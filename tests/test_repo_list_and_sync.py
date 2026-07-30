@@ -147,6 +147,7 @@ class CliTest(unittest.TestCase):
                 "summaries",
                 "semantic",
                 "topics",
+                "deepdive",
                 "explorer",
                 "status",
             ],

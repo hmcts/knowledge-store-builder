@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from knowledgestore import build_deep_dives as dives
 
@@ -95,6 +97,107 @@ class InstabilityTest(unittest.TestCase):
 class RepoTicketsTest(unittest.TestCase):
     def test_union_of_file_tickets(self):
         self.assertEqual(dives.repo_tickets(INTENT_FILES), {"DD-1", "DD-2", "DD-3"})
+
+
+class CochangeTest(unittest.TestCase):
+    def _files(self, pairs_count):
+        # DD-n tickets each touching both files -> co-change support
+        tickets = {f"DD-{i}": 1 for i in range(pairs_count)}
+        return {
+            "src/A.java": {"tickets": dict(tickets)},
+            "src/B.java": {"tickets": dict(tickets)},
+            "src/ATest.java": {"tickets": dict(tickets)},
+        }
+
+    def test_pairs_meet_threshold_and_test_pairs_are_excluded(self):
+        self.addCleanup(setattr, dives, "MIN_COCHANGE", dives.MIN_COCHANGE)
+        dives.MIN_COCHANGE = 10
+        got = dives.cochange_section(self._files(12))
+        self.assertIn({"a": "src/A.java", "b": "src/B.java", "n": 12}, got)
+        self.assertFalse(
+            any("ATest" in p["a"] or "ATest" in p["b"] for p in got if "A.java" in (p["a"], p["b"]))
+        )
+
+    def test_sweeping_tickets_are_ignored(self):
+        files = {f"f{i}.java": {"tickets": {"BIG-1": 1}} for i in range(60)}
+        self.assertEqual(dives.cochange_section(files), [])
+
+
+class CouplingSurfaceTest(unittest.TestCase):
+    def test_shared_schema_labels_name_the_other_repos(self):
+        got = dives.coupling_surface(GRAPH, "target")
+        self.assertEqual(got, [{"label": "progression.case.json", "other_repos": ["other"]}])
+
+
+class FeatureSectionTest(unittest.TestCase):
+    def test_features_sharing_tickets_are_linked(self):
+        got = dives.feature_section(GRAPH, {"DD-1", "DD-9"})
+        self.assertEqual(got, [{"label": "Progress a case", "tickets": ["DD-1"]}])
+
+
+class HotspotTest(unittest.TestCase):
+    def test_high_churn_high_degree_files_flagged(self):
+        got = dives.hotspot_section(INTENT_FILES, GRAPH, "target")
+        paths = [h["path"] for h in got]
+        self.assertIn("src/CaseAggregate.java", paths)  # churn 3, degree 2
+        self.assertNotIn("pom.xml", paths)  # churn 1, no nodes
+
+
+class ExtractTest(unittest.TestCase):
+    def test_extract_writes_a_complete_bundle(self):
+        import gzip
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for attr, rel in {
+                "GRAPH_PATH": "graph.json",
+                "LABELS_PATH": "labels.json",
+                "INTENT_PATH": "intent.json.gz",
+                "DESCRIPTIONS_PATH": "desc.json.gz",
+                "SUMMARIES_PATH": "summaries.json",
+                "INPUT_DIR": "deep-dives",
+            }.items():
+                self.addCleanup(setattr, dives, attr, getattr(dives, attr))
+                setattr(dives, attr, root / rel)
+            from knowledgestore import provenance
+
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = root / "provenance.json"
+            (root / "graph.json").write_text(json.dumps(GRAPH))
+            (root / "labels.json").write_text(json.dumps(LABELS))
+            (root / "summaries.json").write_text(json.dumps(SUMMARIES))
+            with gzip.open(root / "intent.json.gz", "wt") as f:
+                json.dump({"target": INTENT_FILES}, f)
+            with gzip.open(root / "desc.json.gz", "wt") as f:
+                json.dump(DESCRIPTIONS, f)
+            self.assertEqual(dives.extract("target"), 0)
+            bundle = json.loads((root / "deep-dives" / "target-input.json").read_text())
+        for key in (
+            "repo",
+            "provenance",
+            "scale",
+            "churn",
+            "instability",
+            "timeline",
+            "cochange",
+            "hotspots",
+            "coupling_surface",
+            "features",
+            "summary_coverage",
+        ):
+            self.assertIn(key, bundle)
+        self.assertEqual(bundle["repo"], "target")
+
+    def test_extract_unknown_repo_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            import json
+
+            root = Path(tmp)
+            self.addCleanup(setattr, dives, "GRAPH_PATH", dives.GRAPH_PATH)
+            dives.GRAPH_PATH = root / "graph.json"
+            (root / "graph.json").write_text(json.dumps({"nodes": [], "links": []}))
+            self.assertEqual(dives.extract("nope"), 1)
 
 
 if __name__ == "__main__":
