@@ -64,7 +64,7 @@ def corpus_citations(root: Path) -> dict:
 
 def _committed_at(path: str, run) -> str:
     try:
-        return run(["log", "-1", "--format=%cI", "--", path]).strip()
+        return run(["-C", str(ROOT), "log", "-1", "--format=%cI", "--", path]).strip()
     except Exception:
         return ""
 

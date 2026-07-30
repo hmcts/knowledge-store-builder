@@ -104,6 +104,8 @@ class FreshnessTest(unittest.TestCase):
         from knowledgestore import status
 
         def fake_git(arguments):
+            self.assertEqual(arguments[0], "-C")
+            self.assertTrue(arguments[2] in ("log", "-1"))
             path = arguments[-1]
             return (
                 "2026-07-01T00:00:00+00:00\n"
@@ -118,6 +120,7 @@ class FreshnessTest(unittest.TestCase):
         from knowledgestore import status
 
         def failing_git(arguments):
+            self.assertEqual(arguments[0], "-C")
             raise RuntimeError("not a git repository")
 
         self.assertEqual(status.artefact_freshness(run=failing_git), {})
