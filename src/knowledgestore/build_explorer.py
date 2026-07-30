@@ -26,6 +26,7 @@ external requests. Regenerate after a graph refresh:
 
 from __future__ import annotations
 
+import datetime
 import gzip
 import json
 import re
@@ -60,6 +61,30 @@ E2E_REPOS = config.E2E_REPOS
 
 
 PACKAGE = "knowledgestore"
+
+
+def latest_synced(recorded: dict[str, dict]) -> str:
+    """Return the YYYY-MM-DD date of the chronologically latest committed entry.
+
+    Parses ISO-8601 timestamps with timezone offsets (from git log %cI) to
+    compare chronologically, not lexicographically. Skips entries that fail
+    to parse. Returns empty string if no valid entries.
+    """
+    latest_dt = None
+    latest_date = ""
+    for entry in recorded.values():
+        committed = entry.get("committed", "")
+        if not committed:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(committed)
+            if latest_dt is None or dt > latest_dt:
+                latest_dt = dt
+                latest_date = committed[:10]  # YYYY-MM-DD
+        except ValueError:
+            # Skip entries with invalid timestamps
+            pass
+    return latest_date
 
 
 def app_source() -> str:
@@ -348,9 +373,9 @@ def main() -> int:
         f"full graph is queryable via the graphify CLI"
     )
     recorded = io.read_json_dict(PROVENANCE_PATH).get("repositories", {})
-    synced = max((str(e.get("committed", "")) for e in recorded.values()), default="")
+    synced = latest_synced(recorded)
     if synced:
-        sub += f" &middot; sources synced to {synced[:10]}"
+        sub += f" &middot; sources synced to {synced}"
     html = (
         TEMPLATE.replace("__TITLE__", config.EXPLORER_TITLE)
         .replace("__SUB__", sub)
