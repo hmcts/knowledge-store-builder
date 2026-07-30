@@ -1,31 +1,52 @@
-# Repository discovery filters (no regex - reviewable lists only).
-# Lines: `prefix <name-prefix>` include repos whose name starts with it;
-#        `repo <exact-name>`   include one repo explicitly;
-#        `exclude <exact-name>` exclude one repo even if a rule matches it.
-# Archived repositories are always excluded.
+# Which repositories make up your estate.
+#
+# Copy this to config/repository-filters.txt and edit. `knowledgestore discover`
+# reads it, lists your GitHub organisation, and writes the repositories that
+# match to config/repositories.txt.
+#
+# Three rules, one per line. No regex and no fuzzy search: this file is meant to
+# be read and reviewed in a pull request, so what is in the estate is a decision
+# with a diff, not the result of a search that quietly changes.
+#
+#   prefix <name-prefix>    include every repository whose name starts with this
+#   repo <exact-name>       include one repository by name
+#   exclude <exact-name>    exclude one repository, even if a prefix matched it
+#
+# `exclude` always wins. Archived repositories are always excluded, so you never
+# need a rule for them.
+#
+# Comments and blank lines are ignored. Comment your reasoning: whoever widens
+# the estate next will want to know why something was left out.
 
-# Phase A corpus: the Crime UI estate + the cpp-context backend services.
-prefix cpp-ui-
-prefix cpp-context-
+# --- Start with the naming conventions that define your estate -------------
+# Most estates have one or two prefixes covering the bulk of them.
+prefix myteam-service-
+prefix myteam-ui-
 
-# Legacy members of the UI corpus that predate the cpp-ui- naming:
-repo cpp-cadb-ui-prototypes
-repo cpp-pdk-documentation
-repo cpp-retrial-ui-prototype
+# --- Add what the conventions miss -----------------------------------------
+# Repositories predating the naming scheme, shared libraries, or the E2E suite
+# when it sits outside the pattern. E2E suites are worth including: their
+# specifications and page objects are the estate's business documentation.
+repo legacy-payments-api
+repo myteam-e2e-tests
+repo shared-component-library
 
-# Explicitly not wanted (decision 2026-07-29):
-exclude cp-meta-arch
+# --- Exclude what a prefix wrongly caught ----------------------------------
+# Infrastructure, scaffolding, retired services and generated repositories add
+# nodes without adding meaning. Say why, and when.
+exclude myteam-service-deprecated       # retired 2026-01, kept for audit only
+exclude myteam-ui-terraform             # infrastructure, no application code
 
-# Phase B: adjacent product/domain services (explicit, demand-driven)
-repo cp-ai-rag-service
-repo cp-court-list-publishing-service
-repo cp-result-definitions-browser
-repo cp-crime-portal
-repo cp-case-document-knowledge-service
-repo cpp-rota-application
-repo cpp-idam-organisation-service
-repo cpp-idam-account-service
-repo cp-notification-gateway
-repo cp-file-service
-repo cp-task-manager
-repo cp-job-manager
+# --- Growing the estate later ----------------------------------------------
+# Adding repositories re-clusters the graph, which moves community ids, so
+# existing community summaries need remapping or regenerating — the
+# knowledge-store-build skill covers how.
+#
+# Prefer deliberate batches over importing everything an organisation happens
+# to contain: a larger graph is not automatically a more useful one, and every
+# repository costs clone time, build time and clone weight for consumers.
+#
+# An order that works:
+#   1. the applications and services your users' journeys actually touch
+#   2. the shared libraries those depend on
+#   3. adjacent services, one batch at a time, when real questions reach them
