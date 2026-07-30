@@ -45,6 +45,7 @@ SUMMARIES_PATH = config.SUMMARIES_PATH
 SYNONYMS_PATH = config.SYNONYMS_PATH
 TICKET_DESC_PATH = config.TICKET_DESCRIPTIONS_PATH
 TOPICS_PATH = config.TOPICS_BRIEFS_PATH
+PROVENANCE_PATH = config.PROVENANCE_PATH
 OUTPUT = config.EXPLORER_PATH
 
 MINIFIED = re.compile(r"^[A-Za-z_$]{1,3}(\(\))?$")
@@ -346,6 +347,10 @@ def main() -> int:
         f"here (business features, tickets and connected code) &middot; the "
         f"full graph is queryable via the graphify CLI"
     )
+    recorded = io.read_json_dict(PROVENANCE_PATH).get("repositories", {})
+    synced = max((str(e.get("committed", "")) for e in recorded.values()), default="")
+    if synced:
+        sub += f" &middot; sources synced to {synced[:10]}"
     html = (
         TEMPLATE.replace("__TITLE__", config.EXPLORER_TITLE)
         .replace("__SUB__", sub)

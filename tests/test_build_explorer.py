@@ -147,6 +147,20 @@ class BuildPageSmokeTest(unittest.TestCase):
             explorer.TICKET_DESC_PATH = root / "missing-desc.json.gz"
             explorer.TOPICS_PATH = root / "missing-topics.json"
             explorer.OUTPUT = root / "explorer.html"
+            explorer.PROVENANCE_PATH = root / "provenance.json"
+            with open(explorer.PROVENANCE_PATH, "w") as pf:
+                _json.dump(
+                    {
+                        "repositories": {
+                            "r": {
+                                "sha": "a" * 40,
+                                "branch": "main",
+                                "committed": "2026-07-30T09:14:02+01:00",
+                            }
+                        }
+                    },
+                    pf,
+                )
             explorer.GRAPH_PATH.write_text(
                 _json.dumps({"nodes": [node("n1", "AddressPipe")], "links": []}), encoding="utf-8"
             )
@@ -166,6 +180,7 @@ class BuildPageSmokeTest(unittest.TestCase):
         ):
             self.assertIn(f'<script id="{block}"', html)
         self.assertIn("function runAsk", html)  # app.js inlined
+        self.assertIn("sources synced to 2026-07-30", html)
 
 
 class IncludeEntryPolicyTest(unittest.TestCase):
