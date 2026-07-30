@@ -148,6 +148,7 @@ class CliTest(unittest.TestCase):
                 "semantic",
                 "topics",
                 "explorer",
+                "status",
             ],
         )
 

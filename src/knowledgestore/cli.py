@@ -46,6 +46,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "extract topic evidence dossiers, or merge written briefs back in",
     ),
     "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
+    "status": (
+        "status",
+        "report provenance, layer coverage, dangling citations and page freshness",
+    ),
 }
 
 
