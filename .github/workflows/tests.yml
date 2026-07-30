@@ -1,0 +1,52 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Versions pinned, binary-only, no lifecycle scripts: the lint and test
+      # toolchain is fixed so a dependency release cannot fail an unrelated PR.
+      - name: Lint Python (ruff)
+        run: |
+          pip install --only-binary :all: ruff==0.16.0
+          ruff check src tests
+
+      - name: Install the package
+        run: pip install -e .
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned JS toolchain
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund eslint@10.8.0 typescript@7.0.2
+
+      - name: Lint explorer JavaScript
+        run: ./node_modules/.bin/eslint src/knowledgestore/assets/app.js tests/explorer/*.mjs
+
+      - name: Type-check explorer application
+        run: ./node_modules/.bin/tsc --checkJs --noEmit --target es2020 --lib es2020,dom src/knowledgestore/assets/app.js
+
+      - name: Explorer scorer unit tests
+        run: node tests/explorer/engine-unit.mjs
+
+      # Builds a page from a synthetic estate, then drives every composed
+      # answer shape against it.
+      - name: Explorer page regression
+        run: |
+          python3 tests/explorer/fixture.py
+          node tests/explorer/page-regression.mjs

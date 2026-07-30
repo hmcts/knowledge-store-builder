@@ -1,0 +1,142 @@
+"""Configuration: where files live, and the values that vary by estate.
+
+Every setting has a default that works for a repository laid out like the
+quickstart in the README, and can be overridden by an environment variable
+so a pipeline run can be steered without editing code:
+
+    KSB_ROOT=/path/to/store KSB_GITHUB_ORG=myorg knowledgestore discover
+
+The module-level names below are what the stage modules read. `configure()`
+rewrites them in place, which is how the CLI applies `--root` and how tests
+point a stage at a temporary directory.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.environ.get(name)
+    return Path(value).expanduser().resolve() if value else default
+
+
+def _env_int(name: str, default: int) -> int:
+    return int(os.environ.get(name, default))
+
+
+def _env_set(name: str, default: set[str]) -> set[str]:
+    value = os.environ.get(name)
+    return {v.strip() for v in value.split(",") if v.strip()} if value else default
+
+
+# --- where the knowledge store lives -------------------------------------
+# Default: the current working directory, i.e. the store repository you run in.
+ROOT = _env_path("KSB_ROOT", Path.cwd())
+
+# --- the estate being described ------------------------------------------
+# The GitHub organisation repositories are discovered from.
+GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "hmcts")
+
+# --- inputs you maintain by hand -----------------------------------------
+FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
+REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
+TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
+
+# --- working directories (regenerable; do not commit) --------------------
+REPOSITORIES_DIR = ROOT / "repositories"
+HISTORY_DIR = ROOT / "knowledge" / "git-history"
+
+# --- generated datasets (commit these) -----------------------------------
+MANIFEST_PATH = ROOT / "knowledge" / "repository-manifest.md"
+CONTEXT_PATH = ROOT / "knowledge_context.md"
+INTENT_INDEX_PATH = ROOT / "knowledge" / "intent" / "file-tickets.json.gz"
+TICKET_DESCRIPTIONS_PATH = ROOT / "knowledge" / "intent" / "ticket-descriptions.json.gz"
+TICKET_TITLES_PATH = ROOT / "knowledge" / "intent" / "ticket-titles.json.gz"
+SUMMARIES_INPUT_PATH = ROOT / "knowledge" / "summaries" / "communities-input.json"
+SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
+SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
+TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
+TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
+TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
+
+# --- graph artefacts (produced by graphify, consumed here) ---------------
+GRAPH_PATH = ROOT / "graphify-out" / "graph.json"
+LABELS_PATH = ROOT / "graphify-out" / ".graphify_labels.json"
+EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
+
+# --- issue tracker -------------------------------------------------------
+# Ticket references mined from commit subjects, e.g. "PROJ-123".
+TICKET_PATTERN = re.compile(
+    os.environ.get("KSB_TICKET_PATTERN", r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
+)
+# Ticket ids in the explorer link here, with the id appended.
+TICKET_BROWSE_URL = os.environ.get(
+    "KSB_TICKET_BROWSE_URL", "https://tools.hmcts.net/jira/browse/"
+)
+
+# --- explorer page -------------------------------------------------------
+EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
+# Where "request a topic brief" links point. Empty disables the link.
+BRIEF_REQUEST_URL = os.environ.get("KSB_BRIEF_REQUEST_URL", "")
+# Minimum connection count for a code entry to be indexed in the explorer.
+# Business entries (features, scenarios, tickets) are always indexed.
+MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
+# Repositories whose test code IS the business documentation (E2E suites),
+# so their test files are indexed rather than filtered out as scaffolding.
+E2E_REPOS = _env_set("KSB_E2E_REPOS", {"cpp-ui-e2e", "cpp-ui-e2e-serenity"})
+
+# --- community summaries -------------------------------------------------
+MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
+
+# --- semantic index ------------------------------------------------------
+EMBEDDING_MODEL = os.environ.get(
+    "KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+def configure(root: Path | str | None = None, **overrides) -> None:
+    """Point the pipeline at a different root, or override any setting.
+
+    Call before running a stage. `configure(root=...)` recomputes every
+    derived path; other keyword arguments set module names directly:
+
+        configure(root="/tmp/store", GITHUB_ORG="myorg")
+    """
+    module = globals()
+    if root is not None:
+        module["ROOT"] = Path(root).expanduser().resolve()
+        _recompute_paths()
+    for name, value in overrides.items():
+        if name not in module:
+            raise KeyError(f"unknown setting: {name}")
+        module[name] = value
+
+
+def _recompute_paths() -> None:
+    """Re-derive every ROOT-relative path after ROOT changes."""
+    module = globals()
+    root: Path = module["ROOT"]
+    module.update(
+        FILTERS_PATH=root / "config" / "repository-filters.txt",
+        REPOSITORIES_CONFIG=root / "config" / "repositories.txt",
+        TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
+        REPOSITORIES_DIR=root / "repositories",
+        HISTORY_DIR=root / "knowledge" / "git-history",
+        MANIFEST_PATH=root / "knowledge" / "repository-manifest.md",
+        CONTEXT_PATH=root / "knowledge_context.md",
+        INTENT_INDEX_PATH=root / "knowledge" / "intent" / "file-tickets.json.gz",
+        TICKET_DESCRIPTIONS_PATH=root / "knowledge" / "intent" / "ticket-descriptions.json.gz",
+        TICKET_TITLES_PATH=root / "knowledge" / "intent" / "ticket-titles.json.gz",
+        SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
+        SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
+        SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
+        TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
+        TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
+        TOPICS_DOCS_DIR=root / "docs" / "topics",
+        GRAPH_PATH=root / "graphify-out" / "graph.json",
+        LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
+        EXPLORER_PATH=root / "graphify-out" / "explorer.html",
+    )
