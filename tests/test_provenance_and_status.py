@@ -126,5 +126,34 @@ class FreshnessTest(unittest.TestCase):
         self.assertEqual(status.artefact_freshness(run=failing_git), {})
 
 
+class DriftTest(unittest.TestCase):
+    def test_reports_repos_with_commits_since_recorded_date(self):
+        from knowledgestore import provenance, status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            provenance.write(
+                {
+                    "moved": {
+                        "sha": "a" * 40,
+                        "branch": "main",
+                        "committed": "2026-07-01T00:00:00+00:00",
+                    },
+                    "still": {
+                        "sha": "b" * 40,
+                        "branch": "main",
+                        "committed": "2026-07-01T00:00:00+00:00",
+                    },
+                }
+            )
+
+            def fake_gh(arguments):
+                return "9\n" if "moved" in arguments[1] else "0\n"
+
+            got = status.source_drift(runner=fake_gh)
+        self.assertEqual(got, [{"repo": "moved", "behind": 9}])
+
+
 if __name__ == "__main__":
     unittest.main()

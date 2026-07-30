@@ -6,6 +6,8 @@ check reads the small tracked extract, not graph.json.
 
 from __future__ import annotations
 
+import argparse
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -18,6 +20,7 @@ TOPICS_BRIEFS_PATH = config.TOPICS_BRIEFS_PATH
 TOPICS_CONFIG_PATH = config.TOPICS_CONFIG_PATH
 EXPLORER_PATH = config.EXPLORER_PATH
 ROOT = config.ROOT
+GITHUB_ORG = config.GITHUB_ORG
 
 # committed layers the page embeds; if any is newer than the page, rebuild
 EMBEDDED_LAYERS = (
@@ -87,7 +90,46 @@ def artefact_freshness(run=run_git) -> dict:
     }
 
 
+def run_gh(arguments: list[str]) -> str:
+    completed = subprocess.run(["gh", *arguments], check=True, text=True, stdout=subprocess.PIPE)
+    return completed.stdout
+
+
+def source_drift(runner=run_gh) -> list[dict]:
+    """Repositories with commits on their branch since the recorded date.
+
+    One API call per repository - the caller opts in. Counts cap at 100
+    (one page); "100" therefore means "at least 100".
+    """
+    drifted = []
+    for name, entry in provenance.read().items():
+        since = entry.get("committed", "")
+        branch = entry.get("branch", "")
+        if not since:
+            continue
+        raw = runner(
+            [
+                "api",
+                f"/repos/{GITHUB_ORG}/{name}/commits?sha={branch}&since={since}&per_page=100",
+                "--jq",
+                "length",
+            ]
+        )
+        behind = int(raw.strip() or 0)
+        if behind:
+            drifted.append({"repo": name, "behind": behind})
+    return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--drift",
+        action="store_true",
+        help="also check GitHub for commits since the build (one API call per repository)",
+    )
+    arguments = parser.parse_args()
+
     recorded = provenance.read()
     print(
         f"Provenance: {len(recorded)} repositories recorded"
@@ -121,5 +163,19 @@ def main() -> int:
         )
     elif fresh:
         print("Explorer page is newer than every embedded layer")
+
+    if arguments.drift:
+        if not shutil.which("gh"):
+            print("Drift: gh CLI not available - skipped")
+        elif not provenance.read():
+            print("Drift: no provenance recorded - skipped")
+        else:
+            drifted = source_drift()
+            if drifted:
+                print(f"Source drift ({len(drifted)} repositories moved on):")
+                for d in drifted[:15]:
+                    print(f"  {d['repo']}: {d['behind']}+ commits since the build")
+            else:
+                print("Source drift: none - every repository is at the build state")
 
     return 0
