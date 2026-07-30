@@ -13,11 +13,71 @@ is the product.
 
 ## Step 1 — Locate the store
 
-The store lives in the working directory, not in this skill. Confirm
-`graphify-out/graph.json` or `graphify-out/graph.json.gz` exists. If not, ask
-the user to `cd` into their store repository.
+A store is a repository: the graph and its retrieval layers are committed
+files, so they must be on disk. Work through this in order, and stay quiet
+about steps that were already satisfied.
 
-## Step 2 — Setup (run silently, only what is missing)
+**1. Is it here?** If the working directory contains `graphify-out/`, use it.
+
+**2. Has the user said before?** The environment variable wins; the file is
+what this skill wrote the first time it asked.
+
+```bash
+[ -d "${KNOWLEDGE_STORE:-/nonexistent}/graphify-out" ] && echo "$KNOWLEDGE_STORE"
+cat ~/.config/knowledge-store/locations 2>/dev/null
+```
+
+**3. Is it somewhere obvious?** One cheap look before troubling them:
+
+```bash
+find ~ -maxdepth 4 -type d -name graphify-out -not -path '*/node_modules/*' 2>/dev/null | head -5
+```
+
+**4. More than one candidate?** Someone may keep several estates. Identify each
+before choosing — never guess which estate a question is about:
+
+```bash
+head -3 <candidate>/knowledge/repository-manifest.md 2>/dev/null
+```
+
+Ask which they mean, unless the question names an estate unambiguously.
+
+**5. Otherwise ask.** Two questions together, then wait:
+
+- do they already have a clone you have not found, and where?
+- if not, which store should be cloned, and into which directory?
+
+Do not clone into the current directory by default — people are usually sitting
+in an unrelated project. An estate-specific skill (installed alongside this
+one) normally supplies its own repository URL; without one, ask.
+
+**6. Cloning cheaply.** A store's committed page and visualisation are large and
+an agent never reads them, so take one commit and leave them behind:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse <store-repository> <directory>
+cd <directory>
+git sparse-checkout set graphify-out/graph.json.gz graphify-out/GRAPH_REPORT.md \
+  graphify-out/.graphify_labels.json knowledge docs knowledge_context.md
+```
+
+On a large estate this is the difference between tens and hundreds of
+megabytes. Someone who wants `explorer.html` in a browser needs a plain
+`git clone` instead — offer that if they mention the browser page.
+
+**7. Remember it, so this is asked once.** Append rather than overwrite: the
+file is a list, because a user may query more than one estate.
+
+```bash
+mkdir -p ~/.config/knowledge-store
+grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
+  || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
+```
+
+Mention that `KNOWLEDGE_STORE` in their shell profile pins a default, which is
+worth doing if they mostly query one estate.
+
+## Step 2 — Prepare the store (run silently, only what is missing)
 
 ```bash
 [ -f graphify-out/graph.json ] || gunzip -k graphify-out/graph.json.gz
@@ -25,6 +85,10 @@ command -v graphify >/dev/null 2>&1 \
   || uv tool install graphifyy -q 2>/dev/null \
   || pip install graphifyy -q
 ```
+
+Offer `git pull` when the question concerns recent changes: a clone goes stale
+silently, and `graphify-out/GRAPH_REPORT.md` records the commit the graph was
+built from.
 
 ## Step 3 — Read the written answers first
 
