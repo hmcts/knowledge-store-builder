@@ -1,10 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "hmcts-knowledge-store-builder"
-version = "0.3.0"
+# The version is the git tag (hatch-vcs): creating a GitHub release IS the
+# version bump. Untagged commits build as <next>.devN+g<sha> automatically.
+dynamic = ["version"]
 description = "Build a committed, queryable knowledge store from a fleet of git repositories"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +36,9 @@ knowledgestore = "knowledgestore.cli:main"
 [project.urls]
 Homepage = "https://github.com/hmcts/knowledge-store-builder"
 Source = "https://github.com/hmcts/knowledge-store-builder"
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 # assets/app.js sits inside the package, so it is included automatically
