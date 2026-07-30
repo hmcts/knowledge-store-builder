@@ -107,7 +107,7 @@ class FreshnessTest(unittest.TestCase):
 
         def fake_git(arguments):
             self.assertEqual(arguments[0], "-C")
-            self.assertTrue(arguments[2] in ("log", "-1"))
+            self.assertIn(arguments[2], ("log", "-1"))
             path = arguments[-1]
             return (
                 "2026-07-01T00:00:00+00:00\n"
@@ -125,7 +125,7 @@ class FreshnessTest(unittest.TestCase):
 
         def fake_git(arguments):
             self.assertEqual(arguments[0], "-C")
-            self.assertTrue(arguments[2] in ("log", "-1"))
+            self.assertIn(arguments[2], ("log", "-1"))
             path = arguments[-1]
             if "explorer" in path:
                 return "2026-07-01T00:00:00+00:00\n"
@@ -144,7 +144,7 @@ class FreshnessTest(unittest.TestCase):
 
         def fake_git(arguments):
             self.assertEqual(arguments[0], "-C")
-            self.assertTrue(arguments[2] in ("log", "-1"))
+            self.assertIn(arguments[2], ("log", "-1"))
             path = arguments[-1]
             if "explorer" in path:
                 # 2026-07-30 04:30:00 UTC

@@ -158,6 +158,25 @@ def source_drift(runner=run_gh) -> list[dict] | None:
     return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
 
 
+def _report_drift(recorded: dict) -> None:
+    """Print the --drift section: gh availability, provenance, then results."""
+    if not shutil.which("gh"):
+        print("Drift: gh CLI not available - skipped")
+        return
+    if not recorded:
+        print("Drift: no provenance recorded - skipped")
+        return
+    drifted = source_drift()
+    if drifted:
+        print(f"Source drift ({len(drifted)} repositories moved on):")
+        for d in drifted[:15]:
+            print(f"  {d['repo']}: {d['behind']}+ commits since the build")
+    elif drifted == []:
+        print("Source drift: none - every repository is at the build state")
+    # drifted is None: the check failed - the diagnostic note above already
+    # explained why, so nothing more to print here.
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -202,19 +221,6 @@ def main(argv=None) -> int:
         print("Explorer page is newer than every embedded layer")
 
     if arguments.drift:
-        if not shutil.which("gh"):
-            print("Drift: gh CLI not available - skipped")
-        elif not recorded:
-            print("Drift: no provenance recorded - skipped")
-        else:
-            drifted = source_drift()
-            if drifted:
-                print(f"Source drift ({len(drifted)} repositories moved on):")
-                for d in drifted[:15]:
-                    print(f"  {d['repo']}: {d['behind']}+ commits since the build")
-            elif drifted == []:
-                print("Source drift: none - every repository is at the build state")
-            # drifted is None: the check failed - the diagnostic note above
-            # already explained why, so nothing more to print here.
+        _report_drift(recorded)
 
     return 0

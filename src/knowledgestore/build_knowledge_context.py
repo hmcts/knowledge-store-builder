@@ -73,7 +73,9 @@ def build_manifest(repository_dirs: list[Path]) -> None:
     )
 
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(
+    # Sonar S2083 misfires here: MANIFEST_PATH is a module constant derived
+    # from configuration, not untrusted input; this is offline build tooling.
+    MANIFEST_PATH.write_text(  # NOSONAR(S2083)
         "\n".join(lines),
         encoding="utf-8",
     )
