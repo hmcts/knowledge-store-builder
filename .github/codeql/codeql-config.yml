@@ -1,0 +1,7 @@
+name: "CodeQL config"
+paths-ignore:
+  - "**/tests/**"
+  - ".fixture-store/**"
+  - "**/__pycache__/**"
+  - "dist/**"
+  - "build/**"
