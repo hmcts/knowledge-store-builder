@@ -759,7 +759,7 @@ function matchDive(lq) {
   return best;
 }
 
-/** @param {{repo: string, html: string, source: string, sha: string}} dive */
+/** @param {{repo: string, title: string, html: string, source: string, sha: string}} dive */
 const diveHtml = (dive) =>
   '<div class="brief">' + dive.html +
   '<div class="b-src">Deep dive (' + esc(dive.source) + ')'
@@ -821,7 +821,8 @@ function runAsk() {
   ranked.terms = terms;
   applySummaryBoost(ranked, terms, expansions);
   const topic = matchTopic(raw.toLowerCase(), expansions);
-  if (!ranked.length && !topic) {
+  const dive = topic ? null : matchDive(raw.toLowerCase());
+  if (!ranked.length && !topic && !dive) {
     meta.textContent = 'nothing in the graph matches those words - try different terms';
     out.innerHTML = '';
     return;
@@ -832,7 +833,6 @@ function runAsk() {
     out.innerHTML = '';
     meta.textContent = '';
   }
-  const dive = topic ? null : matchDive(raw.toLowerCase());
   if (topic) {
     out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
     meta.textContent = 'topic brief: ' + topic.title

@@ -137,6 +137,19 @@ assert('matchDive hits when the question names the repository',
 assert('matchDive returns null otherwise',
   context.matchDive('how are payments taken?') === null);
 
+// runAsk: a dive match must survive even when ranking finds nothing at all
+// to match against - the "nothing in the graph matches" guard must consider
+// dive (and topic), not fire before either is computed (regression: it used
+// to short-circuit on an empty ranked list before the dive lookup ran).
+// None of this fixture's DATA/labels/sources contain "demo", "core" or
+// "internals", so ranking this question yields zero hits.
+context.q.value = 'tell me about demo-core internals';
+context.runAsk();
+assert('a dive match survives a zero-hit ranked list',
+  context.meta.textContent.includes('deep dive: demo-core'), context.meta.textContent);
+assert('the zero-hit dive question is not reported as unmatched',
+  !context.meta.textContent.includes('nothing in the graph matches'), context.meta.textContent);
+
 // bfs: hop distances and cap
 const reached = context.bfs([0], 2, 100);
 assert('bfs reaches two hops with correct distances',
