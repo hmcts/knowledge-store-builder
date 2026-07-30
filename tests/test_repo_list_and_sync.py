@@ -68,6 +68,83 @@ class DiscoverTest(unittest.TestCase):
         self.assertIn("repository-filters.txt", content)
 
 
+class TeamDiscoveryTest(unittest.TestCase):
+    """The `team <slug>` rule: an estate defined by ownership, not naming.
+
+    Teams without naming conventions (and the infrastructure estates being
+    added next) cannot be expressed as prefixes; a team's repository listing
+    is the source instead. Excludes must still win, and the union with
+    name-based rules must be deduplicated.
+    """
+
+    def _filters(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "repository-filters.txt"
+            path.write_text(text, encoding="utf-8")
+            return repo_list.read_filters(path)
+
+    @staticmethod
+    def _runner(org_repos, team_repos):
+        def fake_gh(arguments):
+            joined = " ".join(arguments)
+            if "/teams/" in joined:
+                slug = joined.split("/teams/")[1].split("/")[0]
+                rows = team_repos.get(slug, [])
+            else:
+                rows = org_repos
+            import json
+
+            return "\n".join(json.dumps({"name": n, "defaultBranch": "main"}) for n in rows)
+
+        return fake_gh
+
+    def test_team_rule_parses(self):
+        filters = self._filters("team platform-team\n")
+        self.assertEqual(filters.teams, ["platform-team"])
+
+    def test_a_team_only_config_is_valid(self):
+        # no prefix or repo rule needed when a team defines the estate
+        filters = self._filters("team platform-team\n")
+        self.assertEqual((filters.prefixes, filters.includes), ([], set()))
+
+    def test_team_membership_includes_a_repo_no_name_rule_matches(self):
+        filters = self._filters("prefix svc-\nteam platform-team\n")
+        runner = self._runner(
+            org_repos=["svc-a", "oddly-named"],
+            team_repos={"platform-team": ["oddly-named"]},
+        )
+        repos = repo_list.discover(filters, runner=runner)
+        self.assertEqual([r["name"] for r in repos], ["oddly-named", "svc-a"])
+
+    def test_exclude_beats_team_membership(self):
+        filters = self._filters("team platform-team\nexclude retired-thing\n")
+        runner = self._runner(
+            org_repos=["retired-thing", "kept-thing"],
+            team_repos={"platform-team": ["retired-thing", "kept-thing"]},
+        )
+        repos = repo_list.discover(filters, runner=runner)
+        self.assertEqual([r["name"] for r in repos], ["kept-thing"])
+
+    def test_union_is_deduplicated_when_rules_overlap(self):
+        # a repo matched by prefix AND owned by the team appears once
+        filters = self._filters("prefix svc-\nteam platform-team\n")
+        runner = self._runner(
+            org_repos=["svc-a"],
+            team_repos={"platform-team": ["svc-a"]},
+        )
+        repos = repo_list.discover(filters, runner=runner)
+        self.assertEqual([r["name"] for r in repos], ["svc-a"])
+
+    def test_two_teams_both_contribute(self):
+        filters = self._filters("team one\nteam two\n")
+        runner = self._runner(
+            org_repos=[],
+            team_repos={"one": ["alpha"], "two": ["beta"]},
+        )
+        repos = repo_list.discover(filters, runner=runner)
+        self.assertEqual([r["name"] for r in repos], ["alpha", "beta"])
+
+
 class SyncRepositoryTest(unittest.TestCase):
     def _repo(self):
         return export.RepositoryConfig(
