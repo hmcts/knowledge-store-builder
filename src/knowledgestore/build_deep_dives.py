@@ -20,6 +20,7 @@ from collections import Counter, defaultdict
 from itertools import combinations
 
 from . import config, io, kinds, provenance
+from .build_topic_briefs import markdown_to_html
 
 GRAPH_PATH = config.GRAPH_PATH
 LABELS_PATH = config.LABELS_PATH
@@ -220,9 +221,45 @@ def extract(repo: str) -> int:
     return 0
 
 
-def merge() -> int:  # implemented in the next task
-    print("merge is not implemented yet")
-    return 1
+def merge() -> int:
+    dives_out: dict[str, dict] = {}
+    problems: list[str] = []
+    bundles = sorted(INPUT_DIR.glob("*-input.json"))
+    if not bundles:
+        print(
+            f"No bundles in {INPUT_DIR} - run `knowledgestore deepdive extract <repo>` first",
+            file=sys.stderr,
+        )
+        return 1
+    for bundle_path in bundles:
+        bundle = io.read_json_dict(bundle_path)
+        repo = str(bundle.get("repo", ""))
+        doc = DOCS_DIR / f"{repo}.md"
+        sha = str((bundle.get("provenance") or {}).get("sha", ""))[:8]
+        if not doc.exists():
+            problems.append(f"{repo}: missing {doc}")
+            continue
+        markdown = doc.read_text(encoding="utf-8")
+        if len(markdown) < MIN_DIVE_LENGTH:
+            problems.append(f"{repo}: dossier shorter than {MIN_DIVE_LENGTH}")
+            continue
+        if sha and sha not in markdown:
+            problems.append(
+                f"{repo}: dossier does not state the build it measured "
+                f"(expected the short sha `{sha}`)"
+            )
+            continue
+        dives_out[repo] = {
+            "title": f"Deep dive: {repo}",
+            "html": markdown_to_html(markdown),
+            "source": f"docs/deep-dives/{repo}.md",
+            "sha": sha,
+        }
+    io.write_json(DIVES_PATH, dict(sorted(dives_out.items())), indent=1)
+    for problem in problems:
+        print(f"skipped - {problem}")
+    print(f"{len(dives_out)} deep dives -> {DIVES_PATH}")
+    return 1 if problems else 0
 
 
 def main() -> int:

@@ -46,6 +46,7 @@ SUMMARIES_PATH = config.SUMMARIES_PATH
 SYNONYMS_PATH = config.SYNONYMS_PATH
 TICKET_DESC_PATH = config.TICKET_DESCRIPTIONS_PATH
 TOPICS_PATH = config.TOPICS_BRIEFS_PATH
+DIVES_PATH = config.DEEPDIVES_PATH
 PROVENANCE_PATH = config.PROVENANCE_PATH
 OUTPUT = config.EXPLORER_PATH
 
@@ -322,6 +323,7 @@ README.</div>
 <script id="tickets" type="application/json">__TICKETINFO__</script>
 <script id="config" type="application/json">__CONFIG__</script>
 <script id="topics" type="application/json">__TOPICS__</script>
+<script id="dives" type="application/json">__DIVES__</script>
 <script>
 __APP_JS__
 </script>
@@ -353,6 +355,9 @@ def main() -> int:
     # Topic briefs (GraphRAG phase 3): pre-written narratives composed at
     # build time from knowledge/topics evidence; served without any LLM.
     topics = io.read_json_dict(TOPICS_PATH)
+    # Deep dives (Task 7): pre-written, provenance-stamped dossiers on
+    # individual repositories, served without any LLM.
+    divesdata = io.read_json_dict(DIVES_PATH)
 
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.
@@ -389,6 +394,7 @@ def main() -> int:
         )
         .replace("__CONFIG__", json.dumps(page_config, ensure_ascii=False))
         .replace("__TOPICS__", json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__DIVES__", json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__APP_JS__", app_js)
     )
     # Sonar S2083 misfires here: OUTPUT is a module constant derived from

@@ -129,6 +129,11 @@ const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
  * @type {Record<string, {title: string, keywords: string[], html: string, source: string}>} */
 const TOPICS = JSON.parse(getEl('topics').textContent || '{}');
 
+/** Deep dives: build-time dossiers on individual repositories, keyed by
+ * repository name, served when a question names the repository.
+ * @type {Record<string, {title: string, html: string, source: string, sha: string}>} */
+const DIVES = JSON.parse(getEl('dives').textContent || '{}');
+
 /** A ticket id as a link to the real Jira ticket.
  * @param {string} t */
 function ticketLink(t) {
@@ -741,6 +746,26 @@ const topicBriefHtml = (topic) =>
   ') - composed with Claude at build time from graph evidence, then reviewed; ' +
   'live evidence follows below.</div></div>';
 
+/** The dive whose repository name the question mentions; longest name wins.
+ * @param {string} lq lowercase question
+ * @returns {{repo: string, title: string, html: string, source: string, sha: string}|null} */
+function matchDive(lq) {
+  let best = null;
+  for (const [repo, dive] of Object.entries(DIVES)) {
+    if (lq.includes(repo) && (!best || repo.length > best.repo.length)) {
+      best = { repo, ...dive };
+    }
+  }
+  return best;
+}
+
+/** @param {{repo: string, html: string, source: string, sha: string}} dive */
+const diveHtml = (dive) =>
+  '<div class="brief">' + dive.html +
+  '<div class="b-src">Deep dive (' + esc(dive.source) + ')'
+  + (dive.sha ? ' - evidence measured at build ' + esc(dive.sha) : '')
+  + '; live evidence follows below.</div></div>';
+
 /** Offer to request a new brief when no pre-written one covers the question.
  * @param {string} question */
 const requestBriefHtml = (question) => {
@@ -807,9 +832,14 @@ function runAsk() {
     out.innerHTML = '';
     meta.textContent = '';
   }
+  const dive = topic ? null : matchDive(raw.toLowerCase());
   if (topic) {
     out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
     meta.textContent = 'topic brief: ' + topic.title
+      + (meta.textContent ? ' | ' + meta.textContent : '');
+  } else if (dive) {
+    out.innerHTML = diveHtml(dive) + out.innerHTML;
+    meta.textContent = 'deep dive: ' + dive.repo
       + (meta.textContent ? ' | ' + meta.textContent : '');
   } else {
     out.innerHTML += requestBriefHtml(raw);
@@ -844,5 +874,5 @@ run();
 // harmless in the browser.
 /** @type {any} */ (globalThis).__explorerApi = {
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
-  matchTopic, runAsk, runSearch, q, out, meta,
+  matchTopic, matchDive, runAsk, runSearch, q, out, meta,
 };

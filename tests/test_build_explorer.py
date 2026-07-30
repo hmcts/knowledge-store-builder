@@ -209,6 +209,7 @@ class BuildPageSmokeTest(unittest.TestCase):
             explorer.SYNONYMS_PATH = root / "missing-syn.json.gz"
             explorer.TICKET_DESC_PATH = root / "missing-desc.json.gz"
             explorer.TOPICS_PATH = root / "missing-topics.json"
+            explorer.DIVES_PATH = root / "missing-dives.json"
             explorer.OUTPUT = root / "explorer.html"
             explorer.PROVENANCE_PATH = root / "provenance.json"
             with open(explorer.PROVENANCE_PATH, "w") as pf:
@@ -240,6 +241,7 @@ class BuildPageSmokeTest(unittest.TestCase):
             "tickets",
             "config",
             "topics",
+            "dives",
         ):
             self.assertIn(f'<script id="{block}"', html)
         self.assertIn("function runAsk", html)  # app.js inlined

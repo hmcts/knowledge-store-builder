@@ -200,5 +200,42 @@ class ExtractTest(unittest.TestCase):
             self.assertEqual(dives.extract("nope"), 1)
 
 
+class MergeTest(unittest.TestCase):
+    def test_merge_validates_length_and_provenance_stamp(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for attr, rel in {
+                "INPUT_DIR": "in",
+                "DOCS_DIR": "docs",
+                "DIVES_PATH": "in/dives.json",
+            }.items():
+                self.addCleanup(setattr, dives, attr, getattr(dives, attr))
+                setattr(dives, attr, root / rel)
+            (root / "in").mkdir()
+            (root / "docs").mkdir()
+            (root / "in" / "good-input.json").write_text(
+                json.dumps({"repo": "good", "provenance": {"sha": "abcd1234" + "0" * 32}})
+            )
+            (root / "in" / "bad-input.json").write_text(
+                json.dumps({"repo": "bad", "provenance": {"sha": "feed5678" + "0" * 32}})
+            )
+            (root / "docs" / "good.md").write_text(
+                "# Deep dive: good\n\nMeasured at `abcd1234`.\n\n" + "Evidence paragraph. " * 60,
+                encoding="utf-8",
+            )
+            (root / "docs" / "bad.md").write_text(
+                "# Deep dive: bad\n\n" + "No stamp here. " * 60,
+                encoding="utf-8",
+            )
+            code = dives.merge()
+            written = json.loads((root / "in" / "dives.json").read_text())
+        self.assertEqual(code, 1)  # bad was rejected
+        self.assertEqual(list(written), ["good"])
+        self.assertEqual(written["good"]["sha"], "abcd1234")
+        self.assertIn("<h2>", written["good"]["html"])
+
+
 if __name__ == "__main__":
     unittest.main()

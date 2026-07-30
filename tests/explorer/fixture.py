@@ -164,12 +164,26 @@ The form components differ in name and location: `AddressFormComponent` in
 **Sources:** the synthetic fixture estate used by the library's own tests.
 """
 
+# A stamp-bearing deep dive for demo-core, so a question naming the
+# repository serves this dossier (build_deep_dives.merge() below validates
+# it against a bundle recording the same short sha, same as production).
+DIVE_SHA = "abcd1234" + "0" * 32
+DIVE = (
+    "# Deep dive: demo-core\n\n"
+    "**Headline verdict:** demo-core's PaymentService is the single shared "
+    f"payment implementation both applications call. Measured at `{DIVE_SHA[:8]}`.\n\n"
+    + "Evidence paragraph about payment coupling and churn. " * 40
+    + "\n\n**Sources:** the synthetic fixture estate used by the library's own tests.\n"
+)
+
 
 def main() -> int:
     if STORE.exists():
         shutil.rmtree(STORE)
     (STORE / "graphify-out").mkdir(parents=True)
     (STORE / "docs" / "topics").mkdir(parents=True)
+    (STORE / "docs" / "deep-dives").mkdir(parents=True)
+    (STORE / "knowledge" / "deep-dives").mkdir(parents=True)
 
     config.configure(
         root=STORE,
@@ -190,17 +204,26 @@ def main() -> int:
         "addresses | Addresses in the demo estate | address, addresses, postcode\n",
         encoding="utf-8",
     )
+    (config.DEEPDIVES_DOCS_DIR / "demo-core.md").write_text(DIVE, encoding="utf-8")
+    io.write_json(
+        config.DEEPDIVES_INPUT_DIR / "demo-core-input.json",
+        {"repo": "demo-core", "provenance": {"sha": DIVE_SHA}},
+    )
 
     # Stage modules snapshot config at import time, so import after configure().
-    from knowledgestore import build_explorer, build_topic_briefs
+    from knowledgestore import build_deep_dives, build_explorer, build_topic_briefs
 
-    for module in (build_topic_briefs, build_explorer):
+    for module in (build_topic_briefs, build_deep_dives, build_explorer):
         _repoint(module)
 
     if build_topic_briefs.merge() != 0:
         print("fixture: topic brief did not validate", file=sys.stderr)
         return 1
+    if build_deep_dives.merge() != 0:
+        print("fixture: deep dive did not validate", file=sys.stderr)
+        return 1
     build_explorer.TOPICS_PATH = config.TOPICS_BRIEFS_PATH
+    build_explorer.DIVES_PATH = config.DEEPDIVES_PATH
     if build_explorer.main() != 0:
         return 1
     print(f"fixture store -> {STORE}")
@@ -213,20 +236,36 @@ def _repoint(module) -> None:
         if name.isupper() and hasattr(config, name):
             setattr(module, name, getattr(config, name))
     # stage-specific aliases that do not share the config name
-    aliases = {
+    shared_aliases = {
         "GRAPH_PATH": "GRAPH_PATH",
         "LABELS_PATH": "LABELS_PATH",
         "INTENT_PATH": "INTENT_INDEX_PATH",
         "TITLES_PATH": "TICKET_TITLES_PATH",
         "TICKET_DESC_PATH": "TICKET_DESCRIPTIONS_PATH",
-        "TOPICS_CONFIG": "TOPICS_CONFIG_PATH",
-        "TOPICS_INPUT": "TOPICS_INPUT_PATH",
-        "BRIEFS_PATH": "TOPICS_BRIEFS_PATH",
-        "DOCS_DIR": "TOPICS_DOCS_DIR",
-        "OUTPUT": "EXPLORER_PATH",
+        "DESCRIPTIONS_PATH": "TICKET_DESCRIPTIONS_PATH",
         "SUMMARIES_PATH": "SUMMARIES_PATH",
         "SYNONYMS_PATH": "SYNONYMS_PATH",
     }
+    # module-specific aliases: the same attribute name (e.g. DOCS_DIR) means a
+    # different config setting depending which stage module owns it.
+    per_module_aliases = {
+        "build_topic_briefs": {
+            "TOPICS_CONFIG": "TOPICS_CONFIG_PATH",
+            "TOPICS_INPUT": "TOPICS_INPUT_PATH",
+            "BRIEFS_PATH": "TOPICS_BRIEFS_PATH",
+            "DOCS_DIR": "TOPICS_DOCS_DIR",
+        },
+        "build_deep_dives": {
+            "INPUT_DIR": "DEEPDIVES_INPUT_DIR",
+            "DOCS_DIR": "DEEPDIVES_DOCS_DIR",
+            "DIVES_PATH": "DEEPDIVES_PATH",
+        },
+        "build_explorer": {
+            "OUTPUT": "EXPLORER_PATH",
+        },
+    }
+    aliases = dict(shared_aliases)
+    aliases.update(per_module_aliases.get(module.__name__.rsplit(".", 1)[-1], {}))
     for attr, setting in aliases.items():
         if hasattr(module, attr):
             setattr(module, attr, getattr(config, setting))
