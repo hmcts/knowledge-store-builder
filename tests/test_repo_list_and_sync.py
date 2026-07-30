@@ -4,6 +4,7 @@ build_graph.py - the (former bash) plumbing, now testable Python."""
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -277,6 +278,45 @@ class MainProvenanceTest(unittest.TestCase):
                 "committed": "2026-07-01T00:00:00+00:00",
             },
         )
+
+
+class ExportHistoryRootTest(unittest.TestCase):
+    """The CLI --root contract: a stage operates on the configured store root.
+
+    export-history ignored config.ROOT in favour of a package-relative
+    default, so the first estate rebuild from the installed wheel looked for
+    config/repositories.txt inside site-packages, exported nothing, and the
+    downstream stages silently rebuilt from stale history.
+    """
+
+    def test_cli_root_reaches_export_history(self):
+        from knowledgestore import config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "config").mkdir()
+            repo_dir = root / "repositories" / "demo"
+            repo_dir.mkdir(parents=True)
+            git = ["git", "-C", str(repo_dir), "-c", "user.email=t@t", "-c", "user.name=t"]
+            subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+            (repo_dir / "a.txt").write_text("hello\n", encoding="utf-8")
+            subprocess.run([*git, "add", "."], check=True)
+            subprocess.run([*git, "commit", "-qm", "CCT-1 first"], check=True)
+            (root / "config" / "repositories.txt").write_text(
+                "demo|git@github.com:example/demo.git|main\n", encoding="utf-8"
+            )
+
+            old_root, old_argv = config.ROOT, list(sys.argv)
+            try:
+                exit_code = cli.main(["--root", str(root), "export-history"])
+            finally:
+                config.configure(root=str(old_root))
+                sys.argv = old_argv
+
+            self.assertEqual(exit_code, 0)
+            dataset = root / "knowledge" / "git-history" / "demo" / "commits.ndjson"
+            self.assertTrue(dataset.exists(), "history dataset must land under the store root")
+            self.assertIn("CCT-1", dataset.read_text(encoding="utf-8"))
 
 
 class CliTest(unittest.TestCase):
