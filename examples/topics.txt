@@ -1,9 +1,50 @@
-# Topic briefs - the estate-level questions answered as pre-written,
-# committed narratives (GraphRAG phase 3). One topic per line:
-#   <slug> | <title> | <comma-separated match keywords>
-# Keywords are matched (with semantic expansion) against Ask-mode questions
-# to serve the brief; they also drive evidence gathering at extract time.
+# Which questions get a pre-written brief.
+#
+# Copy this to config/topics.txt and edit. A topic brief is an analyst-grade
+# answer, written once from graph evidence and committed, then served whole when
+# someone's question hits the topic's keywords. It is how the explorer answers
+# an estate-level question well without an LLM at query time.
+#
+# One topic per line:
+#
+#   <slug> | <title> | <comma-separated keywords>
+#
+#   slug      names the file: docs/topics/<slug>.md
+#   title     shown above the brief, and in the answer's heading
+#   keywords  matched against the question, and used to gather evidence
+#
+# A brief is only served on a direct keyword hit. Semantic expansion can
+# strengthen a match but never create one, so a brief cannot surface
+# speculatively on a question it does not cover.
 
-welsh-language | Welsh language in Common Platform | welsh, cymraeg, bilingual, wales
+# --- Keep this list demand-driven ------------------------------------------
+# Add a topic when someone asked a real question and the evidence cluster
+# answered it badly. Do not try to anticipate the whole space: that way lies an
+# encyclopaedia nobody maintains, and the graph already answers structural
+# questions without any prose being written.
+#
+# Ten or fifteen briefs earned this way is a cache of your most valuable
+# answers. Two hundred guessed upfront is a liability.
+
+# --- Choosing keywords -----------------------------------------------------
+# Include the words people actually type, including abbreviations and the
+# domain's jargon. Avoid words so common in your estate that they would match
+# unrelated questions: "case" or "user" in a case-management estate will pull
+# the brief into conversations it has nothing to say about.
+
+# --- Examples --------------------------------------------------------------
+# A cross-cutting capability nobody owns end to end - the classic case for a
+# brief, because the answer is spread across many repositories:
+notifications | How notifications reach users | notification, notify, email, sms
+
+# A concept implemented inconsistently, where the honest answer is "there is no
+# single implementation" and that needs explaining once, carefully:
 address-handling | How addresses are implemented | address, addresses, postcode
-sjp-case-decisions | SJP case decisions | sjp, single justice, plea, decision
+
+# A journey that spans services, where the brief complements the screen-by-screen
+# write-up in docs/journeys/:
+refunds | How a refund is processed | refund, refunded, repayment
+
+# A compliance or regulatory concern that gets asked about repeatedly, usually
+# by someone who needs evidence rather than a tour of the code:
+accessibility | How accessibility is handled | accessibility, a11y, wcag, screen reader
