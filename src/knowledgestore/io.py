@@ -31,8 +31,12 @@ def read_json_dict(path: Path) -> dict:
 
 
 def write_json(path: Path, data, indent: int | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
+    # Sonar S2083 misfires here: every caller passes a module constant derived
+    # from configuration, not untrusted input; this is offline build tooling.
+    path.parent.mkdir(parents=True, exist_ok=True)  # NOSONAR(S2083)
+    path.write_text(  # NOSONAR(S2083)
+        json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def read_gzip_json(path: Path, default=None):

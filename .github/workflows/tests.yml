@@ -22,8 +22,11 @@ jobs:
           pip install --only-binary :all: ruff==0.16.0
           ruff check src tests
 
+      # The library's core has no runtime dependencies, so --no-deps makes
+      # this install exactly the local source and nothing resolved from an
+      # index. Test-time tooling is pinned where it is installed.
       - name: Install the package
-        run: pip install -e .
+        run: pip install --no-deps -e .
 
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
