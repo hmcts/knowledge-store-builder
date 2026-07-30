@@ -24,8 +24,12 @@ STORE = ROOT / ".fixture-store"
 
 def node(nid, label, repo, source_file, community, kind=None, file_type="code"):
     return {
-        "id": nid, "label": label, "repo": repo, "source_file": source_file,
-        "community": community, "file_type": file_type,
+        "id": nid,
+        "label": label,
+        "repo": repo,
+        "source_file": source_file,
+        "community": community,
+        "file_type": file_type,
         "metadata": {"kind": kind} if kind else {},
     }
 
@@ -35,23 +39,50 @@ GRAPH = {
         # the same pipe implemented independently in two applications
         node("app-a::pipe", "AddressPipe", "demo-app-a", "src/pipes/address.pipe.ts", 1),
         node("app-b::pipe", "AddressPipe", "demo-app-b", "src/pipes/address.pipe.ts", 2),
-        node("app-a::form", "AddressFormComponent", "demo-app-a",
-             "src/address/address-form.component.ts", 1),
-        node("app-b::form", "AddressEntryComponent", "demo-app-b",
-             "src/address/address-entry.component.ts", 2),
+        node(
+            "app-a::form",
+            "AddressFormComponent",
+            "demo-app-a",
+            "src/address/address-form.component.ts",
+            1,
+        ),
+        node(
+            "app-b::form",
+            "AddressEntryComponent",
+            "demo-app-b",
+            "src/address/address-entry.component.ts",
+            2,
+        ),
         # a service both applications call
         node("core::pay", "PaymentService", "demo-core", "src/payment.service.ts", 3),
-        node("app-a::checkout", "CheckoutContainer", "demo-app-a",
-             "src/checkout/checkout.container.ts", 3),
-        node("app-b::checkout", "PayContainer", "demo-app-b",
-             "src/pay/pay.container.ts", 3),
+        node(
+            "app-a::checkout",
+            "CheckoutContainer",
+            "demo-app-a",
+            "src/checkout/checkout.container.ts",
+            3,
+        ),
+        node("app-b::checkout", "PayContainer", "demo-app-b", "src/pay/pay.container.ts", 3),
         # business layer
-        node("e2e::feature", "Pay a fine online", "demo-e2e",
-             "features/payment.feature", 4, kind="gherkin_feature", file_type="concept"),
-        node("e2e::scenario", "Card payment succeeds", "demo-e2e",
-             "features/payment.feature", 4, kind="gherkin_scenario", file_type="concept"),
-        node("jira::DEMO-1", "DEMO-1", "", None, 4, kind="jira_ticket",
-             file_type="concept"),
+        node(
+            "e2e::feature",
+            "Pay a fine online",
+            "demo-e2e",
+            "features/payment.feature",
+            4,
+            kind="gherkin_feature",
+            file_type="concept",
+        ),
+        node(
+            "e2e::scenario",
+            "Card payment succeeds",
+            "demo-e2e",
+            "features/payment.feature",
+            4,
+            kind="gherkin_scenario",
+            file_type="concept",
+        ),
+        node("jira::DEMO-1", "DEMO-1", "", None, 4, kind="jira_ticket", file_type="concept"),
     ],
     "links": [
         {"source": "app-a::pipe", "target": "app-a::form"},
@@ -73,24 +104,30 @@ LABELS = {
 }
 
 SUMMARIES = {
-    "3": ("The payment path in demo-core and both applications: PaymentService is "
-          "called from the checkout containers in demo-app-a and demo-app-b, so a "
-          "change to it reaches both user-facing flows."),
+    "3": (
+        "The payment path in demo-core and both applications: PaymentService is "
+        "called from the checkout containers in demo-app-a and demo-app-b, so a "
+        "change to it reaches both user-facing flows."
+    ),
 }
 
 # file -> tickets, as build_intent_index would emit
 INTENT = {
     "demo-app-a": {
         "src/pipes/address.pipe.ts": {
-            "tickets": {"DEMO-1": 3}, "first": "2024-01-05", "last": "2024-02-01",
+            "tickets": {"DEMO-1": 3},
+            "first": "2024-01-05",
+            "last": "2024-02-01",
         },
     },
 }
 TICKET_DESCRIPTIONS = {
     "DEMO-1": {
         "d": ["Add address formatting to the payment confirmation screen"],
-        "first": "2024-01-05", "last": "2024-02-01",
-        "repos": ["demo-app-a", "demo-e2e"], "n": 3,
+        "first": "2024-01-05",
+        "last": "2024-02-01",
+        "repos": ["demo-app-a", "demo-e2e"],
+        "n": 3,
     },
 }
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}
@@ -134,9 +171,12 @@ def main() -> int:
     (STORE / "graphify-out").mkdir(parents=True)
     (STORE / "docs" / "topics").mkdir(parents=True)
 
-    config.configure(root=STORE, EXPLORER_TITLE="Demo Estate Explorer",
-                     BRIEF_REQUEST_URL="https://example.invalid/issues/new",
-                     MIN_ENTRY_DEGREE=1)
+    config.configure(
+        root=STORE,
+        EXPLORER_TITLE="Demo Estate Explorer",
+        BRIEF_REQUEST_URL="https://example.invalid/issues/new",
+        MIN_ENTRY_DEGREE=1,
+    )
 
     io.write_json(config.GRAPH_PATH, GRAPH)
     io.write_json(config.LABELS_PATH, LABELS)
@@ -174,12 +214,17 @@ def _repoint(module) -> None:
             setattr(module, name, getattr(config, name))
     # stage-specific aliases that do not share the config name
     aliases = {
-        "GRAPH_PATH": "GRAPH_PATH", "LABELS_PATH": "LABELS_PATH",
-        "INTENT_PATH": "INTENT_INDEX_PATH", "TITLES_PATH": "TICKET_TITLES_PATH",
+        "GRAPH_PATH": "GRAPH_PATH",
+        "LABELS_PATH": "LABELS_PATH",
+        "INTENT_PATH": "INTENT_INDEX_PATH",
+        "TITLES_PATH": "TICKET_TITLES_PATH",
         "TICKET_DESC_PATH": "TICKET_DESCRIPTIONS_PATH",
-        "TOPICS_CONFIG": "TOPICS_CONFIG_PATH", "TOPICS_INPUT": "TOPICS_INPUT_PATH",
-        "BRIEFS_PATH": "TOPICS_BRIEFS_PATH", "DOCS_DIR": "TOPICS_DOCS_DIR",
-        "OUTPUT": "EXPLORER_PATH", "SUMMARIES_PATH": "SUMMARIES_PATH",
+        "TOPICS_CONFIG": "TOPICS_CONFIG_PATH",
+        "TOPICS_INPUT": "TOPICS_INPUT_PATH",
+        "BRIEFS_PATH": "TOPICS_BRIEFS_PATH",
+        "DOCS_DIR": "TOPICS_DOCS_DIR",
+        "OUTPUT": "EXPLORER_PATH",
+        "SUMMARIES_PATH": "SUMMARIES_PATH",
         "SYNONYMS_PATH": "SYNONYMS_PATH",
     }
     for attr, setting in aliases.items():

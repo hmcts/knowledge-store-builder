@@ -27,14 +27,11 @@ REPOSITORIES = config.REPOSITORIES_DIR
 
 def run_git(arguments: list[str]) -> str:
     """Run git and return stdout. Raises on failure."""
-    completed = subprocess.run(
-        ["git", *arguments], check=True, text=True, stdout=subprocess.PIPE
-    )
+    completed = subprocess.run(["git", *arguments], check=True, text=True, stdout=subprocess.PIPE)
     return completed.stdout
 
 
-def sync_repository(repo: RepositoryConfig, repositories_dir: Path,
-                    run=run_git) -> int:
+def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git) -> int:
     """Clone (if absent) then hard-sync one repository to its remote default
     branch. Returns the repository's total commit count."""
     repo_dir = repositories_dir / repo.name
@@ -44,16 +41,20 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path,
 
     git = lambda *args: run(["-C", str(repo_dir), *args])  # noqa: E731
     git("remote", "set-url", "origin", repo.clone_url)
-    git("fetch", "origin", "--prune", "--prune-tags", "--tags",
-        "+refs/heads/*:refs/remotes/origin/*")
+    git(
+        "fetch",
+        "origin",
+        "--prune",
+        "--prune-tags",
+        "--tags",
+        "+refs/heads/*:refs/remotes/origin/*",
+    )
 
     remote_ref = f"refs/remotes/origin/{repo.default_branch}"
     try:
         git("show-ref", "--verify", "--quiet", remote_ref)
     except subprocess.CalledProcessError:
-        raise RuntimeError(
-            f"Remote branch not found: {repo.name}/{repo.default_branch}"
-        ) from None
+        raise RuntimeError(f"Remote branch not found: {repo.name}/{repo.default_branch}") from None
 
     git("checkout", "-B", repo.default_branch, f"origin/{repo.default_branch}")
     git("reset", "--hard", f"origin/{repo.default_branch}")

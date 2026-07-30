@@ -56,8 +56,7 @@ def _widen_range(record: dict, date: str) -> None:
         record["last"] = date
 
 
-def apply_commit(commit: dict, files: dict[str, dict],
-                 descriptions: dict[str, dict]) -> bool:
+def apply_commit(commit: dict, files: dict[str, dict], descriptions: dict[str, dict]) -> bool:
     """Fold one commit's tickets into the per-file entries and the per-ticket
     description pool. True if ticketed."""
     if commit.get("is_merge"):
@@ -68,9 +67,7 @@ def apply_commit(commit: dict, files: dict[str, dict],
         return False
     date = commit["author_date"][:10]
     description = clean_description(subject)
-    keep_description = (
-        len(description) >= 12 and not JUNK_DESCRIPTION.match(description)
-    )
+    keep_description = len(description) >= 12 and not JUNK_DESCRIPTION.match(description)
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
@@ -123,16 +120,18 @@ def summarise(index: dict[str, dict[str, dict]], commits_seen: int) -> None:
 def main() -> int:
     ndjson_files = sorted(HISTORY_DIR.glob("*/commits.ndjson"))
     if not ndjson_files:
-        print(
-            f"No history datasets under {HISTORY_DIR}. "
-            "Run: knowledgestore export-history"
-        )
+        print(f"No history datasets under {HISTORY_DIR}. Run: knowledgestore export-history")
         return 1
 
     index: dict[str, dict[str, dict]] = {}
     descriptions: dict[str, dict] = defaultdict(
-        lambda: {"descriptions": defaultdict(int), "repos": set(),
-                 "first": None, "last": None, "count": 0}
+        lambda: {
+            "descriptions": defaultdict(int),
+            "repos": set(),
+            "first": None,
+            "last": None,
+            "count": 0,
+        }
     )
     commits_seen = 0
     for ndjson in ndjson_files:
@@ -150,7 +149,8 @@ def main() -> int:
     ticket_out = {
         ticket: {
             "d": [
-                d for d, _ in sorted(
+                d
+                for d, _ in sorted(
                     info["descriptions"].items(),
                     key=lambda kv: (-kv[1], -len(kv[0])),
                 )[:2]

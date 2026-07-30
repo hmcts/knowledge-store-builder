@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 from knowledgestore import extract_gherkin as gherkin  # noqa: E402
+
 FEATURE = """@regression @DD-123
 Feature: Amend defendant address
 
@@ -35,9 +36,9 @@ public class DefendantDetailsStepDefinitions {
 class NormaliseStepTest(unittest.TestCase):
     def test_cucumber_expressions_and_quotes_align(self):
         annotation = gherkin.normalise_step(
-            'user updates defendant details {string}, {string}, {string}')
-        step = gherkin.normalise_step(
-            'user updates defendant details "name", "dob", "address"')
+            "user updates defendant details {string}, {string}, {string}"
+        )
+        step = gherkin.normalise_step('user updates defendant details "name", "dob", "address"')
         self.assertEqual(annotation, step)
 
     def test_outline_params_and_numbers_align(self):
@@ -58,8 +59,8 @@ class ParseFeatureTest(unittest.TestCase):
 
         self.assertEqual(feature["name"], "Amend defendant address")
         self.assertEqual(len(feature["scenarios"]), 2)
-        self.assertIn("DD-123", feature["tickets"])   # from tag
-        self.assertIn("DD-999", feature["tickets"])   # from filename
+        self.assertIn("DD-123", feature["tickets"])  # from tag
+        self.assertIn("DD-999", feature["tickets"])  # from filename
         self.assertIn("regression", feature["tags"])
 
     def test_file_without_feature_header_returns_none(self):
@@ -72,8 +73,7 @@ class ParseFeatureTest(unittest.TestCase):
 
 class FeatureAreaTest(unittest.TestCase):
     def test_groups_by_first_directory_under_features(self):
-        self.assertEqual(
-            gherkin.feature_area("src/test/resources/features/CPS/PET.feature"), "CPS")
+        self.assertEqual(gherkin.feature_area("src/test/resources/features/CPS/PET.feature"), "CPS")
         self.assertEqual(gherkin.feature_area("elsewhere/x.feature"), "(root)")
 
 
@@ -86,8 +86,7 @@ class StepDefinitionsTest(unittest.TestCase):
             java.write_text(JAVA, encoding="utf-8")
             patterns = gherkin.parse_step_definitions(repo)
 
-        key = gherkin.normalise_step(
-            'user updates defendant details {string}, {string}, {string}')
+        key = gherkin.normalise_step("user updates defendant details {string}, {string}, {string}")
         self.assertIn(key, patterns)
         self.assertEqual(patterns[key][0], "DefendantDetailsStepDefinitions")
 
@@ -96,9 +95,13 @@ class GraphEnricherTest(unittest.TestCase):
     def _graph(self):
         return {
             "nodes": [
-                {"id": "r::stepdef", "label": "D",
-                 "repo": "repo-a", "community": 1,
-                 "source_file": "src/test/java/com/stepdefinitions/D.java"},
+                {
+                    "id": "r::stepdef",
+                    "label": "D",
+                    "repo": "repo-a",
+                    "community": 1,
+                    "source_file": "src/test/java/com/stepdefinitions/D.java",
+                },
             ],
             "links": [],
         }
@@ -143,14 +146,28 @@ class NormIdTest(unittest.TestCase):
 
 class StepdefClassNodesTest(unittest.TestCase):
     def test_maps_java_class_nodes_by_source_file(self):
-        graph = {"nodes": [
-            {"id": "a", "label": "D", "repo": "repo-a",
-             "source_file": "src/test/java/com/stepdefinitions/D.java"},
-            {"id": "b", "label": "NotTheStem", "repo": "repo-a",
-             "source_file": "src/test/java/com/stepdefinitions/E.java"},
-            {"id": "c", "label": "F", "repo": "other-repo",
-             "source_file": "src/test/java/com/stepdefinitions/F.java"},
-        ]}
+        graph = {
+            "nodes": [
+                {
+                    "id": "a",
+                    "label": "D",
+                    "repo": "repo-a",
+                    "source_file": "src/test/java/com/stepdefinitions/D.java",
+                },
+                {
+                    "id": "b",
+                    "label": "NotTheStem",
+                    "repo": "repo-a",
+                    "source_file": "src/test/java/com/stepdefinitions/E.java",
+                },
+                {
+                    "id": "c",
+                    "label": "F",
+                    "repo": "other-repo",
+                    "source_file": "src/test/java/com/stepdefinitions/F.java",
+                },
+            ]
+        }
         mapping = gherkin.stepdef_class_nodes(graph, "repo-a")
         self.assertEqual(mapping, {"src/test/java/com/stepdefinitions/D.java": "a"})
 
@@ -166,11 +183,18 @@ class EnrichRepositoryTest(unittest.TestCase):
             java.parent.mkdir(parents=True)
             java.write_text(JAVA, encoding="utf-8")
 
-            graph = {"nodes": [
-                {"id": "r::stepdef", "label": "D", "repo": "repo-a",
-                 "community": 1,
-                 "source_file": "src/test/java/com/stepdefinitions/D.java"},
-            ], "links": []}
+            graph = {
+                "nodes": [
+                    {
+                        "id": "r::stepdef",
+                        "label": "D",
+                        "repo": "repo-a",
+                        "community": 1,
+                        "source_file": "src/test/java/com/stepdefinitions/D.java",
+                    },
+                ],
+                "links": [],
+            }
             enricher = gherkin.GraphEnricher(graph, {})
             gherkin.enrich_repository(repo, enricher)
 
@@ -185,14 +209,16 @@ class WriteOutputsTest(unittest.TestCase):
     def test_writes_graph_labels_and_recompressed_gz(self):
         import gzip as _gzip
         import json as _json
+
         with tempfile.TemporaryDirectory() as tmp:
             gherkin.GRAPH_PATH = Path(tmp) / "graph.json"
             gherkin.LABELS_PATH = Path(tmp) / ".graphify_labels.json"
             graph = {"nodes": [{"id": "n"}], "links": []}
             gherkin.write_outputs(graph, {"1": "Area"})
             written = _json.loads(gherkin.GRAPH_PATH.read_text(encoding="utf-8"))
-            zipped = _json.loads(_gzip.open(
-                Path(tmp) / "graph.json.gz", "rt", encoding="utf-8").read())
+            zipped = _json.loads(
+                _gzip.open(Path(tmp) / "graph.json.gz", "rt", encoding="utf-8").read()
+            )
         self.assertEqual(written, graph)
         self.assertEqual(zipped, graph)
 

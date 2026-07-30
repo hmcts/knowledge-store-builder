@@ -1,0 +1,54 @@
+name: Lint
+
+# Lint, format and type-check gate. All three are blocking: the library is
+# ruff-formatted and pyright-clean, and staying that way is cheaper than
+# recovering it later.
+
+on:
+  pull_request:
+    branches: [main]
+    # Skip docs/config-only changes — nothing to lint or type-check.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.claude/**'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Ruff + Pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        # SHA-pinned (v9.0.0): a tag can be moved, a commit cannot.
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          enable-cache: true
+
+      # --frozen installs exactly what uv.lock resolves, so the whole tree is
+      # locked. --no-install-project keeps the linters' environment to the
+      # tools themselves, which is all ruff and pyright need, and lets
+      # --no-build hold: nothing is built from source.
+      - name: Install the tooling
+        run: uv sync --frozen --extra dev --no-install-project --no-build
+
+      # --no-sync: the environment is already exactly right, so these commands
+      # resolve and install nothing. --no-build says so explicitly, for
+      # anything reading the command rather than the flags it implies.
+      - name: Ruff lint
+        run: uv run --no-sync --no-build ruff check src tests --output-format=github
+
+      - name: Ruff format check
+        run: uv run --no-sync --no-build ruff format --check src tests
+
+      - name: Pyright
+        run: uv run --no-sync --no-build pyright

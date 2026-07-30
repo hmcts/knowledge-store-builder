@@ -76,26 +76,27 @@ def read_filters(path: Path) -> Filters:
 
 def run_gh(arguments: list[str]) -> str:
     """Run the gh CLI and return stdout. Raises on failure."""
-    completed = subprocess.run(
-        ["gh", *arguments], check=True, text=True, stdout=subprocess.PIPE
-    )
+    completed = subprocess.run(["gh", *arguments], check=True, text=True, stdout=subprocess.PIPE)
     return completed.stdout
 
 
 def list_organisation_repositories(runner=run_gh) -> list[dict]:
     """Every non-archived repository in the organisation (paginated)."""
-    output = runner([
-        "api", "--paginate", f"/orgs/{GITHUB_ORG}/repos?per_page=100&type=all",
-        "--jq", '.[] | select(.archived==false) | {name, defaultBranch: .default_branch}',
-    ])
+    output = runner(
+        [
+            "api",
+            "--paginate",
+            f"/orgs/{GITHUB_ORG}/repos?per_page=100&type=all",
+            "--jq",
+            ".[] | select(.archived==false) | {name, defaultBranch: .default_branch}",
+        ]
+    )
     return [json.loads(line) for line in output.splitlines() if line.strip()]
 
 
 def discover(filters: Filters, runner=run_gh) -> list[dict]:
     """Repositories selected by the filters, sorted by name."""
-    repositories = [
-        r for r in list_organisation_repositories(runner) if filters.matches(r["name"])
-    ]
+    repositories = [r for r in list_organisation_repositories(runner) if filters.matches(r["name"])]
     return sorted(repositories, key=lambda r: r["name"])
 
 
@@ -113,8 +114,12 @@ def main() -> int:
         print("GitHub CLI is required: https://cli.github.com/", file=sys.stderr)
         return 1
     try:
-        subprocess.run(["gh", "auth", "status"], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["gh", "auth", "status"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except subprocess.CalledProcessError:
         print("GitHub CLI is not authenticated. Run: gh auth login", file=sys.stderr)
         return 1
@@ -124,9 +129,11 @@ def main() -> int:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(render_config(repositories), encoding="utf-8")
     print(f"Generated {OUTPUT}")
-    print(f"Repositories selected: {len(repositories)} "
-          f"({len(filters.prefixes)} prefixes, {len(filters.includes)} explicit, "
-          f"{len(filters.excludes)} excluded)")
+    print(
+        f"Repositories selected: {len(repositories)} "
+        f"({len(filters.prefixes)} prefixes, {len(filters.includes)} explicit, "
+        f"{len(filters.excludes)} excluded)"
+    )
     return 0
 
 

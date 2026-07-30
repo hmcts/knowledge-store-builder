@@ -15,10 +15,10 @@ def make_history(tmp: Path) -> Path:
     """A minimal knowledge/git-history layout with one repository."""
     repo_dir = tmp / "git-history" / "repo-a"
     repo_dir.mkdir(parents=True)
-    record = {"repository": "repo-a",
-              "repository_url": "git@example.com:o/repo-a.git", "sha": "x"}
+    record = {"repository": "repo-a", "repository_url": "git@example.com:o/repo-a.git", "sha": "x"}
     (repo_dir / "commits.ndjson").write_text(
-        json.dumps(record) + "\n" + json.dumps(record) + "\n", encoding="utf-8")
+        json.dumps(record) + "\n" + json.dumps(record) + "\n", encoding="utf-8"
+    )
     (repo_dir / "index.md").write_text("# repo-a\n", encoding="utf-8")
     return repo_dir
 

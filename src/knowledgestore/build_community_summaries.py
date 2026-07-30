@@ -47,15 +47,13 @@ MIN_SUMMARY_LEN = 60
 MAX_SUMMARY_LEN = 700
 
 
-def community_digest(community: int, nodes: list[dict], labels: dict,
-                     intent: dict, degree: dict) -> dict:
+def community_digest(
+    community: int, nodes: list[dict], labels: dict, intent: dict, degree: dict
+) -> dict:
     """The raw material one community summary is written from."""
     nodes.sort(key=lambda n: -degree[n["id"]])
     repos = Counter(n.get("repo", "") for n in nodes)
-    features = [
-        n["label"] for n in nodes
-        if kinds.is_kind(n, kinds.FEATURE)
-    ]
+    features = [n["label"] for n in nodes if kinds.is_kind(n, kinds.FEATURE)]
     tickets: Counter = Counter()
     for n in nodes[:30]:
         tickets.update((n.get("metadata") or {}).get("tickets") or [])
@@ -70,7 +68,7 @@ def community_digest(community: int, nodes: list[dict], labels: dict,
         "top_nodes": [
             # label-less structural nodes (Java package hierarchy) are skipped
             f"{n['label']} ({n.get('source_file') or '?'})"
-            for n in nodes[:TOP_NODES * 2]
+            for n in nodes[: TOP_NODES * 2]
             if n.get("label")
         ][:TOP_NODES],
         "business_features": features[:TOP_FEATURES],
@@ -81,7 +79,7 @@ def community_digest(community: int, nodes: list[dict], labels: dict,
 def extract() -> int:
     graph = io.load_graph(GRAPH_PATH)
     labels = io.load_labels(LABELS_PATH)
-    intent = io.read_gzip_json(INTENT_PATH, default={})
+    intent = io.read_gzip_json_dict(INTENT_PATH)
 
     degree: dict[str, int] = defaultdict(int)
     for edge in graph["links"]:
@@ -109,14 +107,9 @@ def extract() -> int:
 
 
 def merge(paths: list[str]) -> int:
-    known_ids = {
-        str(d["id"])
-        for d in json.loads(INPUT_PATH.read_text(encoding="utf-8"))
-    }
+    known_ids = {str(d["id"]) for d in json.loads(INPUT_PATH.read_text(encoding="utf-8"))}
     merged: dict[str, str] = (
-        json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
-        if OUTPUT_PATH.exists()
-        else {}
+        json.loads(OUTPUT_PATH.read_text(encoding="utf-8")) if OUTPUT_PATH.exists() else {}
     )
     added, rejected = 0, []
     for path in paths:
@@ -135,8 +128,9 @@ def merge(paths: list[str]) -> int:
                 added += 1
 
     OUTPUT_PATH.write_text(
-        json.dumps(dict(sorted(merged.items(), key=lambda kv: int(kv[0]))),
-                   indent=1, ensure_ascii=False),
+        json.dumps(
+            dict(sorted(merged.items(), key=lambda kv: int(kv[0]))), indent=1, ensure_ascii=False
+        ),
         encoding="utf-8",
     )
     for r in rejected:

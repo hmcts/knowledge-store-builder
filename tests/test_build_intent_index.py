@@ -14,15 +14,18 @@ from knowledgestore import build_intent_index as intent  # noqa: E402
 
 def make_descriptions():
     return defaultdict(
-        lambda: {"descriptions": defaultdict(int), "repos": set(),
-                 "first": None, "last": None, "count": 0}
+        lambda: {
+            "descriptions": defaultdict(int),
+            "repos": set(),
+            "first": None,
+            "last": None,
+            "count": 0,
+        }
     )
 
 
 def make_files():
-    return defaultdict(
-        lambda: {"tickets": defaultdict(int), "first": None, "last": None}
-    )
+    return defaultdict(lambda: {"tickets": defaultdict(int), "first": None, "last": None})
 
 
 class CleanDescriptionTest(unittest.TestCase):
@@ -56,21 +59,28 @@ class JunkFilterTest(unittest.TestCase):
 class ApplyCommitTest(unittest.TestCase):
     def _commit(self, subject, merge=False, date="2024-05-01T10:00:00+00:00"):
         return {
-            "repository": "repo-a", "subject": subject, "is_merge": merge,
+            "repository": "repo-a",
+            "subject": subject,
+            "is_merge": merge,
             "author_date": date,
             "files": [{"path": "src/x.ts"}],
         }
 
     def test_merge_and_ticketless_commits_are_skipped(self):
         files, descriptions = make_files(), make_descriptions()
-        self.assertFalse(intent.apply_commit(self._commit("DD-1: x", merge=True), files, descriptions))
+        self.assertFalse(
+            intent.apply_commit(self._commit("DD-1: x", merge=True), files, descriptions)
+        )
         self.assertFalse(intent.apply_commit(self._commit("no ticket here"), files, descriptions))
         self.assertEqual(len(files), 0)
 
     def test_ticketed_commit_updates_files_and_descriptions(self):
         files, descriptions = make_files(), make_descriptions()
-        self.assertTrue(intent.apply_commit(
-            self._commit("DD-9: introduce address validation rules"), files, descriptions))
+        self.assertTrue(
+            intent.apply_commit(
+                self._commit("DD-9: introduce address validation rules"), files, descriptions
+            )
+        )
         self.assertEqual(files["src/x.ts"]["tickets"]["DD-9"], 1)
         self.assertEqual(files["src/x.ts"]["first"], "2024-05-01")
         info = descriptions["DD-9"]
@@ -87,20 +97,31 @@ class ApplyCommitTest(unittest.TestCase):
 class IndexRepositoryTest(unittest.TestCase):
     def test_end_to_end_over_ndjson(self):
         commits = [
-            {"repository": "repo-a", "subject": "DD-1: add address form",
-             "is_merge": False, "author_date": "2024-01-02T09:00:00+00:00",
-             "files": [{"path": "a.ts"}, {"path": "b.ts"}]},
-            {"repository": "repo-a", "subject": "DD-1: add address form",
-             "is_merge": False, "author_date": "2024-02-03T09:00:00+00:00",
-             "files": [{"path": "a.ts"}]},
-            {"repository": "repo-a", "subject": "merge branch",
-             "is_merge": True, "author_date": "2024-02-04T09:00:00+00:00",
-             "files": [{"path": "a.ts"}]},
+            {
+                "repository": "repo-a",
+                "subject": "DD-1: add address form",
+                "is_merge": False,
+                "author_date": "2024-01-02T09:00:00+00:00",
+                "files": [{"path": "a.ts"}, {"path": "b.ts"}],
+            },
+            {
+                "repository": "repo-a",
+                "subject": "DD-1: add address form",
+                "is_merge": False,
+                "author_date": "2024-02-03T09:00:00+00:00",
+                "files": [{"path": "a.ts"}],
+            },
+            {
+                "repository": "repo-a",
+                "subject": "merge branch",
+                "is_merge": True,
+                "author_date": "2024-02-04T09:00:00+00:00",
+                "files": [{"path": "a.ts"}],
+            },
         ]
         with tempfile.TemporaryDirectory() as tmp:
             ndjson = Path(tmp) / "commits.ndjson"
-            ndjson.write_text(
-                "\n".join(json.dumps(c) for c in commits) + "\n", encoding="utf-8")
+            ndjson.write_text("\n".join(json.dumps(c) for c in commits) + "\n", encoding="utf-8")
             descriptions = make_descriptions()
             files, seen = intent.index_repository(ndjson, descriptions)
 

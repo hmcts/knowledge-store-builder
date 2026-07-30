@@ -24,10 +24,11 @@ class FiltersTest(unittest.TestCase):
 
     def test_prefix_repo_and_exclude_rules(self):
         filters = self._filters(
-            "# comment\nprefix cpp-context-\nrepo odd-one\nexclude cpp-context-skip\n")
+            "# comment\nprefix cpp-context-\nrepo odd-one\nexclude cpp-context-skip\n"
+        )
         self.assertTrue(filters.matches("cpp-context-hearing"))
         self.assertTrue(filters.matches("odd-one"))
-        self.assertFalse(filters.matches("cpp-context-skip"))   # exclude wins
+        self.assertFalse(filters.matches("cpp-context-skip"))  # exclude wins
         self.assertFalse(filters.matches("unrelated"))
 
     def test_rejects_unknown_kind_and_empty_rules(self):
@@ -40,21 +41,26 @@ class FiltersTest(unittest.TestCase):
 class DiscoverTest(unittest.TestCase):
     def test_discovers_filters_and_sorts(self):
         calls = []
+
         def fake_runner(args):
             calls.append(args)
-            return ('{"name":"cpp-context-b","defaultBranch":"main"}\n'
-                    '{"name":"cpp-context-a","defaultBranch":"master"}\n'
-                    '{"name":"infra-thing","defaultBranch":"main"}\n')
+            return (
+                '{"name":"cpp-context-b","defaultBranch":"main"}\n'
+                '{"name":"cpp-context-a","defaultBranch":"master"}\n'
+                '{"name":"infra-thing","defaultBranch":"main"}\n'
+            )
+
         filters = repo_list.Filters(prefixes=["cpp-context-"])
         repos = repo_list.discover(filters, runner=fake_runner)
-        self.assertEqual([r["name"] for r in repos],
-                         ["cpp-context-a", "cpp-context-b"])
+        self.assertEqual([r["name"] for r in repos], ["cpp-context-a", "cpp-context-b"])
         self.assertIn("--paginate", calls[0])
 
     def test_render_config_pipe_format(self):
-        content = repo_list.render_config([
-            {"name": "a-repo", "defaultBranch": "main"},
-        ])
+        content = repo_list.render_config(
+            [
+                {"name": "a-repo", "defaultBranch": "main"},
+            ]
+        )
         lines = [line for line in content.splitlines() if line and not line.startswith("#")]
         self.assertEqual(lines, ["a-repo|git@github.com:hmcts/a-repo.git|main"])
         self.assertIn("repository-filters.txt", content)
@@ -63,14 +69,16 @@ class DiscoverTest(unittest.TestCase):
 class SyncRepositoryTest(unittest.TestCase):
     def _repo(self):
         return export.RepositoryConfig(
-            name="repo-a", clone_url="git@example.com:o/repo-a.git",
-            default_branch="main")
+            name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+        )
 
     def test_clones_when_missing_and_syncs(self):
         commands = []
+
         def fake_git(args):
             commands.append(args)
             return "42\n" if args[-2:] == ["--all", "--count"] else ""
+
         with tempfile.TemporaryDirectory() as tmp:
             count = sync.sync_repository(self._repo(), Path(tmp), run=fake_git)
         self.assertEqual(count, 42)
@@ -84,9 +92,11 @@ class SyncRepositoryTest(unittest.TestCase):
         # untracked repositories/<repo>/graphify-out/ on re-sync, destroying
         # the per-repo graphs the estate merge is built from.
         commands = []
+
         def fake_git(args):
             commands.append(args)
             return "1\n" if args[-2:] == ["--all", "--count"] else ""
+
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "repo-a" / ".git").mkdir(parents=True)
             sync.sync_repository(self._repo(), Path(tmp), run=fake_git)
@@ -97,9 +107,11 @@ class SyncRepositoryTest(unittest.TestCase):
 
     def test_skips_clone_when_repo_exists(self):
         commands = []
+
         def fake_git(args):
             commands.append(args)
             return "7\n" if args[-2:] == ["--all", "--count"] else ""
+
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "repo-a" / ".git").mkdir(parents=True)
             sync.sync_repository(self._repo(), Path(tmp), run=fake_git)
@@ -110,6 +122,7 @@ class SyncRepositoryTest(unittest.TestCase):
             if args[-3:-1] == ["--verify", "--quiet"] or "--verify" in args:
                 raise subprocess.CalledProcessError(1, args)
             return ""
+
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "repo-a" / ".git").mkdir(parents=True)
             repo, target = self._repo(), Path(tmp)
@@ -121,9 +134,19 @@ class CliTest(unittest.TestCase):
     def test_stages_are_listed_in_pipeline_order(self):
         self.assertEqual(
             list(cli.STAGES),
-            ["discover", "sync", "export-history", "context", "intent",
-             "ticket-titles", "gherkin", "summaries", "semantic", "topics",
-             "explorer"],
+            [
+                "discover",
+                "sync",
+                "export-history",
+                "context",
+                "intent",
+                "ticket-titles",
+                "gherkin",
+                "summaries",
+                "semantic",
+                "topics",
+                "explorer",
+            ],
         )
 
     def test_every_stage_maps_to_a_module_with_a_main(self):
@@ -146,6 +169,7 @@ class CliTest(unittest.TestCase):
 
     def test_root_option_repoints_every_derived_path(self):
         from knowledgestore import config
+
         original = config.ROOT
         self.addCleanup(config.configure, original)
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,15 +180,25 @@ class CliTest(unittest.TestCase):
 class SemanticVocabularyTest(unittest.TestCase):
     def test_vocabulary_filters_short_stop_and_rare_tokens(self):
         from knowledgestore import build_semantic_index as semantic
+
         with tempfile.TemporaryDirectory() as tmp:
             graph = Path(tmp) / "graph.json"
             import json
-            graph.write_text(json.dumps({"nodes": [
-                {"label": "address validation address validation address validation"},
-                {"label": "there there there"},   # stopword
-                {"label": "ab ab ab"},            # too short
-                {"label": "rareword"},            # below MIN_DF
-            ], "links": []}), encoding="utf-8")
+
+            graph.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {"label": "address validation address validation address validation"},
+                            {"label": "there there there"},  # stopword
+                            {"label": "ab ab ab"},  # too short
+                            {"label": "rareword"},  # below MIN_DF
+                        ],
+                        "links": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
             semantic.GRAPH_PATH = graph
             semantic.LABELS_PATH = Path(tmp) / "missing.json"
             semantic.SUMMARIES_PATH = Path(tmp) / "missing2.json"
@@ -198,16 +232,18 @@ class _Sliceable(list):
 class NearestNeighboursTest(unittest.TestCase):
     def test_keeps_similar_tokens_and_skips_shared_stems(self):
         from knowledgestore import build_semantic_index as semantic
+
         vocab = ["outcome", "result", "results", "banana"]
         #        self       strong    shared-stem-with-result  weak
         row = FakeRow([1.0, 0.7, 0.69, 0.1])
         near = semantic.nearest_neighbours(vocab, row, "outcome")
         names = [n for n, _ in near]
         self.assertIn("result", names)
-        self.assertNotIn("banana", names)   # below MIN_SIMILARITY
+        self.assertNotIn("banana", names)  # below MIN_SIMILARITY
 
     def test_shared_stem_pairs_are_skipped(self):
         from knowledgestore import build_semantic_index as semantic
+
         vocab = ["result", "results", "verdict"]
         row = FakeRow([1.0, 0.9, 0.6])
         near = semantic.nearest_neighbours(vocab, row, "result")
@@ -223,6 +259,7 @@ class IntentSummariseTest(unittest.TestCase):
         import io
         import json as _json
         from knowledgestore import build_intent_index as intent
+
         with tempfile.TemporaryDirectory() as tmp:
             intent.OUTPUT = Path(tmp) / "file-tickets.json.gz"
             with _gzip.open(intent.OUTPUT, "wt", encoding="utf-8") as out:

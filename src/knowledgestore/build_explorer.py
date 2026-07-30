@@ -58,18 +58,19 @@ MIN_ENTRY_DEGREE = config.MIN_ENTRY_DEGREE
 E2E_REPOS = config.E2E_REPOS
 
 
+PACKAGE = "knowledgestore"
+
+
 def app_source() -> str:
     """The explorer page application, shipped as package data."""
-    return (resources.files(__package__) / "assets" / "app.js").read_text(
-        encoding="utf-8"
-    )
+    return (resources.files(PACKAGE) / "assets" / "app.js").read_text(encoding="utf-8")
 
 
 def load_inputs() -> tuple[dict, dict, dict, dict]:
     graph = io.load_graph(GRAPH_PATH)
     labels = io.load_labels(LABELS_PATH)
-    intent = io.read_gzip_json(INTENT_PATH, default={})
-    titles = io.read_gzip_json(TITLES_PATH, default={})
+    intent = io.read_gzip_json_dict(INTENT_PATH)
+    titles = io.read_gzip_json_dict(TITLES_PATH)
     return graph, labels, intent, titles
 
 
@@ -90,12 +91,12 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
     if kind in ("feature", "scenario", "ticket"):
         return True
     label = node.get("label", "")
-    if label.startswith("."):        # instance methods - not search targets
+    if label.startswith("."):  # instance methods - not search targets
         return False
     source = node.get("source_file") or ""
     is_test = ".spec." in source or "__tests__" in source or "/test/" in source
     if is_test and node.get("repo") not in E2E_REPOS:
-        return False                 # backend test scaffolding
+        return False  # backend test scaffolding
     return degree >= MIN_ENTRY_DEGREE
 
 
@@ -151,8 +152,7 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
     return entries, kept_edges(kept, adjacency, index_of)
 
 
-def entry_connections(node_id: str, adjacency: dict, degree: dict,
-                      nodes: dict) -> list[str]:
+def entry_connections(node_id: str, adjacency: dict, degree: dict, nodes: dict) -> list[str]:
     """Labels of the strongest-connected distinct neighbours."""
     connections: list[str] = []
     # name tiebreak: adjacency is a set, so without it equal-degree order
@@ -312,9 +312,7 @@ def main() -> int:
     graph, labels, intent, titles = load_inputs()
     entries, edges = build_index(graph, labels, intent)
     summaries = (
-        json.loads(SUMMARIES_PATH.read_text(encoding="utf-8"))
-        if SUMMARIES_PATH.exists()
-        else {}
+        json.loads(SUMMARIES_PATH.read_text(encoding="utf-8")) if SUMMARIES_PATH.exists() else {}
     )
     synonyms = (
         json.load(gzip.open(SYNONYMS_PATH, "rt", encoding="utf-8"))
@@ -328,7 +326,7 @@ def main() -> int:
     )
     # Topic briefs (GraphRAG phase 3): pre-written narratives composed at
     # build time from knowledge/topics evidence; served without any LLM.
-    topics = io.read_json(TOPICS_PATH, default={})
+    topics = io.read_json_dict(TOPICS_PATH)
 
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.
@@ -351,30 +349,23 @@ def main() -> int:
     html = (
         TEMPLATE.replace("__TITLE__", config.EXPLORER_TITLE)
         .replace("__SUB__", sub)
-        .replace("__DATA__", json.dumps(entries, ensure_ascii=False)
-                 .replace("</", "<\\/"))
+        .replace("__DATA__", json.dumps(entries, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__EDGES__", json.dumps(edges))
-        .replace("__TITLES__", json.dumps(titles, ensure_ascii=False)
-                 .replace("</", "<\\/"))
-        .replace("__SUMMARIES__", json.dumps(summaries, ensure_ascii=False)
-                 .replace("</", "<\\/"))
-        .replace("__SYNONYMS__", json.dumps(synonyms, ensure_ascii=False)
-                 .replace("</", "<\\/"))
-        .replace("__TICKETINFO__", json.dumps(ticket_info, ensure_ascii=False)
-                 .replace("</", "<\\/"))
+        .replace("__TITLES__", json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__SUMMARIES__", json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__SYNONYMS__", json.dumps(synonyms, ensure_ascii=False).replace("</", "<\\/"))
+        .replace(
+            "__TICKETINFO__", json.dumps(ticket_info, ensure_ascii=False).replace("</", "<\\/")
+        )
         .replace("__CONFIG__", json.dumps(page_config, ensure_ascii=False))
-        .replace("__TOPICS__", json.dumps(topics, ensure_ascii=False)
-                 .replace("</", "<\\/"))
+        .replace("__TOPICS__", json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__APP_JS__", app_js)
     )
     # Sonar S2083 misfires here: OUTPUT is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
     OUTPUT.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
     size_mb = OUTPUT.stat().st_size / 1_048_576
-    print(
-        f"{len(entries):,} entries, {len(edges)//2:,} edges -> {OUTPUT} "
-        f"({size_mb:.1f} MB)"
-    )
+    print(f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {OUTPUT} ({size_mb:.1f} MB)")
     return 0
 
 

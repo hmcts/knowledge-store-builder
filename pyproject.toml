@@ -25,6 +25,8 @@ dependencies = []
 [project.optional-dependencies]
 # Only the semantic index needs a model. Everything else works without it.
 semantic = ["fastembed>=0.4", "numpy>=1.24"]
+# Lint, format and type-check tooling, pinned to what CI runs.
+dev = ["ruff==0.16.0", "pyright==1.1.407"]
 
 [project.scripts]
 knowledgestore = "knowledgestore.cli:main"
@@ -39,3 +41,20 @@ packages = ["src/knowledgestore"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/knowledgestore", "tests", "examples", "README.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.pyright]
+include = ["src"]
+# Stage modules read module-level path constants that tests and configure()
+# rebind, so inferred types are deliberately loose in places.
+typeCheckingMode = "basic"
+pythonVersion = "3.10"
+reportMissingImports = "warning"

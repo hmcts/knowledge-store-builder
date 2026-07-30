@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -44,9 +43,7 @@ def build_manifest(repository_dirs: list[Path]) -> None:
         commit_count = count_lines(ndjson_path)
 
         repository_name = repository_dir.name
-        source_url = str(
-            first_record.get("repository_url", "Unknown")
-        )
+        source_url = str(first_record.get("repository_url", "Unknown"))
 
         lines.append(
             f"| `{repository_name}` "
@@ -73,15 +70,9 @@ def build_manifest(repository_dirs: list[Path]) -> None:
 
 
 def build_context(repository_dirs: list[Path]) -> None:
-    repository_names = [
-        repository_dir.name
-        for repository_dir in repository_dirs
-    ]
+    repository_names = [repository_dir.name for repository_dir in repository_dirs]
 
-    repository_list = "\n".join(
-        f"- `{repository_name}`"
-        for repository_name in repository_names
-    )
+    repository_list = "\n".join(f"- `{repository_name}`" for repository_name in repository_names)
 
     context = f"""# UI estate knowledge context
 
@@ -192,9 +183,7 @@ def main() -> None:
     build_manifest(repository_dirs)
     build_context(repository_dirs)
 
-    print(
-        f"Generated context for {len(repository_dirs)} repositories"
-    )
+    print(f"Generated context for {len(repository_dirs)} repositories")
 
 
 if __name__ == "__main__":

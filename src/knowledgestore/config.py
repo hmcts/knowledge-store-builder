@@ -73,9 +73,7 @@ TICKET_PATTERN = re.compile(
     os.environ.get("KSB_TICKET_PATTERN", r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
 )
 # Ticket ids in the explorer link here, with the id appended.
-TICKET_BROWSE_URL = os.environ.get(
-    "KSB_TICKET_BROWSE_URL", "https://tools.hmcts.net/jira/browse/"
-)
+TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "https://tools.hmcts.net/jira/browse/")
 
 # --- explorer page -------------------------------------------------------
 EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
@@ -116,17 +114,13 @@ STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
     # behave / pytest-bdd: @given("...") or @given('...')
     "python": {
         "glob": "**/*.py",
-        "annotation": (
-            r"@(?:given|when|then|step)\s*\(\s*[\"'](.*?)[\"']\s*[,)]"
-        ),
+        "annotation": (r"@(?:given|when|then|step)\s*\(\s*[\"'](.*?)[\"']\s*[,)]"),
         "symbol": None,
     },
     # cucumber-js: Given("...") or Given('...'), no decorator
     "typescript": {
         "glob": "**/*.ts",
-        "annotation": (
-            r"\b(?:Given|When|Then)\s*\(\s*[\"'](.*?)[\"']\s*,"
-        ),
+        "annotation": (r"\b(?:Given|When|Then)\s*\(\s*[\"'](.*?)[\"']\s*,"),
         "symbol": None,
     },
 }
@@ -135,9 +129,7 @@ STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
 MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
 
 # --- semantic index ------------------------------------------------------
-EMBEDDING_MODEL = os.environ.get(
-    "KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-)
+EMBEDDING_MODEL = os.environ.get("KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 
 def configure(root: Path | str | None = None, **overrides) -> None:

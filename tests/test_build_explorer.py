@@ -10,12 +10,19 @@ from pathlib import Path
 from knowledgestore import build_explorer as explorer  # noqa: E402
 
 
-def node(node_id, label, kind=None, community=1, repo="repo-a",
-         source_file="src/a.ts", file_type="code"):
+def node(
+    node_id, label, kind=None, community=1, repo="repo-a", source_file="src/a.ts", file_type="code"
+):
     metadata = {"kind": kind} if kind else {}
-    return {"id": node_id, "label": label, "repo": repo, "community": community,
-            "source_file": source_file, "file_type": file_type,
-            "metadata": metadata}
+    return {
+        "id": node_id,
+        "label": label,
+        "repo": repo,
+        "community": community,
+        "source_file": source_file,
+        "file_type": file_type,
+        "metadata": metadata,
+    }
 
 
 class NodeKindTest(unittest.TestCase):
@@ -74,8 +81,15 @@ class BuildIndexTest(unittest.TestCase):
 
     def test_intent_tickets_attach_to_code_entries(self):
         graph = {"nodes": [node("n1", "AddressPipe")], "links": []}
-        intent = {"repo-a": {"src/a.ts": {"tickets": {"CRC-12016": 1},
-                                          "first": "2019-10-01", "last": "2019-11-14"}}}
+        intent = {
+            "repo-a": {
+                "src/a.ts": {
+                    "tickets": {"CRC-12016": 1},
+                    "first": "2019-10-01",
+                    "last": "2019-11-14",
+                }
+            }
+        }
         entries, _ = explorer.build_index(graph, {}, intent)
         self.assertEqual(entries[0][7], ["CRC-12016"])
 
@@ -92,8 +106,7 @@ class NodeTicketsTest(unittest.TestCase):
 
     def test_code_tickets_come_from_intent_index(self):
         intent = {"repo-a": {"src/a.ts": {"tickets": {"DD-1": 3, "DD-2": 1}}}}
-        self.assertEqual(explorer.node_tickets(node("a", "X"), "code", intent),
-                         ["DD-1", "DD-2"])
+        self.assertEqual(explorer.node_tickets(node("a", "X"), "code", intent), ["DD-1", "DD-2"])
 
 
 class EntryConnectionsTest(unittest.TestCase):
@@ -122,6 +135,7 @@ class BuildPageSmokeTest(unittest.TestCase):
         self.addCleanup(setattr, explorer, "MIN_ENTRY_DEGREE", explorer.MIN_ENTRY_DEGREE)
         explorer.MIN_ENTRY_DEGREE = 0
         import json as _json
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             explorer.GRAPH_PATH = root / "graph.json"
@@ -133,14 +147,23 @@ class BuildPageSmokeTest(unittest.TestCase):
             explorer.TICKET_DESC_PATH = root / "missing-desc.json.gz"
             explorer.TOPICS_PATH = root / "missing-topics.json"
             explorer.OUTPUT = root / "explorer.html"
-            explorer.GRAPH_PATH.write_text(_json.dumps(
-                {"nodes": [node("n1", "AddressPipe")], "links": []}), encoding="utf-8")
+            explorer.GRAPH_PATH.write_text(
+                _json.dumps({"nodes": [node("n1", "AddressPipe")], "links": []}), encoding="utf-8"
+            )
             explorer.LABELS_PATH.write_text("{}", encoding="utf-8")
             code = explorer.main()
             html = explorer.OUTPUT.read_text(encoding="utf-8")
         self.assertEqual(code, 0)
-        for block in ("data", "edges", "titles", "summaries", "synonyms",
-                      "tickets", "config", "topics"):
+        for block in (
+            "data",
+            "edges",
+            "titles",
+            "summaries",
+            "synonyms",
+            "tickets",
+            "config",
+            "topics",
+        ):
             self.assertIn(f'<script id="{block}"', html)
         self.assertIn("function runAsk", html)  # app.js inlined
 
@@ -162,8 +185,12 @@ class IncludeEntryPolicyTest(unittest.TestCase):
         self.assertFalse(explorer.include_entry(backend_test, "code", 99))
 
     def test_e2e_test_artifacts_kept(self):
-        po = node("a", "SjpCaseDecisionPage", repo="cpp-ui-e2e",
-                  source_file="src/test/pages/SjpCaseDecisionPage.po.ts")
+        po = node(
+            "a",
+            "SjpCaseDecisionPage",
+            repo="cpp-ui-e2e",
+            source_file="src/test/pages/SjpCaseDecisionPage.po.ts",
+        )
         self.assertTrue(explorer.include_entry(po, "code", explorer.MIN_ENTRY_DEGREE))
 
     def test_degree_threshold_applies_to_plain_code(self):

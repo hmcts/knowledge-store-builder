@@ -44,18 +44,23 @@ class SummariesMergeTest(unittest.TestCase):
     def _with_paths(self, tmp):
         summaries.INPUT_PATH = Path(tmp) / "communities-input.json"
         summaries.OUTPUT_PATH = Path(tmp) / "communities.json"
-        summaries.INPUT_PATH.write_text(json.dumps(
-            [{"id": 3, "label": "Hearing State Store", "size": 100}]
-        ), encoding="utf-8")
+        summaries.INPUT_PATH.write_text(
+            json.dumps([{"id": 3, "label": "Hearing State Store", "size": 100}]), encoding="utf-8"
+        )
 
     def test_valid_summary_merges(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._with_paths(tmp)
             batch = Path(tmp) / "gen.json"
-            batch.write_text(json.dumps(
-                {"3": "The NgRx state store for hearing results, managing draft "
-                      "results as they are built during a hearing."}
-            ), encoding="utf-8")
+            batch.write_text(
+                json.dumps(
+                    {
+                        "3": "The NgRx state store for hearing results, managing draft "
+                        "results as they are built during a hearing."
+                    }
+                ),
+                encoding="utf-8",
+            )
             code = summaries.merge([str(batch)])
             merged = json.loads(summaries.OUTPUT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 0)
@@ -65,8 +70,7 @@ class SummariesMergeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._with_paths(tmp)
             batch = Path(tmp) / "gen.json"
-            batch.write_text(json.dumps({"999": "x" * 100, "3": "too short"}),
-                             encoding="utf-8")
+            batch.write_text(json.dumps({"999": "x" * 100, "3": "too short"}), encoding="utf-8")
             code = summaries.merge([str(batch)])
             merged = json.loads(summaries.OUTPUT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 1)
@@ -77,7 +81,12 @@ class TicketDescriptionsOutputTest(unittest.TestCase):
     """The committed ticket-descriptions artefact keeps its contract."""
 
     def test_shape_of_committed_artifact(self):
-        path = Path(__file__).resolve().parent.parent / "knowledge" / "intent" / "ticket-descriptions.json.gz"
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "knowledge"
+            / "intent"
+            / "ticket-descriptions.json.gz"
+        )
         if not path.exists():
             self.skipTest("artefact not built")
         data = json.load(gzip.open(path, "rt", encoding="utf-8"))
@@ -89,11 +98,20 @@ class TicketDescriptionsOutputTest(unittest.TestCase):
 class CommunityDigestTest(unittest.TestCase):
     def test_digest_gathers_repos_features_and_tickets(self):
         nodes = [
-            {"id": "a", "label": "BigHub", "repo": "repo-a",
-             "source_file": "src/hub.ts", "metadata": {}},
-            {"id": "b", "label": "Amend address", "repo": "repo-a",
-             "source_file": "features/a.feature",
-             "metadata": {"kind": "gherkin_feature", "tickets": ["DD-1"]}},
+            {
+                "id": "a",
+                "label": "BigHub",
+                "repo": "repo-a",
+                "source_file": "src/hub.ts",
+                "metadata": {},
+            },
+            {
+                "id": "b",
+                "label": "Amend address",
+                "repo": "repo-a",
+                "source_file": "features/a.feature",
+                "metadata": {"kind": "gherkin_feature", "tickets": ["DD-1"]},
+            },
         ]
         intent = {"repo-a": {"src/hub.ts": {"tickets": {"DD-2": 4}}}}
         degree = {"a": 10, "b": 2}
@@ -109,21 +127,38 @@ class CommunityDigestTest(unittest.TestCase):
 class SummariesExtractTest(unittest.TestCase):
     def test_extract_filters_small_communities(self):
         import json as _json
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             summaries.GRAPH_PATH = root / "graph.json"
             summaries.LABELS_PATH = root / "labels.json"
             summaries.INTENT_PATH = root / "missing.json.gz"
             summaries.INPUT_PATH = root / "communities-input.json"
-            big = [{"id": f"n{i}", "label": f"L{i}", "community": 1,
-                    "repo": "repo-a", "source_file": "x.ts", "metadata": {}}
-                   for i in range(summaries.MIN_COMMUNITY_SIZE)]
-            small = [{"id": "s", "label": "S", "community": 2,
-                      "repo": "repo-a", "source_file": "y.ts", "metadata": {}}]
-            summaries.GRAPH_PATH.write_text(_json.dumps(
-                {"nodes": big + small, "links": []}), encoding="utf-8")
-            summaries.LABELS_PATH.write_text(
-                _json.dumps({"1": "Big Area"}), encoding="utf-8")
+            big = [
+                {
+                    "id": f"n{i}",
+                    "label": f"L{i}",
+                    "community": 1,
+                    "repo": "repo-a",
+                    "source_file": "x.ts",
+                    "metadata": {},
+                }
+                for i in range(summaries.MIN_COMMUNITY_SIZE)
+            ]
+            small = [
+                {
+                    "id": "s",
+                    "label": "S",
+                    "community": 2,
+                    "repo": "repo-a",
+                    "source_file": "y.ts",
+                    "metadata": {},
+                }
+            ]
+            summaries.GRAPH_PATH.write_text(
+                _json.dumps({"nodes": big + small, "links": []}), encoding="utf-8"
+            )
+            summaries.LABELS_PATH.write_text(_json.dumps({"1": "Big Area"}), encoding="utf-8")
             code = summaries.extract()
             digests = _json.loads(summaries.INPUT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 0)

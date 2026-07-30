@@ -21,8 +21,13 @@ from knowledgestore import build_intent_index as intent  # noqa: E402
 
 class ExportToIntentSeamTest(unittest.TestCase):
     def _git(self, cwd, *args):
-        subprocess.run(["git", *args], cwd=cwd, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     def _make_repo(self, root: Path) -> None:
         repo = root / "repositories" / "repo-a"
@@ -32,8 +37,13 @@ class ExportToIntentSeamTest(unittest.TestCase):
         self._git(repo, "config", "user.name", "Test")
         (repo / "address.pipe.ts").write_text("export const x = 1;\n")
         self._git(repo, "add", "address.pipe.ts")
-        self._git(repo, "commit", "-q", "-m",
-                  "CRC-12016: local copy of address pipe after core broke prod")
+        self._git(
+            repo,
+            "commit",
+            "-q",
+            "-m",
+            "CRC-12016: local copy of address pipe after core broke prod",
+        )
         (repo / "address.pipe.ts").write_text("export const x = 2;\n")
         self._git(repo, "add", "address.pipe.ts")
         self._git(repo, "commit", "-q", "-m", "no ticket housekeeping")
@@ -46,10 +56,12 @@ class ExportToIntentSeamTest(unittest.TestCase):
 
             # stage 3: history export (real module, real git repo)
             export.export_repository(
-                root, history,
+                root,
+                history,
                 export.RepositoryConfig(
-                    name="repo-a", clone_url="git@example.com:o/repo-a.git",
-                    default_branch="main"))
+                    name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+                ),
+            )
 
             # stage 4b: intent index consumes the export's output
             intent.HISTORY_DIR = history
@@ -61,11 +73,10 @@ class ExportToIntentSeamTest(unittest.TestCase):
             descriptions = json.load(gzip.open(intent.DESCRIPTIONS, "rt", encoding="utf-8"))
 
         self.assertEqual(code, 0)
-        self.assertEqual(
-            list(index["repo-a"]["address.pipe.ts"]["tickets"]), ["CRC-12016"])
+        self.assertEqual(list(index["repo-a"]["address.pipe.ts"]["tickets"]), ["CRC-12016"])
         self.assertIn(
-            "local copy of address pipe after core broke prod",
-            descriptions["CRC-12016"]["d"][0])
+            "local copy of address pipe after core broke prod", descriptions["CRC-12016"]["d"][0]
+        )
         self.assertEqual(descriptions["CRC-12016"]["repos"], ["repo-a"])
 
 

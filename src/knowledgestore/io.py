@@ -20,11 +20,19 @@ def read_json(path: Path, default=None):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_json_dict(path: Path) -> dict:
+    """Parse a JSON object, or {} when the file is absent.
+
+    Stages that merge layers into the graph always want a mapping, never None,
+    so this is the reader they use.
+    """
+    value = read_json(path, default={})
+    return value if isinstance(value, dict) else {}
+
+
 def write_json(path: Path, data, indent: int | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8"
-    )
+    path.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
 
 
 def read_gzip_json(path: Path, default=None):
@@ -33,6 +41,12 @@ def read_gzip_json(path: Path, default=None):
         return default
     with gzip.open(path, "rt", encoding="utf-8") as source:
         return json.load(source)
+
+
+def read_gzip_json_dict(path: Path) -> dict:
+    """Parse a gzip-compressed JSON object, or {} when the file is absent."""
+    value = read_gzip_json(path, default={})
+    return value if isinstance(value, dict) else {}
 
 
 def write_gzip_json(path: Path, data) -> None:
@@ -49,4 +63,4 @@ def load_graph(path: Path) -> dict:
 
 def load_labels(path: Path) -> dict:
     """Community labels, or {} when not yet generated."""
-    return read_json(path, default={})
+    return read_json_dict(path)
