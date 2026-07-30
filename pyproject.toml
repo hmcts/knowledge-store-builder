@@ -39,6 +39,10 @@ Source = "https://github.com/hmcts/knowledge-store-builder"
 
 [tool.hatch.version]
 source = "vcs"
+# Draft versions carry the commit: <next>.devN+g<sha> (e.g. 0.3.1.dev8+g6672b53cd).
+# node-and-date is the upstream default; pinned here so the +sha behaviour is
+# a visible decision, not folklore. Tagged (release) builds are the bare tag.
+raw-options = { local_scheme = "node-and-date" }
 
 [tool.hatch.build.targets.wheel]
 # assets/app.js sits inside the package, so it is included automatically
