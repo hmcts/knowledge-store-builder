@@ -91,6 +91,7 @@ def artefact_freshness(run=run_git) -> dict:
 
 
 def run_gh(arguments: list[str]) -> str:
+    """Run a gh CLI command and return its output."""
     completed = subprocess.run(["gh", *arguments], check=True, text=True, stdout=subprocess.PIPE)
     return completed.stdout
 
@@ -99,7 +100,8 @@ def source_drift(runner=run_gh) -> list[dict]:
     """Repositories with commits on their branch since the recorded date.
 
     One API call per repository - the caller opts in. Counts cap at 100
-    (one page); "100" therefore means "at least 100".
+    (one page); "100" therefore means "at least 100". Returns empty list if
+    gh is unavailable or unauthenticated, printing a diagnostic note.
     """
     drifted = []
     for name, entry in provenance.read().items():
@@ -107,28 +109,32 @@ def source_drift(runner=run_gh) -> list[dict]:
         branch = entry.get("branch", "")
         if not since:
             continue
-        raw = runner(
-            [
-                "api",
-                f"/repos/{GITHUB_ORG}/{name}/commits?sha={branch}&since={since}&per_page=100",
-                "--jq",
-                "length",
-            ]
-        )
+        try:
+            raw = runner(
+                [
+                    "api",
+                    f"/repos/{GITHUB_ORG}/{name}/commits?sha={branch}&since={since}&per_page=100",
+                    "--jq",
+                    "length",
+                ]
+            )
+        except (subprocess.CalledProcessError, OSError):
+            print("Drift: gh call failed (not authenticated?) - skipped")
+            return []
         behind = int(raw.strip() or 0)
         if behind:
             drifted.append({"repo": name, "behind": behind})
     return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--drift",
         action="store_true",
         help="also check GitHub for commits since the build (one API call per repository)",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
 
     recorded = provenance.read()
     print(
@@ -167,7 +173,7 @@ def main() -> int:
     if arguments.drift:
         if not shutil.which("gh"):
             print("Drift: gh CLI not available - skipped")
-        elif not provenance.read():
+        elif not recorded:
             print("Drift: no provenance recorded - skipped")
         else:
             drifted = source_drift()

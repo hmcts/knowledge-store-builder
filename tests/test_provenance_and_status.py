@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from knowledgestore import config, io, provenance
 
@@ -153,6 +155,35 @@ class DriftTest(unittest.TestCase):
 
             got = status.source_drift(runner=fake_gh)
         self.assertEqual(got, [{"repo": "moved", "behind": 9}])
+
+    def test_returns_empty_list_when_runner_fails(self):
+        from knowledgestore import provenance, status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            provenance.write(
+                {
+                    "repo1": {
+                        "sha": "a" * 40,
+                        "branch": "main",
+                        "committed": "2026-07-01T00:00:00+00:00",
+                    },
+                }
+            )
+
+            def failing_runner(arguments):
+                raise subprocess.CalledProcessError(1, ["gh"])
+
+            got = status.source_drift(runner=failing_runner)
+        self.assertEqual(got, [])
+
+    def test_main_with_drift_returns_zero_when_gh_missing(self):
+        from knowledgestore import status
+
+        with mock.patch("shutil.which", return_value=None):
+            result = status.main(["--drift"])
+        self.assertEqual(result, 0)
 
 
 if __name__ == "__main__":
