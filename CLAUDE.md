@@ -17,6 +17,48 @@ the traps that are not visible in the code, and cost hours when rediscovered.
   unit tests and the page regression. Do not make one non-blocking to land a
   change.
 
+## Testing
+
+Two principles govern every test here (they are the house distillation of
+the wider practice in the superpowers `test-driven-development` skill):
+
+1. **Every test names the break it catches.** Before writing the body, name
+   the production change that should make it fail — and make sure that
+   change is a bug, not a decision. A test only intentional redesign can
+   fail is a change detector: it fires on refactors and sleeps through
+   bugs. Derive expected values by hand (literals, hand-checked fixtures),
+   never with the code under test.
+
+2. **Every test exercises the real thing.** Prefer real components, or
+   stubs at the true IO boundary, over mocks. Mocks have their place, but
+   describing behaviour easily *becomes* the test — an assertion on a mock
+   passes when the mock is present and says nothing about the product.
+   Never assert call counts or that a stand-in was invoked; assert
+   outcomes and artefacts.
+
+How that looks in this codebase:
+
+- **Stub the IO boundary through the injectable seams** — `run=` on the
+  git helpers, `runner=` on the gh helpers. Everything downstream of the
+  seam is real code, and assertions land on what it produced: the
+  provenance file's contents, the merged `dives.json`, the exit code.
+- **The explorer harnesses build through the real pipeline.**
+  `tests/explorer/fixture.py` writes real inputs and runs the real merge
+  and page build; the regression then drives the shipped `app.js` against
+  the page those produced. Never fake a generated artefact to test its
+  consumer.
+- **Bite-check regression tests.** A test pinning a fixed bug must be
+  shown to fail against the broken code before it is trusted — check out
+  or temporarily revert the fix and watch it fail. A pin that has never
+  failed is unverified protection.
+- **Mutation check before finishing:** mentally flip a branch, drop a side
+  effect, return the default — at least one test should fail for each
+  realistic mutation. A mutation nothing catches is unprotected behaviour
+  or a tautological test.
+- Coverage percentages are a map of where to look, never the goal. A test
+  written to move a number, with no break it can catch, costs maintenance
+  forever and protects nothing.
+
 ## Graph handling
 
 - **Never merge a graph that is already merged.** `graphify merge-graphs`
