@@ -60,6 +60,9 @@ TICKET_TITLES_PATH = ROOT / "knowledge" / "intent" / "ticket-titles.json.gz"
 SUMMARIES_INPUT_PATH = ROOT / "knowledge" / "summaries" / "communities-input.json"
 SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
 SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
+# What each repository's clone pointed at when the store was last built.
+# Written by the sync stage; read by status, the manifest and the explorer.
+PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
 TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
 TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
 TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
@@ -173,6 +176,7 @@ def _recompute_paths() -> None:
         SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
+        PROVENANCE_PATH=root / "knowledge" / "provenance.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
         TOPICS_DOCS_DIR=root / "docs" / "topics",
