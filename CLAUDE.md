@@ -19,8 +19,16 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 
 ## Testing
 
-Two principles govern every test here (they are the house distillation of
-the wider practice in the superpowers `test-driven-development` skill):
+**Tests defend the product's designed behaviour under change. A test earns
+its place by failing when the product breaks — name the break it catches
+before writing it. Assert outcomes and artefacts, never that a mock was
+called: prefer real components, or stubs at the true IO boundary, because
+describing behaviour can easily become the test. When pinning a fixed bug,
+prove the test fails against the broken code before trusting it. Coverage
+that doesn't uphold product integrity is not coverage.**
+
+In more detail (the house distillation of the superpowers
+`test-driven-development` skill):
 
 1. **Every test names the break it catches.** Before writing the body, name
    the production change that should make it fail — and make sure that
