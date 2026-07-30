@@ -42,6 +42,10 @@ class Filters:
     prefixes: list[str] = field(default_factory=list)
     includes: set[str] = field(default_factory=set)
     excludes: set[str] = field(default_factory=set)
+    # GitHub team slugs: every non-archived repository the team has is part
+    # of the estate. The rule for estates defined by ownership rather than
+    # naming - teams without conventions, and infrastructure estates.
+    teams: list[str] = field(default_factory=list)
 
     def matches(self, name: str) -> bool:
         if name in self.excludes:
@@ -67,9 +71,11 @@ def read_filters(path: Path) -> Filters:
             filters.includes.add(value)
         elif kind == "exclude":
             filters.excludes.add(value)
+        elif kind == "team":
+            filters.teams.append(value)
         else:
             raise ValueError(f"Unknown filter kind at {path}:{line_number}: {kind}")
-    if not filters.prefixes and not filters.includes:
+    if not filters.prefixes and not filters.includes and not filters.teams:
         raise ValueError(f"No include rules in {path}")
     return filters
 
@@ -80,24 +86,58 @@ def run_gh(arguments: list[str]) -> str:
     return completed.stdout
 
 
-def list_organisation_repositories(runner=run_gh) -> list[dict]:
-    """Every non-archived repository in the organisation (paginated)."""
-    output = runner(
-        [
-            "api",
-            "--paginate",
-            f"/orgs/{GITHUB_ORG}/repos?per_page=100&type=all",
-            "--jq",
-            ".[] | select(.archived==false) | {name, defaultBranch: .default_branch}",
-        ]
-    )
+LISTING_JQ = ".[] | select(.archived==false) | {name, defaultBranch: .default_branch}"
+
+
+def _parse_listing(output: str) -> list[dict]:
     return [json.loads(line) for line in output.splitlines() if line.strip()]
 
 
+def list_organisation_repositories(runner=run_gh) -> list[dict]:
+    """Every non-archived repository in the organisation (paginated)."""
+    return _parse_listing(
+        runner(
+            [
+                "api",
+                "--paginate",
+                f"/orgs/{GITHUB_ORG}/repos?per_page=100&type=all",
+                "--jq",
+                LISTING_JQ,
+            ]
+        )
+    )
+
+
+def list_team_repositories(slug: str, runner=run_gh) -> list[dict]:
+    """Every non-archived repository a GitHub team has (paginated)."""
+    return _parse_listing(
+        runner(
+            [
+                "api",
+                "--paginate",
+                f"/orgs/{GITHUB_ORG}/teams/{slug}/repos?per_page=100",
+                "--jq",
+                LISTING_JQ,
+            ]
+        )
+    )
+
+
 def discover(filters: Filters, runner=run_gh) -> list[dict]:
-    """Repositories selected by the filters, sorted by name."""
-    repositories = [r for r in list_organisation_repositories(runner) if filters.matches(r["name"])]
-    return sorted(repositories, key=lambda r: r["name"])
+    """Repositories selected by the filters, sorted by name.
+
+    Name rules (prefix/repo) select from the organisation listing; team rules
+    add every repository the team has. Excludes win over both, and a
+    repository selected by several rules appears once.
+    """
+    selected: dict[str, dict] = {
+        r["name"]: r for r in list_organisation_repositories(runner) if filters.matches(r["name"])
+    }
+    for slug in filters.teams:
+        for r in list_team_repositories(slug, runner):
+            if r["name"] not in filters.excludes:
+                selected.setdefault(r["name"], r)
+    return sorted(selected.values(), key=lambda r: r["name"])
 
 
 def render_config(repositories: list[dict]) -> str:

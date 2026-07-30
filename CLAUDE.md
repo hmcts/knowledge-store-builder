@@ -106,6 +106,16 @@ Full clones are deliberate: the history export diffs every commit, so a
 `--filter=blob:none` clone re-fetches blobs one commit at a time and is far
 slower overall.
 
+## The shared-environment trap
+
+This library and its consumer stores often share one Python environment.
+Installing a store's pinned release (its `requirements.lock`) silently
+replaces this repo's editable install — after which "local" test runs
+exercise the released wheel, not your working tree: tests for new code
+error while CI passes. Before trusting a local run, confirm
+`python3 -c "import knowledgestore; print(knowledgestore.__file__)"` points
+at `src/` here; `pip install --no-deps -e .` restores it.
+
 ## Things that look like bugs but are not
 
 - `str.strip()` treats `\x1f` and `\x1e` as whitespace. The history export uses

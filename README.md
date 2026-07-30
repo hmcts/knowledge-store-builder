@@ -78,6 +78,7 @@ cat > config/repository-filters.txt <<'EOF'
 prefix myteam-service-
 prefix myteam-ui-
 repo   shared-component-library
+team   my-github-team          # or: everything a GitHub team owns
 exclude myteam-service-deprecated
 EOF
 ```

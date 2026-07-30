@@ -10,7 +10,8 @@
 #
 #   prefix <name-prefix>    include every repository whose name starts with this
 #   repo <exact-name>       include one repository by name
-#   exclude <exact-name>    exclude one repository, even if a prefix matched it
+#   team <github-team-slug> include every repository the GitHub team has
+#   exclude <exact-name>    exclude one repository, even if another rule matched it
 #
 # `exclude` always wins. Archived repositories are always excluded, so you never
 # need a rule for them.
@@ -22,6 +23,13 @@
 # Most estates have one or two prefixes covering the bulk of them.
 prefix myteam-service-
 prefix myteam-ui-
+
+# --- Or define the estate by ownership --------------------------------------
+# Teams without naming conventions - and infrastructure estates - cannot be
+# expressed as prefixes. A team rule includes everything the team has, so an
+# estate can simply be "what my team owns". Excludes still win, which is how
+# you keep a team's terraform scaffolding out while taking its services.
+team my-github-team
 
 # --- Add what the conventions miss -----------------------------------------
 # Repositories predating the naming scheme, shared libraries, or the E2E suite
