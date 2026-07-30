@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -235,6 +236,97 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(list(written), ["good"])
         self.assertEqual(written["good"]["sha"], "abcd1234")
         self.assertIn("<h2>", written["good"]["html"])
+
+    def _wire_paths(self, root: Path) -> None:
+        for attr, rel in {
+            "INPUT_DIR": "in",
+            "DOCS_DIR": "docs",
+            "DIVES_PATH": "in/dives.json",
+        }.items():
+            self.addCleanup(setattr, dives, attr, getattr(dives, attr))
+            setattr(dives, attr, root / rel)
+        (root / "in").mkdir()
+        (root / "docs").mkdir()
+
+    def test_merge_rejects_bundle_with_missing_dossier(self):
+        import io as std_io
+        import json
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._wire_paths(root)
+            (root / "in" / "ghost-input.json").write_text(
+                json.dumps({"repo": "ghost", "provenance": {"sha": "a" * 40}})
+            )
+            # deliberately no docs/ghost.md
+            captured = std_io.StringIO()
+            with redirect_stdout(captured):
+                code = dives.merge()
+            written = json.loads((root / "in" / "dives.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(written, {})
+        self.assertIn("ghost: missing", captured.getvalue())
+
+    def test_merge_rejects_dossier_shorter_than_minimum(self):
+        import io as std_io
+        import json
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._wire_paths(root)
+            (root / "in" / "short-input.json").write_text(
+                json.dumps({"repo": "short", "provenance": {"sha": "a" * 40}})
+            )
+            (root / "docs" / "short.md").write_text("Too short.", encoding="utf-8")
+            captured = std_io.StringIO()
+            with redirect_stdout(captured):
+                code = dives.merge()
+            written = json.loads((root / "in" / "dives.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(written, {})
+        self.assertIn(f"short: dossier shorter than {dives.MIN_DIVE_LENGTH}", captured.getvalue())
+
+    def test_merge_with_no_bundles_fails(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._wire_paths(root)
+            captured = StringIO()
+            with redirect_stderr(captured):
+                code = dives.merge()
+        self.assertEqual(code, 1)
+        self.assertIn("No bundles", captured.getvalue())
+
+
+class MainDispatchTest(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(setattr, sys, "argv", sys.argv)
+
+    def test_extract_dispatch_passes_repo_and_propagates_return(self):
+        calls = []
+        self.addCleanup(setattr, dives, "extract", dives.extract)
+        dives.extract = lambda repo: calls.append(repo) or 7
+        sys.argv = ["prog", "extract", "some-repo"]
+        self.assertEqual(dives.main(), 7)
+        self.assertEqual(calls, ["some-repo"])
+
+    def test_merge_dispatch_propagates_return(self):
+        self.addCleanup(setattr, dives, "merge", dives.merge)
+        dives.merge = lambda: 3
+        sys.argv = ["prog", "merge"]
+        self.assertEqual(dives.main(), 3)
+
+    def test_no_arguments_fails(self):
+        sys.argv = ["prog"]
+        self.assertEqual(dives.main(), 1)
+
+    def test_bogus_argument_fails(self):
+        sys.argv = ["prog", "bogus"]
+        self.assertEqual(dives.main(), 1)
 
 
 if __name__ == "__main__":

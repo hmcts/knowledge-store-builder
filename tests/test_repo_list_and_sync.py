@@ -132,6 +132,46 @@ class SyncRepositoryTest(unittest.TestCase):
                 sync.sync_repository(repo, target, run=fake_git)
 
 
+class MainProvenanceTest(unittest.TestCase):
+    def test_writes_provenance_for_every_configured_repository(self):
+        from knowledgestore import provenance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "repositories.txt"
+            config_path.write_text(
+                "repo-a|git@example.com:o/repo-a.git|main\n"
+                "repo-b|git@example.com:o/repo-b.git|main\n",
+                encoding="utf-8",
+            )
+
+            self.addCleanup(setattr, sync, "CONFIG", sync.CONFIG)
+            sync.CONFIG = config_path
+            self.addCleanup(setattr, sync, "REPOSITORIES", sync.REPOSITORIES)
+            sync.REPOSITORIES = root / "repositories"
+            self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
+            sync.sync_repository = lambda repo, repositories_dir, run=None: 5
+
+            canned = {
+                "sha": "a" * 40,
+                "branch": "main",
+                "committed": "2026-07-01T00:00:00+00:00",
+            }
+            self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
+            provenance.head_info = lambda repo_dir, branch, run=None: dict(canned)
+
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = root / "provenance.json"
+
+            result = sync.main()
+            recorded = provenance.read()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(set(recorded), {"repo-a", "repo-b"})
+        self.assertEqual(recorded["repo-a"], canned)
+        self.assertEqual(recorded["repo-b"], canned)
+
+
 class CliTest(unittest.TestCase):
     def test_stages_are_listed_in_pipeline_order(self):
         self.assertEqual(
