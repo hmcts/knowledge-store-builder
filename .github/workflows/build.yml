@@ -7,7 +7,7 @@ name: Build
 # The version is derived from the git tag by hatch-vcs — creating a GitHub
 # release IS the version bump; nothing in the source mentions a version:
 #
-#   push to main        -> <next>.devN+<short-sha>  (draft; bare GitHub short SHA)
+#   push to main        -> <last-tag>.devN+<short-sha>  (draft; bare GitHub short SHA)
 #   published release   -> the tag, verbatim  (v0.4.0 -> 0.4.0)
 #
 # Auth is basic auth to Azure Artifacts using the org secrets
@@ -80,9 +80,12 @@ jobs:
           # (+g<sha9>), so the draft version is computed here and injected via
           # the documented override; a release builds the checked-out tag as-is.
           if [ "${{ github.event_name }}" != "release" ]; then
+            # Base = the LAST tag (0.3.0.devN), matching the artefact-version
+            # form the feed has always carried. Duncan's explicit choice over
+            # next-patch: continuity on the feed beats PEP 440 dev-sorts-before-
+            # base ordering, since consumers pin exact versions anyway.
             LAST=$(git describe --tags --abbrev=0)
-            NEXT=$(echo "${LAST#v}" | awk -F. '{print $1"."$2"."$3+1}')
-            DRAFT="${NEXT}.dev$(git rev-list "${LAST}..HEAD" --count)+$(git rev-parse --short=7 HEAD)"
+            DRAFT="${LAST#v}.dev$(git rev-list "${LAST}..HEAD" --count)+$(git rev-parse --short=7 HEAD)"
             export SETUPTOOLS_SCM_PRETEND_VERSION="$DRAFT"
           fi
           uv build
