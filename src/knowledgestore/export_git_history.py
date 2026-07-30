@@ -484,8 +484,8 @@ def main() -> int:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path(__file__).resolve().parent.parent,
-        help="Root directory of the knowledge repository.",
+        default=None,
+        help="Root directory of the knowledge store (default: the configured store root).",
     )
     parser.add_argument(
         "--config",
@@ -500,7 +500,12 @@ def main() -> int:
 
     arguments = parser.parse_args()
 
-    root_dir = arguments.root.resolve()
+    # Late import so `knowledgestore --root <store> export-history` is
+    # honoured: the CLI applies --root via config.configure() before the
+    # stage module loads.
+    from . import config
+
+    root_dir = arguments.root.resolve() if arguments.root else config.ROOT
     config_path = (
         arguments.config.resolve() if arguments.config else root_dir / "config" / "repositories.txt"
     )
