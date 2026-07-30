@@ -57,7 +57,7 @@ const makeEl = () => ({
 });
 const elements = {};
 for (const id of ['data', 'edges', 'titles', 'summaries', 'synonyms', 'tickets',
-                  'config', 'topics']) {
+                  'config', 'topics', 'dives']) {
   if (!jsonBlocks[id]) throw new Error(`missing embedded JSON block: #${id}`);
   elements[id] = { textContent: jsonBlocks[id] };
 }
@@ -127,8 +127,10 @@ check('DEMO-1', 'ticket lookup',
 // business-first composition: prose leads, code sits behind the disclosure
 check('how are addresses handled?', 'topic brief',
   ['Addresses in the demo estate', 'Pre-written topic brief']);
-// evidence exists but no brief covers payments, so the page must offer to
-// have one written rather than pretending it can compose an answer
+// deep dives: naming the repository serves the dossier, with its build stamp
+check('what is going on with demo-core?', 'deep dive: demo-core',
+  ['Deep dive', 'demo-core', 'evidence measured at build abcd1234']);
+// no topic and no dive cover this question, so the page offers to have a brief written
 check('how are payments taken?', 'open question',
   ['No pre-written brief covers this question']);
 // nothing in the graph matches: say so plainly

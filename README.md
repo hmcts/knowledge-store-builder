@@ -120,12 +120,15 @@ are large.
 | `summaries` | `knowledge/summaries/` | Plain-English descriptions of each cluster |
 | `semantic` | `knowledge/semantic/` | Token-neighbour map, so "outcomes" finds "results" |
 | `topics` | `docs/topics/`, `briefs.json` | Pre-written answers to anticipated questions |
+| `deepdive` | `knowledge/deep-dives/`, `docs/deep-dives/` | Evidence-grounded dossier on one repository: churn, instability, co-change coupling, hotspots |
+| `status` | (report only) | Provenance, layer coverage, dangling citations, page freshness; `--drift` checks GitHub for commits since the build |
 | `explorer` | `graphify-out/explorer.html` | One self-contained page: search and basic Q&A |
 
 ## The two-part stages
 
-`summaries` and `topics` are the only stages that need an LLM, and they are
-deliberately split so the LLM runs at **build** time, never at query time:
+`summaries`, `topics` and `deepdive` are the stages where an LLM writes prose,
+and they are deliberately split so it runs at **build** time, never at query
+time:
 
 ```bash
 knowledgestore summaries extract              # evidence digests, deterministic
@@ -141,6 +144,20 @@ works the same way: `extract` gathers a per-topic evidence dossier, you write
 This split is the point of the design. Whoever builds the store may have an
 LLM; the people querying it may not. Everything the LLM produces is committed
 as reviewed static text.
+
+`deepdive` is the third two-part stage, scoped to a single repository:
+
+```bash
+knowledgestore deepdive extract cpp-context-progression   # loads the full graph
+# write docs/deep-dives/cpp-context-progression.md from the bundle, then:
+knowledgestore deepdive merge
+knowledgestore explorer
+```
+
+A dossier must state which build it measured (the bundle's short commit SHA);
+`merge` rejects one that does not, because churn and instability figures go
+stale with every commit and a dossier that does not say when it was true is
+misleading rather than useful.
 
 ## Configuration
 

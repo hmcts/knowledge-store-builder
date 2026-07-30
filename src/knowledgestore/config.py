@@ -60,9 +60,26 @@ TICKET_TITLES_PATH = ROOT / "knowledge" / "intent" / "ticket-titles.json.gz"
 SUMMARIES_INPUT_PATH = ROOT / "knowledge" / "summaries" / "communities-input.json"
 SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
 SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
+# What each repository's clone pointed at when the store was last built.
+# Written by the sync stage; read by status, the manifest and the explorer.
+PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
 TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
 TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
 TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
+
+# --- deep dives: evidence-grounded dossiers on individual repositories ----
+DEEPDIVES_INPUT_DIR = ROOT / "knowledge" / "deep-dives"
+DEEPDIVES_DOCS_DIR = ROOT / "docs" / "deep-dives"
+DEEPDIVES_PATH = ROOT / "knowledge" / "deep-dives" / "dives.json"
+# Bundle thresholds (env-overridable where an estate may reasonably differ).
+DIVE_TOP_FILES = _env_int("KSB_DIVE_TOP_FILES", 15)
+DIVE_MIN_COCHANGE = _env_int("KSB_DIVE_MIN_COCHANGE", 10)
+# Tickets touching more files than this are sweeping changes (renames,
+# reformat commits) and are excluded from co-change pairing.
+DIVE_COCHANGE_MAX_FILES_PER_TICKET = _env_int("KSB_DIVE_COCHANGE_MAX_FILES_PER_TICKET", 40)
+# Instability wording in commit-mined ticket descriptions.
+REVERT_PATTERN = re.compile(r"\brevert", re.IGNORECASE)
+FIX_PATTERN = re.compile(r"\b(fix|defect|bug|hotfix)", re.IGNORECASE)
 
 # --- graph artefacts (produced by graphify, consumed here) ---------------
 GRAPH_PATH = ROOT / "graphify-out" / "graph.json"
@@ -173,9 +190,13 @@ def _recompute_paths() -> None:
         SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
+        PROVENANCE_PATH=root / "knowledge" / "provenance.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
         TOPICS_DOCS_DIR=root / "docs" / "topics",
+        DEEPDIVES_INPUT_DIR=root / "knowledge" / "deep-dives",
+        DEEPDIVES_DOCS_DIR=root / "docs" / "deep-dives",
+        DEEPDIVES_PATH=root / "knowledge" / "deep-dives" / "dives.json",
         GRAPH_PATH=root / "graphify-out" / "graph.json",
         LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",

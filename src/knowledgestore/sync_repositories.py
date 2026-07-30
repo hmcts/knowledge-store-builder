@@ -65,15 +65,21 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
 
 
 def main() -> int:
+    from . import provenance
+
     if not CONFIG.is_file():
         print(f"Repository configuration not found: {CONFIG}", file=sys.stderr)
         return 1
 
     REPOSITORIES.mkdir(parents=True, exist_ok=True)
+    entries: dict[str, dict] = {}
     for repo in read_repository_config(CONFIG):
         print(f"\nSynchronising {repo.name}")
         count = sync_repository(repo, REPOSITORIES)
         print(f"{repo.name}: {count} commits available")
+        entries[repo.name] = provenance.head_info(REPOSITORIES / repo.name, repo.default_branch)
+    provenance.write(entries)
+    print(f"\nProvenance recorded for {len(entries)} repositories -> {provenance.PROVENANCE_PATH}")
     return 0
 
 

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-from . import config
+from . import config, provenance
 
 HISTORY_DIR = config.HISTORY_DIR
 MANIFEST_PATH = config.MANIFEST_PATH
@@ -26,6 +26,13 @@ def count_lines(path: Path) -> int:
         return sum(1 for _ in source)
 
 
+def synced_cell(name: str, recorded: dict[str, dict]) -> str:
+    entry = recorded.get(name)
+    if not entry or not entry.get("sha"):
+        return "—"
+    return f"{str(entry.get('committed', ''))[:10]} (`{entry['sha'][:8]}`)"
+
+
 def build_manifest(repository_dirs: list[Path]) -> None:
     lines = [
         "# Repository manifest",
@@ -33,9 +40,11 @@ def build_manifest(repository_dirs: list[Path]) -> None:
         "This manifest describes the source repositories represented by "
         "the combined Graphify knowledge graph.",
         "",
-        "| Repository | Commits | History | Current source |",
-        "|---|---:|---|---|",
+        "| Repository | Commits | Synced at | History | Current source |",
+        "|---|---:|---|---|---|",
     ]
+
+    recorded = provenance.read()
 
     for repository_dir in repository_dirs:
         ndjson_path = repository_dir / "commits.ndjson"
@@ -48,6 +57,7 @@ def build_manifest(repository_dirs: list[Path]) -> None:
         lines.append(
             f"| `{repository_name}` "
             f"| {commit_count} "
+            f"| {synced_cell(repository_name, recorded)} "
             f"| [History](git-history/{repository_name}/index.md) "
             f"| `{source_url}` |"
         )
@@ -63,7 +73,9 @@ def build_manifest(repository_dirs: list[Path]) -> None:
     )
 
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(
+    # Sonar S2083 misfires here: MANIFEST_PATH is a module constant derived
+    # from configuration, not untrusted input; this is offline build tooling.
+    MANIFEST_PATH.write_text(  # NOSONAR(S2083)
         "\n".join(lines),
         encoding="utf-8",
     )

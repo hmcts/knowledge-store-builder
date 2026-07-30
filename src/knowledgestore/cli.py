@@ -45,7 +45,15 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_topic_briefs",
         "extract topic evidence dossiers, or merge written briefs back in",
     ),
+    "deepdive": (
+        "build_deep_dives",
+        "extract a repository evidence bundle, or merge written deep dives",
+    ),
     "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
+    "status": (
+        "status",
+        "report provenance, layer coverage, dangling citations and page freshness",
+    ),
 }
 
 
@@ -61,7 +69,7 @@ def usage() -> str:
     lines += [
         "",
         "Stages that both extract evidence and merge written prose back in",
-        "(summaries, topics) take a sub-command:",
+        "(summaries, topics, deepdive) take a sub-command:",
         "",
         "  knowledgestore summaries extract",
         "  knowledgestore summaries merge <written.json> [...]",

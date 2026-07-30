@@ -128,6 +128,69 @@ class KeptEdgesTest(unittest.TestCase):
         self.assertEqual(explorer.kept_edges(kept, adjacency, index_of), [0, 1])
 
 
+class LatestSyncedTest(unittest.TestCase):
+    """Test timezone-aware chronological comparison of committed dates."""
+
+    def test_returns_empty_string_when_no_entries(self):
+        self.assertEqual(explorer.latest_synced({}), "")
+
+    def test_returns_empty_string_when_no_committed_dates(self):
+        recorded = {"repo": {"sha": "abc123"}}  # no committed key
+        self.assertEqual(explorer.latest_synced(recorded), "")
+
+    def test_extracts_date_from_single_entry(self):
+        recorded = {
+            "repo-a": {
+                "sha": "a" * 40,
+                "committed": "2026-07-30T09:14:02+01:00",
+            }
+        }
+        self.assertEqual(explorer.latest_synced(recorded), "2026-07-30")
+
+    def test_handles_different_timezones_chronologically(self):
+        """Lexicographically larger string can be chronologically earlier."""
+        # 2026-07-30T01:00:00+05:00 is lexicographically larger
+        # but 2026-07-29T23:30:00-05:00 is chronologically later
+        recorded = {
+            "repo-a": {
+                "sha": "a" * 40,
+                "committed": "2026-07-30T01:00:00+05:00",  # 2026-07-29 20:00:00 UTC
+            },
+            "repo-b": {
+                "sha": "b" * 40,
+                "committed": "2026-07-29T23:30:00-05:00",  # 2026-07-30 04:30:00 UTC
+            },
+        }
+        # repo-b is chronologically later, so should return its date
+        self.assertEqual(explorer.latest_synced(recorded), "2026-07-29")
+
+    def test_skips_invalid_timestamps(self):
+        recorded = {
+            "repo-a": {"sha": "a" * 40, "committed": "invalid-date"},
+            "repo-b": {"sha": "b" * 40, "committed": "2026-07-30T09:14:02+01:00"},
+        }
+        # Should skip the invalid one and use the valid one
+        self.assertEqual(explorer.latest_synced(recorded), "2026-07-30")
+
+    def test_handles_multiple_valid_entries(self):
+        recorded = {
+            "repo-a": {
+                "sha": "a" * 40,
+                "committed": "2026-07-28T10:00:00+00:00",
+            },
+            "repo-b": {
+                "sha": "b" * 40,
+                "committed": "2026-07-30T09:14:02+01:00",
+            },
+            "repo-c": {
+                "sha": "c" * 40,
+                "committed": "2026-07-29T15:00:00+00:00",
+            },
+        }
+        # repo-b should be latest
+        self.assertEqual(explorer.latest_synced(recorded), "2026-07-30")
+
+
 class BuildPageSmokeTest(unittest.TestCase):
     """main() inlines app.js and all data blocks into one page."""
 
@@ -146,7 +209,22 @@ class BuildPageSmokeTest(unittest.TestCase):
             explorer.SYNONYMS_PATH = root / "missing-syn.json.gz"
             explorer.TICKET_DESC_PATH = root / "missing-desc.json.gz"
             explorer.TOPICS_PATH = root / "missing-topics.json"
+            explorer.DIVES_PATH = root / "missing-dives.json"
             explorer.OUTPUT = root / "explorer.html"
+            explorer.PROVENANCE_PATH = root / "provenance.json"
+            with open(explorer.PROVENANCE_PATH, "w") as pf:
+                _json.dump(
+                    {
+                        "repositories": {
+                            "r": {
+                                "sha": "a" * 40,
+                                "branch": "main",
+                                "committed": "2026-07-30T09:14:02+01:00",
+                            }
+                        }
+                    },
+                    pf,
+                )
             explorer.GRAPH_PATH.write_text(
                 _json.dumps({"nodes": [node("n1", "AddressPipe")], "links": []}), encoding="utf-8"
             )
@@ -163,9 +241,11 @@ class BuildPageSmokeTest(unittest.TestCase):
             "tickets",
             "config",
             "topics",
+            "dives",
         ):
             self.assertIn(f'<script id="{block}"', html)
         self.assertIn("function runAsk", html)  # app.js inlined
+        self.assertIn("sources synced to 2026-07-30", html)
 
 
 class IncludeEntryPolicyTest(unittest.TestCase):

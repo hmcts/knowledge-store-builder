@@ -68,6 +68,39 @@ class BuildOutputsTest(unittest.TestCase):
         self.assertIn("source of truth", content)
         self.assertIn("commits.ndjson", content)
 
+    def test_manifest_includes_provenance_when_recorded(self):
+        # arrange a history dir with one repo and a provenance file
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "history" / "repo-a"
+            repo.mkdir(parents=True)
+            (repo / "commits.ndjson").write_text(
+                '{"repository_url": "git@example.com:o/repo-a.git"}\n', encoding="utf-8"
+            )
+            self.addCleanup(setattr, context, "HISTORY_DIR", context.HISTORY_DIR)
+            self.addCleanup(setattr, context, "MANIFEST_PATH", context.MANIFEST_PATH)
+            self.addCleanup(setattr, context, "CONTEXT_PATH", context.CONTEXT_PATH)
+            context.HISTORY_DIR = root / "history"
+            context.MANIFEST_PATH = root / "manifest.md"
+            context.CONTEXT_PATH = root / "context.md"
+            from knowledgestore import provenance
+
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = root / "provenance.json"
+            provenance.write(
+                {
+                    "repo-a": {
+                        "sha": "abcdef0123456789" + "0" * 24,
+                        "branch": "main",
+                        "committed": "2026-07-30T09:14:02+01:00",
+                    }
+                }
+            )
+            context.main()
+            manifest = context.MANIFEST_PATH.read_text(encoding="utf-8")
+        self.assertIn("Synced at", manifest)
+        self.assertIn("2026-07-30 (`abcdef01`)", manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

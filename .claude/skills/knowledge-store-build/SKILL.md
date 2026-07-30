@@ -146,6 +146,53 @@ citations and diff them against the dossier — before merging. State inferences
 as inferences: if the dossier shows a workflow but not who performs it, do not
 say "translated by humans".
 
+## Writing a deep dive
+
+A deep dive is a dossier on one repository — usually the one everybody already
+suspects is the problem. The bundle gives you the evidence to confirm or
+refute that suspicion; your job is the narrative.
+
+```bash
+knowledgestore deepdive extract <repo>    # loads the full graph; be patient
+```
+
+Write `docs/deep-dives/<repo>.md` from the bundle. Structure that works:
+
+1. `# Deep dive: <repo>`, then a **headline verdict** paragraph, then a line
+   stating what was measured: "Evidence measured at build `<short-sha>`,
+   `<n>` tickets, sources synced `<date>`." The merge step **rejects a
+   dossier that omits the short SHA.**
+2. `## Scale and shape` — nodes, share of the estate, community spread.
+3. `## What changes, and why` — churn leaders and the instability numbers
+   (revert share, fix share) with sample tickets quoted.
+4. `## Hidden coupling` — the co-change pairs, especially cross-concern ones
+   (domain files coupled to build files); hotspots (high churn AND high
+   degree) are the refactoring targets worth naming.
+5. `## Coupling surface` — schema/event names other repositories also carry.
+6. `## What this is NOT` — claims the evidence cannot support. Note that the
+   graph holds no cross-repository call edges, so blast radius must come from
+   the coupling surface, never asserted from graph edges.
+7. `**Sources:**` — the bundle path and the graph-build caveat.
+
+Only the constrained markdown subset renders (headings, bold, inline code,
+flat bullets, pipe tables). Base every number on the bundle — never re-derive
+figures by hand, and never soften them either.
+
+Then:
+
+```bash
+knowledgestore deepdive merge
+knowledgestore explorer
+```
+
+## Checking a store's health
+
+`knowledgestore status` reports provenance, summary/brief coverage, dangling
+corpus citations and whether the page is older than a layer it embeds. Add
+`--drift` to ask GitHub how far each repository has moved since the build
+(one API call per repository). It never fails the build: drift is normal,
+and the response to it is a refresh, not a red cross.
+
 ## The semantic index
 
 ```bash

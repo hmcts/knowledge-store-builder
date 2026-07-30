@@ -19,6 +19,14 @@ const DATA = [
 const EDGES = [0, 2, 2, 4]; // AddressPipe(a) - AddressInput; AddressInput - feature
 const SUMMARIES = { 3: 'Recording of hearing outcomes and results for court.' };
 const SYN = { outcome: [['result', 0.687], ['verdict', 0.623]] };
+const DIVES = {
+  'demo-core': {
+    title: 'Deep dive: demo-core',
+    html: '<h2>demo-core</h2>',
+    source: 'docs/deep-dives/demo-core.md',
+    sha: 'abcd1234',
+  },
+};
 const TOPICS = {
   'welsh-language': {
     title: 'Welsh language in Common Platform',
@@ -47,6 +55,7 @@ const elements = {
   tickets: { textContent: '{}' },
   config: { textContent: '{}' },
   topics: { textContent: JSON.stringify(TOPICS) },
+  dives: { textContent: JSON.stringify(DIVES) },
 };
 const documentStub = {
   getElementById: (id) => (elements[id] ??= makeEl()),
@@ -121,6 +130,25 @@ assert('matchTopic requires at least one direct hit',
   context.matchTopic('how do court forms work?', [['welsh', 0.4]]) === null);
 assert('matchTopic returns null when nothing matches',
   context.matchTopic('how are hearings listed?', []) === null);
+
+// matchDive: repository name as a substring of the question selects its dive
+assert('matchDive hits when the question names the repository',
+  context.matchDive('what is wrong with demo-core right now?').repo === 'demo-core');
+assert('matchDive returns null otherwise',
+  context.matchDive('how are payments taken?') === null);
+
+// runAsk: a dive match must survive even when ranking finds nothing at all
+// to match against - the "nothing in the graph matches" guard must consider
+// dive (and topic), not fire before either is computed (regression: it used
+// to short-circuit on an empty ranked list before the dive lookup ran).
+// None of this fixture's DATA/labels/sources contain "demo", "core" or
+// "internals", so ranking this question yields zero hits.
+context.q.value = 'tell me about demo-core internals';
+context.runAsk();
+assert('a dive match survives a zero-hit ranked list',
+  context.meta.textContent.includes('deep dive: demo-core'), context.meta.textContent);
+assert('the zero-hit dive question is not reported as unmatched',
+  !context.meta.textContent.includes('nothing in the graph matches'), context.meta.textContent);
 
 // bfs: hop distances and cap
 const reached = context.bfs([0], 2, 100);
