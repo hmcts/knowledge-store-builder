@@ -114,9 +114,9 @@ class CochangeTest(unittest.TestCase):
         dives.MIN_COCHANGE = 10
         got = dives.cochange_section(self._files(12))
         self.assertIn({"a": "src/A.java", "b": "src/B.java", "n": 12}, got)
-        self.assertFalse(
-            any("ATest" in p["a"] or "ATest" in p["b"] for p in got if "A.java" in (p["a"], p["b"]))
-        )
+        pairs = {(p["a"], p["b"]) for p in got}
+        self.assertNotIn(("src/A.java", "src/ATest.java"), pairs)
+        self.assertIn(("src/A.java", "src/B.java"), pairs)
 
     def test_sweeping_tickets_are_ignored(self):
         files = {f"f{i}.java": {"tickets": {"BIG-1": 1}} for i in range(60)}
