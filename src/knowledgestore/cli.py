@@ -14,28 +14,38 @@ from . import config
 
 # name -> (module attribute, one-line help). Order is the pipeline run order.
 STAGES: dict[str, tuple[str, str]] = {
-    "discover": ("generate_repository_list",
-                 "list the estate's repositories from GitHub into config/repositories.txt"),
-    "sync": ("sync_repositories",
-             "clone or update every configured repository into repositories/"),
-    "export-history": ("export_git_history",
-                       "export per-repository commit history datasets"),
-    "context": ("build_knowledge_context",
-                "write knowledge_context.md and the repository manifest"),
-    "intent": ("build_intent_index",
-               "index file -> ticket links and mine ticket descriptions from commits"),
-    "ticket-titles": ("import_ticket_titles",
-                      "merge real ticket titles from an issue-tracker CSV export"),
-    "gherkin": ("extract_gherkin",
-                "add Gherkin features, scenarios and ticket links to the graph"),
-    "summaries": ("build_community_summaries",
-                  "extract community digests, or merge written summaries back in"),
-    "semantic": ("build_semantic_index",
-                 "build the token-neighbour map that bridges vocabulary gaps"),
-    "topics": ("build_topic_briefs",
-               "extract topic evidence dossiers, or merge written briefs back in"),
-    "explorer": ("build_explorer",
-                 "build the self-contained explorer.html search page"),
+    "discover": (
+        "generate_repository_list",
+        "list the estate's repositories from GitHub into config/repositories.txt",
+    ),
+    "sync": ("sync_repositories", "clone or update every configured repository into repositories/"),
+    "export-history": ("export_git_history", "export per-repository commit history datasets"),
+    "context": (
+        "build_knowledge_context",
+        "write knowledge_context.md and the repository manifest",
+    ),
+    "intent": (
+        "build_intent_index",
+        "index file -> ticket links and mine ticket descriptions from commits",
+    ),
+    "ticket-titles": (
+        "import_ticket_titles",
+        "merge real ticket titles from an issue-tracker CSV export",
+    ),
+    "gherkin": ("extract_gherkin", "add Gherkin features, scenarios and ticket links to the graph"),
+    "summaries": (
+        "build_community_summaries",
+        "extract community digests, or merge written summaries back in",
+    ),
+    "semantic": (
+        "build_semantic_index",
+        "build the token-neighbour map that bridges vocabulary gaps",
+    ),
+    "topics": (
+        "build_topic_briefs",
+        "extract topic evidence dossiers, or merge written briefs back in",
+    ),
+    "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
 }
 
 

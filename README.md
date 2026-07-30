@@ -227,8 +227,12 @@ answer layer lives.
 ## Development
 
 ```bash
-pip install -e .
-python3 -m unittest discover -s tests -v     # 97 unit tests
+pip install -e '.[dev]'                      # tooling pinned in the dev extra
+python3 -m unittest discover -s tests -v     # 110 unit tests
+
+ruff check src tests                         # lint
+ruff format src tests                        # format (checked in CI)
+pyright                                      # type-check (clean; keep it so)
 
 node tests/explorer/engine-unit.mjs          # scorer maths
 python3 tests/explorer/fixture.py            # build a page from a synthetic estate
@@ -244,7 +248,8 @@ tests exercise is what ships.
 
 | Workflow | What it does |
 |---|---|
-| `tests` | ruff, unit tests, eslint, `tsc --checkJs`, the scorer tests and the page regression |
+| `lint` | ruff check, `ruff format --check` and pyright — all blocking |
+| `tests` | unit tests, eslint, `tsc --checkJs`, the scorer tests and the page regression |
 | `build` | builds the wheel and sdist, checks metadata, publishes to the `hmcts-lib` feed on main and on releases |
 | `codeql` | security analysis of the Python pipeline and the JavaScript explorer application (auto-enables when the repository is public) |
 | `secrets-scanner` | gitleaks over the full history, weekly and on every pull request |

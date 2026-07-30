@@ -32,9 +32,7 @@ from pathlib import Path
 from . import config
 
 OUTPUT = config.TICKET_TITLES_PATH
-TICKET = re.compile(
-    "^" + config.TICKET_PATTERN.pattern.strip("\\b") + "$"
-)
+TICKET = re.compile("^" + config.TICKET_PATTERN.pattern.strip("\\b") + "$")
 
 
 def find_columns(header: list[str]) -> tuple[int, int]:
@@ -46,9 +44,7 @@ def find_columns(header: list[str]) -> tuple[int, int]:
         elif cell == "summary" and summary_idx < 0:
             summary_idx = index
     if key_idx < 0 or summary_idx < 0:
-        raise ValueError(
-            f"CSV needs 'Issue key' and 'Summary' columns; found: {header}"
-        )
+        raise ValueError(f"CSV needs 'Issue key' and 'Summary' columns; found: {header}")
     return key_idx, summary_idx
 
 

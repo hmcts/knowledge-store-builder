@@ -1,0 +1,47 @@
+name: Lint
+
+# Lint, format and type-check gate. All three are blocking: the library is
+# ruff-formatted and pyright-clean, and staying that way is cheaper than
+# recovering it later.
+
+on:
+  pull_request:
+    branches: [main]
+    # Skip docs/config-only changes — nothing to lint or type-check.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.claude/**'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Ruff + Pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Versions pinned in the dev extra, binary-only, no lifecycle scripts.
+      - name: Install the tooling
+        run: |
+          pip install --only-binary :all: -e '.[dev]'
+
+      - name: Ruff lint
+        run: ruff check src tests --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check src tests
+
+      - name: Pyright
+        run: pyright

@@ -32,6 +32,8 @@ repos:
       - id: ruff
         name: Ruff lint
         args: ["--output-format=concise"]
+      - id: ruff-format
+        name: Ruff format
 
   # Secret detection, matching the CI secrets scanner.
   - repo: local

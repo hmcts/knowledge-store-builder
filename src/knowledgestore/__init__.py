@@ -8,5 +8,7 @@ Stages are plain modules with a `main()`; see `cli.py` for the run order, and
 `config.py` for the settings that vary by estate.
 """
 
+from . import config, io  # noqa: F401  (re-exported for consumers)
+
 __all__ = ["config", "io"]
 __version__ = "0.1.0"

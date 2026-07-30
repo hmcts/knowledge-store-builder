@@ -11,19 +11,33 @@ from knowledgestore import config  # noqa: E402
 from knowledgestore import io as pio  # noqa: E402
 
 
-ROOTED = ("GRAPH_PATH", "LABELS_PATH", "EXPLORER_PATH", "INTENT_INDEX_PATH",
-          "TICKET_DESCRIPTIONS_PATH", "TICKET_TITLES_PATH", "SUMMARIES_PATH",
-          "SUMMARIES_INPUT_PATH", "SYNONYMS_PATH", "TOPICS_INPUT_PATH",
-          "TOPICS_BRIEFS_PATH", "TOPICS_DOCS_DIR", "HISTORY_DIR", "CONTEXT_PATH",
-          "MANIFEST_PATH", "FILTERS_PATH", "REPOSITORIES_CONFIG",
-          "REPOSITORIES_DIR", "TOPICS_CONFIG_PATH")
+ROOTED = (
+    "GRAPH_PATH",
+    "LABELS_PATH",
+    "EXPLORER_PATH",
+    "INTENT_INDEX_PATH",
+    "TICKET_DESCRIPTIONS_PATH",
+    "TICKET_TITLES_PATH",
+    "SUMMARIES_PATH",
+    "SUMMARIES_INPUT_PATH",
+    "SYNONYMS_PATH",
+    "TOPICS_INPUT_PATH",
+    "TOPICS_BRIEFS_PATH",
+    "TOPICS_DOCS_DIR",
+    "HISTORY_DIR",
+    "CONTEXT_PATH",
+    "MANIFEST_PATH",
+    "FILTERS_PATH",
+    "REPOSITORIES_CONFIG",
+    "REPOSITORIES_DIR",
+    "TOPICS_CONFIG_PATH",
+)
 
 
 class ConfigTest(unittest.TestCase):
     def test_every_path_sits_under_root(self):
         for name in ROOTED:
-            self.assertTrue(
-                str(getattr(config, name)).startswith(str(config.ROOT)), name)
+            self.assertTrue(str(getattr(config, name)).startswith(str(config.ROOT)), name)
 
     def test_configure_root_repoints_every_derived_path(self):
         original = config.ROOT
@@ -32,7 +46,8 @@ class ConfigTest(unittest.TestCase):
             config.configure(root=tmp)
             for name in ROOTED:
                 self.assertTrue(
-                    str(getattr(config, name)).startswith(str(Path(tmp).resolve())), name)
+                    str(getattr(config, name)).startswith(str(Path(tmp).resolve())), name
+                )
 
     def test_configure_overrides_a_single_setting(self):
         original = config.GITHUB_ORG
@@ -45,8 +60,9 @@ class ConfigTest(unittest.TestCase):
             config.configure(NOT_A_SETTING=1)
 
     def test_ticket_pattern_matches_and_rejects(self):
-        self.assertEqual(config.TICKET_PATTERN.findall("DD-1: fix CRC-12016 x"),
-                         ["DD-1", "CRC-12016"])
+        self.assertEqual(
+            config.TICKET_PATTERN.findall("DD-1: fix CRC-12016 x"), ["DD-1", "CRC-12016"]
+        )
         self.assertEqual(config.TICKET_PATTERN.findall("no tickets here 12-34"), [])
 
 

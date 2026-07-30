@@ -89,8 +89,7 @@ def linked_tickets(graph: dict, matched_ids: set) -> set[str]:
     """Jira tickets reachable in one hop from any matched node. Ticket labels
     ("DD-100") never contain topic keywords - relevance comes from edges."""
     ticket_label = {
-        node["id"]: node["label"] for node in graph["nodes"]
-        if kinds.is_kind(node, kinds.TICKET)
+        node["id"]: node["label"] for node in graph["nodes"] if kinds.is_kind(node, kinds.TICKET)
     }
     tickets: set[str] = set()
     for link in graph.get("links", graph.get("edges", [])):
@@ -102,8 +101,7 @@ def linked_tickets(graph: dict, matched_ids: set) -> set[str]:
     return tickets
 
 
-def topic_dossier(topic: Topic, graph: dict, summaries: dict,
-                  descriptions: dict) -> dict:
+def topic_dossier(topic: Topic, graph: dict, summaries: dict, descriptions: dict) -> dict:
     """Deterministic evidence pack a brief is written from."""
     by_repo: dict[str, list] = {}
     features: list[str] = []
@@ -131,11 +129,15 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict,
     for ticket, info in descriptions.items():
         haystack = " ".join(info.get("d", [])).lower()
         if any(k in haystack for k in topic.keywords):
-            described.append({
-                "ticket": ticket, "descriptions": info.get("d", []),
-                "first": info.get("first"), "last": info.get("last"),
-                "repos": info.get("repos", []),
-            })
+            described.append(
+                {
+                    "ticket": ticket,
+                    "descriptions": info.get("d", []),
+                    "first": info.get("first"),
+                    "last": info.get("last"),
+                    "repos": info.get("repos", []),
+                }
+            )
     described.sort(key=lambda t: -(len(t["repos"])))
 
     return {
@@ -153,22 +155,25 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict,
 def extract() -> int:
     topics = read_topics(TOPICS_CONFIG)
     graph = io.load_graph(GRAPH_PATH)
-    summaries = io.read_json(SUMMARIES_PATH, default={})
-    descriptions = io.read_gzip_json(TICKET_DESCRIPTIONS, default={})
+    summaries = io.read_json_dict(SUMMARIES_PATH)
+    descriptions = io.read_gzip_json_dict(TICKET_DESCRIPTIONS)
 
     dossiers = [topic_dossier(t, graph, summaries, descriptions) for t in topics]
     io.write_json(TOPICS_INPUT, dossiers, indent=1)
     for dossier in dossiers:
         repos = len(dossier["nodes_by_repo"])
-        print(f"{dossier['slug']}: {repos} repos, "
-              f"{len(dossier['business_features'])} features, "
-              f"{len(dossier['described_tickets'])} described tickets")
+        print(
+            f"{dossier['slug']}: {repos} repos, "
+            f"{len(dossier['business_features'])} features, "
+            f"{len(dossier['described_tickets'])} described tickets"
+        )
     print(f"{len(dossiers)} dossiers -> {TOPICS_INPUT}")
     return 0
 
 
 # --- constrained markdown -> HTML (headings, bold, code, lists, tables,
 # paragraphs). Deliberately tiny: briefs are written to this subset. -------
+
 
 def _inline(text: str) -> str:
     escaped = html.escape(text, quote=False)
@@ -218,7 +223,11 @@ def markdown_to_html(markdown: str) -> str:
         else:
             paragraph = [stripped]
             i += 1
-            while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||- )", lines[i].strip()):
+            while (
+                i < len(lines)
+                and lines[i].strip()
+                and not re.match(r"^(#|\||- )", lines[i].strip())
+            ):
                 paragraph.append(lines[i].strip())
                 i += 1
             blocks.append(f"<p>{_inline(' '.join(paragraph))}</p>")

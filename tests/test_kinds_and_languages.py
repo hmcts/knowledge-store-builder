@@ -35,26 +35,26 @@ class KindsTest(unittest.TestCase):
         self.assertFalse(kinds.is_kind(node("scenario"), kinds.FEATURE))
 
 
-JAVA = '''package com.steps;
+JAVA = """package com.steps;
 public class PaymentSteps {
     @Given("a defendant owes {int} pounds")
     public void owes(int amount) {}
 }
-'''
+"""
 
-PYTHON = '''from behave import given
+PYTHON = """from behave import given
 
 @given("a defendant owes {amount:d} pounds")
 def step_owes(context, amount):
     pass
-'''
+"""
 
-TYPESCRIPT = '''import { Given } from '@cucumber/cucumber';
+TYPESCRIPT = """import { Given } from '@cucumber/cucumber';
 
 Given('a defendant owes {int} pounds', async function (amount: number) {
   this.amount = amount;
 });
-'''
+"""
 
 
 class StepDefinitionLanguageTest(unittest.TestCase):
@@ -97,11 +97,13 @@ class StepDefinitionLanguageTest(unittest.TestCase):
         self.assertEqual(set(java), set(typescript))
 
     def test_a_mixed_estate_yields_every_language(self):
-        found = self._patterns({
-            "src/test/java/com/steps/PaymentSteps.java": JAVA,
-            "features/steps/other_steps.py": PYTHON.replace("owes", "paid"),
-            "features/step_definitions/third.ts": TYPESCRIPT.replace("owes", "settled"),
-        })
+        found = self._patterns(
+            {
+                "src/test/java/com/steps/PaymentSteps.java": JAVA,
+                "features/steps/other_steps.py": PYTHON.replace("owes", "paid"),
+                "features/step_definitions/third.ts": TYPESCRIPT.replace("owes", "settled"),
+            }
+        )
         self.assertEqual(len(found), 3)
         self.assertEqual(
             {name for name, _ in found.values()},
@@ -115,15 +117,13 @@ class StepDefinitionLanguageTest(unittest.TestCase):
 
 class FeatureAreaTest(unittest.TestCase):
     def test_area_comes_from_the_segment_after_the_features_directory(self):
-        self.assertEqual(gherkin.feature_area("e2e/features/payments/refund.feature"),
-                         "payments")
+        self.assertEqual(gherkin.feature_area("e2e/features/payments/refund.feature"), "payments")
 
     def test_features_directory_is_configurable(self):
         original = gherkin.FEATURES_DIR
         self.addCleanup(setattr, gherkin, "FEATURES_DIR", original)
         gherkin.FEATURES_DIR = "specs/"
-        self.assertEqual(gherkin.feature_area("app/specs/listing/hearing.feature"),
-                         "listing")
+        self.assertEqual(gherkin.feature_area("app/specs/listing/hearing.feature"), "listing")
 
     def test_config_supplies_the_default(self):
         self.assertEqual(config.FEATURES_DIR, "features/")

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import argparse
@@ -37,9 +36,7 @@ def run_git(repo_path: Path, *arguments: str) -> str:
         )
     except subprocess.CalledProcessError as error:
         print(
-            f"Git command failed in {repo_path}:\n"
-            f"  {' '.join(command)}\n"
-            f"{error.stderr}",
+            f"Git command failed in {repo_path}:\n  {' '.join(command)}\n{error.stderr}",
             file=sys.stderr,
         )
         raise
@@ -51,8 +48,8 @@ def read_repository_config(path: Path) -> list[RepositoryConfig]:
     repositories: list[RepositoryConfig] = []
 
     for line_number, raw_line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(),
-            start=1,
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
     ):
         line = raw_line.strip()
 
@@ -63,8 +60,7 @@ def read_repository_config(path: Path) -> list[RepositoryConfig]:
 
         if len(parts) != 3 or not all(parts):
             raise ValueError(
-                f"Invalid repository configuration at "
-                f"{path}:{line_number}: {raw_line}"
+                f"Invalid repository configuration at {path}:{line_number}: {raw_line}"
             )
 
         repositories.append(
@@ -79,12 +75,7 @@ def read_repository_config(path: Path) -> list[RepositoryConfig]:
 
 
 def escape_markdown(value: str) -> str:
-    return (
-        value.replace("\\", "\\\\")
-        .replace("|", "\\|")
-        .replace("\r", "")
-        .strip()
-    )
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\r", "").strip()
 
 
 def normalise_message(value: str) -> str:
@@ -109,16 +100,8 @@ def parse_numstat(value: str) -> list[dict[str, object]]:
 
         additions_raw, deletions_raw, file_path = parts
 
-        additions = (
-            int(additions_raw)
-            if additions_raw.isdigit()
-            else None
-        )
-        deletions = (
-            int(deletions_raw)
-            if deletions_raw.isdigit()
-            else None
-        )
+        additions = int(additions_raw) if additions_raw.isdigit() else None
+        deletions = int(deletions_raw) if deletions_raw.isdigit() else None
 
         files.append(
             {
@@ -147,21 +130,24 @@ def get_commit_files(repo_path: Path, commit_sha: str) -> list[dict[str, object]
 
 
 def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
-    pretty_format = FIELD_SEPARATOR.join(
-        [
-            "%H",   # commit SHA
-            "%P",   # parent SHAs
-            "%aI",  # author date, strict ISO 8601
-            "%cI",  # committer date, strict ISO 8601
-            "%an",  # author name
-            "%ae",  # author email
-            "%cn",  # committer name
-            "%ce",  # committer email
-            "%D",   # refs
-            "%s",   # subject
-            "%b",   # body
-        ]
-    ) + RECORD_SEPARATOR
+    pretty_format = (
+        FIELD_SEPARATOR.join(
+            [
+                "%H",  # commit SHA
+                "%P",  # parent SHAs
+                "%aI",  # author date, strict ISO 8601
+                "%cI",  # committer date, strict ISO 8601
+                "%an",  # author name
+                "%ae",  # author email
+                "%cn",  # committer name
+                "%ce",  # committer email
+                "%D",  # refs
+                "%s",  # subject
+                "%b",  # body
+            ]
+        )
+        + RECORD_SEPARATOR
+    )
 
     output = run_git(
         repo_path,
@@ -209,14 +195,10 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         files = get_commit_files(repo_path, sha)
 
         total_additions = sum(
-            file["additions"]
-            for file in files
-            if isinstance(file["additions"], int)
+            file["additions"] for file in files if isinstance(file["additions"], int)
         )
         total_deletions = sum(
-            file["deletions"]
-            for file in files
-            if isinstance(file["deletions"], int)
+            file["deletions"] for file in files if isinstance(file["deletions"], int)
         )
 
         yield {
@@ -233,11 +215,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
                 "name": committer_name,
                 "email": committer_email,
             },
-            "refs": [
-                ref.strip()
-                for ref in refs.split(",")
-                if ref.strip()
-            ],
+            "refs": [ref.strip() for ref in refs.split(",") if ref.strip()],
             "subject": subject.strip(),
             "body": normalise_message(body),
             "files": files,
@@ -249,9 +227,9 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
 
 
 def write_ndjson(
-        path: Path,
-        repository: RepositoryConfig,
-        commits: list[dict[str, object]],
+    path: Path,
+    repository: RepositoryConfig,
+    commits: list[dict[str, object]],
 ) -> None:
     with path.open("w", encoding="utf-8") as output:
         for commit in commits:
@@ -264,9 +242,14 @@ def write_ndjson(
             output.write("\n")
 
 
+def as_list(value: object) -> list:
+    """A record field known to hold a list, narrowed for the type checker."""
+    return value if isinstance(value, list) else []
+
+
 def commit_markdown(
-        repository: RepositoryConfig,
-        commit: dict[str, object],
+    repository: RepositoryConfig,
+    commit: dict[str, object],
 ) -> str:
     author = commit["author"]
     assert isinstance(author, dict)
@@ -275,8 +258,7 @@ def commit_markdown(
     assert isinstance(files, list)
 
     lines = [
-        f"## {commit['short_sha']}: "
-        f"{escape_markdown(str(commit['subject']))}",
+        f"## {commit['short_sha']}: {escape_markdown(str(commit['subject']))}",
         "",
         f"- **Commit:** `{commit['sha']}`",
         f"- **Date:** {commit['author_date']}",
@@ -284,25 +266,20 @@ def commit_markdown(
         f"- **Repository:** `{repository.name}`",
         "- **Parents:** "
         + (
-            ", ".join(f"`{parent}`" for parent in commit["parents"])
+            ", ".join(f"`{parent}`" for parent in as_list(commit["parents"]))
             if commit["parents"]
             else "None"
         ),
-        f"- **Merge commit:** "
-        f"{'Yes' if commit['is_merge'] else 'No'}",
+        f"- **Merge commit:** {'Yes' if commit['is_merge'] else 'No'}",
         f"- **Files changed:** {commit['file_count']}",
         f"- **Lines:** +{commit['additions']} / -{commit['deletions']}",
-        ]
+    ]
 
-    refs = commit["refs"]
+    refs = as_list(commit["refs"])
 
     if refs:
         lines.append(
-            "- **References:** "
-            + ", ".join(
-                f"`{escape_markdown(str(ref))}`"
-                for ref in refs
-            )
+            "- **References:** " + ", ".join(f"`{escape_markdown(str(ref))}`" for ref in refs)
         )
 
     body = str(commit["body"]).strip()
@@ -348,9 +325,9 @@ def commit_markdown(
 
 
 def write_year_files(
-        output_dir: Path,
-        repository: RepositoryConfig,
-        commits: list[dict[str, object]],
+    output_dir: Path,
+    repository: RepositoryConfig,
+    commits: list[dict[str, object]],
 ) -> dict[str, int]:
     commits_by_year: dict[str, list[dict[str, object]]] = defaultdict(list)
 
@@ -362,19 +339,15 @@ def write_year_files(
     counts: dict[str, int] = {}
 
     for year, year_commits in sorted(
-            commits_by_year.items(),
-            reverse=True,
+        commits_by_year.items(),
+        reverse=True,
     ):
         counts[year] = len(year_commits)
         year_path = output_dir / f"{year}.md"
 
         with year_path.open("w", encoding="utf-8") as output:
-            output.write(
-                f"# {repository.name}: Git history for {year}\n\n"
-            )
-            output.write(
-                f"Source repository: `{repository.clone_url}`\n\n"
-            )
+            output.write(f"# {repository.name}: Git history for {year}\n\n")
+            output.write(f"Source repository: `{repository.clone_url}`\n\n")
             output.write(
                 "This file contains commit metadata and changed-file "
                 "summaries. It intentionally excludes complete patches.\n\n"
@@ -387,11 +360,11 @@ def write_year_files(
 
 
 def write_index(
-        path: Path,
-        repository: RepositoryConfig,
-        commits: list[dict[str, object]],
-        year_counts: dict[str, int],
-        repo_path: Path,
+    path: Path,
+    repository: RepositoryConfig,
+    commits: list[dict[str, object]],
+    year_counts: dict[str, int],
+    repo_path: Path,
 ) -> None:
     head_sha = run_git(repo_path, "rev-parse", "HEAD").strip()
     head_date = run_git(
@@ -436,8 +409,7 @@ def write_index(
     lines.extend(
         [
             "",
-            "The complete structured dataset is available in "
-            "[commits.ndjson](commits.ndjson).",
+            "The complete structured dataset is available in [commits.ndjson](commits.ndjson).",
             "",
             "## Most frequent commit authors",
             "",
@@ -447,9 +419,7 @@ def write_index(
     )
 
     for author_name, count in top_authors:
-        lines.append(
-            f"| {escape_markdown(author_name)} | {count} |"
-        )
+        lines.append(f"| {escape_markdown(author_name)} | {count} |")
 
     lines.extend(
         [
@@ -468,16 +438,14 @@ def write_index(
 
 
 def export_repository(
-        root_dir: Path,
-        output_root: Path,
-        repository: RepositoryConfig,
+    root_dir: Path,
+    output_root: Path,
+    repository: RepositoryConfig,
 ) -> None:
     repo_path = root_dir / "repositories" / repository.name
 
     if not (repo_path / ".git").is_dir():
-        raise FileNotFoundError(
-            f"Repository has not been cloned: {repo_path}"
-        )
+        raise FileNotFoundError(f"Repository has not been cloned: {repo_path}")
 
     print(f"Exporting history for {repository.name}")
 
@@ -490,7 +458,7 @@ def export_repository(
         output_dir / "commits.ndjson",
         repository,
         commits,
-        )
+    )
 
     year_counts = write_year_files(
         output_dir,
@@ -504,19 +472,14 @@ def export_repository(
         commits,
         year_counts,
         repo_path,
-        )
-
-    print(
-        f"Exported {len(commits)} commits for "
-        f"{repository.name}"
     )
+
+    print(f"Exported {len(commits)} commits for {repository.name}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "Export Git histories as Markdown and NDJSON for Graphify."
-        )
+        description=("Export Git histories as Markdown and NDJSON for Graphify.")
     )
     parser.add_argument(
         "--root",
@@ -539,14 +502,10 @@ def main() -> int:
 
     root_dir = arguments.root.resolve()
     config_path = (
-        arguments.config.resolve()
-        if arguments.config
-        else root_dir / "config" / "repositories.txt"
+        arguments.config.resolve() if arguments.config else root_dir / "config" / "repositories.txt"
     )
     output_root = (
-        arguments.output.resolve()
-        if arguments.output
-        else root_dir / "knowledge" / "git-history"
+        arguments.output.resolve() if arguments.output else root_dir / "knowledge" / "git-history"
     )
 
     output_root.mkdir(parents=True, exist_ok=True)

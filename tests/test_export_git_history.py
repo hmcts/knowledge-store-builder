@@ -15,9 +15,15 @@ class ParseNumstatTest(unittest.TestCase):
     def test_parses_additions_deletions_and_binary(self):
         output = "3\t1\tsrc/a.ts\n-\t-\tlogo.png\n"
         files = export.parse_numstat(output)
-        self.assertEqual(files[0], {
-            "path": "src/a.ts", "additions": 3, "deletions": 1, "binary": False,
-        })
+        self.assertEqual(
+            files[0],
+            {
+                "path": "src/a.ts",
+                "additions": 3,
+                "deletions": 1,
+                "binary": False,
+            },
+        )
         self.assertTrue(files[1]["binary"])
         self.assertIsNone(files[1]["additions"])
 
@@ -61,8 +67,11 @@ class GetCommitsIntegrationTest(unittest.TestCase):
 
     def _git(self, cwd, *args):
         subprocess.run(
-            ["git", *args], cwd=cwd, check=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
     def test_empty_body_commits_are_not_dropped(self):
@@ -77,8 +86,7 @@ class GetCommitsIntegrationTest(unittest.TestCase):
             self._git(repo, "commit", "-q", "-m", "ABC-1: subject only")
             (repo / "a.txt").write_text("two\n")
             self._git(repo, "add", "a.txt")
-            self._git(repo, "commit", "-q", "-m", "second subject",
-                      "-m", "with a body paragraph")
+            self._git(repo, "commit", "-q", "-m", "second subject", "-m", "with a body paragraph")
 
             commits = list(export.get_commits(repo))
 
@@ -95,31 +103,39 @@ class RenderingContractTest(unittest.TestCase):
 
     def _commit(self):
         return {
-            "sha": "a" * 40, "short_sha": "a" * 12, "parents": [],
+            "sha": "a" * 40,
+            "short_sha": "a" * 12,
+            "parents": [],
             "author_date": "2024-05-01T10:00:00+00:00",
             "committer_date": "2024-05-01T10:00:00+00:00",
             "author": {"name": "Dev|One", "email": "d@example.com"},
             "committer": {"name": "Dev|One", "email": "d@example.com"},
-            "refs": [], "subject": "DD-1: add thing", "body": "why it changed",
+            "refs": [],
+            "subject": "DD-1: add thing",
+            "body": "why it changed",
             "files": [{"path": "a.ts", "additions": 3, "deletions": 1, "binary": False}],
-            "file_count": 1, "additions": 3, "deletions": 1, "is_merge": False,
+            "file_count": 1,
+            "additions": 3,
+            "deletions": 1,
+            "is_merge": False,
         }
 
     def _repo_config(self):
         return export.RepositoryConfig(
-            name="repo-a", clone_url="git@example.com:o/repo-a.git",
-            default_branch="main")
+            name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+        )
 
     def test_commit_markdown_includes_metadata_and_escapes_pipes(self):
         md = export.commit_markdown(self._repo_config(), self._commit())
         self.assertIn("DD-1: add thing", md)
-        self.assertIn("Dev\\|One", md)          # markdown-table escaping
+        self.assertIn("Dev\\|One", md)  # markdown-table escaping
         self.assertIn("**Files changed:** 1", md)
         self.assertIn("+3 / -1", md)
         self.assertIn("why it changed", md)
 
     def test_write_ndjson_stamps_repository_fields(self):
         import json as _json
+
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "commits.ndjson"
             export.write_ndjson(out, self._repo_config(), [self._commit()])
@@ -130,8 +146,7 @@ class RenderingContractTest(unittest.TestCase):
 
     def test_write_year_files_groups_by_author_year(self):
         with tempfile.TemporaryDirectory() as tmp:
-            counts = export.write_year_files(Path(tmp), self._repo_config(),
-                                             [self._commit()])
+            counts = export.write_year_files(Path(tmp), self._repo_config(), [self._commit()])
             self.assertEqual(counts, {"2024": 1})
             year_md = (Path(tmp) / "2024.md").read_text(encoding="utf-8")
         self.assertIn("Git history for 2024", year_md)
@@ -142,8 +157,13 @@ class ExportRepositoryEndToEndTest(unittest.TestCase):
     """Whole-stage integration over a real fixture repository."""
 
     def _git(self, cwd, *args):
-        subprocess.run(["git", *args], cwd=cwd, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     def test_export_repository_produces_dataset_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,18 +179,21 @@ class ExportRepositoryEndToEndTest(unittest.TestCase):
 
             out_root = root / "out"
             export.export_repository(
-                root, out_root,
+                root,
+                out_root,
                 export.RepositoryConfig(
-                    name="repo-a", clone_url="git@example.com:o/repo-a.git",
-                    default_branch="main"))
+                    name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+                ),
+            )
 
             produced = sorted(f.name for f in (out_root / "repo-a").iterdir())
             index = (out_root / "repo-a" / "index.md").read_text(encoding="utf-8")
 
         self.assertIn("commits.ndjson", produced)
         self.assertIn("index.md", produced)
-        self.assertTrue(any(name.endswith(".md") and name[:4].isdigit()
-                            for name in produced), produced)
+        self.assertTrue(
+            any(name.endswith(".md") and name[:4].isdigit() for name in produced), produced
+        )
         self.assertIn("**Total commits:** 1", index)
 
 
