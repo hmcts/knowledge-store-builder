@@ -37,8 +37,10 @@ def _env_set(name: str, default: set[str]) -> set[str]:
 ROOT = _env_path("KSB_ROOT", Path.cwd())
 
 # --- the estate being described ------------------------------------------
-# The GitHub organisation repositories are discovered from.
-GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "hmcts")
+# The GitHub organisation repositories are discovered from. Required: set
+# KSB_GITHUB_ORG or pass GITHUB_ORG to configure(). There is no sensible
+# default - a library cannot guess whose estate you mean.
+GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
 
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
@@ -72,8 +74,9 @@ EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
 TICKET_PATTERN = re.compile(
     os.environ.get("KSB_TICKET_PATTERN", r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
 )
-# Ticket ids in the explorer link here, with the id appended.
-TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "https://tools.hmcts.net/jira/browse/")
+# Ticket ids in the explorer link here, with the id appended. Empty renders
+# them as plain text, which is right until you say where your tracker lives.
+TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
 
 # --- explorer page -------------------------------------------------------
 EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
@@ -84,7 +87,9 @@ BRIEF_REQUEST_URL = os.environ.get("KSB_BRIEF_REQUEST_URL", "")
 MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
 # Repositories whose test code IS the business documentation (E2E suites),
 # so their test files are indexed rather than filtered out as scaffolding.
-E2E_REPOS = _env_set("KSB_E2E_REPOS", {"cpp-ui-e2e", "cpp-ui-e2e-serenity"})
+# Name yours in KSB_E2E_REPOS (comma-separated); by default no repository is
+# treated this way.
+E2E_REPOS = _env_set("KSB_E2E_REPOS", set())
 
 # --- BDD specifications --------------------------------------------------
 # Gherkin (.feature) files are read wherever they appear in a repository. This

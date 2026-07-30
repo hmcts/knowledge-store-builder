@@ -122,7 +122,7 @@ function ticketDates(info, hasTitle) {
  * override with env vars, e.g. JIRA_BROWSE_URL for other Jira instances).
  * @type {{jiraBrowseUrl?: string, briefRequestUrl?: string}} */
 const CONFIG = JSON.parse(getEl('config').textContent || '{}');
-const JIRA_BROWSE_URL = CONFIG.jiraBrowseUrl || 'https://tools.hmcts.net/jira/browse/';
+const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
 
 /** Topic briefs (GraphRAG phase 3): pre-written narratives composed at
  * build time from graph evidence, keyed by slug with matching keywords.
@@ -132,7 +132,8 @@ const TOPICS = JSON.parse(getEl('topics').textContent || '{}');
 /** A ticket id as a link to the real Jira ticket.
  * @param {string} t */
 function ticketLink(t) {
-  return '<a href="' + JIRA_BROWSE_URL + encodeURIComponent(t)
+  if (!TICKET_BROWSE_URL) return esc(t);   // no tracker configured: plain text
+  return '<a href="' + TICKET_BROWSE_URL + encodeURIComponent(t)
     + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
 }
 

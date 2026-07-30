@@ -110,6 +110,13 @@ def render_config(repositories: list[dict]) -> str:
 
 
 def main() -> int:
+    if not GITHUB_ORG:
+        print(
+            "No GitHub organisation configured. Set KSB_GITHUB_ORG to the "
+            "organisation whose repositories make up your estate.",
+            file=sys.stderr,
+        )
+        return 1
     if not shutil.which("gh"):
         print("GitHub CLI is required: https://cli.github.com/", file=sys.stderr)
         return 1

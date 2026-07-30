@@ -116,13 +116,13 @@ matter when adopting the library:
 | Variable | Default | Purpose |
 |---|---|---|
 | `KSB_ROOT` | current directory | Where the store lives |
-| `KSB_GITHUB_ORG` | `hmcts` | Organisation to discover repositories from |
+| `KSB_GITHUB_ORG` | **required** | Organisation to discover repositories from |
 | `KSB_TICKET_PATTERN` | `\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b` | How ticket ids look in commit subjects |
-| `KSB_TICKET_BROWSE_URL` | HMCTS Jira | Prefix for ticket links in the page |
+| `KSB_TICKET_BROWSE_URL` | (unset) | Prefix for ticket links; unset renders ticket ids as plain text |
 | `KSB_EXPLORER_TITLE` | `Estate Explorer` | Page heading |
 | `KSB_BRIEF_REQUEST_URL` | (unset) | Where "request a topic brief" links point |
 | `KSB_MIN_ENTRY_DEGREE` | `3` | Minimum connections for a code entry to be indexed |
-| `KSB_E2E_REPOS` | two cpp-ui repos | Repositories whose tests *are* the business documentation |
+| `KSB_E2E_REPOS` | (none) | Repositories whose tests *are* the business documentation |
 | `KSB_MIN_COMMUNITY_SIZE` | `25` | Smallest cluster worth summarising |
 | `KSB_FEATURES_DIR` | `features/` | Directory whose next path segment names a feature's area |
 | `KSB_EMBEDDING_MODEL` | MiniLM-L6-v2 | Model for the semantic stage |

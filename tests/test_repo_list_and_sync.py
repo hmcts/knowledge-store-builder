@@ -56,13 +56,15 @@ class DiscoverTest(unittest.TestCase):
         self.assertIn("--paginate", calls[0])
 
     def test_render_config_pipe_format(self):
+        self.addCleanup(setattr, repo_list, "GITHUB_ORG", repo_list.GITHUB_ORG)
+        repo_list.GITHUB_ORG = "myorg"
         content = repo_list.render_config(
             [
                 {"name": "a-repo", "defaultBranch": "main"},
             ]
         )
         lines = [line for line in content.splitlines() if line and not line.startswith("#")]
-        self.assertEqual(lines, ["a-repo|git@github.com:hmcts/a-repo.git|main"])
+        self.assertEqual(lines, ["a-repo|git@github.com:myorg/a-repo.git|main"])
         self.assertIn("repository-filters.txt", content)
 
 

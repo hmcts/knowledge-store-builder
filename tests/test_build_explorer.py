@@ -185,13 +185,22 @@ class IncludeEntryPolicyTest(unittest.TestCase):
         self.assertFalse(explorer.include_entry(backend_test, "code", 99))
 
     def test_e2e_test_artifacts_kept(self):
+        # an estate names its E2E suites; their tests are documentation
+        self.addCleanup(setattr, explorer, "E2E_REPOS", explorer.E2E_REPOS)
+        explorer.E2E_REPOS = {"my-e2e"}
         po = node(
             "a",
             "SjpCaseDecisionPage",
-            repo="cpp-ui-e2e",
+            repo="my-e2e",
             source_file="src/test/pages/SjpCaseDecisionPage.po.ts",
         )
         self.assertTrue(explorer.include_entry(po, "code", explorer.MIN_ENTRY_DEGREE))
+
+    def test_test_artifacts_dropped_when_no_e2e_repo_is_named(self):
+        self.addCleanup(setattr, explorer, "E2E_REPOS", explorer.E2E_REPOS)
+        explorer.E2E_REPOS = set()
+        po = node("a", "SomePage", repo="my-e2e", source_file="src/test/pages/P.po.ts")
+        self.assertFalse(explorer.include_entry(po, "code", 99))
 
     def test_degree_threshold_applies_to_plain_code(self):
         plain = node("a", "SomeClass")
