@@ -7,6 +7,7 @@ check reads the small tracked extract, not graph.json.
 from __future__ import annotations
 
 import argparse
+import datetime
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,12 +23,20 @@ EXPLORER_PATH = config.EXPLORER_PATH
 ROOT = config.ROOT
 GITHUB_ORG = config.GITHUB_ORG
 
-# committed layers the page embeds; if any is newer than the page, rebuild
-EMBEDDED_LAYERS = (
-    "knowledge/summaries/communities.json",
-    "knowledge/topics/briefs.json",
-    "knowledge/semantic/token-neighbours.json.gz",
-    "knowledge/intent/ticket-descriptions.json.gz",
+# committed layers the page embeds; if any is newer than the page, rebuild.
+# Derived from the config paths themselves so a new embedded layer can't be
+# added to the page without this list noticing.
+EMBEDDED_LAYERS = tuple(
+    str(p.relative_to(config.ROOT))
+    for p in (
+        config.SUMMARIES_PATH,
+        config.TOPICS_BRIEFS_PATH,
+        config.SYNONYMS_PATH,
+        config.TICKET_DESCRIPTIONS_PATH,
+        config.TICKET_TITLES_PATH,
+        config.DEEPDIVES_PATH,
+        config.PROVENANCE_PATH,
+    )
 )
 
 
@@ -72,6 +81,13 @@ def _committed_at(path: str, run) -> str:
         return ""
 
 
+def _parse_iso(value: str) -> datetime.datetime | None:
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def artefact_freshness(run=run_git) -> dict:
     explorer = _committed_at(
         str(EXPLORER_PATH.relative_to(ROOT))
@@ -81,12 +97,24 @@ def artefact_freshness(run=run_git) -> dict:
     )
     if not explorer:
         return {}
-    layers = [d for layer in EMBEDDED_LAYERS if (d := _committed_at(layer, run))]
-    newest_layer = max(layers, default="")
+    # Compare timestamps chronologically, not lexicographically: ISO-8601
+    # strings with different UTC offsets do not sort the same way their
+    # instants do (mirrors build_explorer.latest_synced).
+    explorer_dt = _parse_iso(explorer)
+    newest_layer = ""
+    newest_dt = None
+    for layer in EMBEDDED_LAYERS:
+        committed = _committed_at(layer, run)
+        dt = _parse_iso(committed) if committed else None
+        if dt is None:
+            continue
+        if newest_dt is None or dt > newest_dt:
+            newest_dt = dt
+            newest_layer = committed
     return {
         "explorer_committed": explorer,
         "layers_committed": newest_layer,
-        "explorer_stale": bool(newest_layer) and newest_layer > explorer,
+        "explorer_stale": bool(newest_dt and explorer_dt and newest_dt > explorer_dt),
     }
 
 
@@ -96,12 +124,15 @@ def run_gh(arguments: list[str]) -> str:
     return completed.stdout
 
 
-def source_drift(runner=run_gh) -> list[dict]:
+def source_drift(runner=run_gh) -> list[dict] | None:
     """Repositories with commits on their branch since the recorded date.
 
     One API call per repository - the caller opts in. Counts cap at 100
-    (one page); "100" therefore means "at least 100". Returns empty list if
-    gh is unavailable or unauthenticated, printing a diagnostic note.
+    (one page); "100" therefore means "at least 100". Returns an empty list
+    when the check ran cleanly and found no drift. Returns None - not an
+    empty list - when the check could not run at all (gh unavailable or
+    unauthenticated), printing a diagnostic note; callers must not treat
+    None as "no drift".
     """
     drifted = []
     for name, entry in provenance.read().items():
@@ -120,7 +151,7 @@ def source_drift(runner=run_gh) -> list[dict]:
             )
         except (subprocess.CalledProcessError, OSError):
             print("Drift: gh call failed (not authenticated?) - skipped")
-            return []
+            return None
         behind = int(raw.strip() or 0)
         if behind:
             drifted.append({"repo": name, "behind": behind})
@@ -181,7 +212,9 @@ def main(argv=None) -> int:
                 print(f"Source drift ({len(drifted)} repositories moved on):")
                 for d in drifted[:15]:
                     print(f"  {d['repo']}: {d['behind']}+ commits since the build")
-            else:
+            elif drifted == []:
                 print("Source drift: none - every repository is at the build state")
+            # drifted is None: the check failed - the diagnostic note above
+            # already explained why, so nothing more to print here.
 
     return 0

@@ -752,7 +752,7 @@ const topicBriefHtml = (topic) =>
 function matchDive(lq) {
   let best = null;
   for (const [repo, dive] of Object.entries(DIVES)) {
-    if (lq.includes(repo) && (!best || repo.length > best.repo.length)) {
+    if (lq.includes(repo.toLowerCase()) && (!best || repo.length > best.repo.length)) {
       best = { repo, ...dive };
     }
   }

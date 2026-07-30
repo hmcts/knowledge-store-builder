@@ -118,6 +118,45 @@ class FreshnessTest(unittest.TestCase):
         got = status.artefact_freshness(run=fake_git)
         self.assertTrue(got["explorer_stale"])
 
+    def test_flags_stale_when_a_newly_tracked_layer_moves(self):
+        """dives.json and provenance.json must be in EMBEDDED_LAYERS, not just
+        the original four - regression coverage for the omission."""
+        from knowledgestore import status
+
+        def fake_git(arguments):
+            self.assertEqual(arguments[0], "-C")
+            self.assertTrue(arguments[2] in ("log", "-1"))
+            path = arguments[-1]
+            if "explorer" in path:
+                return "2026-07-01T00:00:00+00:00\n"
+            if "dives.json" in path:
+                return "2026-07-20T00:00:00+00:00\n"
+            return "2026-06-01T00:00:00+00:00\n"
+
+        got = status.artefact_freshness(run=fake_git)
+        self.assertTrue(got["explorer_stale"])
+        self.assertEqual(got["layers_committed"], "2026-07-20T00:00:00+00:00")
+
+    def test_not_stale_when_lexicographically_larger_layer_is_chronologically_earlier(self):
+        """Mirrors test_build_explorer.test_handles_different_timezones_chronologically:
+        ISO-8601 strings must be compared as instants, not as strings."""
+        from knowledgestore import status
+
+        def fake_git(arguments):
+            self.assertEqual(arguments[0], "-C")
+            self.assertTrue(arguments[2] in ("log", "-1"))
+            path = arguments[-1]
+            if "explorer" in path:
+                # 2026-07-30 04:30:00 UTC
+                return "2026-07-29T23:30:00-05:00\n"
+            # 2026-07-30T01:00:00+05:00 is lexicographically larger than the
+            # explorer's string above but is 2026-07-29 20:00:00 UTC -
+            # chronologically earlier than the explorer.
+            return "2026-07-30T01:00:00+05:00\n"
+
+        got = status.artefact_freshness(run=fake_git)
+        self.assertFalse(got["explorer_stale"])
+
     def test_empty_outside_a_git_repository(self):
         from knowledgestore import status
 
@@ -156,7 +195,9 @@ class DriftTest(unittest.TestCase):
             got = status.source_drift(runner=fake_gh)
         self.assertEqual(got, [{"repo": "moved", "behind": 9}])
 
-    def test_returns_empty_list_when_runner_fails(self):
+    def test_returns_none_when_runner_fails(self):
+        """None - not an empty list - means the check itself failed, so callers
+        must not report a false all-clear."""
         from knowledgestore import provenance, status
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -176,7 +217,7 @@ class DriftTest(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, ["gh"])
 
             got = status.source_drift(runner=failing_runner)
-        self.assertEqual(got, [])
+        self.assertIsNone(got)
 
     def test_main_with_drift_returns_zero_when_gh_missing(self):
         from knowledgestore import status
@@ -184,6 +225,42 @@ class DriftTest(unittest.TestCase):
         with mock.patch("shutil.which", return_value=None):
             result = status.main(["--drift"])
         self.assertEqual(result, 0)
+
+    def test_main_with_drift_does_not_print_all_clear_when_check_fails(self):
+        """A failed gh call must not be reported as 'none - every repository
+        is at the build state' - that would be a false all-clear."""
+        import io as std_io
+        from contextlib import redirect_stdout
+
+        from knowledgestore import provenance, status
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            provenance.write(
+                {
+                    "repo1": {
+                        "sha": "a" * 40,
+                        "branch": "main",
+                        "committed": "2026-07-01T00:00:00+00:00",
+                    },
+                }
+            )
+
+            captured = std_io.StringIO()
+            with (
+                mock.patch("shutil.which", return_value="/usr/bin/gh"),
+                mock.patch(
+                    "subprocess.run",
+                    side_effect=subprocess.CalledProcessError(1, ["gh"]),
+                ),
+                redirect_stdout(captured),
+            ):
+                result = status.main(["--drift"])
+        self.assertEqual(result, 0)
+        output = captured.getvalue()
+        self.assertIn("Drift: gh call failed", output)
+        self.assertNotIn("Source drift: none", output)
 
 
 if __name__ == "__main__":

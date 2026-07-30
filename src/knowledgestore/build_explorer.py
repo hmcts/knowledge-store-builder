@@ -377,6 +377,7 @@ def main() -> int:
         f"here (business features, tickets and connected code) &middot; the "
         f"full graph is queryable via the graphify CLI"
     )
+    # the {"repositories": {...}} shape is owned by provenance.py
     recorded = io.read_json_dict(PROVENANCE_PATH).get("repositories", {})
     synced = latest_synced(recorded)
     if synced:

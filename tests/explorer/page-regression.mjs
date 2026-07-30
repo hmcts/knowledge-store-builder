@@ -130,7 +130,7 @@ check('how are addresses handled?', 'topic brief',
 // deep dives: naming the repository serves the dossier, with its build stamp
 check('what is going on with demo-core?', 'deep dive: demo-core',
   ['Deep dive', 'demo-core', 'evidence measured at build abcd1234']);
-// a topic match takes precedence over the request-a-brief link, unchanged
+// no topic and no dive cover this question, so the page offers to have a brief written
 check('how are payments taken?', 'open question',
   ['No pre-written brief covers this question']);
 // nothing in the graph matches: say so plainly

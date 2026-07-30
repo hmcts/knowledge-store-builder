@@ -126,8 +126,9 @@ are large.
 
 ## The two-part stages
 
-`summaries` and `topics` are the only stages that need an LLM, and they are
-deliberately split so the LLM runs at **build** time, never at query time:
+`summaries`, `topics` and `deepdive` are the stages where an LLM writes prose,
+and they are deliberately split so it runs at **build** time, never at query
+time:
 
 ```bash
 knowledgestore summaries extract              # evidence digests, deterministic

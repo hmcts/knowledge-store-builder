@@ -69,7 +69,7 @@ def usage() -> str:
     lines += [
         "",
         "Stages that both extract evidence and merge written prose back in",
-        "(summaries, topics) take a sub-command:",
+        "(summaries, topics, deepdive) take a sub-command:",
         "",
         "  knowledgestore summaries extract",
         "  knowledgestore summaries merge <written.json> [...]",
