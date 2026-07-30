@@ -28,7 +28,7 @@ dependencies = []
 # Only the semantic index needs a model. Everything else works without it.
 semantic = ["fastembed>=0.4", "numpy>=1.24"]
 # Lint, format and type-check tooling, pinned to what CI runs.
-dev = ["ruff==0.16.0", "pyright==1.1.407"]
+dev = ["ruff==0.16.0", "pyright==1.1.411"]
 
 [project.scripts]
 knowledgestore = "knowledgestore.cli:main"
