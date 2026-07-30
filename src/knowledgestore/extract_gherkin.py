@@ -28,19 +28,17 @@ from collections import defaultdict
 from pathlib import Path
 
 
-from . import config
+from . import config, kinds
 
 GRAPH_PATH = config.GRAPH_PATH
 LABELS_PATH = config.LABELS_PATH
 REPOSITORIES = config.REPOSITORIES_DIR
-FEATURES_DIR = "features/"
+FEATURES_DIR = config.FEATURES_DIR
+STEP_DEFINITION_LANGUAGES = config.STEP_DEFINITION_LANGUAGES
+FORMAT = "gherkin"
 
 TICKET = config.TICKET_PATTERN
 STEP_KEYWORD = re.compile(r"^(Given|When|Then|And|But)\s+", re.IGNORECASE)
-ANNOTATION = re.compile(
-    r"@(?:Given|When|Then|And|But)\s*\(\s*\"(.*?)\"\s*\)", re.DOTALL
-)
-CLASS_NAME = re.compile(r"(?:public\s+)?class\s+(\w+)")
 PLACEHOLDER = "¤"
 
 
@@ -51,8 +49,10 @@ def norm_id(value: str) -> str:
 def normalise_step(text: str) -> str:
     """Normalise a feature step or annotation pattern to a comparable form."""
     text = text.strip().strip("^$")
-    # Cucumber expressions and regex capture groups -> placeholder
-    text = re.sub(r"\{[a-zA-Z]*\}", PLACEHOLDER, text)
+    # Cucumber expressions ({int}, {string}) and behave/parse typed
+    # parameters ({amount:d}) -> placeholder, so the same business step
+    # matches whichever language declared it
+    text = re.sub(r"\{[a-zA-Z_]*(?::[^}]*)?\}", PLACEHOLDER, text)
     text = re.sub(r"\((?:\?:)?[^)]*\)", PLACEHOLDER, text)
     # Quoted values and <outline-params> -> placeholder
     text = re.sub(r'"[^"]*"', PLACEHOLDER, text)
@@ -62,19 +62,36 @@ def normalise_step(text: str) -> str:
 
 
 def parse_step_definitions(repo_dir: Path) -> dict[str, tuple[str, str]]:
-    """Map normalised step pattern -> (class name, repo-relative file)."""
+    """Map normalised step pattern -> (symbol name, repo-relative file).
+
+    Every language in config.STEP_DEFINITION_LANGUAGES is searched, so an
+    estate can mix Java, Python and TypeScript step definitions.
+    """
     patterns: dict[str, tuple[str, str]] = {}
-    for java in (repo_dir / "src" / "test" / "java").rglob("*.java"):
-        content = java.read_text(encoding="utf-8", errors="replace")
-        annotations = ANNOTATION.findall(content)
-        if not annotations:
-            continue
-        class_match = CLASS_NAME.search(content)
-        class_name = class_match.group(1) if class_match else java.stem
-        rel = str(java.relative_to(repo_dir))
-        for pattern in annotations:
-            patterns[normalise_step(pattern)] = (class_name, rel)
+    for language in STEP_DEFINITION_LANGUAGES.values():
+        patterns.update(_language_step_definitions(repo_dir, language))
     return patterns
+
+
+def _language_step_definitions(repo_dir: Path,
+                               language: dict) -> dict[str, tuple[str, str]]:
+    """Step patterns declared in one language's files."""
+    annotation = re.compile(language["annotation"], re.DOTALL)
+    symbol = re.compile(language["symbol"]) if language.get("symbol") else None
+    found: dict[str, tuple[str, str]] = {}
+    for path in sorted(repo_dir.glob(language["glob"])):
+        if not path.is_file():
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        declared = annotation.findall(content)
+        if not declared:
+            continue
+        match = symbol.search(content) if symbol else None
+        name = match.group(1) if match else path.stem
+        rel = str(path.relative_to(repo_dir))
+        for pattern in declared:
+            found[normalise_step(pattern)] = (name, rel)
+    return found
 
 
 def parse_feature_line(line: str, feature: dict[str, object]) -> None:
@@ -185,7 +202,7 @@ class GraphEnricher:
         for index, scenario in enumerate(feature["scenarios"], start=1):
             scenario_id = f"{repo}::{stem}_scenario_{index}"
             if self.add_node(scenario_id, scenario[:120], repo, rel, community,
-                             {"kind": "gherkin_scenario"}):
+                             {"kind": kinds.SCENARIO, "format": FORMAT}):
                 self.add_edge(feature_id, scenario_id, "contains", rel)
                 self.stats["scenarios"] += 1
 
@@ -207,7 +224,7 @@ class GraphEnricher:
         for ticket in feature["tickets"]:
             ticket_id = self.ticket_ids.setdefault(ticket, f"jira::{norm_id(ticket)}")
             if self.add_node(ticket_id, ticket, repo, rel, community,
-                             {"kind": "jira_ticket"}):
+                             {"kind": kinds.TICKET}):
                 self.stats["tickets"] += 1
             self.add_edge(feature_id, ticket_id, "references", rel)
             self.stats["ticket_edges"] += 1
@@ -222,7 +239,8 @@ class GraphEnricher:
         created = self.add_node(
             feature_id, feature["name"], repo, rel, community,
             {
-                "kind": "gherkin_feature",
+                "kind": kinds.FEATURE,
+                "format": FORMAT,
                 "tags": feature["tags"],
                 "tickets": feature["tickets"],
                 "scenario_count": len(feature["scenarios"]),

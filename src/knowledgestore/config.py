@@ -88,6 +88,49 @@ MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
 # so their test files are indexed rather than filtered out as scaffolding.
 E2E_REPOS = _env_set("KSB_E2E_REPOS", {"cpp-ui-e2e", "cpp-ui-e2e-serenity"})
 
+# --- BDD specifications --------------------------------------------------
+# Gherkin (.feature) files are read wherever they appear in a repository. This
+# is the directory whose next path segment names the feature's area, used to
+# group features into business communities: "features/" makes
+# features/payments/refund.feature belong to the "payments" area.
+FEATURES_DIR = os.environ.get("KSB_FEATURES_DIR", "features/")
+
+# Step definitions bind a Gherkin step to the code implementing it. Each entry
+# is a language: where to look, and how a step pattern is declared there.
+#
+#   glob       - searched from the repository root
+#   annotation - regex whose first group is the step pattern
+#   symbol     - optional regex whose first group names the enclosing symbol
+#                (a class, typically); the file stem is used when it is absent
+#
+# Defaults cover Cucumber's three most common hosts. Add or replace entries by
+# assigning to this dict via configure(); an estate with an unusual layout only
+# needs to narrow the glob.
+STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
+    # Cucumber-JVM / Serenity: @Given("...") in Maven's test tree
+    "java": {
+        "glob": "src/test/java/**/*.java",
+        "annotation": r"@(?:Given|When|Then|And|But)\s*\(\s*\"(.*?)\"\s*\)",
+        "symbol": r"(?:public\s+)?class\s+(\w+)",
+    },
+    # behave / pytest-bdd: @given("...") or @given('...')
+    "python": {
+        "glob": "**/*.py",
+        "annotation": (
+            r"@(?:given|when|then|step)\s*\(\s*[\"'](.*?)[\"']\s*[,)]"
+        ),
+        "symbol": None,
+    },
+    # cucumber-js: Given("...") or Given('...'), no decorator
+    "typescript": {
+        "glob": "**/*.ts",
+        "annotation": (
+            r"\b(?:Given|When|Then)\s*\(\s*[\"'](.*?)[\"']\s*,"
+        ),
+        "symbol": None,
+    },
+}
+
 # --- community summaries -------------------------------------------------
 MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
 

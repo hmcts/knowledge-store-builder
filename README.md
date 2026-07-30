@@ -82,7 +82,7 @@ are large.
 | `context` | `knowledge_context.md`, manifest | How to interpret the graph; what was read |
 | `intent` | `knowledge/intent/*.json.gz` | File → tickets, and ticket descriptions mined from commit subjects |
 | `ticket-titles` | `ticket-titles.json.gz` | Real issue titles, merged from a tracker CSV export |
-| `gherkin` | (updates the graph) | Features, scenarios and ticket nodes in business language |
+| `gherkin` | (updates the graph) | Features, scenarios and ticket nodes in business language, linked to the step definitions implementing them (Java, Python and TypeScript) |
 | `summaries` | `knowledge/summaries/` | Plain-English descriptions of each cluster |
 | `semantic` | `knowledge/semantic/` | Token-neighbour map, so "outcomes" finds "results" |
 | `topics` | `docs/topics/`, `briefs.json` | Pre-written answers to anticipated questions |
@@ -124,6 +124,7 @@ matter when adopting the library:
 | `KSB_MIN_ENTRY_DEGREE` | `3` | Minimum connections for a code entry to be indexed |
 | `KSB_E2E_REPOS` | two cpp-ui repos | Repositories whose tests *are* the business documentation |
 | `KSB_MIN_COMMUNITY_SIZE` | `25` | Smallest cluster worth summarising |
+| `KSB_FEATURES_DIR` | `features/` | Directory whose next path segment names a feature's area |
 | `KSB_EMBEDDING_MODEL` | MiniLM-L6-v2 | Model for the semantic stage |
 
 From Python, `config.configure()` does the same thing and is what the tests
@@ -179,6 +180,30 @@ anticipated, and the page says so.
 
 There is also `graphify query` from the terminal for deterministic traversal
 without a licence.
+
+## BDD specifications
+
+The `gherkin` stage reads `.feature` files — the Cucumber format, not anything
+estate-specific — and links each feature to the code implementing its steps.
+Step definitions are matched across languages, so a mixed estate works:
+
+| Language | Where it looks | What it recognises |
+|---|---|---|
+| Java | `src/test/java/**/*.java` | `@Given("...")`, named by the enclosing class |
+| Python | `**/*.py` | `@given("...")` (behave, pytest-bdd), named by module |
+| TypeScript | `**/*.ts` | `Given("...")` (cucumber-js), named by module |
+
+Steps are normalised before matching — Cucumber expressions (`{int}`),
+behave's typed parameters (`{amount:d}`), regex groups and quoted values all
+collapse to a placeholder — so the same business step matches whichever
+language declared it.
+
+Add a language, or narrow a glob for an unusual layout, by assigning to
+`config.STEP_DEFINITION_LANGUAGES`.
+
+Graph nodes carry a format-agnostic `kind` (`feature`, `scenario`, `ticket`)
+plus `format` recording the parser that produced them, so a second
+specification format can be added without changing consumers.
 
 ## Design notes
 
