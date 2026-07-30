@@ -119,9 +119,9 @@ class GraphEnricherTest(unittest.TestCase):
         enricher.add_feature(self._feature(), "repo-a", {}, {})
 
         kinds = [(n.get("metadata") or {}).get("kind") for n in graph["nodes"]]
-        self.assertIn("gherkin_feature", kinds)
-        self.assertIn("gherkin_scenario", kinds)
-        self.assertIn("jira_ticket", kinds)
+        self.assertIn("feature", kinds)
+        self.assertIn("scenario", kinds)
+        self.assertIn("ticket", kinds)
         relations = {e["relation"] for e in graph["links"]}
         self.assertEqual(relations, {"contains", "references"})
 

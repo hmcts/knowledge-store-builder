@@ -31,6 +31,7 @@ from pathlib import Path
 
 from . import config
 from . import io
+from . import kinds
 
 GRAPH_PATH = config.GRAPH_PATH
 LABELS_PATH = config.LABELS_PATH
@@ -53,7 +54,7 @@ def community_digest(community: int, nodes: list[dict], labels: dict,
     repos = Counter(n.get("repo", "") for n in nodes)
     features = [
         n["label"] for n in nodes
-        if (n.get("metadata") or {}).get("kind") == "gherkin_feature"
+        if kinds.is_kind(n, kinds.FEATURE)
     ]
     tickets: Counter = Counter()
     for n in nodes[:30]:

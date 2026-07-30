@@ -39,6 +39,7 @@ from pathlib import Path
 
 from . import config
 from . import io
+from . import kinds
 
 
 TOPICS_CONFIG = config.TOPICS_CONFIG_PATH
@@ -89,7 +90,7 @@ def linked_tickets(graph: dict, matched_ids: set) -> set[str]:
     ("DD-100") never contain topic keywords - relevance comes from edges."""
     ticket_label = {
         node["id"]: node["label"] for node in graph["nodes"]
-        if (node.get("metadata") or {}).get("kind", "") == "jira_ticket"
+        if kinds.is_kind(node, kinds.TICKET)
     }
     tickets: set[str] = set()
     for link in graph.get("links", graph.get("edges", [])):
@@ -111,10 +112,10 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict,
         if not node_matches(node, topic.keywords):
             continue
         matched_ids.add(node.get("id"))
-        kind = (node.get("metadata") or {}).get("kind", "")
-        if kind == "gherkin_feature":
+        kind = kinds.node_kind(node)
+        if kind == kinds.FEATURE:
             features.append(node["label"])
-        elif kind != "jira_ticket":
+        elif kind != kinds.TICKET:
             entries = by_repo.setdefault(node.get("repo", ""), [])
             if len(entries) < MAX_NODES_PER_REPO:
                 entries.append(f"{node['label']} ({node.get('source_file') or '?'})")

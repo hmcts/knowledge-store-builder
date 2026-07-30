@@ -35,6 +35,7 @@ from importlib import resources
 
 from . import config
 from . import io
+from . import kinds
 
 GRAPH_PATH = config.GRAPH_PATH
 LABELS_PATH = config.LABELS_PATH
@@ -73,13 +74,10 @@ def load_inputs() -> tuple[dict, dict, dict, dict]:
 
 
 def node_kind(node: dict) -> str:
-    kind = (node.get("metadata") or {}).get("kind", "")
-    if kind == "gherkin_feature":
-        return "feature"
-    if kind == "gherkin_scenario":
-        return "scenario"
-    if kind == "jira_ticket":
-        return "ticket"
+    """The explorer's entry kind: business kinds, else code or concept."""
+    kind = kinds.node_kind(node)
+    if kind in (kinds.FEATURE, kinds.SCENARIO, kinds.TICKET):
+        return kind
     return "code" if node.get("file_type") == "code" else "concept"
 
 
