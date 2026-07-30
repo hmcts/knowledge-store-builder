@@ -115,6 +115,8 @@ class TeamDiscoveryTest(unittest.TestCase):
         )
         repos = repo_list.discover(filters, runner=runner)
         self.assertEqual([r["name"] for r in repos], ["oddly-named", "svc-a"])
+        # sync clones the branch this row names; a team-sourced repo must carry it
+        self.assertEqual(repos[0]["defaultBranch"], "main")
 
     def test_exclude_beats_team_membership(self):
         filters = self._filters("team platform-team\nexclude retired-thing\n")
