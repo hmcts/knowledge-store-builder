@@ -19,13 +19,47 @@ formatting, and which tickets changed them" without anyone reading the code.
 
 ## Install
 
+Releases are published to HMCTS's shared **`hmcts-lib`** Azure Artifacts feed,
+not to PyPI, so the feed has to be named explicitly.
+
+**Inside HMCTS:**
+
 ```bash
-pip install hmcts-knowledge-store-builder            # from the hmcts-lib feed
-pip install 'hmcts-knowledge-store-builder[semantic]' # adds the embedding stage
+pip install keyring artifacts-keyring     # one-off: Azure Artifacts credentials
+pip install --extra-index-url \
+  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+  hmcts-knowledge-store-builder
 ```
 
-The core has no dependencies beyond the standard library. Two external tools
-are needed for the full pipeline:
+`artifacts-keyring` handles the device-flow sign-in on first use. A `~/.netrc`
+entry for `pkgs.dev.azure.com` works instead, and is what CI uses.
+
+For a store repository, put the feed and the pinned version in a requirements
+file so every rebuild resolves the same way, and lock it with
+`uv pip compile --generate-hashes` so CI installs exactly what you resolved:
+
+```
+--extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
+--only-binary :all:
+hmcts-knowledge-store-builder==0.2.0
+```
+
+**Outside HMCTS**, the feed is not reachable — install from source instead:
+
+```bash
+pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
+```
+
+**The embedding stage** needs a model, and is the one optional extra:
+
+```bash
+pip install 'hmcts-knowledge-store-builder[semantic]'
+```
+
+Everything else is standard library only, by design: the pipeline runs anywhere
+Python does, with no supply chain to review.
+
+## Two tools it does not replace
 
 - **[graphify](https://github.com/safishamsi/graphify)** builds the graph
   itself (`pip install graphifyy`). This library prepares its inputs and
