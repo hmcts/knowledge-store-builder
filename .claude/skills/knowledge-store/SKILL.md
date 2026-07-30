@@ -33,6 +33,7 @@ Before traversing, check whether the question is already answered:
 - `docs/topics/` — topic briefs: analyst-grade answers to estate-level
   questions, written from graph evidence and reviewed. If one covers the
   question, answer from it and cite it.
+- `docs/deep-dives/` — evidence-grounded dossiers on individual repositories; if the question is about one repository's health, answer from its dive and cite it.
 - `docs/journeys/`, `docs/findings/` — narrative write-ups, where the estate
   keeps them.
 - `knowledge_context.md` — how this particular estate should be interpreted.
@@ -112,9 +113,9 @@ worth keeping, offer to save it under `docs/journeys/`.
 
 - **Runtime behaviour.** Edges are static relationships from source. The graph
   knows nothing about deployment, configuration or production.
-- **Recency.** The store is a snapshot at the commit recorded in
-  `graphify-out/GRAPH_REPORT.md`. Flag staleness if the question is about very
-  recent changes.
+- **Recency.** When the question concerns recent changes, run `knowledgestore status --drift`
+  (if the pipeline is installed) and report concretely — "the store predates
+  9 commits to cpp-context-progression" — rather than a vague staleness caveat.
 
 ## Honesty rules
 
