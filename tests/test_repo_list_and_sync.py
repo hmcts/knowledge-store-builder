@@ -133,7 +133,14 @@ class SyncRepositoryTest(unittest.TestCase):
 
 
 class MainProvenanceTest(unittest.TestCase):
-    def test_writes_provenance_for_every_configured_repository(self):
+    def test_sync_records_provenance_for_every_configured_repository(self):
+        """Design promise: after `knowledgestore sync`, provenance.json
+        describes every configured repository with its own sha/branch/
+        committed - the durable artefact every staleness and deep-dive check
+        downstream reads via provenance.read(). Only the true IO boundaries
+        are stubbed (git clone/fetch behind sync_repository; git
+        rev-parse/log behind head_info) - main()'s own wiring (config
+        parsing, provenance.write) runs for real."""
         from knowledgestore import provenance
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,27 +156,48 @@ class MainProvenanceTest(unittest.TestCase):
             sync.CONFIG = config_path
             self.addCleanup(setattr, sync, "REPOSITORIES", sync.REPOSITORIES)
             sync.REPOSITORIES = root / "repositories"
+            # true IO boundary: no real git clone/fetch/reset
             self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
             sync.sync_repository = lambda repo, repositories_dir, run=None: 5
 
-            canned = {
-                "sha": "a" * 40,
-                "branch": "main",
-                "committed": "2026-07-01T00:00:00+00:00",
-            }
+            # true IO boundary: no real git rev-parse/log. The sha is
+            # derived from which repository is being asked about, so a
+            # wiring bug (e.g. both repos ending up with the same entry,
+            # or one repo missing) fails the per-repo assertions below.
+            def fake_head_info(repo_dir: Path, branch: str, run=None) -> dict:
+                return {
+                    "sha": (repo_dir.name * 40)[:40],
+                    "branch": branch,
+                    "committed": "2026-07-01T00:00:00+00:00",
+                }
+
             self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
-            provenance.head_info = lambda repo_dir, branch, run=None: dict(canned)
+            provenance.head_info = fake_head_info
 
             self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
             provenance.PROVENANCE_PATH = root / "provenance.json"
 
             result = sync.main()
-            recorded = provenance.read()
+            recorded = provenance.read()  # the artefact downstream stages consume
 
         self.assertEqual(result, 0)
         self.assertEqual(set(recorded), {"repo-a", "repo-b"})
-        self.assertEqual(recorded["repo-a"], canned)
-        self.assertEqual(recorded["repo-b"], canned)
+        self.assertEqual(
+            recorded["repo-a"],
+            {
+                "sha": ("repo-a" * 40)[:40],
+                "branch": "main",
+                "committed": "2026-07-01T00:00:00+00:00",
+            },
+        )
+        self.assertEqual(
+            recorded["repo-b"],
+            {
+                "sha": ("repo-b" * 40)[:40],
+                "branch": "main",
+                "committed": "2026-07-01T00:00:00+00:00",
+            },
+        )
 
 
 class CliTest(unittest.TestCase):

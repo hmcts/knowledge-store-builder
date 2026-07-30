@@ -201,21 +201,55 @@ class ExtractTest(unittest.TestCase):
             self.assertEqual(dives.extract("nope"), 1)
 
 
+def _wire_deep_dive_paths(test: unittest.TestCase, root: Path) -> None:
+    """Point INPUT_DIR/DOCS_DIR/DIVES_PATH at a scratch tree and restore them
+    after the test - the merge()/main() IO seam under test."""
+    for attr, rel in {
+        "INPUT_DIR": "in",
+        "DOCS_DIR": "docs",
+        "DIVES_PATH": "in/dives.json",
+    }.items():
+        test.addCleanup(setattr, dives, attr, getattr(dives, attr))
+        setattr(dives, attr, root / rel)
+    (root / "in").mkdir()
+    (root / "docs").mkdir()
+
+
+def _write_mixed_dive_batch(root: Path) -> None:
+    """One valid, stamped dossier ('good'); one repo with a bundle but no
+    dossier at all ('ghost'); one dossier that is too short ('short'). The
+    three cases merge() must tell apart in a single pass, without letting
+    the bad ones block the good one."""
+    import json
+
+    sha = "a" * 40
+    (root / "in" / "good-input.json").write_text(
+        json.dumps({"repo": "good", "provenance": {"sha": sha}})
+    )
+    (root / "docs" / "good.md").write_text(
+        f"# Deep dive: good\n\nMeasured at `{sha[:8]}`.\n\n" + "Evidence paragraph. " * 60,
+        encoding="utf-8",
+    )
+    (root / "in" / "ghost-input.json").write_text(
+        json.dumps({"repo": "ghost", "provenance": {"sha": "b" * 40}})
+    )
+    # deliberately no docs/ghost.md - the missing-dossier case
+    (root / "in" / "short-input.json").write_text(
+        json.dumps({"repo": "short", "provenance": {"sha": "c" * 40}})
+    )
+    (root / "docs" / "short.md").write_text("Too short.", encoding="utf-8")
+
+
 class MergeTest(unittest.TestCase):
-    def test_merge_validates_length_and_provenance_stamp(self):
+    def test_merge_rejects_a_dossier_that_does_not_state_its_build(self):
+        """Design promise: a dossier that cannot say which build it measured
+        is rejected - churn/instability figures go stale every commit, so an
+        unstamped claim is misleading rather than useful."""
         import json
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for attr, rel in {
-                "INPUT_DIR": "in",
-                "DOCS_DIR": "docs",
-                "DIVES_PATH": "in/dives.json",
-            }.items():
-                self.addCleanup(setattr, dives, attr, getattr(dives, attr))
-                setattr(dives, attr, root / rel)
-            (root / "in").mkdir()
-            (root / "docs").mkdir()
+            _wire_deep_dive_paths(self, root)
             (root / "in" / "good-input.json").write_text(
                 json.dumps({"repo": "good", "provenance": {"sha": "abcd1234" + "0" * 32}})
             )
@@ -237,64 +271,37 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(written["good"]["sha"], "abcd1234")
         self.assertIn("<h2>", written["good"]["html"])
 
-    def _wire_paths(self, root: Path) -> None:
-        for attr, rel in {
-            "INPUT_DIR": "in",
-            "DOCS_DIR": "docs",
-            "DIVES_PATH": "in/dives.json",
-        }.items():
-            self.addCleanup(setattr, dives, attr, getattr(dives, attr))
-            setattr(dives, attr, root / rel)
-        (root / "in").mkdir()
-        (root / "docs").mkdir()
-
-    def test_merge_rejects_bundle_with_missing_dossier(self):
+    def test_one_bad_dossier_does_not_block_a_good_one(self):
+        """Design promise: an invalid dossier can never enter the store, and
+        one bad dossier does not silently block good ones in the same run."""
         import io as std_io
         import json
         from contextlib import redirect_stdout
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._wire_paths(root)
-            (root / "in" / "ghost-input.json").write_text(
-                json.dumps({"repo": "ghost", "provenance": {"sha": "a" * 40}})
-            )
-            # deliberately no docs/ghost.md
+            _wire_deep_dive_paths(self, root)
+            _write_mixed_dive_batch(root)
             captured = std_io.StringIO()
             with redirect_stdout(captured):
                 code = dives.merge()
             written = json.loads((root / "in" / "dives.json").read_text())
         self.assertEqual(code, 1)
-        self.assertEqual(written, {})
-        self.assertIn("ghost: missing", captured.getvalue())
+        self.assertEqual(list(written), ["good"])  # exactly the valid one entered the store
+        self.assertEqual(written["good"]["sha"], "aaaaaaaa")
+        output = captured.getvalue()
+        self.assertIn("ghost: missing", output)  # reported, not silent
+        self.assertIn(f"short: dossier shorter than {dives.MIN_DIVE_LENGTH}", output)
 
-    def test_merge_rejects_dossier_shorter_than_minimum(self):
-        import io as std_io
-        import json
-        from contextlib import redirect_stdout
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._wire_paths(root)
-            (root / "in" / "short-input.json").write_text(
-                json.dumps({"repo": "short", "provenance": {"sha": "a" * 40}})
-            )
-            (root / "docs" / "short.md").write_text("Too short.", encoding="utf-8")
-            captured = std_io.StringIO()
-            with redirect_stdout(captured):
-                code = dives.merge()
-            written = json.loads((root / "in" / "dives.json").read_text())
-        self.assertEqual(code, 1)
-        self.assertEqual(written, {})
-        self.assertIn(f"short: dossier shorter than {dives.MIN_DIVE_LENGTH}", captured.getvalue())
-
-    def test_merge_with_no_bundles_fails(self):
+    def test_merge_with_no_bundles_tells_operator_to_extract_first(self):
+        """Design promise: nothing to merge fails loudly (exit 1) rather than
+        silently writing an empty store, and says what to do about it."""
         from contextlib import redirect_stderr
         from io import StringIO
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._wire_paths(root)
+            _wire_deep_dive_paths(self, root)
             captured = StringIO()
             with redirect_stderr(captured):
                 code = dives.merge()
@@ -306,25 +313,43 @@ class MainDispatchTest(unittest.TestCase):
     def setUp(self):
         self.addCleanup(setattr, sys, "argv", sys.argv)
 
-    def test_extract_dispatch_passes_repo_and_propagates_return(self):
-        calls = []
-        self.addCleanup(setattr, dives, "extract", dives.extract)
-        dives.extract = lambda repo: calls.append(repo) or 7
-        sys.argv = ["prog", "extract", "some-repo"]
-        self.assertEqual(dives.main(), 7)
-        self.assertEqual(calls, ["some-repo"])
+    def test_extract_dispatch_rejects_unknown_repo_through_real_extract(self):
+        """Design promise: `deepdive extract <repo>` for a repo not in the
+        graph fails clearly (exit 1) - exercised through the real CLI
+        dispatch and the real extract(), not a stand-in."""
+        import json
 
-    def test_merge_dispatch_propagates_return(self):
-        self.addCleanup(setattr, dives, "merge", dives.merge)
-        dives.merge = lambda: 3
-        sys.argv = ["prog", "merge"]
-        self.assertEqual(dives.main(), 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.addCleanup(setattr, dives, "GRAPH_PATH", dives.GRAPH_PATH)
+            dives.GRAPH_PATH = root / "graph.json"
+            (root / "graph.json").write_text(
+                json.dumps({"nodes": [{"repo": "other-repo"}], "links": []})
+            )
+            sys.argv = ["prog", "extract", "no-such-repo"]
+            self.assertEqual(dives.main(), 1)
 
-    def test_no_arguments_fails(self):
+    def test_merge_dispatch_produces_the_same_artefact_as_a_direct_call(self):
+        """Design promise: `deepdive merge` through the CLI is the same
+        contract as calling merge() directly - dispatch adds no behaviour of
+        its own, exercised on the mixed valid/invalid batch."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _wire_deep_dive_paths(self, root)
+            _write_mixed_dive_batch(root)
+            sys.argv = ["prog", "merge"]
+            code = dives.main()
+            written = json.loads((root / "in" / "dives.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(list(written), ["good"])
+
+    def test_no_arguments_and_bogus_argument_fail_the_usage_contract(self):
+        """Design promise: with no sub-command or an unrecognised one, the
+        stage fails (exit 1) instead of guessing what the caller meant."""
         sys.argv = ["prog"]
         self.assertEqual(dives.main(), 1)
-
-    def test_bogus_argument_fails(self):
         sys.argv = ["prog", "bogus"]
         self.assertEqual(dives.main(), 1)
 
