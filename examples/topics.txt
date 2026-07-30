@@ -1,0 +1,9 @@
+# Topic briefs - the estate-level questions answered as pre-written,
+# committed narratives (GraphRAG phase 3). One topic per line:
+#   <slug> | <title> | <comma-separated match keywords>
+# Keywords are matched (with semantic expansion) against Ask-mode questions
+# to serve the brief; they also drive evidence gathering at extract time.
+
+welsh-language | Welsh language in Common Platform | welsh, cymraeg, bilingual, wales
+address-handling | How addresses are implemented | address, addresses, postcode
+sjp-case-decisions | SJP case decisions | sjp, single justice, plea, decision

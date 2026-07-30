@@ -1,0 +1,31 @@
+# Repository discovery filters (no regex - reviewable lists only).
+# Lines: `prefix <name-prefix>` include repos whose name starts with it;
+#        `repo <exact-name>`   include one repo explicitly;
+#        `exclude <exact-name>` exclude one repo even if a rule matches it.
+# Archived repositories are always excluded.
+
+# Phase A corpus: the Crime UI estate + the cpp-context backend services.
+prefix cpp-ui-
+prefix cpp-context-
+
+# Legacy members of the UI corpus that predate the cpp-ui- naming:
+repo cpp-cadb-ui-prototypes
+repo cpp-pdk-documentation
+repo cpp-retrial-ui-prototype
+
+# Explicitly not wanted (decision 2026-07-29):
+exclude cp-meta-arch
+
+# Phase B: adjacent product/domain services (explicit, demand-driven)
+repo cp-ai-rag-service
+repo cp-court-list-publishing-service
+repo cp-result-definitions-browser
+repo cp-crime-portal
+repo cp-case-document-knowledge-service
+repo cpp-rota-application
+repo cpp-idam-organisation-service
+repo cpp-idam-account-service
+repo cp-notification-gateway
+repo cp-file-service
+repo cp-task-manager
+repo cp-job-manager

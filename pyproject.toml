@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hmcts-knowledge-store-builder"
+version = "0.1.0"
+description = "Build a committed, queryable knowledge store from a fleet of git repositories"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "HM Courts & Tribunals Service" }]
+keywords = ["knowledge-graph", "graphrag", "code-analysis", "documentation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Documentation",
+]
+# The core pipeline is standard library only, by design: it runs anywhere
+# Python does, with no supply chain to review.
+dependencies = []
+
+[project.optional-dependencies]
+# Only the semantic index needs a model. Everything else works without it.
+semantic = ["fastembed>=0.4", "numpy>=1.24"]
+
+[project.scripts]
+knowledgestore = "knowledgestore.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hmcts/knowledge-store-builder"
+Source = "https://github.com/hmcts/knowledge-store-builder"
+
+[tool.hatch.build.targets.wheel]
+# assets/app.js sits inside the package, so it is included automatically
+packages = ["src/knowledgestore"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/knowledgestore", "tests", "examples", "README.md", "LICENSE"]
