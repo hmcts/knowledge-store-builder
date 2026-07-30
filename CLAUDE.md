@@ -128,11 +128,13 @@ at `src/` here; `pip install --no-deps -e .` restores it.
 
 ## Releases
 
-`pyproject.toml` holds the version, but the publish workflow **stamps the
-artefact version at build time** from `artefact-version-action` — a draft on
-push to main, a clean version on a published Release. Keep the declared version
-in step with releases, and remember `uv.lock` records the project's own
-version: bumping without `uv lock` fails the lint workflow's frozen sync.
+**The version is the git tag** (hatch-vcs): creating a GitHub release is the
+whole bump — no file mentions a version, so there is nothing to keep in step.
+Pushes to main publish drafts as `<next>.devN+g<sha>` automatically, and
+`knowledgestore.__version__` reads the installed metadata. Two consequences:
+installing the package needs the git history and tags present (CI checkouts
+use `fetch-depth: 0`), and `uv.lock` records the project as `(dynamic)`, so
+releases can no longer desync the lockfile.
 
 ## SonarCloud, learned the hard way
 

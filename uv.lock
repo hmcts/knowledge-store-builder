@@ -249,7 +249,6 @@ wheels = [
 
 [[package]]
 name = "hmcts-knowledge-store-builder"
-version = "0.2.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -271,7 +270,7 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.407" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.0" },
 ]
-provides-extras = ["semantic", "dev"]
+provides-extras = ["dev", "semantic"]
 
 [[package]]
 name = "httpcore"
