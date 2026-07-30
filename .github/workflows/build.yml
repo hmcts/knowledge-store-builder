@@ -7,7 +7,7 @@ name: Build
 # The version is derived from the git tag by hatch-vcs — creating a GitHub
 # release IS the version bump; nothing in the source mentions a version:
 #
-#   push to main        -> <next>.devN+g<sha>  (automatic draft)
+#   push to main        -> <next>.devN+<short-sha>  (draft; bare GitHub short SHA)
 #   published release   -> the tag, verbatim  (v0.4.0 -> 0.4.0)
 #
 # Auth is basic auth to Azure Artifacts using the org secrets
@@ -75,6 +75,16 @@ jobs:
 
       - name: Build at the tag-derived version
         run: |
+          # Drafts carry the bare 7-char GitHub short SHA (0.3.1.dev9+b83e13d).
+          # setuptools-scm's own local schemes only offer git-describe form
+          # (+g<sha9>), so the draft version is computed here and injected via
+          # the documented override; a release builds the checked-out tag as-is.
+          if [ "${{ github.event_name }}" != "release" ]; then
+            LAST=$(git describe --tags --abbrev=0)
+            NEXT=$(echo "${LAST#v}" | awk -F. '{print $1"."$2"."$3+1}')
+            DRAFT="${NEXT}.dev$(git rev-list "${LAST}..HEAD" --count)+$(git rev-parse --short=7 HEAD)"
+            export SETUPTOOLS_SCM_PRETEND_VERSION="$DRAFT"
+          fi
           uv build
           echo "Publishing:" dist/*.whl
 
