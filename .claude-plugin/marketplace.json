@@ -1,0 +1,14 @@
+{
+  "name": "knowledge-store-builder",
+  "owner": {
+    "name": "HMCTS",
+    "url": "https://github.com/hmcts"
+  },
+  "plugins": [
+    {
+      "name": "knowledge-store",
+      "source": "./",
+      "description": "Query a committed knowledge store, and build or refresh one — including the community-summary and topic-brief authoring loops that need an LLM at build time"
+    }
+  ]
+}

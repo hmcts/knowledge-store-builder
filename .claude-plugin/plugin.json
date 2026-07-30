@@ -1,0 +1,8 @@
+{
+  "name": "knowledge-store",
+  "description": "Query and build knowledge stores made with knowledge-store-builder: query any committed store (architecture, duplication, journeys, business intent), and run the pipeline including the summary and topic-brief authoring loops",
+  "author": {
+    "name": "HMCTS"
+  },
+  "skills": ".claude/skills/"
+}

@@ -136,6 +136,28 @@ config.configure(root="/path/to/store", EXPLORER_TITLE="Payments Estate")
 build_explorer.main()
 ```
 
+## Claude Code plugin
+
+The reusable skills ship here, so any store gets them:
+
+```
+/plugin marketplace add hmcts/knowledge-store-builder
+/plugin install knowledge-store@knowledge-store-builder
+```
+
+- **`knowledge-store`** — query a store: setup, traversal recipes,
+  interpretation rules (same-named nodes in different repositories are
+  independent implementations unless an edge says otherwise), the business-intent
+  and journey recipes, and what the graph cannot answer.
+- **`knowledge-store-build`** — build or refresh one, including the two loops
+  that need an LLM: writing community summaries from digests (chunked across
+  parallel subagents, coverage-checked, validated on merge) and writing topic
+  briefs from evidence dossiers.
+
+Individual stores can add their own thin skill for estate specifics — which
+repositories matter, where journeys are written up, what is known stale — and
+leave the mechanics to these.
+
 ## Querying the result
 
 The store is designed to be read two ways, and it is worth being explicit
