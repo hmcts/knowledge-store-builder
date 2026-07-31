@@ -5,6 +5,18 @@ document states that contract, and says how to check it — including the case
 that is easy to miss, where the prose was written by a subagent and the
 dispatching agent checked that it *arrived* rather than that it was *true*.
 
+> **This document is the master for these rules, and they are mirrored inside
+> the skills.** If you change anything here, update every copy in the same
+> change — an agent reads the skill it was invoked with and may never open this
+> file, so a superseded rule in a skill is the rule that gets applied.
+>
+> | Mirrored in | Which part |
+> |---|---|
+> | `.claude/skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; say which layer answered |
+> | `.claude/skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate |
+> | `.claude/skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
+> | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
+
 ## The contract
 
 **Every claim in a store, and every claim in an answer from a store, traces to
