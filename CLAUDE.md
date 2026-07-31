@@ -126,6 +126,20 @@ at `src/` here; `pip install --no-deps -e .` restores it.
 - Very large graphs need `GRAPHIFY_VIZ_NODE_LIMIT` raised, or the HTML
   visualisation export refuses to run.
 
+## Required checks and paths-ignore do not mix
+
+The `main` ruleset requires the `tests` and `CodeQL` status checks. A workflow
+skipped by `paths-ignore` **never reports its check at all** — GitHub waits for
+a context that will never arrive — so a documentation-only pull request sits at
+`BLOCKED` with every visible check green. That deadlocked a docs PR, and the
+diagnosis is invisible from the checks list: you have to compare the required
+contexts in the ruleset against the ones that reported.
+
+So: never add `paths-ignore` to a workflow whose check is required. `build.yml`
+and `lint.yml` may keep theirs because they are not required. If skipping a
+required check on prose ever becomes worth the effort, add a companion job that
+reports the same context for the ignored paths.
+
 ## Releases
 
 **The version is the git tag** (hatch-vcs): creating a GitHub release is the

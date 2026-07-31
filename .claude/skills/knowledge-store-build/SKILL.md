@@ -10,6 +10,11 @@ topic briefs — which need prose written from evidence. Those are your job. The
 LLM runs at **build** time only; consumers query committed static files with no
 licence, so everything you write is validated and committed.
 
+**Before a first build, or when judging what to ingest, read**
+`docs/building-a-knowledge-store.md` in this library: estate definition,
+what extraction yields per content type, gating, refresh economics and the
+traps. This skill is the mechanics; that document is the judgement.
+
 ## Setup
 
 ```bash
@@ -68,6 +73,15 @@ files, business features and tickets. Then:
 2. **Dispatch one subagent per batch, in parallel** — a single message with
    several agent calls. Give each the digest file path, an output path, and the
    rules below.
+
+   **Wait for every agent to report before merging — not for its output file to
+   exist.** An agent writes its JSON, then validates it, and may rewrite it. A
+   file therefore appears on disk before the agent has finished with it, so a
+   merge gated on "all N files present" reads some of them mid-write. This has
+   happened: 141 valid summaries out of 502 were silently left out, and the only
+   reason it surfaced was comparing `merge`'s "361 merged" against the 502 the
+   agents had written. Re-running the merge after all agents reported took every
+   one of them.
 3. **Merge and validate:**
 
    ```bash
@@ -75,7 +89,9 @@ files, business features and tickets. Then:
    ```
 
    `merge` rejects unknown cluster ids and out-of-range lengths, and reports
-   what it rejected. It is the guardrail — read its output.
+   what it rejected. It is the guardrail — read its output, and **reconcile the
+   count it merged against the count the agents wrote**. "N merged" alone does
+   not tell you N was everything; the difference is where the defects hide.
 
 Rules to give each subagent, verbatim in spirit:
 
@@ -89,6 +105,18 @@ Rules to give each subagent, verbatim in spirit:
   schema or contract content. If tests dominate, say it is test coverage.
 - Write the output as one JSON object `{"<id>": "<summary>"}` covering every
   digest id in the batch, and nothing else.
+
+**Verify grounding, not only coverage.** A subagent given 45 digests returns 45
+summaries: right length, ids matching, merge accepted, coverage green — and any
+number of them may describe behaviour the digest does not show. Every mechanical
+gate measures shape, not truth, and a subagent's report is evidence that it
+believes it finished, not that it was right. **The dispatching agent verifies;
+this is not delegable to the author.** Cheapest effective checks: set-difference
+the identifiers in each summary against its digest (anything in the prose but not
+the evidence is fabrication or paraphrase); grep for speculation words
+(*probably*, *likely*, *appears to*) which mark where evidence ran out; and read
+a random 20–30 against their digests claim by claim. See
+`docs/grounding-and-verification.md`.
 
 **Verify coverage before merging** when several agents ran: every digest id in
 every batch must appear in exactly one output file. Agents writing to the wrong

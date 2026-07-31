@@ -213,6 +213,12 @@ Individual stores can add their own thin skill for estate specifics — which
 repositories matter, their clone URL, where journeys are written up, what is
 known stale — and leave the mechanics to these.
 
+A third skill, **`knowledge-store-export`**, covers getting a finding *out* of
+the store: a dated, self-contained markdown export for a ticket or a
+data-protection owner, with evidence, provenance and honest limits — and with
+sensitive values deliberately left out in favour of locations, masked shapes and
+a regeneration recipe.
+
 ## Querying the result
 
 The store is designed to be read two ways, and it is worth being explicit
@@ -274,9 +280,20 @@ specification format can be added without changing consumers.
   connecting edge are independent implementations, and the tooling says that
   rather than guessing.
 
-`docs/retrieval-architecture.md` covers the retrieval design in full: how this
-differs from vector RAG, what the graph is and is not good for, and where each
-answer layer lives.
+Two documents go further than this README:
+
+- **`docs/building-a-knowledge-store.md`** — the operator's judgement:
+  how to define an estate (and how to tell when your definition is wrong),
+  what extraction actually yields per content type, what to gate before you
+  build, what a refresh costs, and the traps that have cost real time. Read
+  this before standing up a new store.
+- **`docs/grounding-and-verification.md`** — the contract that every claim in a
+  store traces to evidence in it, why a subagent's report is not evidence that
+  its work is correct, and how to check grounding rather than only coverage.
+  Read this if you are asked whether a store's answers are fact-based.
+- **`docs/retrieval-architecture.md`** — the retrieval design in full: how
+  this differs from vector RAG, what the graph is and is not good for, and
+  where each answer layer lives.
 
 ## Development
 
