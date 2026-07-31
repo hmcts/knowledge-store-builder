@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -273,6 +274,126 @@ def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
     return 0
 
 
+# A token is treated as a claim about code only if it is shaped like one. This is
+# structural rather than a blocklist, because ordinary prose is full of
+# capitalised words - "Welsh", "Angular", "Common Platform" - that are not claims
+# about code, and a blocklist of them would never be complete. Requiring an
+# internal case change, a separator, a file extension or a ticket shape excludes
+# English capitalisation and all-caps acronyms without naming any of them.
+_CAMEL = re.compile(r"\b[A-Za-z][a-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*\b")
+_SNAKE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b")
+_DASHED = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b")
+_FILE = re.compile(
+    r"\b[A-Za-z0-9_.-]+\.(?:java|ts|js|py|json|yaml|yml|xml|raml|csv|feature|sql|html|tsx)\b"
+)
+_TICKET = re.compile(r"\b[A-Z]{2,}-\d+\b")
+# Words that mark a claim the author had no evidence for. A factual description
+# layer should contain almost none.
+_SPECULATION = re.compile(
+    r"\b(probably|likely|presumably|possibly|perhaps|appears to|seems to|"
+    r"suggests that|may be|might be|could be)\b",
+    re.I,
+)
+
+
+def prose_identifiers(text: str) -> set[str]:
+    """Tokens in `text` shaped like a claim about code."""
+    found: set[str] = set()
+    for pattern in (_FILE, _TICKET, _CAMEL, _SNAKE, _DASHED):
+        found.update(pattern.findall(text))
+    return found
+
+
+def _digest_identifiers(digest: dict) -> set[str]:
+    """Every identifier the evidence contains, including path components."""
+    evidence: set[str] = set()
+    for repo in digest.get("repositories", []):
+        evidence.add(repo)
+    for field in ("label",):
+        if digest.get(field):
+            evidence.add(str(digest[field]))
+    for node in digest.get("top_nodes", []):
+        if node.get("label"):
+            evidence.add(str(node["label"]))
+        source = str(node.get("source_file") or "")
+        if source:
+            evidence.add(source)
+            evidence.update(part for part in re.split(r"[/\\]", source) if part)
+    for feature in digest.get("business_features", []):
+        label = feature.get("label") if isinstance(feature, dict) else feature
+        if label:
+            evidence.add(str(label))
+    evidence.update(str(t) for t in digest.get("tickets", []))
+    # a prose mention of Foo.java is grounded by evidence naming Foo, and vice
+    # versa, so index the stem alongside the filename
+    for item in list(evidence):
+        stem = item.rsplit(".", 1)[0]
+        if stem and stem != item:
+            evidence.add(stem)
+        evidence.add(f"{item}.java")
+    return evidence
+
+
+def verify(sample: int | None = None, strict: bool = False) -> int:
+    """Check authored summaries cite only what their digests contain.
+
+    Coverage checks confirm every digest got prose; this confirms the prose is
+    grounded. Reports rather than fails, so it can be run on a whole store
+    without blocking; `strict` is for CI.
+    """
+    loaded = io.read_json(INPUT_PATH, default=[]) or []
+    digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
+    prose = io.read_json_dict(OUTPUT_PATH)
+    if not digests or not prose:
+        print(
+            f"Nothing to verify: {len(digests)} digests in {INPUT_PATH}, "
+            f"{len(prose)} summaries in {OUTPUT_PATH}. Run `summaries extract` first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    ids = sorted(prose, key=lambda k: (len(k), k))
+    if sample and sample < len(ids):
+        # deterministic sample: reproducible between runs, so a finding can be
+        # re-examined without it disappearing
+        step = len(ids) / sample
+        ids = [ids[int(i * step)] for i in range(sample)]
+
+    unsupported: list[tuple[str, set[str]]] = []
+    speculative: list[tuple[str, list[str]]] = []
+    orphaned: list[str] = []
+    for cid in ids:
+        text = prose[cid]
+        digest = digests.get(cid)
+        if digest is None:
+            orphaned.append(cid)
+            continue
+        extra = prose_identifiers(text) - _digest_identifiers(digest)
+        if extra:
+            unsupported.append((cid, extra))
+        hedges = _SPECULATION.findall(text)
+        if hedges:
+            speculative.append((cid, hedges))
+
+    print(f"Verified {len(ids)} of {len(prose)} summaries against their digests.")
+    for cid, extra in unsupported:
+        print(f"  [unsupported] community {cid} cites: {', '.join(sorted(extra))}")
+    for cid, hedges in speculative:
+        print(
+            f"  [speculation] community {cid}: {', '.join(sorted(set(h.lower() for h in hedges)))}"
+        )
+    for cid in orphaned:
+        print(f"  [no digest] community {cid} has prose but no evidence to check it against")
+    if not (unsupported or speculative or orphaned):
+        print("  nothing unsupported.")
+    else:
+        print(
+            f"  {len(unsupported)} unsupported, {len(speculative)} speculative, "
+            f"{len(orphaned)} without a digest."
+        )
+    return 1 if (strict and (unsupported or orphaned)) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["extract"]:
@@ -281,6 +402,12 @@ def main(argv: list[str] | None = None) -> int:
         return merge(arguments[1:])
     if arguments[:1] == ["snapshot"]:
         return snapshot()
+    if arguments[:1] == ["verify"]:
+        parser = argparse.ArgumentParser(prog="knowledgestore summaries verify")
+        parser.add_argument("--sample", type=int, default=None)
+        parser.add_argument("--strict", action="store_true")
+        options = parser.parse_args(arguments[1:])
+        return verify(sample=options.sample, strict=options.strict)
     if arguments[:1] == ["remap"]:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries remap")
         parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
