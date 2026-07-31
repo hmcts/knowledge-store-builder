@@ -3,6 +3,5 @@
   "description": "Query and build knowledge stores made with knowledge-store-builder. knowledge-store: ask a store questions (architecture, duplication, journeys, business intent), with every claim traced to evidence. knowledge-store-build: run the pipeline, including the summary, topic-brief and deep-dive authoring loops, and verify what subagents produce. knowledge-store-export: hand a finding to a ticket or a data-protection owner, with locations and masked shapes rather than the values themselves.",
   "author": {
     "name": "HMCTS"
-  },
-  "skills": ".claude/skills/"
+  }
 }

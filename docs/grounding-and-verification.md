@@ -12,9 +12,9 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 >
 > | Mirrored in | Which part |
 > |---|---|
-> | `.claude/skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; say which layer answered |
-> | `.claude/skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate; run `summaries verify` |
-> | `.claude/skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
+> | `skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; say which layer answered |
+> | `skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate; run `summaries verify` |
+> | `skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
 
 ## The contract

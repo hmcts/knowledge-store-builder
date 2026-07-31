@@ -69,7 +69,14 @@ How that looks in this codebase:
 
 ## The skills are the enforcement point, not the docs
 
-`docs/` holds the reasoning; the three skills in `.claude/skills/` hold the
+**Skills live in `skills/`, not `.claude/skills/`.** That is where Claude Code
+discovers a plugin's skills; `plugin.json` must not declare a `skills` field at
+all, and declaring one makes the plugin fail to install with
+`skills: Invalid input`. The consequence for a library developer is that these
+skills do not auto-load while working in this repository — they are for
+consumers of stores, and `CLAUDE.md` is what a developer here needs.
+
+`docs/` holds the reasoning; the three skills in `skills/` hold the
 operative rules. **An agent reads the skill it was invoked with and may never
 open `docs/`** — so a rule that exists only in a document does not bind anyone.
 
