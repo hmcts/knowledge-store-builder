@@ -281,7 +281,7 @@ def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
 # internal case change, a separator, a file extension or a ticket shape excludes
 # English capitalisation and all-caps acronyms without naming any of them.
 _CAMEL = re.compile(r"\b[A-Za-z][a-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*\b")
-_SNAKE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b")
+_SNAKE = re.compile(r"\b[A-Za-z]\w*_\w+\b")
 _DASHED = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b")
 # English compound adjectives match _DASHED too - "police-to-courtroom",
 # "end-to-end", "point-in-time" - and flagging them is noise that would train
@@ -307,7 +307,7 @@ _PROSE_JOINERS = {
     "vs",
 }
 _FILE = re.compile(
-    r"\b[A-Za-z0-9_.-]+\.(?:java|ts|js|py|json|yaml|yml|xml|raml|csv|feature|sql|html|tsx)\b"
+    r"\b[\w.-]+\.(?:java|ts|js|py|json|yaml|yml|xml|raml|csv|feature|sql|html|tsx)\b"
 )
 _TICKET = re.compile(r"\b[A-Z]{2,}-\d+\b")
 # Words that mark a claim the author had no evidence for. A factual description
@@ -343,60 +343,110 @@ def _normalise(identifier: str) -> str:
     return re.sub(r"[^a-z0-9]", "", identifier.lower())
 
 
+def _node_identifiers(node) -> set[str]:
+    """Identifiers a single digest node contributes.
+
+    Real digests write a node as "Label (source/file.ext)" in one string; the
+    dict form is also accepted. Handling only the dict form crashed on a real
+    store despite a full passing test suite, because every fixture used dicts.
+    """
+    if isinstance(node, dict):
+        label = str(node.get("label") or "")
+        source = str(node.get("source_file") or "")
+    else:
+        label, _, tail = str(node).partition(" (")
+        source = tail.rstrip(")") if tail else ""
+    found: set[str] = set()
+    if label:
+        found.add(label.strip())
+        found.update(word for word in re.split(r"[\s,]+", label) if word)
+    if source:
+        found.add(source)
+        found.update(part for part in re.split(r"[/\\]", source) if part)
+    return found
+
+
+def _spelling_variants(identifier: str) -> set[str]:
+    """Other spellings of the same thing, so prose need not match character for
+    character: a bare stem for a filename, and the test/subject pairing."""
+    variants = {f"{identifier}.java"}
+    stem = identifier.rsplit(".", 1)[0]
+    if stem and stem != identifier:
+        variants.add(stem)
+    # A digest showing FooTest is evidence that Foo exists; describing the class
+    # rather than its test is interpretation, not invention.
+    if identifier.endswith("Test") and len(identifier) > 4:
+        variants.add(identifier[:-4])
+    else:
+        variants.add(f"{identifier}Test")
+    return variants
+
+
 def _digest_identifiers(digest: dict) -> set[str]:
-    """Every identifier the evidence contains, including path components."""
-    evidence: set[str] = set()
-    for repo in digest.get("repositories", []):
-        evidence.add(repo)
-    for field in ("label",):
-        if digest.get(field):
-            evidence.add(str(digest[field]))
+    """Every identifier the evidence contains, with its spelling variants."""
+    evidence: set[str] = set(digest.get("repositories", []))
+    if digest.get("label"):
+        evidence.add(str(digest["label"]))
     for node in digest.get("top_nodes", []):
-        # Real digests write a node as "Label (source/file.ext)" in one string;
-        # the dict form is also accepted. Handling only the dict form crashed on
-        # a real store despite a full passing test suite, because every fixture
-        # used dicts.
-        if isinstance(node, dict):
-            label = str(node.get("label") or "")
-            source = str(node.get("source_file") or "")
-        else:
-            text = str(node)
-            label, _, tail = text.partition(" (")
-            source = tail.rstrip(")") if tail else ""
-        if label:
-            evidence.add(label.strip())
-            evidence.update(word for word in re.split(r"[\s,]+", label) if word)
-        if source:
-            evidence.add(source)
-            evidence.update(part for part in re.split(r"[/\\]", source) if part)
+        evidence |= _node_identifiers(node)
     for feature in digest.get("business_features", []):
         label = feature.get("label") if isinstance(feature, dict) else feature
         if isinstance(label, str):
+            evidence.add(label)
             evidence.update(word for word in re.split(r"[\s,]+", label) if word)
-        if label:
-            evidence.add(str(label))
-    evidence.update(str(t) for t in digest.get("tickets", []))
-    # a prose mention of Foo.java is grounded by evidence naming Foo, and vice
-    # versa, so index the stem alongside the filename
-    for item in list(evidence):
-        stem = item.rsplit(".", 1)[0]
-        if stem and stem != item:
-            evidence.add(stem)
-        evidence.add(f"{item}.java")
-        # A digest showing FooTest is evidence that Foo exists; describing the
-        # class rather than its test is interpretation, not invention.
-        if item.endswith("Test") and len(item) > 4:
-            evidence.add(item[:-4])
-        else:
-            evidence.add(f"{item}Test")
+    evidence.update(str(ticket) for ticket in digest.get("tickets", []))
+    for identifier in tuple(evidence):
+        evidence |= _spelling_variants(identifier)
     return evidence
+
+
+def _sample_ids(ids: list[str], sample: int | None) -> list[str]:
+    """A deterministic subset, so a finding can be re-examined without it moving."""
+    if not sample or sample >= len(ids):
+        return ids
+    step = len(ids) / sample
+    return [ids[int(i * step)] for i in range(sample)]
+
+
+def _report_verify(
+    checked: int,
+    total: int,
+    unsupported: list[tuple[str, set[str]]],
+    speculative: list[tuple[str, list[str]]],
+    orphaned: list[str],
+) -> None:
+    print(f"Verified {checked} of {total} summaries against their digests.")
+    for cid, extra in unsupported:
+        print(f"  [unsupported] community {cid} cites: {', '.join(sorted(extra))}")
+    for cid, hedges in speculative:
+        words = sorted({hedge.lower() for hedge in hedges})
+        print(f"  [speculation] community {cid}: {', '.join(words)}")
+    for cid in orphaned:
+        print(f"  [no digest] community {cid} has prose but no evidence to check it against")
+    if unsupported or speculative or orphaned:
+        print(
+            f"  {len(unsupported)} unsupported, {len(speculative)} speculative, "
+            f"{len(orphaned)} without a digest."
+        )
+    else:
+        print("  nothing unsupported.")
+
+
+def _ungrounded(text: str, digest: dict) -> set[str]:
+    """Identifiers the prose cites that the evidence does not contain."""
+    evidence = {_normalise(item) for item in _digest_identifiers(digest)}
+    return {
+        cited
+        for cited in prose_identifiers(text)
+        if _normalise(cited) and _normalise(cited) not in evidence
+    }
 
 
 def verify(sample: int | None = None, strict: bool = False) -> int:
     """Check authored summaries cite only what their digests contain.
 
     Coverage checks confirm every digest got prose; this confirms the prose is
-    grounded. Reports rather than fails, so it can be run on a whole store
+    grounded. Reports rather than fails, so it can be run over a whole store
     without blocking; `strict` is for CI.
     """
     loaded = io.read_json(INPUT_PATH, default=[]) or []
@@ -410,50 +460,23 @@ def verify(sample: int | None = None, strict: bool = False) -> int:
         )
         return 1
 
-    ids = sorted(prose, key=lambda k: (len(k), k))
-    if sample and sample < len(ids):
-        # deterministic sample: reproducible between runs, so a finding can be
-        # re-examined without it disappearing
-        step = len(ids) / sample
-        ids = [ids[int(i * step)] for i in range(sample)]
-
     unsupported: list[tuple[str, set[str]]] = []
     speculative: list[tuple[str, list[str]]] = []
     orphaned: list[str] = []
-    for cid in ids:
-        text = prose[cid]
+    checked = _sample_ids(sorted(prose, key=lambda k: (len(k), k)), sample)
+    for cid in checked:
         digest = digests.get(cid)
         if digest is None:
             orphaned.append(cid)
             continue
-        evidence = {_normalise(e) for e in _digest_identifiers(digest)}
-        extra = {
-            cited
-            for cited in prose_identifiers(text)
-            if _normalise(cited) and _normalise(cited) not in evidence
-        }
+        extra = _ungrounded(prose[cid], digest)
         if extra:
             unsupported.append((cid, extra))
-        hedges = _SPECULATION.findall(text)
+        hedges = _SPECULATION.findall(prose[cid])
         if hedges:
             speculative.append((cid, hedges))
 
-    print(f"Verified {len(ids)} of {len(prose)} summaries against their digests.")
-    for cid, extra in unsupported:
-        print(f"  [unsupported] community {cid} cites: {', '.join(sorted(extra))}")
-    for cid, hedges in speculative:
-        print(
-            f"  [speculation] community {cid}: {', '.join(sorted(set(h.lower() for h in hedges)))}"
-        )
-    for cid in orphaned:
-        print(f"  [no digest] community {cid} has prose but no evidence to check it against")
-    if not (unsupported or speculative or orphaned):
-        print("  nothing unsupported.")
-    else:
-        print(
-            f"  {len(unsupported)} unsupported, {len(speculative)} speculative, "
-            f"{len(orphaned)} without a digest."
-        )
+    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned)
     return 1 if (strict and (unsupported or orphaned)) else 0
 
 
