@@ -283,6 +283,29 @@ def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
 _CAMEL = re.compile(r"\b[A-Za-z][a-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*\b")
 _SNAKE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b")
 _DASHED = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b")
+# English compound adjectives match _DASHED too - "police-to-courtroom",
+# "end-to-end", "point-in-time" - and flagging them is noise that would train
+# readers to ignore the report. A hyphenated token joined by a preposition or
+# conjunction is prose, not a repository or file name.
+_PROSE_JOINERS = {
+    "to",
+    "in",
+    "of",
+    "and",
+    "or",
+    "for",
+    "with",
+    "the",
+    "a",
+    "an",
+    "at",
+    "on",
+    "by",
+    "from",
+    "as",
+    "per",
+    "vs",
+}
 _FILE = re.compile(
     r"\b[A-Za-z0-9_.-]+\.(?:java|ts|js|py|json|yaml|yml|xml|raml|csv|feature|sql|html|tsx)\b"
 )
@@ -299,9 +322,25 @@ _SPECULATION = re.compile(
 def prose_identifiers(text: str) -> set[str]:
     """Tokens in `text` shaped like a claim about code."""
     found: set[str] = set()
-    for pattern in (_FILE, _TICKET, _CAMEL, _SNAKE, _DASHED):
+    for pattern in (_FILE, _TICKET, _CAMEL, _SNAKE):
         found.update(pattern.findall(text))
+    for token in _DASHED.findall(text):
+        if not (set(token.split("-")) & _PROSE_JOINERS):
+            found.add(token)
     return found
+
+
+def _normalise(identifier: str) -> str:
+    """Reduce an identifier to what makes two spellings the same thing.
+
+    Graph node labels carry method decoration (`.saveDecision()`) that prose
+    naturally drops, and this estate names the same concept in kebab-case as a
+    schema and CamelCase as a class (`result-prompt-word-synonym`,
+    `ResultPromptWordSynonym`). Comparing on letters and digits alone treats
+    those as grounded, while a genuinely different name - or a longer one like
+    `FooProcessor` against `Foo` - still differs.
+    """
+    return re.sub(r"[^a-z0-9]", "", identifier.lower())
 
 
 def _digest_identifiers(digest: dict) -> set[str]:
@@ -313,14 +352,27 @@ def _digest_identifiers(digest: dict) -> set[str]:
         if digest.get(field):
             evidence.add(str(digest[field]))
     for node in digest.get("top_nodes", []):
-        if node.get("label"):
-            evidence.add(str(node["label"]))
-        source = str(node.get("source_file") or "")
+        # Real digests write a node as "Label (source/file.ext)" in one string;
+        # the dict form is also accepted. Handling only the dict form crashed on
+        # a real store despite a full passing test suite, because every fixture
+        # used dicts.
+        if isinstance(node, dict):
+            label = str(node.get("label") or "")
+            source = str(node.get("source_file") or "")
+        else:
+            text = str(node)
+            label, _, tail = text.partition(" (")
+            source = tail.rstrip(")") if tail else ""
+        if label:
+            evidence.add(label.strip())
+            evidence.update(word for word in re.split(r"[\s,]+", label) if word)
         if source:
             evidence.add(source)
             evidence.update(part for part in re.split(r"[/\\]", source) if part)
     for feature in digest.get("business_features", []):
         label = feature.get("label") if isinstance(feature, dict) else feature
+        if isinstance(label, str):
+            evidence.update(word for word in re.split(r"[\s,]+", label) if word)
         if label:
             evidence.add(str(label))
     evidence.update(str(t) for t in digest.get("tickets", []))
@@ -331,6 +383,12 @@ def _digest_identifiers(digest: dict) -> set[str]:
         if stem and stem != item:
             evidence.add(stem)
         evidence.add(f"{item}.java")
+        # A digest showing FooTest is evidence that Foo exists; describing the
+        # class rather than its test is interpretation, not invention.
+        if item.endswith("Test") and len(item) > 4:
+            evidence.add(item[:-4])
+        else:
+            evidence.add(f"{item}Test")
     return evidence
 
 
@@ -368,7 +426,12 @@ def verify(sample: int | None = None, strict: bool = False) -> int:
         if digest is None:
             orphaned.append(cid)
             continue
-        extra = prose_identifiers(text) - _digest_identifiers(digest)
+        evidence = {_normalise(e) for e in _digest_identifiers(digest)}
+        extra = {
+            cited
+            for cited in prose_identifiers(text)
+            if _normalise(cited) and _normalise(cited) not in evidence
+        }
         if extra:
             unsupported.append((cid, extra))
         hedges = _SPECULATION.findall(text)

@@ -45,6 +45,20 @@ class IdentifierExtractionTest(unittest.TestCase):
         self.assertIn("pom.xml", found)
         self.assertIn("CCT-1234", found)
 
+    def test_english_compound_adjectives_are_not_identifiers(self):
+        # "the police-to-courtroom mapping" is prose; flagging it is noise that
+        # trains readers to ignore the report
+        for phrase in ("police-to-courtroom", "end-to-end", "point-in-time", "out-of-hours"):
+            self.assertEqual(
+                summaries.prose_identifiers(f"Handles {phrase} routing."),
+                set(),
+                phrase,
+            )
+
+    def test_hyphenated_code_names_are_still_identifiers(self):
+        found = summaries.prose_identifiers("Defined in cpp-context-progression and svc-crime-api")
+        self.assertIn("cpp-context-progression", found)
+
     def test_ordinary_capitalised_prose_is_not_an_identifier(self):
         # the false-positive case that would make the checker useless
         text = "Welsh language handling in the Common Platform, an Angular UI using JSON."
@@ -131,6 +145,71 @@ class VerifyTest(unittest.TestCase):
         )
         _, output = self.run_verify()
         self.assertNotIn("[unsupported]", output)
+
+    def test_top_nodes_written_as_strings_are_read_as_evidence(self):
+        # real digests write a node as "Label (source/file.ext)" in one string.
+        # Every fixture here used the dict form, so a full passing suite still
+        # crashed on a real store - this pins the shape that actually ships.
+        config.SUMMARIES_INPUT_PATH.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "1",
+                        "label": "CaseAggregate",
+                        "size": 40,
+                        "repositories": ["svc-a"],
+                        "top_nodes": ["CaseAggregate (src/main/java/CaseAggregate.java)"],
+                        "business_features": [],
+                        "tickets": [],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        config.SUMMARIES_PATH.write_text(
+            json.dumps({"1": "Logic in svc-a around CaseAggregate."}), encoding="utf-8"
+        )
+        code, output = self.run_verify()
+        self.assertEqual(code, 0)
+        self.assertNotIn("[unsupported]", output)
+
+    def test_a_test_class_in_evidence_grounds_a_claim_about_the_class(self):
+        # a digest showing HearingResultHelperTest is evidence the helper exists;
+        # describing the class rather than its test is interpretation
+        self.write(
+            [self.digest("1", "HearingResultHelperTest", "svc-a", ["HearingResultHelperTest"])],
+            {"1": "Helper logic in svc-a around HearingResultHelper."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("[unsupported]", output)
+
+    def test_method_decoration_in_evidence_grounds_the_bare_name(self):
+        # graph node labels are written ".saveDecision()"; prose says saveDecision
+        self.write(
+            [self.digest("1", "CaseService", "svc-a", [".saveDecision()"])],
+            {"1": "The svc-a case service exposes saveDecision for SJP decisions."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("[unsupported]", output)
+
+    def test_kebab_and_camel_spellings_of_one_concept_agree(self):
+        # this estate names a schema in kebab-case and its class in CamelCase
+        self.write(
+            [self.digest("1", "ResultPromptWordSynonym", "svc-a", ["ResultPromptWordSynonym"])],
+            {"1": "Handles the result-prompt-word-synonym reference data in svc-a."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("[unsupported]", output)
+
+    def test_a_longer_name_is_still_not_the_same_identifier(self):
+        # normalisation must not collapse Foo into FooProcessor, or the check
+        # stops distinguishing a real class from an invented neighbour
+        self.write(
+            [self.digest("1", "CaseDecisionProcessor", "svc-a", ["CaseDecisionProcessor"])],
+            {"1": "Logic in svc-a around ApplicationDecisionProcessor."},
+        )
+        _, output = self.run_verify()
+        self.assertIn("ApplicationDecisionProcessor", output)
 
     # --- speculation ---------------------------------------------------------
 

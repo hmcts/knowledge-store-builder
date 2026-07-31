@@ -13,7 +13,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 > | Mirrored in | Which part |
 > |---|---|
 > | `.claude/skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; say which layer answered |
-> | `.claude/skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate |
+> | `.claude/skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate; run `summaries verify` |
 > | `.claude/skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
 
@@ -134,11 +134,41 @@ A reader who knows a layer was coverage-checked but not grounding-checked can
 calibrate. A reader told only "N summaries, full coverage" will reasonably assume
 more than that number supports.
 
-## Honest note on this library's current state
+## The shipped check
 
-Coverage checks are implemented and documented. **Grounding checks are documented
-here but not yet shipped as tooling** — the mechanical citation check and the
-vocabulary check are both automatable and neither exists as a command. Until they
-do, they are manual steps that get skipped under time pressure, which is exactly
-when invention is most likely to enter a store. Treated as a defect, not a
-future enhancement.
+```bash
+knowledgestore summaries verify [--sample N] [--strict]
+```
+
+Both automatable checks above are implemented: identifiers cited in each summary
+are compared against those its digest contains, and speculation words are
+flagged. It reports by default so it can be run over a whole store without
+blocking; `--strict` exits non-zero for CI; `--sample N` takes a deterministic
+subset and prints its own rate, so the output cannot be read as full coverage.
+
+**What it will and will not tell you.** A finding means the prose cites an
+identifier the evidence does not contain. That is usually one of three things,
+and only the first is fabrication:
+
+- a name that does not exist, sometimes a blend of two that do
+- interpretation the reader might accept (naming a class when the evidence shows
+  only its test)
+- a spelling difference the checker has not been taught
+
+Comparison is on letters and digits only, so method decoration (`.saveDecision()`
+against `saveDecision`) and this estate's kebab-schema/CamelCase-class convention
+both count as grounded, while a longer or different name still differs. English
+compound adjectives ("police-to-courtroom") are excluded from identifier
+detection, because flagging them trains readers to ignore the report.
+
+**Calibrating on a real store.** Tuned against ~5,300 authored summaries:
+summaries written directly against their own digest flagged at 9%, while
+summaries carried across a re-cluster by `summaries remap` flagged at 37%. Two
+things follow. The four-fold gap is the check working — remapped prose cites the
+evidence of the cluster it was written for, not the one it now sits on. And a
+remap preserves *coverage* while degrading *grounding*, which is worth knowing
+before treating a high retention figure as a clean result.
+
+Neither residual figure is all fabrication; both include interpretation and
+spellings the checker has not been taught. Use it to find the worst cases and to
+watch the rate between refreshes, not as a defect count.

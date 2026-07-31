@@ -41,7 +41,7 @@ file so every rebuild resolves the same way, and lock it with
 ```
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
 --only-binary :all:
-hmcts-knowledge-store-builder==0.2.0
+hmcts-knowledge-store-builder==0.5.0   # pin a real release: see the Releases page
 ```
 
 **Outside HMCTS**, the feed is not reachable — install from source instead:
@@ -137,8 +137,23 @@ knowledgestore summaries extract              # evidence digests, deterministic
 knowledgestore summaries merge written.json   # validated on the way in
 ```
 
-`merge` rejects unknown cluster ids and out-of-range lengths, so a
-hallucinated or mismatched batch cannot silently enter the store. `topics`
+`merge` rejects unknown cluster ids and out-of-range lengths, so a mismatched
+batch cannot silently enter the store — but shape is all it can check. Two more
+sub-commands cover what shape cannot:
+
+```bash
+knowledgestore summaries verify --sample 200   # is the prose grounded in its digest?
+knowledgestore summaries snapshot              # before re-clustering
+knowledgestore summaries remap                 # after: carry summaries onto new ids
+```
+
+`verify` compares the identifiers each summary cites against those its digest
+contains, because a confidently fabricated batch passes every length and id
+check. `snapshot` and `remap` survive a re-cluster: adding repositories moves
+community ids, and `remap` carries prose across by membership overlap, drops what
+it cannot place, and reports retention. See `docs/grounding-and-verification.md`.
+
+`topics`
 works the same way: `extract` gathers a per-topic evidence dossier, you write
 `docs/topics/<slug>.md` from it, and `merge` validates and renders it.
 
@@ -191,33 +206,25 @@ build_explorer.main()
 
 ## Claude Code plugin
 
-The reusable skills ship here, so any store gets them:
+Three skills ship here, so any store gets them:
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 ```
 
-- **`knowledge-store`** — query a store: it finds one (working directory,
-  `$KNOWLEDGE_STORE`, a remembered location, or a look under your home
-  directory) and offers to clone one if there is none, then traversal recipes,
-  the interpretation rules that matter (same-named nodes in different
-  repositories are independent implementations unless an edge says otherwise),
-  the business-intent and journey recipes, and what the graph cannot answer.
-- **`knowledge-store-build`** — build or refresh one, including the two loops
-  that need an LLM: writing community summaries from digests (chunked across
-  parallel subagents, coverage-checked, validated on merge) and writing topic
-  briefs from evidence dossiers.
+| Skill | Use it to | Covers |
+|---|---|---|
+| **`knowledge-store`** | **ask a store questions** | Finds a store (working directory, `$KNOWLEDGE_STORE`, a remembered location, or a look under your home directory) and offers to clone one if there is none. Traversal recipes, the business-intent and journey recipes, the interpretation rules that matter — same-named nodes in different repositories are independent implementations unless an edge says otherwise — and what the graph cannot answer. Every claim traces to evidence; absence of evidence is reported as a finding. |
+| **`knowledge-store-build`** | **build or refresh one** | The stage order, and the three loops that need an LLM: community summaries from digests, topic briefs from evidence dossiers, and repository deep dives. Fanning those across parallel subagents, then verifying what comes back — coverage *and* grounding, because a fabricated batch passes every shape check. |
+| **`knowledge-store-export`** | **hand a finding to someone else** | A dated, self-contained markdown export for a ticket or a data-protection owner: required sections, provenance, honest limits, and a plain register so it reads as measurement rather than persuasion. Sensitive values stay out — locations, masked shapes and a regeneration recipe instead. |
+
+Pick by direction of travel: `knowledge-store` reads, `knowledge-store-build`
+writes, `knowledge-store-export` sends outward.
 
 Individual stores can add their own thin skill for estate specifics — which
 repositories matter, their clone URL, where journeys are written up, what is
-known stale — and leave the mechanics to these.
-
-A third skill, **`knowledge-store-export`**, covers getting a finding *out* of
-the store: a dated, self-contained markdown export for a ticket or a
-data-protection owner, with evidence, provenance and honest limits — and with
-sensitive values deliberately left out in favour of locations, masked shapes and
-a regeneration recipe.
+known stale — and leave the mechanics to these three.
 
 ## Querying the result
 
