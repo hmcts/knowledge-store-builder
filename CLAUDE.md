@@ -69,7 +69,29 @@ How that looks in this codebase:
 
 ## The skills are the enforcement point, not the docs
 
-`docs/` holds the reasoning; the three skills in `.claude/skills/` hold the
+**Skills live in `skills/`**, the directory Claude Code scans by default, and
+`plugin.json` declares no `skills` field. A store may reasonably choose the
+other arrangement, so be precise about why this one fails:
+
+- **`skills` is a valid manifest field.** What is invalid is a path that does
+  not start with `./` — every component path must be relative to the plugin
+  root and begin with `./`. `".claude/skills/"` fails install with
+  `skills: Invalid input`; `"./.claude/skills/"` is accepted. The message names
+  the field, which reads as though the field were unsupported. It is not.
+- **`skills` adds to the default scan** rather than replacing it — except when
+  a marketplace entry's `source` resolves to the marketplace root, as ours does
+  (`"source": "./"`), where naming subdirectories replaces the default `skills/`
+  scan instead.
+
+So a store that wants its own skill auto-discovered while working inside its
+clone should keep it at `.claude/skills/` and point the manifest at
+`"./.claude/skills/"` — one copy serving both. This library has no such need:
+its skills are for consumers of stores, not developers here, so it takes the
+plain `skills/` layout and declares nothing. The trade is that these skills do
+not auto-load while working in this repository; `CLAUDE.md` is what a developer
+here needs.
+
+`docs/` holds the reasoning; the three skills in `skills/` hold the
 operative rules. **An agent reads the skill it was invoked with and may never
 open `docs/`** — so a rule that exists only in a document does not bind anyone.
 
