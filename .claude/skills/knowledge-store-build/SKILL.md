@@ -118,6 +118,15 @@ the evidence is fabrication or paraphrase); grep for speculation words
 a random 20–30 against their digests claim by claim. See
 `docs/grounding-and-verification.md`.
 
+```bash
+knowledgestore summaries verify --sample 200   # grounding, after merging
+```
+
+Compares the identifiers each summary cites against those its digest contains,
+and flags speculation words. `--strict` for CI. Read
+`docs/grounding-and-verification.md` for what a finding does and does not mean —
+it is a starting point for inspection, not a defect count.
+
 **Verify coverage before merging** when several agents ran: every digest id in
 every batch must appear in exactly one output file. Agents writing to the wrong
 path is the failure mode to check for.
