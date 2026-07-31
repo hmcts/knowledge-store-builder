@@ -13,38 +13,64 @@ the estate — best through a coding agent, which can traverse the graph and
 write a cited answer, and adequately through the HTML page if they have no
 licence at all.
 
-Built for the HMCTS Common Platform crime estate (93 repositories, 745k nodes),
-where it answers questions like "which applications implement their own address
-formatting, and which tickets changed them" without anyone reading the code.
+Built for the HMCTS Common Platform crime estate, where it answers questions
+like "which applications implement their own address formatting, and which
+tickets changed them" without anyone reading the code.
 
-## Install
+## Two installs, and which one you need
 
-Releases are published to HMCTS's shared **`hmcts-lib`** Azure Artifacts feed,
-not to PyPI, so the feed has to be named explicitly.
+There are **two separate installs** here. They share nothing but the source
+repository — different channels, different audiences, different versioning — and
+conflating them is the most common confusion:
 
-**Inside HMCTS:**
+| | **1. The Python library** | **2. The Claude Code plugin** |
+|---|---|---|
+| What you get | the `knowledgestore` CLI — the pipeline that builds a store | three skills for querying, building and exporting |
+| Comes from | a wheel on the `hmcts-lib` Azure Artifacts feed | a clone of this repository on GitHub |
+| Install with | `pip`, pinned in your store's requirements | `/plugin marketplace add` |
+| You need it to | **rebuild** a store | **use** one |
+| Version | a git tag, resolved at build time and pinned by consumers | none — whatever is on `main` |
+| How to install | [Install: the Python library](#install-the-python-library) | [Install: the Claude Code plugin](#install-the-claude-code-plugin) |
+
+**Asking questions of an existing store needs only the plugin** — no `pip`, no
+feed, no Python at all. Only someone refreshing a store needs the library, and
+they usually want both.
+
+The versioning asymmetry is worth stating plainly, because it surprises people:
+**cutting a release does not ship a skill change, and merging a skill change
+needs no release.** A store can therefore pin library `v0.5.1` while running
+skills from a later `main`. Neither is wrong — they are separate channels — but
+if a skill's behaviour does not match its documentation, the release number is
+not the thing to check.
+
+## Install: the Python library
+
+Releases are published to the **`hmcts-lib`** Azure Artifacts feed, not to PyPI,
+so the feed has to be named explicitly. It reads anonymously, so this needs no
+credentials and no HMCTS account:
 
 ```bash
-pip install keyring artifacts-keyring     # one-off: Azure Artifacts credentials
 pip install --extra-index-url \
   https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
   hmcts-knowledge-store-builder
 ```
 
-`artifacts-keyring` handles the device-flow sign-in on first use. A `~/.netrc`
-entry for `pkgs.dev.azure.com` works instead, and is what CI uses.
+Opening the feed's root URL in a browser does prompt for a sign-in, which makes
+it look private. It is not: `pip` requests the per-package path, which serves
+the distribution list and the artefacts without authentication. Credentials are
+only needed to *publish*, and that is the release workflow's job.
 
-For a store repository, put the feed and the pinned version in a requirements
+For a store repository, put the feed and a pinned version in a requirements
 file so every rebuild resolves the same way, and lock it with
 `uv pip compile --generate-hashes` so CI installs exactly what you resolved:
 
 ```
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
 --only-binary :all:
-hmcts-knowledge-store-builder==0.5.0   # pin a real release: see the Releases page
+hmcts-knowledge-store-builder==X.Y.Z   # the release you mean: see the Releases page
 ```
 
-**Outside HMCTS**, the feed is not reachable — install from source instead:
+To run an unreleased change, install from the branch instead of the feed:
 
 ```bash
 pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
@@ -75,13 +101,21 @@ mkdir my-estate-knowledge && cd my-estate-knowledge && git init
 mkdir config
 cat > config/repository-filters.txt <<'EOF'
 # One rule per line. Archived repositories are always excluded.
+# A rule's value is the whole rest of the line, so a comment can only go on
+# a line of its own -- a trailing one becomes part of the value and matches
+# nothing.
 prefix myteam-service-
 prefix myteam-ui-
 repo   shared-component-library
-team   my-github-team          # or: everything a GitHub team owns
+# everything a GitHub team owns:
+team   my-github-team
 exclude myteam-service-deprecated
 EOF
 ```
+
+`discover` warns about any selecting rule that matched no repository, which is
+what catches a typo or a rule whose value swallowed a comment. `--strict` turns
+those warnings into a non-zero exit for CI.
 
 Then run the pipeline. Every stage is independent and idempotent, so you can
 re-run one without repeating the others:
@@ -204,9 +238,12 @@ config.configure(root="/path/to/store", EXPLORER_TITLE="Payments Estate")
 build_explorer.main()
 ```
 
-## Claude Code plugin
+## Install: the Claude Code plugin
 
-Three skills ship here, so any store gets them:
+Three skills ship here, so any store gets them. This is the second of the
+[two installs](#two-installs-and-which-one-you-need) and is independent of the
+first: it clones this repository from GitHub, and needs no `pip`, no feed
+credentials and no Python.
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
@@ -331,7 +368,7 @@ Two documents go further than this README:
 
 ```bash
 pip install -e '.[dev]'                      # tooling pinned in the dev extra
-python3 -m unittest discover -s tests -v     # 110 unit tests
+python3 -m unittest discover -s tests -v     # the whole suite, in under a second
 
 ruff check src tests                         # lint
 ruff format src tests                        # format (checked in CI)
