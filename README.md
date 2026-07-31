@@ -233,7 +233,10 @@ having the branch locally does nothing. Two consequences:
   manifest problem it reports is about that copy. Merge, update, install.
 
 `skills: Invalid input` on install means the manifest on `main` is wrong, not
-your setup — see `CLAUDE.md` for the layout `plugin.json` must have.
+your setup. Despite the wording it rarely means the field is unsupported —
+usually a component path is missing its `./` prefix, which every path in
+`plugin.json` requires. `CLAUDE.md` has the layout rules, including how a store
+keeps one copy of its skill for both in-clone discovery and plugin install.
 
 | Skill | Use it to | Covers |
 |---|---|---|
