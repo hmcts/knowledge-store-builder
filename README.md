@@ -248,11 +248,26 @@ credentials and no Python.
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
+/reload-plugins
 ```
+
+`install` opens the plugin's details so you can pick a scope — **user** for
+yourself everywhere, **project** to commit it for everyone on the repository,
+**local** for yourself here only. **`/reload-plugins` is not optional**: without
+it the plugin is installed but not active in the session you are sitting in.
 
 Then confirm all three arrived — `/plugin` lists the installed plugin, and
 `knowledge-store`, `knowledge-store-build` and `knowledge-store-export` should
-appear in the skills available to the session.
+appear in the skills available to the session. Note that `/reload-plugins`
+counts only a plugin's `commands/` directory, so it can report `0 skills` while
+having loaded all three correctly — trust the skill list, not that number.
+
+If the plugin installs but its skills never appear, the documented fix is to
+clear the cache, restart, and reinstall:
+
+```bash
+rm -rf ~/.claude/plugins/cache
+```
 
 **Installs come from `main`, not from your checkout.** The marketplace clones
 this repository, so a skill change is only installable once it is merged;
