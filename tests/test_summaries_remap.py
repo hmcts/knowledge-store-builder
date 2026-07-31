@@ -79,10 +79,10 @@ class RemapTest(unittest.TestCase):
     def test_snapshot_records_community_membership_from_the_graph(self):
         # without this, a remap after re-clustering has nothing to compare against
         self.write_graph({"1": ["a", "b"], "2": ["c"]})
-        self.assertEqual(0, summaries.snapshot())
+        self.assertEqual(summaries.snapshot(), 0)
         with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as f:
             recorded = json.load(f)
-        self.assertEqual({"1": ["a", "b"], "2": ["c"]}, recorded)
+        self.assertEqual(recorded, {"1": ["a", "b"], "2": ["c"]})
 
     def test_snapshot_refuses_when_the_graph_has_no_communities(self):
         # a graph that has not been clustered yet would snapshot as empty and
@@ -90,7 +90,7 @@ class RemapTest(unittest.TestCase):
         config.GRAPH_PATH.write_text(
             json.dumps({"nodes": [{"id": "a", "label": "a"}], "links": []}), encoding="utf-8"
         )
-        self.assertEqual(1, summaries.snapshot())
+        self.assertEqual(summaries.snapshot(), 1)
         self.assertFalse(config.SUMMARIES_SNAPSHOT_PATH.exists())
 
     # --- the overlap bar -----------------------------------------------------
@@ -102,9 +102,9 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "the seven-of-ten cluster"} | self.many(30))
-        self.assertEqual(0, summaries.remap(bar=0.6))
+        self.assertEqual(summaries.remap(bar=0.6), 0)
         result = self.read_summaries()
-        self.assertEqual("the seven-of-ten cluster", result.get("42"))
+        self.assertEqual(result.get("42"), "the seven-of-ten cluster")
         self.assertNotIn("7", result)
 
     def test_the_same_summary_is_dropped_at_a_higher_bar(self):
@@ -114,7 +114,7 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "the seven-of-ten cluster"} | self.many(30))
-        self.assertEqual(0, summaries.remap(bar=0.8))
+        self.assertEqual(summaries.remap(bar=0.8), 0)
         self.assertNotIn("42", self.read_summaries())
 
     def test_a_split_cluster_with_no_majority_is_dropped_not_guessed(self):
@@ -128,7 +128,7 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "no majority anywhere"} | self.many(30))
-        self.assertEqual(0, summaries.remap())
+        self.assertEqual(summaries.remap(), 0)
         result = self.read_summaries()
         for cid in ("50", "51", "52"):
             self.assertNotIn(cid, result)
@@ -143,16 +143,16 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"1": "from one", "2": "from two"} | self.many(30))
-        self.assertEqual(0, summaries.remap())
+        self.assertEqual(summaries.remap(), 0)
         result = self.read_summaries()
-        self.assertEqual("from one", result.get("99"), "lowest old id wins, deterministically")
+        self.assertEqual(result.get("99"), "from one", "lowest old id wins, deterministically")
 
     def test_a_summary_whose_members_have_all_gone_is_dropped(self):
         old = {"7": ["gone1", "gone2"]}
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph({str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "orphaned"} | self.many(30))
-        self.assertEqual(0, summaries.remap())
+        self.assertEqual(summaries.remap(), 0)
         self.assertNotIn("7", self.read_summaries())
 
     def test_a_summary_with_no_snapshot_entry_is_dropped_not_carried_forward(self):
@@ -161,7 +161,7 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot({str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph({str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "never snapshotted"} | self.many(30))
-        self.assertEqual(0, summaries.remap())
+        self.assertEqual(summaries.remap(), 0)
         self.assertNotIn("7", self.read_summaries())
 
     # --- guards --------------------------------------------------------------
@@ -173,7 +173,7 @@ class RemapTest(unittest.TestCase):
         self.write_graph({"1": ["new-a", "new-b"]})
         before = {"1": "should survive this"} | self.many(30)
         self.write_summaries(before)
-        self.assertEqual(1, summaries.remap())
+        self.assertEqual(summaries.remap(), 1)
         self.assertEqual(before, self.read_summaries(), "must not write on a refused run")
 
     def test_refuses_when_there_are_implausibly_few_summaries_to_remap(self):
@@ -181,14 +181,14 @@ class RemapTest(unittest.TestCase):
         self.write_snapshot({"1": ["a"]})
         self.write_graph({"1": ["a"]})
         self.write_summaries({"1": "the only one"})
-        self.assertEqual(1, summaries.remap(floor=10))
+        self.assertEqual(summaries.remap(floor=10), 1)
 
     def test_the_floor_guard_can_be_lowered_for_a_genuinely_small_store(self):
         self.write_snapshot({"1": ["a"]})
         self.write_graph({"1": ["a"]})
         self.write_summaries({"1": "the only one"})
-        self.assertEqual(0, summaries.remap(floor=1))
-        self.assertEqual({"1": "the only one"}, self.read_summaries())
+        self.assertEqual(summaries.remap(floor=1), 0)
+        self.assertEqual(self.read_summaries(), {"1": "the only one"})
 
     # --- reporting -----------------------------------------------------------
 
@@ -214,15 +214,15 @@ class RemapCliTest(RemapTest):
 
     def test_snapshot_sub_command_writes_the_snapshot(self):
         self.write_graph({"1": ["a", "b"]})
-        self.assertEqual(0, summaries.main(["snapshot"]))
+        self.assertEqual(summaries.main(["snapshot"]), 0)
         self.assertTrue(config.SUMMARIES_SNAPSHOT_PATH.exists())
 
     def test_remap_sub_command_carries_summaries_across(self):
         self.write_snapshot({"7": ["a", "b", "c"]} | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph({"42": ["a", "b", "c"]} | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "carried by the cli"} | self.many(30))
-        self.assertEqual(0, summaries.main(["remap"]))
-        self.assertEqual("carried by the cli", self.read_summaries().get("42"))
+        self.assertEqual(summaries.main(["remap"]), 0)
+        self.assertEqual(self.read_summaries().get("42"), "carried by the cli")
 
     def test_remap_bar_is_settable_from_the_command_line(self):
         old = {"7": [f"n{i}" for i in range(10)]}
@@ -230,11 +230,11 @@ class RemapCliTest(RemapTest):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "seven of ten"} | self.many(30))
-        self.assertEqual(0, summaries.main(["remap", "--bar", "0.8"]))
+        self.assertEqual(summaries.main(["remap", "--bar", "0.8"]), 0)
         self.assertNotIn("42", self.read_summaries(), "--bar 0.8 must reject 0.7 overlap")
 
     def test_an_unknown_sub_command_fails_rather_than_silently_doing_nothing(self):
-        self.assertEqual(1, summaries.main(["remapp"]))
+        self.assertEqual(summaries.main(["remapp"]), 1)
 
 
 if __name__ == "__main__":
