@@ -228,19 +228,25 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
             file=sys.stderr,
         )
         return 1
-    if not shutil.which("gh"):
-        print("GitHub CLI is required: https://cli.github.com/", file=sys.stderr)
-        return 1
-    try:
-        subprocess.run(
-            ["gh", "auth", "status"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except subprocess.CalledProcessError:
-        print("GitHub CLI is not authenticated. Run: gh auth login", file=sys.stderr)
-        return 1
+    # The gh preflight exists to give a clear error when the real CLI is absent
+    # or unauthenticated. A caller that injected its own runner is not using the
+    # real CLI, so checking for it would fail for the wrong reason - which is
+    # exactly what happened to this function's own test in CI, where no
+    # authenticated gh exists.
+    if runner is run_gh:
+        if not shutil.which("gh"):
+            print("GitHub CLI is required: https://cli.github.com/", file=sys.stderr)
+            return 1
+        try:
+            subprocess.run(
+                ["gh", "auth", "status"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            print("GitHub CLI is not authenticated. Run: gh auth login", file=sys.stderr)
+            return 1
 
     filters = read_filters(FILTERS)
     repositories = discover(filters, runner=runner)
