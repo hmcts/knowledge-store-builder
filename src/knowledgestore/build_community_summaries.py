@@ -13,7 +13,14 @@ Claude Code (maintainers have a licence; consumers never need one):
   2. In Claude Code: generate 2-4 sentence business summaries for each
      digest, as JSON files of {"<community id>": "<summary>", ...}.
 
-  3. knowledgestore summaries merge <file.json ...>
+  3. knowledgestore summaries snapshot
+       Records community membership before a re-cluster moves the ids.
+
+  4. knowledgestore summaries remap [--bar 0.6] [--floor 10]
+       After re-clustering, carries summaries onto the new ids by membership
+       overlap and reports retention.
+
+  5. knowledgestore summaries merge <file.json ...>
        -> knowledge/summaries/communities.json  (committed)
        Validates ids and length bounds, merges over any existing file.
 
@@ -23,6 +30,8 @@ pre-written prose selected deterministically - no query-time AI.
 
 from __future__ import annotations
 
+import argparse
+import gzip
 import json
 import sys
 from collections import Counter, defaultdict
@@ -34,6 +43,7 @@ from . import io
 from . import kinds
 
 GRAPH_PATH = config.GRAPH_PATH
+SNAPSHOT_PATH = config.SUMMARIES_SNAPSHOT_PATH
 LABELS_PATH = config.LABELS_PATH
 INTENT_PATH = config.INTENT_INDEX_PATH
 INPUT_PATH = config.SUMMARIES_INPUT_PATH
@@ -142,11 +152,141 @@ def merge(paths: list[str]) -> int:
     return 1 if rejected else 0
 
 
-def main() -> int:
-    if len(sys.argv) >= 2 and sys.argv[1] == "extract":
+# The share of an old cluster's members that must land in one new cluster before
+# its summary is carried across. Below this the summary is dropped: prose on the
+# wrong cluster reads as authoritative and is worse than no prose. 0.6 has been
+# used across several estate refreshes and behaved sensibly.
+DEFAULT_BAR = 0.6
+# Refuse to remap when fewer summaries than this are loaded. A mis-specified path
+# reads as "almost nothing to do" rather than failing, and the run then writes an
+# empty file over a good one.
+DEFAULT_FLOOR = 10
+
+
+def _membership(graph: dict) -> dict[str, list[str]]:
+    members: dict[str, list[str]] = {}
+    for node in graph.get("nodes", []):
+        community = node.get("community")
+        if community is None:
+            continue
+        members.setdefault(str(community), []).append(node["id"])
+    return members
+
+
+def snapshot() -> int:
+    """Record community membership before a re-cluster moves the ids."""
+    graph = io.read_json_dict(GRAPH_PATH)
+    members = _membership(graph)
+    if not members:
+        print(
+            f"No communities in {GRAPH_PATH}. Cluster the graph before snapshotting - "
+            "an empty snapshot makes every later remap drop everything.",
+            file=sys.stderr,
+        )
+        return 1
+    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(SNAPSHOT_PATH, "wt", encoding="utf-8") as handle:
+        json.dump(members, handle)
+    print(
+        f"Snapshotted {len(members)} communities "
+        f"({sum(len(v) for v in members.values())} member nodes) -> {SNAPSHOT_PATH}"
+    )
+    return 0
+
+
+def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
+    """Carry committed summaries onto new community ids after a re-cluster.
+
+    For each summary, find the new cluster holding the largest share of its old
+    members and carry it there when that share meets `bar`. Drop it otherwise,
+    and report retention so the cost of the re-cluster is a measured number.
+    """
+    if not SNAPSHOT_PATH.exists():
+        print(
+            f"No membership snapshot at {SNAPSHOT_PATH}. Run `summaries snapshot` "
+            "before re-clustering.",
+            file=sys.stderr,
+        )
+        return 1
+    with gzip.open(SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
+        old_members: dict[str, list[str]] = json.load(handle)
+    summaries = io.read_json_dict(OUTPUT_PATH)
+    if len(summaries) < floor:
+        print(
+            f"Refusing to remap: only {len(summaries)} summaries loaded from "
+            f"{OUTPUT_PATH} (floor {floor}). A mis-specified path looks like this. "
+            "Pass --floor to lower it for a genuinely small store.",
+            file=sys.stderr,
+        )
+        return 1
+    new_community = {
+        node["id"]: str(node["community"])
+        for node in io.read_json_dict(GRAPH_PATH).get("nodes", [])
+        if node.get("community") is not None
+    }
+    snapshot_ids = {node for ids in old_members.values() for node in ids}
+    if snapshot_ids and not (snapshot_ids & set(new_community)):
+        print(
+            "Refusing to remap: the snapshot and the graph share no node ids, so "
+            "this is the wrong snapshot. Proceeding would drop every summary and "
+            "report it as legitimate 0% retention.",
+            file=sys.stderr,
+        )
+        return 1
+
+    remapped: dict[str, str] = {}
+    below_bar: list[str] = []
+    members_gone: list[str] = []
+    collisions: list[str] = []
+    # Sorted so a collision resolves to the lowest old id every run, rather than
+    # to whichever happened to be seen first.
+    for old_id in sorted(summaries, key=lambda k: (len(k), k)):
+        members = old_members.get(str(old_id))
+        if not members:
+            members_gone.append(old_id)
+            continue
+        landed = Counter(new_community[m] for m in members if m in new_community)
+        if not landed:
+            members_gone.append(old_id)
+            continue
+        target, count = landed.most_common(1)[0]
+        if count / len(members) < bar:
+            below_bar.append(old_id)
+            continue
+        if target in remapped:
+            collisions.append(old_id)
+            continue
+        remapped[target] = summaries[old_id]
+
+    OUTPUT_PATH.write_text(
+        json.dumps(dict(sorted(remapped.items(), key=lambda kv: int(kv[0]))), indent=1),
+        encoding="utf-8",
+    )
+    total = len(summaries)
+    share = (100 * len(remapped) // total) if total else 0
+    print(f"Retained {len(remapped)} of {total} summaries ({share}%) -> {OUTPUT_PATH}")
+    print(
+        f"Dropped: {len(below_bar)} below {int(bar * 100)}% overlap, "
+        f"{len(members_gone)} whose members are gone, "
+        f"{len(collisions)} merged-cluster collisions"
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["extract"]:
         return extract()
-    if len(sys.argv) >= 3 and sys.argv[1] == "merge":
-        return merge(sys.argv[2:])
+    if arguments[:1] == ["merge"] and len(arguments) >= 2:
+        return merge(arguments[1:])
+    if arguments[:1] == ["snapshot"]:
+        return snapshot()
+    if arguments[:1] == ["remap"]:
+        parser = argparse.ArgumentParser(prog="knowledgestore summaries remap")
+        parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
+        parser.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
+        options = parser.parse_args(arguments[1:])
+        return remap(bar=options.bar, floor=options.floor)
     print(__doc__)
     return 1
 
