@@ -7,6 +7,7 @@
   "plugins": [
     {
       "name": "knowledge-store",
+      "displayName": "Knowledge Store",
       "source": "./",
       "description": "Three skills for knowledge stores: query a committed store, build or refresh one (including the authoring loops that need an LLM at build time), and export a finding for a ticket without copying sensitive values into it"
     }
