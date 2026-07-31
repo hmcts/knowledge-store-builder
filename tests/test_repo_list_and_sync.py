@@ -280,6 +280,108 @@ class MainProvenanceTest(unittest.TestCase):
         )
 
 
+class UnmatchedRuleWarningTest(unittest.TestCase):
+    """A rule that selects nothing must say so.
+
+    Rules take the whole rest of the line, so `repo name  # note` becomes a
+    rule for a repository called "name  # note" and can never match. Discovery
+    printed its usual count and exited 0, so three of four intended additions
+    were silently dropped during an estate expansion and only found by diffing
+    the selected count against the previous run. The same silence covers a
+    renamed repository and a mistyped team slug.
+    """
+
+    def _filters(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "repository-filters.txt"
+            path.write_text(text, encoding="utf-8")
+            return repo_list.read_filters(path), path
+
+    @staticmethod
+    def _runner(org_repos, team_repos=None):
+        def fake_gh(arguments):
+            import json
+
+            joined = " ".join(arguments)
+            if "/teams/" in joined:
+                slug = joined.split("/teams/")[1].split("/")[0]
+                rows = (team_repos or {}).get(slug, [])
+            else:
+                rows = org_repos
+            return "\n".join(json.dumps({"name": n, "defaultBranch": "main"}) for n in rows)
+
+        return fake_gh
+
+    def test_repo_rule_matching_nothing_is_reported_with_its_line(self):
+        filters, path = self._filters("prefix svc-\nrepo does-not-exist\n")
+        runner = self._runner(["svc-a"])
+        problems = repo_list.unmatched_rules(
+            filters, repo_list.discover(filters, runner=runner), runner=runner
+        )
+        self.assertEqual([(2, "repo does-not-exist")], problems)
+
+    def test_a_trailing_comment_makes_the_rule_unmatchable_and_is_reported(self):
+        # the exact shape that cost three repositories
+        filters, path = self._filters("repo svc-a  # the important one\n")
+        runner = self._runner(["svc-a"])
+        problems = repo_list.unmatched_rules(
+            filters, repo_list.discover(filters, runner=runner), runner=runner
+        )
+        self.assertEqual(1, len(problems))
+        self.assertIn("# the important one", problems[0][1])
+
+    def test_rules_that_did_match_are_not_reported(self):
+        filters, path = self._filters("prefix svc-\nrepo other\nteam platform\n")
+        runner = self._runner(["svc-a", "other", "owned"], {"platform": ["owned"]})
+        selected = repo_list.discover(filters, runner=runner)
+        self.assertEqual([], repo_list.unmatched_rules(filters, selected, runner=runner))
+
+    def test_empty_team_is_reported(self):
+        filters, path = self._filters("prefix svc-\nteam ghost-team\n")
+        runner = self._runner(["svc-a"], {"ghost-team": []})
+        selected = repo_list.discover(filters, runner=runner)
+        self.assertEqual(
+            [(2, "team ghost-team")],
+            repo_list.unmatched_rules(filters, selected, runner=runner),
+        )
+
+    def test_strict_turns_an_unmatched_rule_into_a_non_zero_exit(self):
+        # interactively a bad rule warns and still produces an estate; in CI it
+        # must fail the build, or nothing enforces the config being correct
+        from knowledgestore import config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            (root / "config" / "repository-filters.txt").write_text(
+                "prefix svc-\nrepo does-not-exist\n", encoding="utf-8"
+            )
+            old_root = config.ROOT
+            try:
+                config.configure(root=str(root))
+                repo_list.FILTERS = config.FILTERS_PATH
+                repo_list.OUTPUT = config.REPOSITORIES_CONFIG
+                repo_list.GITHUB_ORG = "example-org"
+                runner = self._runner(["svc-a"])
+                lenient = repo_list.main([], runner=runner)
+                strict = repo_list.main(["--strict"], runner=runner)
+            finally:
+                config.configure(root=str(old_root))
+                repo_list.FILTERS = config.FILTERS_PATH
+                repo_list.OUTPUT = config.REPOSITORIES_CONFIG
+                repo_list.GITHUB_ORG = config.GITHUB_ORG
+
+        self.assertEqual(0, lenient, "a warning must not break an interactive run")
+        self.assertEqual(1, strict, "--strict must fail when a rule selected nothing")
+
+    def test_a_stale_exclude_is_not_reported(self):
+        # excludes legitimately outlive the repository they excluded
+        filters, path = self._filters("prefix svc-\nexclude long-gone\n")
+        runner = self._runner(["svc-a"])
+        selected = repo_list.discover(filters, runner=runner)
+        self.assertEqual([], repo_list.unmatched_rules(filters, selected, runner=runner))
+
+
 class ExportHistoryRootTest(unittest.TestCase):
     """The CLI --root contract: a stage operates on the configured store root.
 
