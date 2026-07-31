@@ -213,6 +213,28 @@ Three skills ship here, so any store gets them:
 /plugin install knowledge-store@knowledge-store-builder
 ```
 
+Then confirm all three arrived — `/plugin` lists the installed plugin, and
+`knowledge-store`, `knowledge-store-build` and `knowledge-store-export` should
+appear in the skills available to the session.
+
+**Installs come from `main`, not from your checkout.** The marketplace clones
+this repository, so a skill change is only installable once it is merged;
+having the branch locally does nothing. Two consequences:
+
+- **Already added the marketplace?** `add` does not re-fetch. Take a newer
+  release of the skills with:
+
+  ```
+  /plugin marketplace update knowledge-store-builder
+  ```
+
+- **Do not install from a local path** to test an unmerged change. It resolves
+  to a `temp_local_*` copy that is not the plugin consumers get, and any
+  manifest problem it reports is about that copy. Merge, update, install.
+
+`skills: Invalid input` on install means the manifest on `main` is wrong, not
+your setup — see `CLAUDE.md` for the layout `plugin.json` must have.
+
 | Skill | Use it to | Covers |
 |---|---|---|
 | **`knowledge-store`** | **ask a store questions** | Finds a store (working directory, `$KNOWLEDGE_STORE`, a remembered location, or a look under your home directory) and offers to clone one if there is none. Traversal recipes, the business-intent and journey recipes, the interpretation rules that matter — same-named nodes in different repositories are independent implementations unless an edge says otherwise — and what the graph cannot answer. Every claim traces to evidence; absence of evidence is reported as a finding. |
