@@ -183,6 +183,14 @@ worth keeping, offer to save it under `docs/journeys/`.
 
 ## Honesty rules
 
+- **Every claim traces to evidence in the store** — node names, source paths,
+  repository names, ticket ids, schema fields, commit subjects. Interpreting what
+  a name implies is fine; asserting behaviour the evidence does not show is not.
+  The test: could a reader check your claim against the same evidence and agree?
+- **Say which layer answered**, because they differ in reliability: a committed
+  brief or summary was LLM-authored against a specific build and goes stale
+  silently; nodes and edges are mechanical. When prose and graph disagree, the
+  graph wins and the prose is stale — say so rather than reconciling them.
 - Never invent nodes, edges or tickets.
 - Distinguish what the graph shows from what you infer from it, in the answer.
 - Say when evidence is thin rather than filling the gap from general knowledge

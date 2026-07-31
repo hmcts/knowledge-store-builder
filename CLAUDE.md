@@ -67,6 +67,50 @@ How that looks in this codebase:
   written to move a number, with no break it can catch, costs maintenance
   forever and protects nothing.
 
+## The skills are the enforcement point, not the docs
+
+`docs/` holds the reasoning; the three skills in `.claude/skills/` hold the
+operative rules. **An agent reads the skill it was invoked with and may never
+open `docs/`** — so a rule that exists only in a document does not bind anyone.
+
+Consequences for anyone changing this library:
+
+- The grounding contract (`docs/grounding-and-verification.md`) is stated
+  **inside all three skills**, at the point each one needs it:
+  `knowledge-store` (traceability and layer precedence in its honesty rules),
+  `knowledge-store-build` (verify grounding not only coverage, at the subagent
+  dispatch step), `knowledge-store-export` (re-derive anything a subagent found
+  before publishing it). Adding a fourth skill that produces or reports store
+  content means carrying the rule into it too. Do not rely on the pointer.
+- **`docs/grounding-and-verification.md` is the master. The statements inside the
+  skills are copies, and they must be updated whenever the master changes.** The
+  obligation runs one way: editing the master without updating the skills leaves
+  agents enforcing a superseded rule, and a skill that has drifted from the
+  contract is worse than one that never mentioned it, because it reads as
+  authoritative. The master lists where it is mirrored — read that list before
+  you finish editing it.
+- The same applies to any other document whose rules are restated in a skill.
+  If you find yourself copying a rule into a skill, add the skill to the master
+  document's mirror list in the same change.
+- Keep the pointer as well as the rule: the skill carries the short operative
+  form, the document carries the reasoning and the techniques. Neither replaces
+  the other.
+
+## Library examples stay generic
+
+This repository is **public** and reusable. Skills, docs and examples must not
+carry any consuming estate's specifics: no repository names, no field names, no
+counts, and above all no detail of a live finding in a store built with this
+library. Illustrate with `N of M (P%)`, `xxxxx@xxxxx.example`, or an invented
+field name.
+
+This has already gone wrong once: examples in the export skill were drawn from
+an unremediated personal-data finding in a consuming estate — the real domain
+and the real counts — and pushed to a public branch. Estate figures and findings
+belong in the store that owns them. The single deliberate exception is the
+operator guide naming the estate it was written from, as attribution for a case
+study.
+
 ## Graph handling
 
 - **Never merge a graph that is already merged.** `graphify merge-graphs`
@@ -125,6 +169,20 @@ at `src/` here; `pip install --no-deps -e .` restores it.
   and enriches its output; it does not re-implement extraction.
 - Very large graphs need `GRAPHIFY_VIZ_NODE_LIMIT` raised, or the HTML
   visualisation export refuses to run.
+
+## Required checks and paths-ignore do not mix
+
+The `main` ruleset requires the `tests` and `CodeQL` status checks. A workflow
+skipped by `paths-ignore` **never reports its check at all** — GitHub waits for
+a context that will never arrive — so a documentation-only pull request sits at
+`BLOCKED` with every visible check green. That deadlocked a docs PR, and the
+diagnosis is invisible from the checks list: you have to compare the required
+contexts in the ruleset against the ones that reported.
+
+So: never add `paths-ignore` to a workflow whose check is required. `build.yml`
+and `lint.yml` may keep theirs because they are not required. If skipping a
+required check on prose ever becomes worth the effort, add a companion job that
+reports the same context for the ignored paths.
 
 ## Releases
 

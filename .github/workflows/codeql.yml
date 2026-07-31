@@ -1,16 +1,18 @@
 name: CodeQL
 
 on:
+  # NO paths-ignore here, deliberately. `CodeQL` is a REQUIRED status check in
+  # the main ruleset, and a workflow skipped by paths-ignore never reports its
+  # check at all — so a docs-only pull request waits forever on a check that
+  # will never arrive (this deadlocked a documentation PR until it was found).
+  # The analyse job is cheap to skip internally: it is gated on repository
+  # visibility below, and on a docs-only change CodeQL finds nothing anyway.
+  # If the cost of running it on prose ever matters, the fix is a companion
+  # job that reports the same `CodeQL` context for doc-only paths — not
+  # paths-ignore on a required check.
   pull_request:
     branches:
       - main
-    # Skip docs/config-only changes — no code to analyse.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.claude/**'
 
   schedule:
     - cron: '36 5 * * 4'
