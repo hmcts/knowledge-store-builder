@@ -124,6 +124,23 @@ path is the failure mode to check for.
 
 ### When clustering changes
 
+```bash
+knowledgestore summaries snapshot   # BEFORE re-clustering
+# ... add repositories, merge, re-cluster ...
+knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+```
+
+`remap` carries a summary only where the new cluster holding most of its old
+members holds at least 60% of them (`--bar` to change), drops it otherwise
+rather than risk prose on the wrong cluster, and prints retention so the cost of
+the re-cluster is a measured number. It refuses to run on a wrong snapshot (no
+shared node ids) or an implausibly small summary set (`--floor`), because both
+failures silently produce an empty file over a good one.
+
+Whatever `remap` drops is then a backfill: extract digests again and author the
+uncovered clusters.
+
+
 Community ids are not stable across re-clustering, and summaries are keyed by
 id. After a re-cluster, do **not** assume the old file still applies. Either
 regenerate, or remap by membership overlap: for each old cluster, find the new
