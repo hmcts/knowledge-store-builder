@@ -125,20 +125,6 @@ JSDoc and checked by `tsc --checkJs` in CI. It is inlined verbatim into the
 built page, and the page regression asserts that byte-for-byte, so what the
 tests exercise is what ships.
 
-## Checks that run on every change
-
-| Workflow | What it does |
-|---|---|
-| `lint` | ruff check, `ruff format --check` and pyright — all blocking |
-| `tests` | unit tests, eslint, `tsc --checkJs`, the scorer tests and the page regression |
-| `build` | builds the wheel and sdist, checks metadata, publishes to the `hmcts-lib` feed on main and on releases |
-| `codeql` | security analysis of the Python pipeline and the JavaScript explorer application (auto-enables when the repository is public) |
-| `secrets-scanner` | gitleaks over the full history, weekly and on every pull request |
-| `dependabot-auto-merge` | merges grouped minor and patch bumps once checks are green; majors go to review |
-
-Locally, `pre-commit install` gives the same lint and secret checks before a
-commit is made (needs `gitleaks` on PATH).
-
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
