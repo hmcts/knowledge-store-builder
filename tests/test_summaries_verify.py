@@ -211,6 +211,38 @@ class VerifyTest(unittest.TestCase):
         _, output = self.run_verify()
         self.assertIn("ApplicationDecisionProcessor", output)
 
+    def test_an_event_named_inside_a_dotted_schema_filename_is_grounded(self):
+        # Schema and event contracts are filed as dotted names while prose cites
+        # the event itself. Without this, a correct summary of a schema cluster
+        # reports as unsupported, and on a schema-heavy estate that was 90% of
+        # everything the check flagged -- enough noise to make people dismiss it.
+        digest = self.digest("1", "referencedata-event/listener", "svc-a", [])
+        digest["top_nodes"] = [
+            {
+                "label": "properties",
+                "source_file": "referencedata-event/src/schema/referencedata.event.case-marker-added.json",
+            }
+        ]
+        self.write([digest], {"1": "Schema content in svc-a defining the case-marker-added event."})
+        _, output = self.run_verify()
+        self.assertNotIn("[unsupported]", output)
+
+    def test_a_dotted_component_does_not_ground_an_invented_neighbour(self):
+        # splitting on dots must not become substring matching: an event the
+        # evidence does not hold is still unsupported
+        digest = self.digest("1", "referencedata-event/listener", "svc-a", [])
+        digest["top_nodes"] = [
+            {
+                "label": "properties",
+                "source_file": "referencedata-event/src/schema/referencedata.event.case-marker-added.json",
+            }
+        ]
+        self.write(
+            [digest], {"1": "Schema content in svc-a defining the case-marker-removed event."}
+        )
+        _, output = self.run_verify()
+        self.assertIn("case-marker-removed", output)
+
     # --- speculation ---------------------------------------------------------
 
     def test_speculation_words_are_reported(self):

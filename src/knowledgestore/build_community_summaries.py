@@ -398,11 +398,20 @@ def _node_identifiers(node) -> set[str]:
 
 def _spelling_variants(identifier: str) -> set[str]:
     """Other spellings of the same thing, so prose need not match character for
-    character: a bare stem for a filename, and the test/subject pairing."""
+    character: a bare stem for a filename, the parts of a dotted name, and the
+    test/subject pairing."""
     variants = {f"{identifier}.java"}
     stem = identifier.rsplit(".", 1)[0]
     if stem and stem != identifier:
         variants.add(stem)
+    # Schema and event contracts are filed under dotted names
+    # (`<domain>.event.<event-name>.json`) while prose cites the event itself,
+    # which is both shorter and more readable. Each dot-separated part is
+    # therefore a spelling of the same thing. This does not loosen the check into
+    # substring matching: parts are whole segments, so an event the evidence does
+    # not hold stays unsupported, and `prose_identifiers` only extracts
+    # structural tokens, so a bare part like `json` or `event` is never cited.
+    variants.update(part for part in identifier.split(".") if len(part) > 2)
     # A digest showing FooTest is evidence that Foo exists; describing the class
     # rather than its test is interpretation, not invention.
     if identifier.endswith("Test") and len(identifier) > 4:
