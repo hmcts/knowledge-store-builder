@@ -1,28 +1,41 @@
 # knowledge-store-builder
 
-## What am I
+## What does this repository do?
 
-Two independent products in one repository. They collaborate.
+Build a knowledge store from one or more GitHub repositories and use it to ask
+questions about your software estate with cited answers.
 
-**The Python library** builds knowledge stores. Point it at a GitHub
-organisation. It reads the source, the commit history and the Gherkin
-specifications of the repositories you select. It produces committed static
-files: a graph of the estate, an index from every file to the tickets that
-changed it, business features as first-class nodes, and one HTML page that
-searches and answers with no server and no LLM.
+For example:
 
-**The Claude Code plugin** puts stores to work. Three skills: ask a store
-questions and get cited answers, build and refresh a store, export a finding
-without its sensitive values.
+> Which applications implement their own address formatting, and which tickets
+> changed them?
 
-**They collaborate because the plugin is instructions and the library is
-machinery.** A skill tells Claude what to run; the library's `knowledgestore`
-commands are what runs. Asking questions needs only the plugin. Building needs
-both.
+Two independent products in one repository work together to provide this
+capability.
 
-**What you get from this repository:** cited answers about a codebase estate —
-*"which applications implement their own address formatting, and which tickets
-changed them"* — without anyone reading the code.
+**The Python library** builds the knowledge store. Point it at a GitHub
+organisation and select the repositories to analyse. It reads source code,
+commit history and Gherkin specifications, then generates static artefacts
+including:
+
+- a graph of the estate;
+- business features as first-class nodes;
+- links from every file to the tickets that changed it; and
+- a self-contained HTML application that searches and answers without a server
+  or an LLM.
+
+**The Claude Code plugin** provides the Claude Code experience. It includes
+three skills:
+
+- ask a knowledge store questions and receive cited answers;
+- build and refresh a knowledge store; and
+- export findings with sensitive values removed.
+
+The two products are designed to work together. The Python library provides
+the `knowledgestore` commands that build the knowledge store. Querying reads
+the committed artefacts directly through the `graphify` CLI, which the
+plugin's query skill installs automatically. Building requires both products.
+Querying an existing knowledge store requires only the plugin.
 
 Build a committed, queryable knowledge store from a fleet of git repositories.
 
