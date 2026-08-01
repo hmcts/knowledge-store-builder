@@ -41,8 +41,8 @@ Querying an existing knowledge store requires only the plugin.
 
 | You want to | You need | Start here |
 |---|---|---|
-| **Ask questions** of an estate that already has a store | the Claude Code plugin — no Python, no `pip` | [Asking questions](docs/asking-questions.md) |
 | **Create or refresh** a store for your own estate | the Python library, plus the plugin | [Creating a store](docs/creating-a-store.md) |
+| **Ask questions** of an estate that already has a store | the Claude Code plugin — no Python, no `pip` | [Asking questions](docs/asking-questions.md) |
 | **Decide** whether this is worth adopting | the rest of this page | — |
 
 The two installs share nothing but this repository. The **plugin** is
