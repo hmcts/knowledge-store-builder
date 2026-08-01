@@ -14,6 +14,9 @@ from typing import Iterable
 
 FIELD_SEPARATOR = "\x1f"
 RECORD_SEPARATOR = "\x1e"
+# Separates a commit's metadata fields from its --numstat block, which git
+# appends after the pretty format. A commit body can contain anything else.
+STAT_SEPARATOR = "\x1d"
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,12 @@ def parse_numstat(value: str) -> list[dict[str, object]]:
 
 
 def get_commit_files(repo_path: Path, commit_sha: str) -> list[dict[str, object]]:
+    """One commit's file statistics, in its own git process.
+
+    `get_commits` no longer calls this - it reads --numstat from its single log
+    pass instead. Retained as the reference implementation that test pins the
+    single-pass parsing against, and for callers wanting one commit.
+    """
     output = run_git(
         repo_path,
         "show",
@@ -146,9 +155,15 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
                 "%b",  # body
             ]
         )
-        + RECORD_SEPARATOR
+        + STAT_SEPARATOR
     )
 
+    # --numstat in this one pass, rather than `git show --numstat` per commit:
+    # that cost one process per commit, which on a large estate meant nearly
+    # 200,000 of them and a stage that took over an hour while barely using a
+    # core. --diff-merges=cc is what `git show` applies to a merge by default,
+    # so merge commits keep the file data they had (plain `git log --numstat`
+    # silently reports none). Needs git 2.31 or newer.
     output = run_git(
         repo_path,
         "log",
@@ -156,7 +171,11 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         "--topo-order",
         "--date-order",
         "--no-show-signature",
-        f"--pretty=format:{pretty_format}",
+        "--numstat",
+        "--find-renames",
+        "--find-copies",
+        "--diff-merges=cc",
+        f"--pretty=format:{RECORD_SEPARATOR}{pretty_format}",
     )
 
     for raw_record in output.split(RECORD_SEPARATOR):
@@ -168,7 +187,8 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         if not raw_record:
             continue
 
-        fields = raw_record.split(FIELD_SEPARATOR)
+        metadata, _, numstat = raw_record.partition(STAT_SEPARATOR)
+        fields = metadata.split(FIELD_SEPARATOR)
 
         if len(fields) != 11:
             print(
@@ -192,7 +212,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
             body,
         ) = fields
 
-        files = get_commit_files(repo_path, sha)
+        files = parse_numstat(numstat)
 
         total_additions = sum(
             file["additions"] for file in files if isinstance(file["additions"], int)
