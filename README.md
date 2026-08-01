@@ -54,30 +54,6 @@ instructions for Claude Code — skills that drive tools on your machine. The
 never need the library: the only tool the query skill uses is the `graphify`
 CLI, and it installs that itself.
 
-## Install: the Claude Code plugin
-
-```
-/plugin marketplace add hmcts/knowledge-store-builder
-/plugin install knowledge-store@knowledge-store-builder
-/reload-plugins
-```
-
-**`/reload-plugins` is not optional** — without it the plugin is installed but
-inactive in the session you are sitting in. Verification, updates and
-troubleshooting: [Asking questions](docs/asking-questions.md).
-
-## Install: the Python library
-
-```bash
-pip install --extra-index-url \
-  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
-  hmcts-knowledge-store-builder
-```
-
-The feed reads anonymously — no credentials, no HMCTS account. Pinning,
-installing from source, the optional semantic extra, and the pipeline itself:
-[Creating a store](docs/creating-a-store.md).
-
 ## How it is designed
 
 - **The store is the product.** Outputs are committed static files. Consumers
@@ -95,7 +71,7 @@ installing from source, the optional semantic extra, and the pipeline itself:
   connecting edge are independent implementations, and the tooling says that
   rather than guessing.
 
-## Going deeper
+## Reference documentation
 
 | Document | For |
 |---|---|

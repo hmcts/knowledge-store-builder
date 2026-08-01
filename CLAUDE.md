@@ -139,9 +139,15 @@ Before writing or reworking any of them, use the `technical-writer` skill in
 prose, the banned-word list) and the verification steps, and it names its
 source. Two hard rules from it:
 
-- **Inbound deep links are load-bearing.** `hmcts/cp-knowledge-store` links to
-  `#install-the-claude-code-plugin`; renaming that heading breaks a consumer's
-  README silently. Check inbound anchors before renaming any heading.
+- **Inbound deep links are load-bearing.** `hmcts/cp-knowledge-store` links
+  into this repository's docs, so renaming a heading it targets breaks a
+  consumer's README silently. Grep the consuming repository for the anchor
+  before renaming or removing any heading — that check is what caught the
+  README's install sections being removed while CP-KS still pointed at them.
+- **Install detail lives in the guides, not the README.** `docs/asking-questions.md`
+  owns the plugin install and `docs/creating-a-store.md` owns the library
+  install. The README routes to them and carries no install commands of its own,
+  so there is one copy of each to keep correct.
 - **Docs and skills must not disagree.** The README once kept `graphify .` at
   the store root long after the build skill documented why that cannot work.
   When a skill changes an instruction, grep the docs for the old one.
