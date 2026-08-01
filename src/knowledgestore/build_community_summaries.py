@@ -236,9 +236,7 @@ def remap(
         return 1
     nodes = io.read_json_dict(GRAPH_PATH).get("nodes", [])
     new_community = {
-        node["id"]: str(node["community"])
-        for node in nodes
-        if node.get("community") is not None
+        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
     }
     if nodes and len(new_community) / len(nodes) < coverage:
         print(

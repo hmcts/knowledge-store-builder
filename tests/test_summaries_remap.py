@@ -69,8 +69,7 @@ class RemapTest(unittest.TestCase):
         """
         graph = _graph({str(i): [f"n{i}"] for i in range(clustered)})
         graph["nodes"] += [
-            {"id": f"n{i}", "label": f"n{i}"}
-            for i in range(clustered, clustered + unclustered)
+            {"id": f"n{i}", "label": f"n{i}"} for i in range(clustered, clustered + unclustered)
         ]
         summaries.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
 
