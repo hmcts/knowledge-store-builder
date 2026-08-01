@@ -37,15 +37,16 @@ the committed artefacts directly through the `graphify` CLI, which the
 plugin's query skill installs automatically. Building requires both products.
 Querying an existing knowledge store requires only the plugin.
 
-Built for, and proven on, the HMCTS Common Platform crime estate.
+## What do you need?
 
-## Who you are decides what you install
+Choose the path that matches your role:
 
-| You want to | You need | Start here |
-|---|---|---|
-| **Ask questions** of an estate that already has a store | the Claude Code plugin — no Python, no `pip` | [Asking questions](docs/asking-questions.md) |
-| **Create or refresh** a store for your own estate | the Python library, plus the plugin | [Creating a store](docs/creating-a-store.md) |
-| **Decide** whether this is worth adopting | the rest of this page | — |
+- **Build a knowledge store** — You own or maintain a software estate and want
+  to create or refresh its knowledge store.
+  → [Creating and refreshing](docs/creating-a-store.md)
+- **Use a knowledge store** — Someone has already built one, and you want to
+  ask questions about it.
+  → [Asking questions](docs/asking-questions.md)
 
 The two installs share nothing but this repository. The **plugin** is
 instructions for Claude Code — skills that drive tools on your machine. The
