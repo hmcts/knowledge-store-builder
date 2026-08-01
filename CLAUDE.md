@@ -126,6 +126,26 @@ Consequences for anyone changing this library:
   form, the document carries the reasoning and the techniques. Neither replaces
   the other.
 
+## Writing documentation
+
+User-facing docs are **persona-led**: one document, one reader. The README
+serves the evaluator and routes the other two personas to their guide —
+`docs/asking-questions.md` (asker: plugin only) and `docs/creating-a-store.md`
+(builder: library + tools). Do not grow the README back into a manual; usage
+detail belongs in the guide that owns the persona.
+
+Before writing or reworking any of them, use the `technical-writer` skill in
+`.claude/skills/` — it carries the house register (value-first, commands before
+prose, the banned-word list) and the verification steps, and it names its
+source. Two hard rules from it:
+
+- **Inbound deep links are load-bearing.** `hmcts/cp-knowledge-store` links to
+  `#install-the-claude-code-plugin`; renaming that heading breaks a consumer's
+  README silently. Check inbound anchors before renaming any heading.
+- **Docs and skills must not disagree.** The README once kept `graphify .` at
+  the store root long after the build skill documented why that cannot work.
+  When a skill changes an instruction, grep the docs for the old one.
+
 ## Library examples stay generic
 
 This repository is **public** and reusable. Skills, docs and examples must not
