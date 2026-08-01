@@ -37,15 +37,125 @@ knowledgestore context         # knowledge_context.md + manifest
 knowledgestore intent          # file -> ticket index, descriptions from commits
 ```
 
-Then build the graph with the graphify skill (`/graphify .`, or
-`/graphify . --update` to refresh), and enrich it:
+Then build the graph. **Do not run graphify at the store root.** `repositories/`
+is gitignored in every store, and graphify's scan honours ignore rules, so a root
+run sees only the store's own config and docs and produces a near-empty graph.
+On one estate that produced a graph three orders of magnitude too small; only
+graphify's overwrite guard stopped it replacing the store. Extract per
+repository, from inside each one, then merge:
+
+```bash
+while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
+  case "$repo" in ''|\#*) continue;; esac
+  ( cd "repositories/$repo" && graphify update . --no-cluster )
+done < config/repositories.txt
+
+graphify merge-graphs repositories/*/graphify-out/graph.json \
+  --out graphify-out/graph.json
+```
+
+Extracting from inside the repository is what keeps `source_file` repo-relative,
+which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
+attribute. `--no-cluster` is deliberate: the merge discards per-repository
+communities, so clustering once per repository is waste.
+
+A large graph also needs the size cap raised, or every graph operation refuses:
+
+```bash
+export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
+```
 
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
+```
+
+**Cluster after `gherkin`, not before**, so the Gherkin layer is clustered with
+everything else — then build the page:
+
+```bash
 knowledgestore explorer        # the self-contained search page
 ```
 
 Stages are independent and idempotent — re-run one without repeating the rest.
+
+### Clustering: `cluster-only` does not persist its result
+
+`graphify cluster-only` re-extracts from the store root before clustering. For
+the reason above its node count disagrees with the graph on disk, its overwrite
+guard refuses the write, and **it still reports success** —
+`Done - N communities. graph.json updated`. The graph is left with almost no
+nodes carrying a `community`, and `GRAPHIFY_FORCE=1` does not help: `--force` is
+documented for `update`, not `cluster-only`.
+
+Left unnoticed this is destructive, because `summaries remap` then finds nothing
+to map onto: it retains a handful of summaries out of thousands, reports the
+rest as `whose members are gone`, and overwrites `communities.json` with what
+survived. That reads as catastrophic churn when the node ids are essentially
+unchanged. It is recoverable only because `communities.json` is committed
+(`git checkout HEAD -- knowledge/summaries/communities.json`).
+
+**Check coverage after clustering, before remapping:**
+
+```bash
+python3 -c "
+import json; g=json.load(open('graphify-out/graph.json')); n=g['nodes']
+h=[x for x in n if x.get('community') is not None]
+print(f'{len(h):,}/{len(n):,} nodes have a community, {len({x[\"community\"] for x in h}):,} communities')"
+```
+
+Anything short of every node is a failed clustering, not a small gap.
+
+Drive clustering through graphify's Python API instead, which persists because
+you write the file yourself. `graphify.cluster` exposes `cluster()`,
+`remap_communities_to_previous()` and `label_communities_by_hub()`. Write
+`community` and `community_name` onto every node and a fresh
+`.graphify_labels.json` (the digest label source; the library reads
+`node.get("community", -1)`).
+
+Two things decide whether the prose survives:
+
+- **`remap_communities_to_previous` is not optional.** It renumbers new
+  communities onto previous ids where membership overlaps, which is what lets
+  summaries keyed to old ids stay attached. With it, a re-cluster keeps most of
+  its prose; without it, effectively none survives.
+- **Use graphify's `cluster()`, not plain Louvain.** On the same graph, Louvain
+  at every resolution tried produced roughly a third as many communities, with a
+  largest cluster an order of magnitude bigger than graphify's. Clusters that
+  coarse are too big to summarise, and they collapse many old clusters into one,
+  so remap discards them as collisions.
+
+### `sync` on a case-insensitive filesystem
+
+Where a remote has branches differing only in casing (`team/DEVOPS` and
+`team/devops`), git cannot store both with the `files` ref backend on macOS or
+Windows. The fetch exits non-zero and **`sync` aborts the entire run** — later
+repositories are never attempted, and the traceback names only the one that
+failed. On one estate roughly a fifth of the repositories were affected, and a
+single failure left dozens of them unsynced.
+
+Migrate the clones to the `reftable` backend (git 2.45+), which stores refs in a
+table so casing stops mattering and both variants are kept:
+
+```bash
+git -C repositories/<repo> refs migrate --ref-format=reftable
+```
+
+Deleting the colliding local refs does **not** work — the remote carries both,
+so the next fetch recreates the collision.
+
+### Trust counts, not exit codes
+
+Long rebuilds fail quietly, and every failure in a real estate refresh was
+caught by reconciling a number against an expectation rather than by a tool
+reporting failure:
+
+- A shell wrapper reports its **last** command's status. `stage > log 2>&1; tail
+  log` exits 0 however the stage ended. Capture the stage's own `rc` and read it.
+- A loop that skips every item also exits 0. One extraction pass processed
+  nothing because `repositories.txt` is pipe-delimited and the directory test
+  silently failed for every repository; only counting successes revealed it.
+- After any stage that writes per-item output, reconcile the count it reports
+  against the count you expected.
 
 ### Adding repositories to an estate
 
