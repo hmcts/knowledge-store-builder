@@ -87,6 +87,9 @@ FIX_PATTERN = re.compile(r"\b(fix|defect|bug|hotfix)", re.IGNORECASE)
 # --- graph artefacts (produced by graphify, consumed here) ---------------
 GRAPH_PATH = ROOT / "graphify-out" / "graph.json"
 LABELS_PATH = ROOT / "graphify-out" / ".graphify_labels.json"
+# graphify's audit report. The library never writes it, but the gherkin stage
+# notes what it added after the report was produced.
+GRAPH_REPORT_PATH = ROOT / "graphify-out" / "GRAPH_REPORT.md"
 EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
 
 # --- issue tracker -------------------------------------------------------
@@ -203,5 +206,6 @@ def _recompute_paths() -> None:
         DEEPDIVES_PATH=root / "knowledge" / "deep-dives" / "dives.json",
         GRAPH_PATH=root / "graphify-out" / "graph.json",
         LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
+        GRAPH_REPORT_PATH=root / "graphify-out" / "GRAPH_REPORT.md",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",
     )
