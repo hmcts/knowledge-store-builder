@@ -172,11 +172,25 @@ majority — 60% works — and drop it otherwise rather than misattach prose).
 |---|---|
 | +70 repositories | 54% |
 | +6 repositories | 93% |
+| +0 repositories, sources refreshed only | 71% |
 
 This matters because the intuitive response — batch every addition to avoid
 re-clustering — is wrong. A small, well-motivated addition is cheap. Measure
 retention on each refresh instead of assuming, and treat the backfill as a
 known, bounded cost rather than a disaster.
+
+**A refresh that adds nothing is not free.** The last row is the surprise: the
+estate was unchanged and only the sources moved on, yet retention was worse than
+a six-repository addition. Enough source churn re-shapes the graph on its own —
+that refresh consolidated roughly 39,000 communities into 28,000, and most of
+the loss was merged-cluster collisions rather than summaries falling below the
+overlap bar. Two clusters that merge can keep only one summary between them.
+
+So budget backfill for any refresh, not only for additions, and read the split
+that `remap` reports: collisions mean consolidation, whereas drops below the bar
+mean genuine drift. It also pays to know how long the authoring costs — roughly
+1,500 summaries took about thirty parallel subagents and a few minutes of
+wall-clock, which is small against the rebuild itself.
 
 **Order constraints bite.** Some stages rewrite artefacts others read: build
 the page after every layer it embeds, and re-compress the graph after any stage
