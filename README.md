@@ -1,5 +1,29 @@
 # knowledge-store-builder
 
+## What am I
+
+Two independent products in one repository. They collaborate.
+
+**The Python library** builds knowledge stores. Point it at a GitHub
+organisation. It reads the source, the commit history and the Gherkin
+specifications of the repositories you select. It produces committed static
+files: a graph of the estate, an index from every file to the tickets that
+changed it, business features as first-class nodes, and one HTML page that
+searches and answers with no server and no LLM.
+
+**The Claude Code plugin** puts stores to work. Three skills: ask a store
+questions and get cited answers, build and refresh a store, export a finding
+without its sensitive values.
+
+**They collaborate because the plugin is instructions and the library is
+machinery.** A skill tells Claude what to run; the library's `knowledgestore`
+commands are what runs. Asking questions needs only the plugin. Building needs
+both.
+
+**What you get from this repository:** cited answers about a codebase estate —
+*"which applications implement their own address formatting, and which tickets
+changed them"* — without anyone reading the code.
+
 Build a committed, queryable knowledge store from a fleet of git repositories.
 
 Point it at a GitHub organisation. It reads the source, the commit history and
