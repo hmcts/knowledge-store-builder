@@ -237,7 +237,9 @@ class VerifyTest(unittest.TestCase):
                 "source_file": "referencedata-event/src/schema/referencedata.event.case-marker-added.json",
             }
         ]
-        self.write([digest], {"1": "Schema content in svc-a defining the case-marker-removed event."})
+        self.write(
+            [digest], {"1": "Schema content in svc-a defining the case-marker-removed event."}
+        )
         _, output = self.run_verify()
         self.assertIn("case-marker-removed", output)
 
