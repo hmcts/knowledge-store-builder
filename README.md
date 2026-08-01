@@ -48,11 +48,13 @@ Choose the path that matches your role:
   ask questions about it.
   → [Asking questions](docs/asking-questions.md)
 
-The two installs share nothing but this repository. The **plugin** is
-instructions for Claude Code — skills that drive tools on your machine. The
-**library** is the pipeline those instructions drive when building. Askers
-never need the library: the only tool the query skill uses is the `graphify`
-CLI, and it installs that itself.
+**Using** a store needs the plugin and nothing else — no Python, no `pip`. The
+query skill installs the one tool it needs,
+[graphify](https://github.com/safishamsi/graphify).
+
+**Building** a store needs three things: the plugin, the Python library for the
+`knowledgestore` commands, and [graphify](https://github.com/safishamsi/graphify)
+for extraction. The guide lists them.
 
 ## How it is designed
 
