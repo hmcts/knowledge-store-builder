@@ -73,14 +73,34 @@ def main() -> int:
 
     REPOSITORIES.mkdir(parents=True, exist_ok=True)
     entries: dict[str, dict] = {}
+    failures: list[tuple[str, str]] = []
     for repo in read_repository_config(CONFIG):
         print(f"\nSynchronising {repo.name}")
-        count = sync_repository(repo, REPOSITORIES)
+        # One repository's failure must not cost the estate. Aborting here used
+        # to skip every repository after it and, because provenance is written
+        # after the loop, discard the record for those that had already
+        # succeeded - so one unreachable remote produced nothing at all.
+        try:
+            count = sync_repository(repo, REPOSITORIES)
+        except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
+            print(f"{repo.name}: FAILED - {error}", file=sys.stderr)
+            failures.append((repo.name, str(error)))
+            continue
         print(f"{repo.name}: {count} commits available")
         entries[repo.name] = provenance.head_info(REPOSITORIES / repo.name, repo.default_branch)
     provenance.write(entries)
     print(f"\nProvenance recorded for {len(entries)} repositories -> {provenance.PROVENANCE_PATH}")
-    return 0
+    if failures:
+        total = len(entries) + len(failures)
+        print(f"\n{len(failures)} of {total} repositories failed to sync:")
+        for name, error in failures:
+            print(f"  {name}: {error}")
+        print(
+            "The rest synced and provenance covers them. A failed repository's "
+            "graph and history will be missing or stale until it syncs, so this "
+            "is an incomplete estate rather than a warning."
+        )
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

@@ -128,10 +128,15 @@ Two things decide whether the prose survives:
 
 Where a remote has branches differing only in casing (`team/DEVOPS` and
 `team/devops`), git cannot store both with the `files` ref backend on macOS or
-Windows. The fetch exits non-zero and **`sync` aborts the entire run** — later
-repositories are never attempted, and the traceback names only the one that
-failed. On one estate roughly a fifth of the repositories were affected, and a
-single failure left dozens of them unsynced.
+Windows, and the fetch exits non-zero. On one estate roughly a fifth of the
+repositories were affected.
+
+`sync` isolates that: it names the failure, carries on with the rest, records
+provenance for everything that succeeded, and **exits non-zero** with a list of
+what failed. Read that list — a repository that did not sync keeps whatever
+graph and history it had, so the estate is incomplete rather than merely warned
+about. (Before this was fixed, one failure aborted the run and discarded the
+provenance of the repositories that had already succeeded.)
 
 Migrate the clones to the `reftable` backend (git 2.45+), which stores refs in a
 table so casing stops mattering and both variants are kept:
