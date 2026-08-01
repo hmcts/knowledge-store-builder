@@ -37,21 +37,7 @@ the committed artefacts directly through the `graphify` CLI, which the
 plugin's query skill installs automatically. Building requires both products.
 Querying an existing knowledge store requires only the plugin.
 
-Build a committed, queryable knowledge store from a fleet of git repositories.
-
-Point it at a GitHub organisation. It reads the source, the commit history and
-the Gherkin specifications of the repositories you select, and produces static
-files: a graph of the estate, an index from every file to the tickets that
-changed it, business features as first-class nodes, and one HTML page that
-searches and answers questions with no server and no LLM.
-
-You commit the output. Anyone who clones it can then query the estate — best
-through a coding agent, which traverses the graph and writes a cited answer,
-and adequately through the HTML page with no licence at all.
-
-Built for the HMCTS Common Platform crime estate, where it answers questions
-like "which applications implement their own address formatting, and which
-tickets changed them" without anyone reading the code.
+Built for, and proven on, the HMCTS Common Platform crime estate.
 
 ## Who you are decides what you install
 
