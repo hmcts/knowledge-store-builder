@@ -37,8 +37,6 @@ the committed artefacts directly through the `graphify` CLI, which the
 plugin's query skill installs automatically. Building requires both products.
 Querying an existing knowledge store requires only the plugin.
 
-Built for, and proven on, the HMCTS Common Platform crime estate.
-
 ## Who you are decides what you install
 
 | You want to | You need | Start here |
