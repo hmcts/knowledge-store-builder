@@ -37,7 +37,11 @@ the committed artefacts directly through the `graphify` CLI, which the
 plugin's query skill installs automatically. Building requires both products.
 Querying an existing knowledge store requires only the plugin.
 
-## Who you are decides what you install
+## What do you need?
+
+You own or maintain an estate — a fleet of git repositories — and want a
+knowledge store for it, or want to keep an existing one fresh. Or someone has
+already built one, and you have questions.
 
 | You want to | You need | Start here |
 |---|---|---|
