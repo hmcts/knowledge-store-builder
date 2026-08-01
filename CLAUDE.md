@@ -63,6 +63,14 @@ How that looks in this codebase:
   effect, return the default — at least one test should fail for each
   realistic mutation. A mutation nothing catches is unprotected behaviour
   or a tautological test.
+- **A non-editable install of this library shadows `src/` for the whole
+  suite.** Test modules put `src/` on `sys.path` at import time, but once any
+  earlier module has imported `knowledgestore`, `sys.modules` is already bound
+  and the insert does nothing — so discovery silently exercises the *installed*
+  package. The symptom is a new test that passes when its module runs alone and
+  fails under `discover`, with an error like `unexpected keyword argument`
+  naming a parameter you just added. Use `pip install -e '.[dev]'` as the README
+  says, or run `PYTHONPATH=src python3 -m unittest discover -s tests`.
 - Coverage percentages are a map of where to look, never the goal. A test
   written to move a number, with no break it can catch, costs maintenance
   forever and protects nothing.

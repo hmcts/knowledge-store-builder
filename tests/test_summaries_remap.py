@@ -60,6 +60,19 @@ class RemapTest(unittest.TestCase):
     def write_graph(self, members):
         config.GRAPH_PATH.write_text(json.dumps(_graph(members)), encoding="utf-8")
 
+    def write_partly_clustered_graph(self, clustered: int, unclustered: int):
+        """A graph where only some nodes carry a community, as a failed write leaves it.
+
+        Writes through `summaries.GRAPH_PATH` — the path the code under test
+        actually reads — rather than `config.GRAPH_PATH`, which the two can
+        disagree about once another module has reconfigured the root.
+        """
+        graph = _graph({str(i): [f"n{i}"] for i in range(clustered)})
+        graph["nodes"] += [
+            {"id": f"n{i}", "label": f"n{i}"} for i in range(clustered, clustered + unclustered)
+        ]
+        summaries.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
+
     def write_snapshot(self, members):
         with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "wt", encoding="utf-8") as f:
             json.dump(members, f)
@@ -175,6 +188,37 @@ class RemapTest(unittest.TestCase):
         self.write_summaries(before)
         self.assertEqual(summaries.remap(), 1)
         self.assertEqual(before, self.read_summaries(), "must not write on a refused run")
+
+    def test_refuses_when_the_graph_is_effectively_unclustered(self):
+        # Catches a clustering step that reported success without persisting its
+        # result: the graph is readable and almost entirely unclustered, so every
+        # summary would be dropped and reported as legitimate churn. The
+        # wrong-snapshot guard cannot see this, because the few communities that
+        # did survive still share node ids with the snapshot.
+        self.write_snapshot({str(i): [f"n{i}"] for i in range(40)})
+        self.write_partly_clustered_graph(clustered=1, unclustered=39)
+        before = {str(i): f"summary {i}" for i in range(40)}
+        self.write_summaries(before)
+        self.assertEqual(summaries.remap(), 1)
+        self.assertEqual(before, self.read_summaries(), "must not overwrite committed prose")
+
+    def test_the_coverage_guard_can_be_lowered_for_a_deliberately_sparse_graph(self):
+        self.write_snapshot({str(i): [f"n{i}"] for i in range(40)})
+        self.write_partly_clustered_graph(clustered=1, unclustered=39)
+        self.write_summaries({str(i): f"summary {i}" for i in range(40)})
+        self.assertEqual(summaries.remap(coverage=0.0), 0)
+
+    def test_the_coverage_guard_counts_nodes_not_distinct_ids(self):
+        # A merged graph can repeat a node id. Measuring coverage by the size of
+        # an id-keyed dict collapses those repeats and understates it — here 2
+        # distinct ids against 31 nodes, which would refuse a graph in which
+        # every node is clustered.
+        nodes = [{"id": "dup", "label": "dup", "community": 1} for _ in range(30)]
+        nodes.append({"id": "other", "label": "other", "community": 2})
+        summaries.GRAPH_PATH.write_text(json.dumps({"nodes": nodes, "links": []}), encoding="utf-8")
+        self.write_snapshot({"1": ["dup"], "2": ["other"]})
+        self.write_summaries({str(i): f"summary {i}" for i in range(1, 21)})
+        self.assertEqual(summaries.remap(), 0, "a fully clustered graph must not be refused")
 
     def test_refuses_when_there_are_implausibly_few_summaries_to_remap(self):
         # a mis-specified path reads as "almost nothing to do" rather than failing
