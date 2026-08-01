@@ -162,6 +162,16 @@ DEFAULT_BAR = 0.6
 # reads as "almost nothing to do" rather than failing, and the run then writes an
 # empty file over a good one.
 DEFAULT_FLOOR = 10
+# Refuse to remap when less than this share of the graph's nodes carry a
+# community. A clustering step that reports success without persisting its result
+# leaves a graph that is readable and almost entirely unclustered; remap then
+# finds nothing to map onto, reports it as legitimate churn, and overwrites the
+# committed summaries. Observed on a real refresh: the clustering tool printed
+# "Done - N communities. graph.json updated" while writing nothing, ~1% of nodes
+# kept a community, and remap carried 8 summaries of 5,323. The wrong-snapshot
+# check cannot catch it, because those few surviving communities still share node
+# ids with the snapshot.
+DEFAULT_COVERAGE = 0.5
 
 
 def _membership(graph: dict) -> dict[str, list[str]]:
@@ -195,7 +205,11 @@ def snapshot() -> int:
     return 0
 
 
-def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
+def remap(
+    bar: float = DEFAULT_BAR,
+    floor: int = DEFAULT_FLOOR,
+    coverage: float = DEFAULT_COVERAGE,
+) -> int:
     """Carry committed summaries onto new community ids after a re-cluster.
 
     For each summary, find the new cluster holding the largest share of its old
@@ -220,11 +234,25 @@ def remap(bar: float = DEFAULT_BAR, floor: int = DEFAULT_FLOOR) -> int:
             file=sys.stderr,
         )
         return 1
+    nodes = io.read_json_dict(GRAPH_PATH).get("nodes", [])
     new_community = {
         node["id"]: str(node["community"])
-        for node in io.read_json_dict(GRAPH_PATH).get("nodes", [])
+        for node in nodes
         if node.get("community") is not None
     }
+    if nodes and len(new_community) / len(nodes) < coverage:
+        print(
+            f"Refusing to remap: only {len(new_community)} of {len(nodes)} nodes in "
+            f"{GRAPH_PATH} carry a community "
+            f"({len(new_community) / len(nodes):.1%}, floor {coverage:.0%}). The "
+            "graph is effectively unclustered, so every summary would be dropped "
+            "and reported as legitimate churn. A clustering step that printed "
+            "success without writing its result looks exactly like this — check "
+            "the graph's community coverage before re-running. Pass --coverage to "
+            "lower the floor for a deliberately sparse graph.",
+            file=sys.stderr,
+        )
+        return 1
     snapshot_ids = {node for ids in old_members.values() for node in ids}
     if snapshot_ids and not (snapshot_ids & set(new_community)):
         print(
@@ -498,8 +526,9 @@ def main(argv: list[str] | None = None) -> int:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries remap")
         parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
         parser.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
+        parser.add_argument("--coverage", type=float, default=DEFAULT_COVERAGE)
         options = parser.parse_args(arguments[1:])
-        return remap(bar=options.bar, floor=options.floor)
+        return remap(bar=options.bar, floor=options.floor, coverage=options.coverage)
     print(__doc__)
     return 1
 
