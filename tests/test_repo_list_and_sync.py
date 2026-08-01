@@ -3,10 +3,12 @@ build_graph.py - the (former bash) plumbing, now testable Python."""
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -278,6 +280,76 @@ class MainProvenanceTest(unittest.TestCase):
                 "committed": "2026-07-01T00:00:00+00:00",
             },
         )
+
+
+class SyncFailureIsolationTest(unittest.TestCase):
+    """One repository's failure must not cost the whole estate.
+
+    A single `git fetch` exiting non-zero used to abort the run: repositories
+    after it were never attempted, and because provenance is written after the
+    loop, the ones that had succeeded lost their record too — so the run
+    produced nothing at all. On a large estate one failure left dozens of
+    repositories unsynced, and the traceback named only the repository that
+    failed, never what had been skipped.
+    """
+
+    def _setup(self, root, failing: set[str]):
+        from knowledgestore import provenance
+
+        config_path = root / "repositories.txt"
+        config_path.write_text(
+            "".join(f"repo-{n}|git@example.com:o/repo-{n}.git|main\n" for n in "abc"),
+            encoding="utf-8",
+        )
+        self.addCleanup(setattr, sync, "CONFIG", sync.CONFIG)
+        sync.CONFIG = config_path
+        self.addCleanup(setattr, sync, "REPOSITORIES", sync.REPOSITORIES)
+        sync.REPOSITORIES = root / "repositories"
+
+        self.attempted: list[str] = []
+
+        def fake_sync(repo, repositories_dir, run=None):
+            self.attempted.append(repo.name)
+            if repo.name in failing:
+                raise subprocess.CalledProcessError(1, ["git", "fetch"])
+            return 5
+
+        self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
+        sync.sync_repository = fake_sync
+
+        self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
+        provenance.head_info = lambda repo_dir, branch, run=None: {
+            "sha": (repo_dir.name * 40)[:40],
+            "branch": branch,
+            "committed": "2026-07-01T00:00:00+00:00",
+        }
+        self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
+        provenance.PROVENANCE_PATH = root / "provenance.json"
+        return provenance
+
+    def test_a_failing_repository_does_not_skip_the_ones_after_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            provenance = self._setup(Path(tmp), failing={"repo-a"})
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = sync.main()
+            recorded = provenance.read()
+            output = buffer.getvalue()
+
+        self.assertEqual(self.attempted, ["repo-a", "repo-b", "repo-c"], "every repo attempted")
+        self.assertEqual(set(recorded), {"repo-b", "repo-c"}, "successes keep their provenance")
+        self.assertIn("repo-a", output, "the failure is named")
+        self.assertEqual(code, 1, "a partial sync must not report success")
+
+    def test_a_clean_run_still_succeeds_and_records_everything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            provenance = self._setup(Path(tmp), failing=set())
+            with redirect_stdout(io.StringIO()):
+                code = sync.main()
+            recorded = provenance.read()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(set(recorded), {"repo-a", "repo-b", "repo-c"})
 
 
 class UnmatchedRuleWarningTest(unittest.TestCase):
