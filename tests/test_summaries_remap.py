@@ -208,6 +208,18 @@ class RemapTest(unittest.TestCase):
         self.write_summaries({str(i): f"summary {i}" for i in range(40)})
         self.assertEqual(summaries.remap(coverage=0.0), 0)
 
+    def test_the_coverage_guard_counts_nodes_not_distinct_ids(self):
+        # A merged graph can repeat a node id. Measuring coverage by the size of
+        # an id-keyed dict collapses those repeats and understates it — here 2
+        # distinct ids against 31 nodes, which would refuse a graph in which
+        # every node is clustered.
+        nodes = [{"id": "dup", "label": "dup", "community": 1} for _ in range(30)]
+        nodes.append({"id": "other", "label": "other", "community": 2})
+        summaries.GRAPH_PATH.write_text(json.dumps({"nodes": nodes, "links": []}), encoding="utf-8")
+        self.write_snapshot({"1": ["dup"], "2": ["other"]})
+        self.write_summaries({str(i): f"summary {i}" for i in range(1, 21)})
+        self.assertEqual(summaries.remap(), 0, "a fully clustered graph must not be refused")
+
     def test_refuses_when_there_are_implausibly_few_summaries_to_remap(self):
         # a mis-specified path reads as "almost nothing to do" rather than failing
         self.write_snapshot({"1": ["a"]})

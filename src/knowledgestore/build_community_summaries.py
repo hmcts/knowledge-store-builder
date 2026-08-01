@@ -16,9 +16,9 @@ Claude Code (maintainers have a licence; consumers never need one):
   3. knowledgestore summaries snapshot
        Records community membership before a re-cluster moves the ids.
 
-  4. knowledgestore summaries remap [--bar 0.6] [--floor 10]
+  4. knowledgestore summaries remap [--bar 0.6] [--floor 10] [--coverage 0.5]
        After re-clustering, carries summaries onto the new ids by membership
-       overlap and reports retention.
+       overlap and reports retention. Refuses on an unclustered graph.
 
   5. knowledgestore summaries merge <file.json ...>
        -> knowledge/summaries/communities.json  (committed)
@@ -166,11 +166,11 @@ DEFAULT_FLOOR = 10
 # community. A clustering step that reports success without persisting its result
 # leaves a graph that is readable and almost entirely unclustered; remap then
 # finds nothing to map onto, reports it as legitimate churn, and overwrites the
-# committed summaries. Observed on a real refresh: the clustering tool printed
-# "Done - N communities. graph.json updated" while writing nothing, ~1% of nodes
-# kept a community, and remap carried 8 summaries of 5,323. The wrong-snapshot
-# check cannot catch it, because those few surviving communities still share node
-# ids with the snapshot.
+# committed summaries. This has happened on a real refresh: the clustering tool
+# printed "Done - N communities. graph.json updated" while writing nothing, a
+# tiny fraction of nodes kept a community, and remap carried a handful of
+# summaries out of thousands. The wrong-snapshot check cannot catch it, because
+# those few surviving communities still share node ids with the snapshot.
 DEFAULT_COVERAGE = 0.5
 
 
@@ -238,11 +238,15 @@ def remap(
     new_community = {
         node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
     }
-    if nodes and len(new_community) / len(nodes) < coverage:
+    # Counted over nodes, not over `new_community`, which is keyed by id: a merged
+    # graph can repeat an id, and the dict would collapse those and understate
+    # coverage enough to refuse a healthy graph.
+    clustered = sum(1 for node in nodes if node.get("community") is not None)
+    if nodes and clustered / len(nodes) < coverage:
         print(
-            f"Refusing to remap: only {len(new_community)} of {len(nodes)} nodes in "
+            f"Refusing to remap: only {clustered} of {len(nodes)} nodes in "
             f"{GRAPH_PATH} carry a community "
-            f"({len(new_community) / len(nodes):.1%}, floor {coverage:.0%}). The "
+            f"({clustered / len(nodes):.1%}, floor {coverage:.0%}). The "
             "graph is effectively unclustered, so every summary would be dropped "
             "and reported as legitimate churn. A clustering step that printed "
             "success without writing its result looks exactly like this — check "
