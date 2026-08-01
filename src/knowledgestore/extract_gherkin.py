@@ -33,6 +33,7 @@ from . import config, kinds
 
 GRAPH_PATH = config.GRAPH_PATH
 LABELS_PATH = config.LABELS_PATH
+REPORT_PATH = config.GRAPH_REPORT_PATH
 REPOSITORIES = config.REPOSITORIES_DIR
 FEATURES_DIR = config.FEATURES_DIR
 STEP_DEFINITION_LANGUAGES = config.STEP_DEFINITION_LANGUAGES
@@ -314,6 +315,42 @@ def enrich_repository(repo_dir: Path, enricher: GraphEnricher) -> None:
             enricher.add_feature(feature, repo, step_index, class_node_by_file)
 
 
+REPORT_NOTE_MARKER = "<!-- knowledgestore: gherkin layer -->"
+
+
+def note_gherkin_layer(stats: dict, nodes: int, edges: int) -> None:
+    """Record in graphify's report that the graph grew after it was written.
+
+    `graphify` writes GRAPH_REPORT.md from its own pass; this stage then adds
+    features, scenarios and ticket nodes, and the report is never regenerated.
+    Reconciling the two then shows a discrepancy with no stated cause, and the
+    business-intent layer is absent from the audit meant to describe the graph.
+
+    The note is bounded by a marker and replaced on every run, so re-running an
+    idempotent stage does not turn the report into a changelog.
+    """
+    if not REPORT_PATH.is_file():
+        return
+    existing = REPORT_PATH.read_text(encoding="utf-8")
+    if REPORT_NOTE_MARKER in existing:
+        existing = existing.split(REPORT_NOTE_MARKER)[0].rstrip() + "\n"
+    note = (
+        f"\n{REPORT_NOTE_MARKER}\n"
+        "## Added after this report was written\n\n"
+        "The totals above describe the graph as `graphify` left it. The `gherkin` "
+        "stage ran afterwards and added the business-intent layer, so the "
+        "committed graph is larger than this report says:\n\n"
+        f"- graph now: **{nodes:,} nodes, {edges:,} edges**\n"
+        f"- added here: {stats.get('features', 0):,} features, "
+        f"{stats.get('scenarios', 0):,} scenarios, {stats.get('tickets', 0):,} ticket nodes\n\n"
+        "Later stages can move these figures again. Measure the graph itself when "
+        "the number matters; read this report for the commit it was built from.\n"
+    )
+    # Sonar S2083: REPORT_PATH is a module constant from configuration, and this
+    # is offline build tooling operating on a local clone.
+    REPORT_PATH.write_text(existing + note, encoding="utf-8")  # NOSONAR(S2083)
+
+
 def write_outputs(graph: dict, labels: dict[str, str]) -> None:
     # Sonar S2083 (path injection) misfires here: both targets are module
     # constants derived from this script's own location, and this is offline
@@ -357,6 +394,7 @@ def main() -> int:
         f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges "
         f"({len(enricher.community_by_area)} new business-feature communities)"
     )
+    note_gherkin_layer(stats, nodes=len(graph["nodes"]), edges=len(graph["links"]))
     return 0
 
 

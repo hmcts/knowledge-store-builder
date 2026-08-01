@@ -223,5 +223,50 @@ class WriteOutputsTest(unittest.TestCase):
         self.assertEqual(zipped, graph)
 
 
+class GraphReportNoteTest(unittest.TestCase):
+    """The audit report must not silently disagree with the graph beside it.
+
+    `graphify` writes GRAPH_REPORT.md from its own pass, then this stage adds the
+    Gherkin layer and the report is never regenerated. Anyone reconciling the two
+    finds a discrepancy with no stated cause, and the business-intent layer — the
+    part that makes business-language questions answerable — is invisible in the
+    audit that is supposed to describe the graph.
+    """
+
+    def _report(self, tmp: Path) -> Path:
+        report = tmp / "GRAPH_REPORT.md"
+        report.write_text("# Graph Report\n\n- 100 nodes · 200 edges\n", encoding="utf-8")
+        gherkin.REPORT_PATH = report
+        return report
+
+    def test_the_report_records_what_gherkin_added_after_it_was_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(Path(tmp))
+            gherkin.note_gherkin_layer({"features": 12, "scenarios": 30}, nodes=142, edges=260)
+            text = report.read_text(encoding="utf-8")
+        self.assertIn("100 nodes", text, "graphify's own report is preserved")
+        self.assertIn("142", text, "the graph's actual node count is stated")
+        self.assertIn("12", text, "what this stage added is stated")
+
+    def test_running_twice_does_not_stack_notes(self):
+        # stages are idempotent; a note that appends on every run turns the
+        # report into a changelog and makes the newest figure hard to find
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(Path(tmp))
+            gherkin.note_gherkin_layer({"features": 12}, nodes=142, edges=260)
+            gherkin.note_gherkin_layer({"features": 13}, nodes=143, edges=261)
+            text = report.read_text(encoding="utf-8")
+        self.assertEqual(text.count(gherkin.REPORT_NOTE_MARKER), 1)
+        self.assertIn("143", text, "the note reflects the latest run")
+        self.assertNotIn("142", text, "the superseded figure is gone")
+
+    def test_a_missing_report_is_not_an_error(self):
+        # graphify may not have run, or the store may not keep the report
+        with tempfile.TemporaryDirectory() as tmp:
+            gherkin.REPORT_PATH = Path(tmp) / "absent.md"
+            gherkin.note_gherkin_layer({"features": 1}, nodes=2, edges=3)
+            self.assertFalse((Path(tmp) / "absent.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
