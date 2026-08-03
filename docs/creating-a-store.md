@@ -22,8 +22,8 @@ deciding what belongs in a new estate; this guide covers the mechanics.
 
 Install the Knowledge Store plugin by following
 [Install the plugin](asking-questions.md#install-the-plugin). The
-`/knowledge-store:knowledge-store-build` carries the stage order, clustering procedure and
-authoring checks. The plugin is instructions; the library and command-line tools
+`/knowledge-store:knowledge-store-build` skill carries the stage order, clustering
+procedure and authoring checks. The plugin is instructions; the library and command-line tools
 run the pipeline on your machine.
 
 You need Python 3.10 or later, Git and the GitHub CLI. On macOS, install them
@@ -242,7 +242,7 @@ Recompress the final graph after clustering or any later graph mutation, then
 build the page:
 
 ```bash
-gzip -n -c graphify-out/graph.json > graphify-out/graph.json.gz
+gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
 knowledgestore status
 ```

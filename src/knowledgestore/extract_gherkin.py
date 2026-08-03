@@ -36,7 +36,6 @@ LABELS_PATH = config.LABELS_PATH
 REPORT_PATH = config.GRAPH_REPORT_PATH
 REPOSITORIES = config.REPOSITORIES_DIR
 FEATURES_DIR = config.FEATURES_DIR
-STEP_DEFINITION_LANGUAGES = config.STEP_DEFINITION_LANGUAGES
 FORMAT = "gherkin"
 
 TICKET = config.TICKET_PATTERN
@@ -68,9 +67,13 @@ def parse_step_definitions(repo_dir: Path) -> dict[str, tuple[str, str]]:
 
     Every language in config.STEP_DEFINITION_LANGUAGES is searched, so an
     estate can mix Java, Python and TypeScript step definitions.
+
+    Read through `config` at call time, never copied to a module-level name at
+    import: an estate that adds a language calls config.configure(), and a copy
+    taken at import would leave that override accepted and silently ineffective.
     """
     patterns: dict[str, tuple[str, str]] = {}
-    for language in STEP_DEFINITION_LANGUAGES.values():
+    for language in config.STEP_DEFINITION_LANGUAGES.values():
         patterns.update(_language_step_definitions(repo_dir, language))
     return patterns
 
