@@ -97,6 +97,23 @@ knowledgestore             # lists every stage in run order
 The feed reads anonymously — no credentials, no account. Credentials are only
 needed to publish.
 
+### Or skip the steps
+
+With those installed, hand Claude Code the goal instead of the stages:
+
+```
+Build a knowledge store for the <org> GitHub organisation in this directory,
+following /knowledge-store:knowledge-store-build. Run every stage. Author the
+community summaries with as many parallel subagents as you can. Do not check
+in with me between stages - stop only if a stage fails, or if a decision is
+mine to make.
+```
+
+Raise `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` in `~/.claude/settings.json` first
+(40 is comfortable on 12 cores) — summary authoring is the stage that dominates
+the clock when it cannot fan out. Full version: [Build one without reading the
+steps](docs/creating-a-store.md#build-one-without-reading-the-steps).
+
 ### A first store
 
 ```bash
