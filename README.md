@@ -1,6 +1,6 @@
 # knowledge-store-builder
 
-## What does this repository do?
+## What this repository does
 
 Build a knowledge store from one or more GitHub repositories and use it to ask
 questions about your software estate with cited answers.
@@ -20,7 +20,7 @@ including:
 
 - a graph of the estate;
 - business features as first-class nodes;
-- links from every file to the tickets that changed it; and
+- links from source files to the tickets that changed them; and
 - a self-contained HTML application that searches and answers without a server
   or an LLM.
 
@@ -35,7 +35,8 @@ The two products are designed to work together. The Python library provides
 the `knowledgestore` commands that build the knowledge store. Querying reads
 the committed artefacts directly through the `graphify` CLI, which the
 plugin's query skill installs automatically. Building requires both products.
-Querying an existing knowledge store requires only the plugin.
+Querying with Claude Code requires only the plugin; the browser page requires
+neither Claude nor the plugin.
 
 ## What do you need?
 
@@ -53,19 +54,22 @@ Choose the path that matches your role:
 
 **Using** a store needs the plugin and nothing else — no Python, no `pip`. The
 query skill installs the one tool it needs,
-[graphify](https://github.com/safishamsi/graphify).
+[graphify](https://github.com/safishamsi/graphify). Without a Claude licence,
+`explorer.html` answers in a browser with no network access at all.
 
-**Building** a store needs three things: the plugin, the Python library for the
-`knowledgestore` commands, and [graphify](https://github.com/safishamsi/graphify)
-for extraction. The guide lists them.
+**Building** a store needs the plugin, the Python library for the
+`knowledgestore` commands, and graphify for extraction — plus Python 3.10 or
+later, Git and the GitHub CLI. The guides list them.
 
 ## How it is designed
 
 - **The store is the product.** Outputs are committed static files. Consumers
   clone and read; nothing is built at query time.
-- **The LLM runs at build time, never at query time.** Whoever builds a store
-  may have a licence; the people querying it may not. Everything an LLM writes
-  is committed as reviewed static text.
+- **The browser has no query-time LLM.** Whoever builds a store may have a
+  licence; the people querying it may not, and `explorer.html` is committed for
+  them. Everything an LLM writes during the build is committed as reviewed
+  static text. Claude Code reads the same evidence when a question needs a new
+  prose answer.
 - **Deterministic where it can be.** Extraction, indexing and page composition
   are pure functions of the sources; two runs on the same inputs produce
   byte-identical output.
@@ -81,33 +85,14 @@ for extraction. The guide lists them.
 | Document | For |
 |---|---|
 | [`CHEATSHEET.md`](CHEATSHEET.md) | the commands, per surface, with nothing else around them |
-| [`docs/asking-questions.md`](docs/asking-questions.md) | getting answers from an existing store |
-| [`docs/creating-a-store.md`](docs/creating-a-store.md) | creating and publishing a store |
-| [`docs/refreshing-a-store.md`](docs/refreshing-a-store.md) | refreshing an existing store and updating its library version |
+| [`docs/asking-questions.md`](docs/asking-questions.md) | asking questions with Claude Code, `explorer.html` or `graphify query` |
+| [`docs/creating-a-store.md`](docs/creating-a-store.md) | creating, building and publishing a new store |
+| [`docs/refreshing-a-store.md`](docs/refreshing-a-store.md) | refreshing an existing store and changing its pinned library version |
 | [`docs/configuring-a-store.md`](docs/configuring-a-store.md) | pipeline settings, BDD support and stage outputs |
 | [`docs/building-a-knowledge-store.md`](docs/building-a-knowledge-store.md) | the operator's judgement: defining an estate, what extraction yields, refresh economics, the traps |
 | [`docs/grounding-and-verification.md`](docs/grounding-and-verification.md) | whether a store's answers are fact-based, and how to verify subagent-authored content |
 | [`docs/retrieval-architecture.md`](docs/retrieval-architecture.md) | how this differs from vector RAG, and where each answer layer lives |
-
-## Development
-
-```bash
-pip install -e '.[dev]'                      # tooling pinned in the dev extra
-python3 -m unittest discover -s tests -v     # the whole suite, in under a second
-
-ruff check src tests                         # lint
-ruff format src tests                        # format (checked in CI)
-pyright                                      # type-check (clean; keep it so)
-
-node tests/explorer/engine-unit.mjs          # scorer maths
-python3 tests/explorer/fixture.py            # build a page from a synthetic estate
-node tests/explorer/page-regression.mjs      # drive every answer shape against it
-```
-
-The explorer page application is `src/knowledgestore/assets/app.js`, typed with
-JSDoc and checked by `tsc --checkJs` in CI. It is inlined verbatim into the
-built page, and the page regression asserts that byte-for-byte, so what the
-tests exercise is what ships.
+| [`CLAUDE.md`](CLAUDE.md) | working on this repository: the dev install, the checks, and what has bitten us |
 
 ## Licence
 
