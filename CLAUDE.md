@@ -19,6 +19,25 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 
 ## Testing
 
+Install the development tools and run the checks from the repository root:
+
+```bash
+pip install -e '.[dev]'
+python3 -m unittest discover -s tests -v
+
+ruff check src tests
+ruff format --check src tests
+pyright
+
+node tests/explorer/engine-unit.mjs
+python3 tests/explorer/fixture.py
+node tests/explorer/page-regression.mjs
+```
+
+The explorer application is `src/knowledgestore/assets/app.js`. It is checked
+with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
+the page regression verifies that the tested code is the code that ships.
+
 **Tests defend the product's designed behaviour under change. A test earns
 its place by failing when the product breaks — name the break it catches
 before writing it. Assert outcomes and artefacts, never that a mock was
@@ -69,8 +88,8 @@ How that looks in this codebase:
   and the insert does nothing — so discovery silently exercises the *installed*
   package. The symptom is a new test that passes when its module runs alone and
   fails under `discover`, with an error like `unexpected keyword argument`
-  naming a parameter you just added. Use `pip install -e '.[dev]'` as the README
-  says, or run `PYTHONPATH=src python3 -m unittest discover -s tests`.
+  naming a parameter you just added. Use the editable install above, or run
+  `PYTHONPATH=src python3 -m unittest discover -s tests`.
 - Coverage percentages are a map of where to look, never the goal. A test
   written to move a number, with no break it can catch, costs maintenance
   forever and protects nothing.
