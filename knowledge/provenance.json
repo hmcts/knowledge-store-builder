@@ -1,9 +1,0 @@
-{
- "repositories": {
-  "repo1": {
-   "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-   "branch": "main",
-   "committed": "2026-07-01T00:00:00+00:00"
-  }
- }
-}
