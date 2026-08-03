@@ -7,9 +7,9 @@ Two separate installs live here. Pick your row.
 | Ask questions of a store someone else built | the plugin | [Use a store](#use-a-store) |
 | Build or refresh a store | the plugin **and** the library | [Build a store](#build-a-store) |
 
-Why the reader who is only asking needs no Python, and how the two fit together:
-[Asking questions](docs/asking-questions.md) and
-[Creating a store](docs/creating-a-store.md).
+For setup and explanation, see [Asking questions](docs/asking-questions.md),
+[Creating a store](docs/creating-a-store.md) or
+[Refreshing a store](docs/refreshing-a-store.md).
 
 ## Use a store
 
@@ -155,7 +155,7 @@ knowledgestore summaries verify --sample 200 # is the prose grounded in evidence
 | Still no skills | `rm -rf ~/.claude/plugins/cache`, restart, reinstall |
 | `marketplace add` says it already exists | `/plugin marketplace update knowledge-store-builder`, then reinstall |
 | A skill change you merged is not there | `add` does not re-fetch; run `marketplace update` |
-| `No matching distribution found` for the library | the lock does not name the feed — pass `--extra-index-url` (see [Creating a store](docs/creating-a-store.md)) |
+| `No matching distribution found` for the library | a lock compiled without `--emit-index-url` does not name the feed — pass `--extra-index-url`, or recompile (see [Refreshing a store](docs/refreshing-a-store.md#update-the-library-version)) |
 | Terminal query fails on a missing file | you skipped the `gunzip` |
 | Graph operations refuse outright | raise `GRAPHIFY_MAX_GRAPH_BYTES` |
 | `remap` drops almost every summary | the graph is unclustered — check community coverage before remapping |
