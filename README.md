@@ -1,4 +1,4 @@
-# Knowledge Store Builder
+# knowledge-store-builder
 
 ## What does this repository do?
 
