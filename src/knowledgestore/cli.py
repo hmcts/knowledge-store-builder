@@ -54,6 +54,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",
     ),
+    "check-install-docs": (
+        "check_install_docs",
+        "check the documented install commands against what the lock file declares",
+    ),
 }
 
 

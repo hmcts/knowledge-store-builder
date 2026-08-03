@@ -98,6 +98,13 @@ LABELS_PATH = ROOT / "graphify-out" / ".graphify_labels.json"
 GRAPH_REPORT_PATH = ROOT / "graphify-out" / "GRAPH_REPORT.md"
 EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
 
+# --- pinned dependencies -------------------------------------------------
+# A store that pins its dependencies keeps a requirements input and a compiled
+# lock. A store that installs the library directly has neither, and
+# check-install-docs reports that rather than failing.
+REQUIREMENTS_PATH = ROOT / "requirements.txt"
+LOCK_PATH = ROOT / "requirements.lock"
+
 # --- issue tracker -------------------------------------------------------
 # Ticket references mined from commit subjects, e.g. "PROJ-123".
 TICKET_PATTERN = re.compile(
@@ -218,4 +225,8 @@ def _recompute_paths() -> None:
         LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
         GRAPH_REPORT_PATH=root / "graphify-out" / "GRAPH_REPORT.md",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",
+        # A store that pins its dependencies keeps these; a store that installs
+        # the library directly has neither, and check-install-docs says so.
+        REQUIREMENTS_PATH=root / "requirements.txt",
+        LOCK_PATH=root / "requirements.lock",
     )
