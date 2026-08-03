@@ -8,10 +8,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config, io, provenance
 
 
-class HeadInfoTest(unittest.TestCase):
+class HeadInfoTest(SettingsIsolated):
     def test_reads_sha_and_commit_date_from_git(self):
         calls = []
 
@@ -33,33 +34,30 @@ class HeadInfoTest(unittest.TestCase):
         self.assertTrue(all("-C" in c for c in calls))
 
 
-class WriteReadTest(unittest.TestCase):
+class WriteReadTest(SettingsIsolated):
     def test_round_trip_sorted_and_missing_file_is_empty(self):
         original = config.PROVENANCE_PATH
         self.addCleanup(config.configure, None, PROVENANCE_PATH=original)
         with tempfile.TemporaryDirectory() as tmp:
             config.configure(PROVENANCE_PATH=Path(tmp) / "provenance.json")
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = config.PROVENANCE_PATH
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
             self.assertEqual(provenance.read(), {})
             provenance.write({"zeta": {"sha": "z"}, "alpha": {"sha": "a"}})
             self.assertEqual(list(provenance.read()), ["alpha", "zeta"])
 
 
-class LayerCoverageTest(unittest.TestCase):
+class LayerCoverageTest(SettingsIsolated):
     def test_counts_summaries_briefs_and_topics(self):
         from knowledgestore import status
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for attr, value in {
-                "SUMMARIES_PATH": root / "communities.json",
-                "SUMMARIES_INPUT_PATH": root / "communities-input.json",
-                "TOPICS_BRIEFS_PATH": root / "briefs.json",
-                "TOPICS_CONFIG_PATH": root / "topics.txt",
-            }.items():
-                self.addCleanup(setattr, status, attr, getattr(status, attr))
-                setattr(status, attr, value)
+            config.configure(
+                SUMMARIES_PATH=root / "communities.json",
+                SUMMARIES_INPUT_PATH=root / "communities-input.json",
+                TOPICS_BRIEFS_PATH=root / "briefs.json",
+                TOPICS_CONFIG_PATH=root / "topics.txt",
+            )
             io.write_json(root / "communities.json", {"1": "x", "2": "y"})
             io.write_json(root / "communities-input.json", [{"id": 1}, {"id": 2}, {"id": 3}])
             io.write_json(root / "briefs.json", {"welsh": {}})
@@ -78,7 +76,7 @@ class LayerCoverageTest(unittest.TestCase):
         )
 
 
-class CorpusCitationsTest(unittest.TestCase):
+class CorpusCitationsTest(SettingsIsolated):
     def test_reports_nodes_citing_missing_files(self):
         from knowledgestore import status
 
@@ -101,7 +99,7 @@ class CorpusCitationsTest(unittest.TestCase):
         self.assertEqual(got, {"checked": 2, "dangling": ["gone/away.sh"]})
 
 
-class FreshnessTest(unittest.TestCase):
+class FreshnessTest(SettingsIsolated):
     def test_flags_explorer_older_than_layers(self):
         from knowledgestore import status
 
@@ -167,13 +165,13 @@ class FreshnessTest(unittest.TestCase):
         self.assertEqual(status.artefact_freshness(run=failing_git), {})
 
 
-class DriftTest(unittest.TestCase):
+class DriftTest(SettingsIsolated):
     def test_reports_repos_with_commits_since_recorded_date(self):
         from knowledgestore import provenance, status
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+            config.configure(PROVENANCE_PATH=Path(tmp) / "provenance.json")
             provenance.write(
                 {
                     "moved": {
@@ -201,8 +199,8 @@ class DriftTest(unittest.TestCase):
         from knowledgestore import provenance, status
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+            config.configure(PROVENANCE_PATH=Path(tmp) / "provenance.json")
             provenance.write(
                 {
                     "repo1": {
@@ -235,8 +233,8 @@ class DriftTest(unittest.TestCase):
         from knowledgestore import provenance, status
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = Path(tmp) / "provenance.json"
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+            config.configure(PROVENANCE_PATH=Path(tmp) / "provenance.json")
             provenance.write(
                 {
                     "repo1": {

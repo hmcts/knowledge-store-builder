@@ -22,19 +22,6 @@ from itertools import combinations
 from . import config, io, kinds, provenance
 from .build_topic_briefs import markdown_to_html
 
-GRAPH_PATH = config.GRAPH_PATH
-LABELS_PATH = config.LABELS_PATH
-INTENT_PATH = config.INTENT_INDEX_PATH
-DESCRIPTIONS_PATH = config.TICKET_DESCRIPTIONS_PATH
-SUMMARIES_PATH = config.SUMMARIES_PATH
-INPUT_DIR = config.DEEPDIVES_INPUT_DIR
-DOCS_DIR = config.DEEPDIVES_DOCS_DIR
-DIVES_PATH = config.DEEPDIVES_PATH
-TOP_FILES = config.DIVE_TOP_FILES
-MIN_COCHANGE = config.DIVE_MIN_COCHANGE
-COCHANGE_MAX_FILES = config.DIVE_COCHANGE_MAX_FILES_PER_TICKET
-REVERT = config.REVERT_PATTERN
-FIX = config.FIX_PATTERN
 
 MIN_DIVE_LENGTH = 800
 
@@ -70,7 +57,7 @@ def churn_section(files: dict) -> dict:
                 "first": info.get("first", ""),
                 "last": info.get("last", ""),
             }
-            for path, info in ranked[:TOP_FILES]
+            for path, info in ranked[: config.DIVE_TOP_FILES]
         ],
     }
 
@@ -85,8 +72,8 @@ def _described(tickets: set[str], descriptions: dict) -> dict[str, str]:
 
 def instability_section(tickets: set[str], descriptions: dict) -> dict:
     texts = _described(tickets, descriptions)
-    reverts = [t for t, text in texts.items() if REVERT.search(text)]
-    fixes = [t for t, text in texts.items() if FIX.search(text)]
+    reverts = [t for t, text in texts.items() if config.REVERT_PATTERN.search(text)]
+    fixes = [t for t, text in texts.items() if config.FIX_PATTERN.search(text)]
     total = max(len(texts), 1)
     sample = lambda ids: [f"{t}: {texts[t][:120]}" for t in ids[:5]]  # noqa: E731
     return {
@@ -120,13 +107,13 @@ def cochange_section(files: dict) -> list[dict]:
             by_ticket[t].append(path)
     pairs: Counter = Counter()
     for paths in by_ticket.values():
-        if 2 <= len(paths) <= COCHANGE_MAX_FILES:
+        if 2 <= len(paths) <= config.DIVE_COCHANGE_MAX_FILES_PER_TICKET:
             for a, b in combinations(sorted(paths), 2):
                 pairs[(a, b)] += 1
     kept = [
         {"a": a, "b": b, "n": n}
         for (a, b), n in pairs.items()
-        if n >= MIN_COCHANGE and not _is_test_pair(a, b)
+        if n >= config.DIVE_MIN_COCHANGE and not _is_test_pair(a, b)
     ]
     return sorted(kept, key=lambda p: (-p["n"], p["a"], p["b"]))[:25]
 
@@ -189,7 +176,7 @@ def summary_coverage(graph: dict, repo: str, summaries: dict) -> dict:
 
 
 def extract(repo: str) -> int:
-    graph = io.load_graph(GRAPH_PATH)  # NOTE: the full graph
+    graph = io.load_graph(config.GRAPH_PATH)  # NOTE: the full graph
     if not any(n.get("repo") == repo for n in graph["nodes"]):
         print(
             f"No nodes for repository '{repo}' - is it in the estate, "
@@ -197,10 +184,10 @@ def extract(repo: str) -> int:
             file=sys.stderr,
         )
         return 1
-    labels = io.read_json_dict(LABELS_PATH)
-    summaries = io.read_json_dict(SUMMARIES_PATH)
-    intent = io.read_gzip_json_dict(INTENT_PATH)
-    descriptions = io.read_gzip_json_dict(DESCRIPTIONS_PATH)
+    labels = io.read_json_dict(config.LABELS_PATH)
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
+    descriptions = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
     files = intent.get(repo, {})
     tickets = repo_tickets(files)
     bundle = {
@@ -216,25 +203,25 @@ def extract(repo: str) -> int:
         "features": feature_section(graph, tickets),
         "summary_coverage": summary_coverage(graph, repo, summaries),
     }
-    io.write_json(INPUT_DIR / f"{repo}-input.json", bundle, indent=1)
-    print(f"{repo}: bundle -> {INPUT_DIR / (repo + '-input.json')}")
+    io.write_json(config.DEEPDIVES_INPUT_DIR / f"{repo}-input.json", bundle, indent=1)
+    print(f"{repo}: bundle -> {config.DEEPDIVES_INPUT_DIR / (repo + '-input.json')}")
     return 0
 
 
 def merge() -> int:
     dives_out: dict[str, dict] = {}
     problems: list[str] = []
-    bundles = sorted(INPUT_DIR.glob("*-input.json"))
+    bundles = sorted(config.DEEPDIVES_INPUT_DIR.glob("*-input.json"))
     if not bundles:
         print(
-            f"No bundles in {INPUT_DIR} - run `knowledgestore deepdive extract <repo>` first",
+            f"No bundles in {config.DEEPDIVES_INPUT_DIR} - run `knowledgestore deepdive extract <repo>` first",
             file=sys.stderr,
         )
         return 1
     for bundle_path in bundles:
         bundle = io.read_json_dict(bundle_path)
         repo = str(bundle.get("repo", ""))
-        doc = DOCS_DIR / f"{repo}.md"
+        doc = config.DEEPDIVES_DOCS_DIR / f"{repo}.md"
         sha = str((bundle.get("provenance") or {}).get("sha", ""))[:8]
         if not doc.exists():
             problems.append(f"{repo}: missing {doc}")
@@ -255,10 +242,10 @@ def merge() -> int:
             "source": f"docs/deep-dives/{repo}.md",
             "sha": sha,
         }
-    io.write_json(DIVES_PATH, dict(sorted(dives_out.items())), indent=1)
+    io.write_json(config.DEEPDIVES_PATH, dict(sorted(dives_out.items())), indent=1)
     for problem in problems:
         print(f"skipped - {problem}")
-    print(f"{len(dives_out)} deep dives -> {DIVES_PATH}")
+    print(f"{len(dives_out)} deep dives -> {config.DEEPDIVES_PATH}")
     return 1 if problems else 0
 
 

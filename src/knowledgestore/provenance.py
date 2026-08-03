@@ -13,8 +13,6 @@ from pathlib import Path
 from . import config, io
 from .sync_repositories import run_git
 
-PROVENANCE_PATH = config.PROVENANCE_PATH
-
 
 def head_info(repo_dir: Path, branch: str, run=run_git) -> dict:
     """The clone's current commit: sha, configured branch, commit date."""
@@ -25,7 +23,7 @@ def head_info(repo_dir: Path, branch: str, run=run_git) -> dict:
 
 def write(entries: dict[str, dict]) -> None:
     io.write_json(
-        PROVENANCE_PATH,
+        config.PROVENANCE_PATH,
         {"repositories": dict(sorted(entries.items()))},
         indent=1,
     )
@@ -33,6 +31,6 @@ def write(entries: dict[str, dict]) -> None:
 
 def read() -> dict[str, dict]:
     """Recorded provenance by repository name, or {} when never recorded."""
-    data = io.read_json_dict(PROVENANCE_PATH)
+    data = io.read_json_dict(config.PROVENANCE_PATH)
     repos = data.get("repositories", {})
     return repos if isinstance(repos, dict) else {}

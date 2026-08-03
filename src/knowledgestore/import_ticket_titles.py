@@ -31,7 +31,6 @@ from pathlib import Path
 
 from . import config
 
-OUTPUT = config.TICKET_TITLES_PATH
 TICKET = re.compile("^" + config.TICKET_PATTERN.pattern.strip("\\b") + "$")
 
 
@@ -75,8 +74,8 @@ def main() -> int:
         return 1
 
     titles: dict[str, str] = {}
-    if OUTPUT.exists():
-        titles = json.load(gzip.open(OUTPUT, "rt", encoding="utf-8"))
+    if config.TICKET_TITLES_PATH.exists():
+        titles = json.load(gzip.open(config.TICKET_TITLES_PATH, "rt", encoding="utf-8"))
         print(f"Loaded {len(titles):,} existing titles")
 
     added = 0
@@ -85,11 +84,11 @@ def main() -> int:
         added += merge_csv(path, titles)
         print(f"{path}: merged")
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(OUTPUT, "wt", encoding="utf-8", compresslevel=9) as out:
+    config.TICKET_TITLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(config.TICKET_TITLES_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
         json.dump(dict(sorted(titles.items())), out, ensure_ascii=False)
 
-    print(f"{added:,} titles added/updated; {len(titles):,} total -> {OUTPUT}")
+    print(f"{added:,} titles added/updated; {len(titles):,} total -> {config.TICKET_TITLES_PATH}")
     return 0
 
 

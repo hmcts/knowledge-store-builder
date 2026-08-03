@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import build_knowledge_context as context  # noqa: E402
 
 
@@ -23,7 +25,7 @@ def make_history(tmp: Path) -> Path:
     return repo_dir
 
 
-class HelpersTest(unittest.TestCase):
+class HelpersTest(SettingsIsolated):
     def test_read_first_record_and_count_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo_dir = make_history(Path(tmp))
@@ -39,11 +41,11 @@ class HelpersTest(unittest.TestCase):
             self.assertEqual(context.read_first_record(empty), {})
 
 
-class BuildOutputsTest(unittest.TestCase):
+class BuildOutputsTest(SettingsIsolated):
     def _patch_paths(self, tmp: Path):
-        context.HISTORY_DIR = tmp / "git-history"
-        context.MANIFEST_PATH = tmp / "repository-manifest.md"
-        context.CONTEXT_PATH = tmp / "knowledge_context.md"
+        config.configure(HISTORY_DIR=tmp / "git-history")
+        config.configure(MANIFEST_PATH=tmp / "repository-manifest.md")
+        config.configure(CONTEXT_PATH=tmp / "knowledge_context.md")
 
     def test_manifest_lists_repository_with_count_and_source(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -51,7 +53,7 @@ class BuildOutputsTest(unittest.TestCase):
             repo_dir = make_history(tmp)
             self._patch_paths(tmp)
             context.build_manifest([repo_dir])
-            manifest = context.MANIFEST_PATH.read_text(encoding="utf-8")
+            manifest = config.MANIFEST_PATH.read_text(encoding="utf-8")
         self.assertIn("`repo-a`", manifest)
         self.assertIn("| 2 |", manifest)  # commit count
         self.assertIn("git@example.com:o/repo-a.git", manifest)
@@ -63,7 +65,7 @@ class BuildOutputsTest(unittest.TestCase):
             repo_dir = make_history(tmp)
             self._patch_paths(tmp)
             context.build_context([repo_dir])
-            content = context.CONTEXT_PATH.read_text(encoding="utf-8")
+            content = config.CONTEXT_PATH.read_text(encoding="utf-8")
         self.assertIn("- `repo-a`", content)
         self.assertIn("source of truth", content)
         self.assertIn("commits.ndjson", content)
@@ -77,16 +79,16 @@ class BuildOutputsTest(unittest.TestCase):
             (repo / "commits.ndjson").write_text(
                 '{"repository_url": "git@example.com:o/repo-a.git"}\n', encoding="utf-8"
             )
-            self.addCleanup(setattr, context, "HISTORY_DIR", context.HISTORY_DIR)
-            self.addCleanup(setattr, context, "MANIFEST_PATH", context.MANIFEST_PATH)
-            self.addCleanup(setattr, context, "CONTEXT_PATH", context.CONTEXT_PATH)
-            context.HISTORY_DIR = root / "history"
-            context.MANIFEST_PATH = root / "manifest.md"
-            context.CONTEXT_PATH = root / "context.md"
+            self.addCleanup(setattr, context, "HISTORY_DIR", config.HISTORY_DIR)
+            self.addCleanup(setattr, context, "MANIFEST_PATH", config.MANIFEST_PATH)
+            self.addCleanup(setattr, context, "CONTEXT_PATH", config.CONTEXT_PATH)
+            config.configure(HISTORY_DIR=root / "history")
+            config.configure(MANIFEST_PATH=root / "manifest.md")
+            config.configure(CONTEXT_PATH=root / "context.md")
             from knowledgestore import provenance
 
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = root / "provenance.json"
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+            config.configure(PROVENANCE_PATH=root / "provenance.json")
             provenance.write(
                 {
                     "repo-a": {
@@ -97,7 +99,7 @@ class BuildOutputsTest(unittest.TestCase):
                 }
             )
             context.main()
-            manifest = context.MANIFEST_PATH.read_text(encoding="utf-8")
+            manifest = config.MANIFEST_PATH.read_text(encoding="utf-8")
         self.assertIn("Synced at", manifest)
         self.assertIn("2026-07-30 (`abcdef01`)", manifest)
 

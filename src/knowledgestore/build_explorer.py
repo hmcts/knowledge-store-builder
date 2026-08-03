@@ -38,17 +38,6 @@ from . import config
 from . import io
 from . import kinds
 
-GRAPH_PATH = config.GRAPH_PATH
-LABELS_PATH = config.LABELS_PATH
-INTENT_PATH = config.INTENT_INDEX_PATH
-TITLES_PATH = config.TICKET_TITLES_PATH
-SUMMARIES_PATH = config.SUMMARIES_PATH
-SYNONYMS_PATH = config.SYNONYMS_PATH
-TICKET_DESC_PATH = config.TICKET_DESCRIPTIONS_PATH
-TOPICS_PATH = config.TOPICS_BRIEFS_PATH
-DIVES_PATH = config.DEEPDIVES_PATH
-PROVENANCE_PATH = config.PROVENANCE_PATH
-OUTPUT = config.EXPLORER_PATH
 
 MINIFIED = re.compile(r"^[A-Za-z_$]{1,3}(\(\))?$")
 MAX_CONNECTIONS = 5
@@ -57,7 +46,6 @@ MAX_TICKETS = 6
 # what the search page indexes). Business kinds are always included; code
 # entries must be non-method symbols outside backend test trees with at
 # least this many connections. See config.MIN_ENTRY_DEGREE / config.E2E_REPOS.
-MIN_ENTRY_DEGREE = config.MIN_ENTRY_DEGREE
 E2E_REPOS = config.E2E_REPOS
 
 
@@ -94,10 +82,10 @@ def app_source() -> str:
 
 
 def load_inputs() -> tuple[dict, dict, dict, dict]:
-    graph = io.load_graph(GRAPH_PATH)
-    labels = io.load_labels(LABELS_PATH)
-    intent = io.read_gzip_json_dict(INTENT_PATH)
-    titles = io.read_gzip_json_dict(TITLES_PATH)
+    graph = io.load_graph(config.GRAPH_PATH)
+    labels = io.load_labels(config.LABELS_PATH)
+    intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
+    titles = io.read_gzip_json_dict(config.TICKET_TITLES_PATH)
     return graph, labels, intent, titles
 
 
@@ -110,7 +98,7 @@ def node_kind(node: dict) -> str:
 
 
 def include_entry(node: dict, kind: str, degree: int) -> bool:
-    """Explorer inclusion policy - see MIN_ENTRY_DEGREE comment above."""
+    """Explorer inclusion policy - see config.MIN_ENTRY_DEGREE comment above."""
     if not node.get("label"):
         return False  # structural nodes (e.g. Java package hierarchy) carry no label
     if is_noise(node, kind):
@@ -124,7 +112,7 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
     is_test = ".spec." in source or "__tests__" in source or "/test/" in source
     if is_test and node.get("repo") not in E2E_REPOS:
         return False  # backend test scaffolding
-    return degree >= MIN_ENTRY_DEGREE
+    return degree >= config.MIN_ENTRY_DEGREE
 
 
 def is_noise(node: dict, kind: str) -> bool:
@@ -333,31 +321,33 @@ __APP_JS__
 
 
 def main() -> int:
-    if not GRAPH_PATH.exists():
-        print(f"Graph not found: {GRAPH_PATH} (gunzip -k graph.json.gz first)")
+    if not config.GRAPH_PATH.exists():
+        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
         return 1
 
     graph, labels, intent, titles = load_inputs()
     entries, edges = build_index(graph, labels, intent)
     summaries = (
-        json.loads(SUMMARIES_PATH.read_text(encoding="utf-8")) if SUMMARIES_PATH.exists() else {}
+        json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
+        if config.SUMMARIES_PATH.exists()
+        else {}
     )
     synonyms = (
-        json.load(gzip.open(SYNONYMS_PATH, "rt", encoding="utf-8"))
-        if SYNONYMS_PATH.exists()
+        json.load(gzip.open(config.SYNONYMS_PATH, "rt", encoding="utf-8"))
+        if config.SYNONYMS_PATH.exists()
         else {}
     )
     ticket_info = (
-        json.load(gzip.open(TICKET_DESC_PATH, "rt", encoding="utf-8"))
-        if TICKET_DESC_PATH.exists()
+        json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8"))
+        if config.TICKET_DESCRIPTIONS_PATH.exists()
         else {}
     )
     # Topic briefs (GraphRAG phase 3): pre-written narratives composed at
     # build time from knowledge/topics evidence; served without any LLM.
-    topics = io.read_json_dict(TOPICS_PATH)
+    topics = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
     # Deep dives (Task 7): pre-written, provenance-stamped dossiers on
     # individual repositories, served without any LLM.
-    divesdata = io.read_json_dict(DIVES_PATH)
+    divesdata = io.read_json_dict(config.DEEPDIVES_PATH)
 
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.
@@ -378,7 +368,7 @@ def main() -> int:
         f"full graph is queryable via the graphify CLI"
     )
     # the {"repositories": {...}} shape is owned by provenance.py
-    recorded = io.read_json_dict(PROVENANCE_PATH).get("repositories", {})
+    recorded = io.read_json_dict(config.PROVENANCE_PATH).get("repositories", {})
     synced = latest_synced(recorded)
     if synced:
         sub += f" &middot; sources synced to {synced}"
@@ -398,11 +388,13 @@ def main() -> int:
         .replace("__DIVES__", json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__APP_JS__", app_js)
     )
-    # Sonar S2083 misfires here: OUTPUT is a module constant derived from
+    # Sonar S2083 misfires here: config.EXPLORER_PATH is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
-    OUTPUT.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
-    size_mb = OUTPUT.stat().st_size / 1_048_576
-    print(f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {OUTPUT} ({size_mb:.1f} MB)")
+    config.EXPLORER_PATH.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
+    size_mb = config.EXPLORER_PATH.stat().st_size / 1_048_576
+    print(
+        f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {config.EXPLORER_PATH} ({size_mb:.1f} MB)"
+    )
     return 0
 
 

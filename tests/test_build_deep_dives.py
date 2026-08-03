@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import build_deep_dives as dives
 
 
@@ -61,7 +63,7 @@ DESCRIPTIONS = {
 }
 
 
-class ScaleTest(unittest.TestCase):
+class ScaleTest(SettingsIsolated):
     def test_counts_nodes_communities_and_summarised_top(self):
         got = dives.scale_section(GRAPH, "target", LABELS, SUMMARIES)
         self.assertEqual(got["nodes"], 3)
@@ -73,7 +75,7 @@ class ScaleTest(unittest.TestCase):
         self.assertIsNone(got["top_communities"][1]["summary"])
 
 
-class ChurnTest(unittest.TestCase):
+class ChurnTest(SettingsIsolated):
     def test_orders_files_by_distinct_tickets(self):
         got = dives.churn_section(INTENT_FILES)
         self.assertEqual(got["files_with_history"], 3)
@@ -81,7 +83,7 @@ class ChurnTest(unittest.TestCase):
         self.assertEqual(got["top_files"][0]["tickets"], 3)
 
 
-class InstabilityTest(unittest.TestCase):
+class InstabilityTest(SettingsIsolated):
     def test_measures_revert_and_fix_shares_with_samples(self):
         tickets = {"DD-1", "DD-2", "DD-3"}
         got = dives.instability_section(tickets, DESCRIPTIONS)
@@ -95,12 +97,12 @@ class InstabilityTest(unittest.TestCase):
         self.assertEqual(got, {"2020": 2, "2021": 1})
 
 
-class RepoTicketsTest(unittest.TestCase):
+class RepoTicketsTest(SettingsIsolated):
     def test_union_of_file_tickets(self):
         self.assertEqual(dives.repo_tickets(INTENT_FILES), {"DD-1", "DD-2", "DD-3"})
 
 
-class CochangeTest(unittest.TestCase):
+class CochangeTest(SettingsIsolated):
     def _files(self, pairs_count):
         # DD-n tickets each touching both files -> co-change support
         tickets = {f"DD-{i}": 1 for i in range(pairs_count)}
@@ -111,8 +113,8 @@ class CochangeTest(unittest.TestCase):
         }
 
     def test_pairs_meet_threshold_and_test_pairs_are_excluded(self):
-        self.addCleanup(setattr, dives, "MIN_COCHANGE", dives.MIN_COCHANGE)
-        dives.MIN_COCHANGE = 10
+        self.addCleanup(setattr, dives, "MIN_COCHANGE", config.DIVE_MIN_COCHANGE)
+        config.configure(DIVE_MIN_COCHANGE=10)
         got = dives.cochange_section(self._files(12))
         self.assertIn({"a": "src/A.java", "b": "src/B.java", "n": 12}, got)
         pairs = {(p["a"], p["b"]) for p in got}
@@ -124,19 +126,19 @@ class CochangeTest(unittest.TestCase):
         self.assertEqual(dives.cochange_section(files), [])
 
 
-class CouplingSurfaceTest(unittest.TestCase):
+class CouplingSurfaceTest(SettingsIsolated):
     def test_shared_schema_labels_name_the_other_repos(self):
         got = dives.coupling_surface(GRAPH, "target")
         self.assertEqual(got, [{"label": "progression.case.json", "other_repos": ["other"]}])
 
 
-class FeatureSectionTest(unittest.TestCase):
+class FeatureSectionTest(SettingsIsolated):
     def test_features_sharing_tickets_are_linked(self):
         got = dives.feature_section(GRAPH, {"DD-1", "DD-9"})
         self.assertEqual(got, [{"label": "Progress a case", "tickets": ["DD-1"]}])
 
 
-class HotspotTest(unittest.TestCase):
+class HotspotTest(SettingsIsolated):
     def test_high_churn_high_degree_files_flagged(self):
         got = dives.hotspot_section(INTENT_FILES, GRAPH, "target")
         paths = [h["path"] for h in got]
@@ -144,27 +146,22 @@ class HotspotTest(unittest.TestCase):
         self.assertNotIn("pom.xml", paths)  # churn 1, no nodes
 
 
-class ExtractTest(unittest.TestCase):
+class ExtractTest(SettingsIsolated):
     def test_extract_writes_a_complete_bundle(self):
         import gzip
         import json
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for attr, rel in {
-                "GRAPH_PATH": "graph.json",
-                "LABELS_PATH": "labels.json",
-                "INTENT_PATH": "intent.json.gz",
-                "DESCRIPTIONS_PATH": "desc.json.gz",
-                "SUMMARIES_PATH": "summaries.json",
-                "INPUT_DIR": "deep-dives",
-            }.items():
-                self.addCleanup(setattr, dives, attr, getattr(dives, attr))
-                setattr(dives, attr, root / rel)
-            from knowledgestore import provenance
-
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = root / "provenance.json"
+            config.configure(
+                GRAPH_PATH=root / "graph.json",
+                LABELS_PATH=root / "labels.json",
+                INTENT_INDEX_PATH=root / "intent.json.gz",
+                TICKET_DESCRIPTIONS_PATH=root / "desc.json.gz",
+                SUMMARIES_PATH=root / "summaries.json",
+                DEEPDIVES_INPUT_DIR=root / "deep-dives",
+                PROVENANCE_PATH=root / "provenance.json",
+            )
             (root / "graph.json").write_text(json.dumps(GRAPH))
             (root / "labels.json").write_text(json.dumps(LABELS))
             (root / "summaries.json").write_text(json.dumps(SUMMARIES))
@@ -195,22 +192,20 @@ class ExtractTest(unittest.TestCase):
             import json
 
             root = Path(tmp)
-            self.addCleanup(setattr, dives, "GRAPH_PATH", dives.GRAPH_PATH)
-            dives.GRAPH_PATH = root / "graph.json"
+            self.addCleanup(setattr, dives, "GRAPH_PATH", config.GRAPH_PATH)
+            config.configure(GRAPH_PATH=root / "graph.json")
             (root / "graph.json").write_text(json.dumps({"nodes": [], "links": []}))
             self.assertEqual(dives.extract("nope"), 1)
 
 
-def _wire_deep_dive_paths(test: unittest.TestCase, root: Path) -> None:
-    """Point INPUT_DIR/DOCS_DIR/DIVES_PATH at a scratch tree and restore them
-    after the test - the merge()/main() IO seam under test."""
-    for attr, rel in {
-        "INPUT_DIR": "in",
-        "DOCS_DIR": "docs",
-        "DIVES_PATH": "in/dives.json",
-    }.items():
-        test.addCleanup(setattr, dives, attr, getattr(dives, attr))
-        setattr(dives, attr, root / rel)
+def _wire_deep_dive_paths(root: Path) -> None:
+    """Point the deep-dive IO at a scratch tree - the merge()/main() seam under
+    test. SettingsIsolated puts the settings back afterwards."""
+    config.configure(
+        DEEPDIVES_INPUT_DIR=root / "in",
+        DEEPDIVES_DOCS_DIR=root / "docs",
+        DEEPDIVES_PATH=root / "in" / "dives.json",
+    )
     (root / "in").mkdir()
     (root / "docs").mkdir()
 
@@ -240,7 +235,7 @@ def _write_mixed_dive_batch(root: Path) -> None:
     (root / "docs" / "short.md").write_text("Too short.", encoding="utf-8")
 
 
-class MergeTest(unittest.TestCase):
+class MergeTest(SettingsIsolated):
     def test_merge_rejects_a_dossier_that_does_not_state_its_build(self):
         """Design promise: a dossier that cannot say which build it measured
         is rejected - churn/instability figures go stale every commit, so an
@@ -249,7 +244,7 @@ class MergeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _wire_deep_dive_paths(self, root)
+            _wire_deep_dive_paths(root)
             (root / "in" / "good-input.json").write_text(
                 json.dumps({"repo": "good", "provenance": {"sha": "abcd1234" + "0" * 32}})
             )
@@ -280,7 +275,7 @@ class MergeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _wire_deep_dive_paths(self, root)
+            _wire_deep_dive_paths(root)
             _write_mixed_dive_batch(root)
             captured = std_io.StringIO()
             with redirect_stdout(captured):
@@ -301,7 +296,7 @@ class MergeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _wire_deep_dive_paths(self, root)
+            _wire_deep_dive_paths(root)
             captured = StringIO()
             with redirect_stderr(captured):
                 code = dives.merge()
@@ -309,7 +304,7 @@ class MergeTest(unittest.TestCase):
         self.assertIn("No bundles", captured.getvalue())
 
 
-class MainDispatchTest(unittest.TestCase):
+class MainDispatchTest(SettingsIsolated):
     def setUp(self):
         self.addCleanup(setattr, sys, "argv", sys.argv)
 
@@ -321,8 +316,8 @@ class MainDispatchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.addCleanup(setattr, dives, "GRAPH_PATH", dives.GRAPH_PATH)
-            dives.GRAPH_PATH = root / "graph.json"
+            self.addCleanup(setattr, dives, "GRAPH_PATH", config.GRAPH_PATH)
+            config.configure(GRAPH_PATH=root / "graph.json")
             (root / "graph.json").write_text(
                 json.dumps({"nodes": [{"repo": "other-repo"}], "links": []})
             )
@@ -337,7 +332,7 @@ class MainDispatchTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _wire_deep_dive_paths(self, root)
+            _wire_deep_dive_paths(root)
             _write_mixed_dive_batch(root)
             sys.argv = ["prog", "merge"]
             code = dives.main()

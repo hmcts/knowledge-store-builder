@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import build_topic_briefs as briefs  # noqa: E402
 
 
@@ -16,7 +18,7 @@ def write_topics(tmp: Path, content: str) -> Path:
     return path
 
 
-class ReadTopicsTest(unittest.TestCase):
+class ReadTopicsTest(SettingsIsolated):
     def test_parses_slug_title_and_keywords(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_topics(
@@ -42,7 +44,7 @@ class ReadTopicsTest(unittest.TestCase):
                 briefs.read_topics(path)
 
 
-class DossierTest(unittest.TestCase):
+class DossierTest(SettingsIsolated):
     def setUp(self):
         self.topic = briefs.Topic(
             slug="welsh-language",
@@ -137,7 +139,7 @@ class DossierTest(unittest.TestCase):
         self.assertIn("welsh-toggle.ts", joined)
 
 
-class MarkdownTest(unittest.TestCase):
+class MarkdownTest(SettingsIsolated):
     def test_headings_paragraphs_and_inline(self):
         html = briefs.markdown_to_html(
             "# Title\n\nSome **bold** and `code` text\nsame paragraph.\n"
@@ -163,11 +165,11 @@ class MarkdownTest(unittest.TestCase):
         self.assertIn("<h5>Deep</h5>", html)
 
 
-class MergeTest(unittest.TestCase):
+class MergeTest(SettingsIsolated):
     def test_merge_validates_and_renders(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = write_topics(
+            topics_config = write_topics(
                 root,
                 (
                     "present | Present topic | word\n"
@@ -183,12 +185,12 @@ class MergeTest(unittest.TestCase):
             (docs / "short.md").write_text("# Too short\n", encoding="utf-8")
             out = root / "briefs.json"
 
-            original = (briefs.TOPICS_CONFIG, briefs.DOCS_DIR, briefs.BRIEFS_PATH)
-            briefs.TOPICS_CONFIG, briefs.DOCS_DIR, briefs.BRIEFS_PATH = config, docs, out
-            try:
-                exit_code = briefs.merge()
-            finally:
-                (briefs.TOPICS_CONFIG, briefs.DOCS_DIR, briefs.BRIEFS_PATH) = original
+            config.configure(
+                TOPICS_CONFIG_PATH=topics_config,
+                TOPICS_DOCS_DIR=docs,
+                TOPICS_BRIEFS_PATH=out,
+            )
+            exit_code = briefs.merge()
 
             self.assertEqual(exit_code, 1)  # two topics missing/short
             import json

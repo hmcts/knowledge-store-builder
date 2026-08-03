@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config, extract_gherkin as gherkin, kinds
 
 
@@ -13,7 +14,7 @@ def node(kind: str) -> dict:
     return {"metadata": {"kind": kind}}
 
 
-class KindsTest(unittest.TestCase):
+class KindsTest(SettingsIsolated):
     def test_current_kinds_are_format_agnostic(self):
         self.assertEqual(kinds.node_kind(node("feature")), kinds.FEATURE)
         self.assertEqual(kinds.node_kind(node("scenario")), kinds.SCENARIO)
@@ -57,7 +58,7 @@ Given('a defendant owes {int} pounds', async function (amount: number) {
 """
 
 
-class StepDefinitionLanguageTest(unittest.TestCase):
+class StepDefinitionLanguageTest(SettingsIsolated):
     def _patterns(self, files: dict[str, str]) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -115,14 +116,14 @@ class StepDefinitionLanguageTest(unittest.TestCase):
         self.assertEqual(found, {})
 
 
-class FeatureAreaTest(unittest.TestCase):
+class FeatureAreaTest(SettingsIsolated):
     def test_area_comes_from_the_segment_after_the_features_directory(self):
         self.assertEqual(gherkin.feature_area("e2e/features/payments/refund.feature"), "payments")
 
     def test_features_directory_is_configurable(self):
-        original = gherkin.FEATURES_DIR
+        original = config.FEATURES_DIR
         self.addCleanup(setattr, gherkin, "FEATURES_DIR", original)
-        gherkin.FEATURES_DIR = "specs/"
+        config.configure(FEATURES_DIR="specs/")
         self.assertEqual(gherkin.feature_area("app/specs/listing/hearing.feature"), "listing")
 
     def test_config_supplies_the_default(self):

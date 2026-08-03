@@ -24,11 +24,7 @@ from pathlib import Path
 
 from . import config
 
-HISTORY_DIR = config.HISTORY_DIR
-OUTPUT = config.INTENT_INDEX_PATH
-DESCRIPTIONS = config.TICKET_DESCRIPTIONS_PATH
 
-TICKET = config.TICKET_PATTERN
 TICKET_PREFIX = re.compile(r"^[\s\[\(]*[A-Z][A-Z0-9]{1,9}-\d{1,6}[\]\)]*[\s:,\-–]*")
 JUNK_DESCRIPTION = re.compile(
     r"^(wip|fix(es|ed)?|updated?|changes?|test(s|ing)?|merge.*|minor.*|"
@@ -62,7 +58,7 @@ def apply_commit(commit: dict, files: dict[str, dict], descriptions: dict[str, d
     if commit.get("is_merge"):
         return False
     subject = commit["subject"]
-    tickets = set(TICKET.findall(subject))
+    tickets = set(config.TICKET_PATTERN.findall(subject))
     if not tickets:
         return False
     date = commit["author_date"][:10]
@@ -109,18 +105,18 @@ def summarise(index: dict[str, dict[str, dict]], commits_seen: int) -> None:
     total_tickets = len(
         {t for files in index.values() for d in files.values() for t in d["tickets"]}
     )
-    size_mb = OUTPUT.stat().st_size / 1_048_576
+    size_mb = config.INTENT_INDEX_PATH.stat().st_size / 1_048_576
     print(
         f"Indexed {total_files:,} files across {len(index)} repos from "
         f"{commits_seen:,} ticketed commits; {total_tickets:,} distinct tickets."
     )
-    print(f"Wrote {OUTPUT} ({size_mb:.1f} MB)")
+    print(f"Wrote {config.INTENT_INDEX_PATH} ({size_mb:.1f} MB)")
 
 
 def main() -> int:
-    ndjson_files = sorted(HISTORY_DIR.glob("*/commits.ndjson"))
+    ndjson_files = sorted(config.HISTORY_DIR.glob("*/commits.ndjson"))
     if not ndjson_files:
-        print(f"No history datasets under {HISTORY_DIR}. Run: knowledgestore export-history")
+        print(f"No history datasets under {config.HISTORY_DIR}. Run: knowledgestore export-history")
         return 1
 
     index: dict[str, dict[str, dict]] = {}
@@ -138,8 +134,8 @@ def main() -> int:
         index[ndjson.parent.name], repo_commits = index_repository(ndjson, descriptions)
         commits_seen += repo_commits
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(OUTPUT, "wt", encoding="utf-8", compresslevel=9) as out:
+    config.INTENT_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(config.INTENT_INDEX_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
         json.dump(index, out, ensure_ascii=False)
 
     # Per-ticket: the best commit-message descriptions (most repeated, then
@@ -162,12 +158,12 @@ def main() -> int:
         }
         for ticket, info in descriptions.items()
     }
-    with gzip.open(DESCRIPTIONS, "wt", encoding="utf-8", compresslevel=9) as out:
+    with gzip.open(config.TICKET_DESCRIPTIONS_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
         json.dump(ticket_out, out, ensure_ascii=False)
     described = sum(1 for t in ticket_out.values() if t["d"])
     print(
         f"Ticket descriptions: {len(ticket_out):,} tickets, "
-        f"{described:,} with usable descriptions -> {DESCRIPTIONS}"
+        f"{described:,} with usable descriptions -> {config.TICKET_DESCRIPTIONS_PATH}"
     )
 
     summarise(index, commits_seen)

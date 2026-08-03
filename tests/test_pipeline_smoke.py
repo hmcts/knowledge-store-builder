@@ -15,11 +15,13 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import export_git_history as export  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
 
 
-class ExportToIntentSeamTest(unittest.TestCase):
+class ExportToIntentSeamTest(SettingsIsolated):
     def _git(self, cwd, *args):
         subprocess.run(
             ["git", *args],
@@ -64,13 +66,22 @@ class ExportToIntentSeamTest(unittest.TestCase):
             )
 
             # stage 4b: intent index consumes the export's output
-            intent.HISTORY_DIR = history
-            intent.OUTPUT = root / "knowledge" / "intent" / "file-tickets.json.gz"
-            intent.DESCRIPTIONS = root / "knowledge" / "intent" / "ticket-descriptions.json.gz"
+            config.configure(HISTORY_DIR=history)
+            config.configure(
+                INTENT_INDEX_PATH=root / "knowledge" / "intent" / "file-tickets.json.gz"
+            )
+            config.configure(
+                TICKET_DESCRIPTIONS_PATH=root
+                / "knowledge"
+                / "intent"
+                / "ticket-descriptions.json.gz"
+            )
             code = intent.main()
 
-            index = json.load(gzip.open(intent.OUTPUT, "rt", encoding="utf-8"))
-            descriptions = json.load(gzip.open(intent.DESCRIPTIONS, "rt", encoding="utf-8"))
+            index = json.load(gzip.open(config.INTENT_INDEX_PATH, "rt", encoding="utf-8"))
+            descriptions = json.load(
+                gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8")
+            )
 
         self.assertEqual(code, 0)
         self.assertEqual(list(index["repo-a"]["address.pipe.ts"]["tickets"]), ["CRC-12016"])

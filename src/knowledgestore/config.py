@@ -9,6 +9,12 @@ so a pipeline run can be steered without editing code:
 The module-level names below are what the stage modules read. `configure()`
 rewrites them in place, which is how the CLI applies `--root` and how tests
 point a stage at a temporary directory.
+
+Stage modules must read `config.SETTING` where they use it, never copy it to a
+module-level name at import. A copy freezes the value before any caller has had
+the chance to configure anything, which made `configure()` a silent no-op for
+that setting - accepted, since it raises only for an unknown name, and then
+ignored. `tests/test_config_and_io.py` fails if a copy reappears.
 """
 
 from __future__ import annotations
@@ -129,9 +135,9 @@ FEATURES_DIR = os.environ.get("KSB_FEATURES_DIR", "features/")
 #   symbol     - optional regex whose first group names the enclosing symbol
 #                (a class, typically); the file stem is used when it is absent
 #
-# Defaults cover Cucumber's three most common hosts. Add or replace entries by
-# assigning to this dict via configure(); an estate with an unusual layout only
-# needs to narrow the glob.
+# Defaults cover Cucumber's three most common hosts. Add or replace entries with
+# configure(STEP_DEFINITION_LANGUAGES={...}), before or after importing the
+# stage; an estate with an unusual layout only needs to narrow the glob.
 STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
     # Cucumber-JVM / Serenity: @Given("...") in Maven's test tree
     "java": {
@@ -163,10 +169,14 @@ EMBEDDING_MODEL = os.environ.get("KSB_EMBEDDING_MODEL", "sentence-transformers/a
 def configure(root: Path | str | None = None, **overrides) -> None:
     """Point the pipeline at a different root, or override any setting.
 
-    Call before running a stage. `configure(root=...)` recomputes every
-    derived path; other keyword arguments set module names directly:
+    `configure(root=...)` recomputes every derived path; other keyword
+    arguments set module names directly:
 
         configure(root="/tmp/store", GITHUB_ORG="myorg")
+
+    Import order does not matter: stages read these names where they use them,
+    so a call after a stage module is imported still reaches it. Unknown names
+    raise KeyError rather than being accepted and quietly doing nothing.
     """
     module = globals()
     if root is not None:

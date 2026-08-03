@@ -15,13 +15,6 @@ from pathlib import Path
 from . import config, io, provenance
 from .build_topic_briefs import read_topics
 
-SUMMARIES_PATH = config.SUMMARIES_PATH
-SUMMARIES_INPUT_PATH = config.SUMMARIES_INPUT_PATH
-TOPICS_BRIEFS_PATH = config.TOPICS_BRIEFS_PATH
-TOPICS_CONFIG_PATH = config.TOPICS_CONFIG_PATH
-EXPLORER_PATH = config.EXPLORER_PATH
-ROOT = config.ROOT
-GITHUB_ORG = config.GITHUB_ORG
 
 # committed layers the page embeds; if any is newer than the page, rebuild.
 # Derived from the config paths themselves so a new embedded layer can't be
@@ -52,11 +45,11 @@ def run_git(arguments: list[str]) -> str:
 
 
 def layer_coverage() -> dict:
-    summaries = io.read_json_dict(SUMMARIES_PATH)
-    digests = io.read_json(SUMMARIES_INPUT_PATH, default=[])
-    briefs = io.read_json_dict(TOPICS_BRIEFS_PATH)
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    digests = io.read_json(config.SUMMARIES_INPUT_PATH, default=[])
+    briefs = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
     try:
-        topics = read_topics(TOPICS_CONFIG_PATH)
+        topics = read_topics(config.TOPICS_CONFIG_PATH)
     except (OSError, ValueError):
         topics = []
     return {
@@ -76,7 +69,7 @@ def corpus_citations(root: Path) -> dict:
 
 def _committed_at(path: str, run) -> str:
     try:
-        return run(["-C", str(ROOT), "log", "-1", "--format=%cI", "--", path]).strip()
+        return run(["-C", str(config.ROOT), "log", "-1", "--format=%cI", "--", path]).strip()
     except Exception:
         return ""
 
@@ -90,9 +83,9 @@ def _parse_iso(value: str) -> datetime.datetime | None:
 
 def artefact_freshness(run=run_git) -> dict:
     explorer = _committed_at(
-        str(EXPLORER_PATH.relative_to(ROOT))
-        if EXPLORER_PATH.is_relative_to(ROOT)
-        else str(EXPLORER_PATH),
+        str(config.EXPLORER_PATH.relative_to(config.ROOT))
+        if config.EXPLORER_PATH.is_relative_to(config.ROOT)
+        else str(config.EXPLORER_PATH),
         run,
     )
     if not explorer:
@@ -144,7 +137,7 @@ def source_drift(runner=run_gh) -> list[dict] | None:
             raw = runner(
                 [
                     "api",
-                    f"/repos/{GITHUB_ORG}/{name}/commits?sha={branch}&since={since}&per_page=100",
+                    f"/repos/{config.GITHUB_ORG}/{name}/commits?sha={branch}&since={since}&per_page=100",
                     "--jq",
                     "length",
                 ]
@@ -203,7 +196,7 @@ def main(argv=None) -> int:
         f"{cov['topics_configured']} topics configured"
     )
 
-    cites = corpus_citations(ROOT)
+    cites = corpus_citations(config.ROOT)
     if cites["dangling"]:
         print(f"Dangling corpus citations ({len(cites['dangling'])}):")
         for path in cites["dangling"][:10]:

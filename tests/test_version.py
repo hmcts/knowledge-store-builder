@@ -6,11 +6,11 @@ against — two of the three copies had already drifted when this test was
 written.
 """
 
-import unittest
 from importlib.metadata import version
+from settings_isolation import SettingsIsolated  # noqa: E402
 
 
-class VersionTest(unittest.TestCase):
+class VersionTest(SettingsIsolated):
     def test_dunder_version_is_the_distribution_version(self):
         import knowledgestore
 

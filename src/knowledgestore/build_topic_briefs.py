@@ -42,14 +42,6 @@ from . import io
 from . import kinds
 
 
-TOPICS_CONFIG = config.TOPICS_CONFIG_PATH
-TOPICS_INPUT = config.TOPICS_INPUT_PATH
-BRIEFS_PATH = config.TOPICS_BRIEFS_PATH
-DOCS_DIR = config.TOPICS_DOCS_DIR
-GRAPH_PATH = config.GRAPH_PATH
-SUMMARIES_PATH = config.SUMMARIES_PATH
-TICKET_DESCRIPTIONS = config.TICKET_DESCRIPTIONS_PATH
-
 MAX_NODES_PER_REPO = 12
 MAX_SUMMARIES = 20
 MAX_FEATURES = 25
@@ -153,13 +145,13 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict, descriptions: dict
 
 
 def extract() -> int:
-    topics = read_topics(TOPICS_CONFIG)
-    graph = io.load_graph(GRAPH_PATH)
-    summaries = io.read_json_dict(SUMMARIES_PATH)
-    descriptions = io.read_gzip_json_dict(TICKET_DESCRIPTIONS)
+    topics = read_topics(config.TOPICS_CONFIG_PATH)
+    graph = io.load_graph(config.GRAPH_PATH)
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    descriptions = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
 
     dossiers = [topic_dossier(t, graph, summaries, descriptions) for t in topics]
-    io.write_json(TOPICS_INPUT, dossiers, indent=1)
+    io.write_json(config.TOPICS_INPUT_PATH, dossiers, indent=1)
     for dossier in dossiers:
         repos = len(dossier["nodes_by_repo"])
         print(
@@ -167,7 +159,7 @@ def extract() -> int:
             f"{len(dossier['business_features'])} features, "
             f"{len(dossier['described_tickets'])} described tickets"
         )
-    print(f"{len(dossiers)} dossiers -> {TOPICS_INPUT}")
+    print(f"{len(dossiers)} dossiers -> {config.TOPICS_INPUT_PATH}")
     return 0
 
 
@@ -235,11 +227,11 @@ def markdown_to_html(markdown: str) -> str:
 
 
 def merge() -> int:
-    topics = read_topics(TOPICS_CONFIG)
+    topics = read_topics(config.TOPICS_CONFIG_PATH)
     briefs: dict[str, dict] = {}
     problems: list[str] = []
     for topic in topics:
-        source = DOCS_DIR / f"{topic.slug}.md"
+        source = config.TOPICS_DOCS_DIR / f"{topic.slug}.md"
         if not source.exists():
             problems.append(f"{topic.slug}: missing {source}")
             continue
@@ -253,10 +245,10 @@ def merge() -> int:
             "html": markdown_to_html(markdown),
             "source": f"docs/topics/{topic.slug}.md",
         }
-    io.write_json(BRIEFS_PATH, briefs, indent=1)
+    io.write_json(config.TOPICS_BRIEFS_PATH, briefs, indent=1)
     for problem in problems:
         print(f"skipped - {problem}")
-    print(f"{len(briefs)} briefs -> {BRIEFS_PATH}")
+    print(f"{len(briefs)} briefs -> {config.TOPICS_BRIEFS_PATH}")
     return 1 if problems else 0
 
 

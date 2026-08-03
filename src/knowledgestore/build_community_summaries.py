@@ -43,14 +43,7 @@ from . import config
 from . import io
 from . import kinds
 
-GRAPH_PATH = config.GRAPH_PATH
-SNAPSHOT_PATH = config.SUMMARIES_SNAPSHOT_PATH
-LABELS_PATH = config.LABELS_PATH
-INTENT_PATH = config.INTENT_INDEX_PATH
-INPUT_PATH = config.SUMMARIES_INPUT_PATH
-OUTPUT_PATH = config.SUMMARIES_PATH
 
-MIN_COMMUNITY_SIZE = config.MIN_COMMUNITY_SIZE
 TOP_NODES = 12
 TOP_FEATURES = 5
 TOP_TICKETS = 8
@@ -88,9 +81,9 @@ def community_digest(
 
 
 def extract() -> int:
-    graph = io.load_graph(GRAPH_PATH)
-    labels = io.load_labels(LABELS_PATH)
-    intent = io.read_gzip_json_dict(INTENT_PATH)
+    graph = io.load_graph(config.GRAPH_PATH)
+    labels = io.load_labels(config.LABELS_PATH)
+    intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
 
     degree: dict[str, int] = defaultdict(int)
     for edge in graph["links"]:
@@ -104,23 +97,27 @@ def extract() -> int:
     digests = [
         community_digest(community, nodes, labels, intent, degree)
         for community, nodes in sorted(members.items(), key=lambda kv: -len(kv[1]))
-        if len(nodes) >= MIN_COMMUNITY_SIZE
+        if len(nodes) >= config.MIN_COMMUNITY_SIZE
     ]
 
-    INPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # Sonar S2083 misfires here: INPUT_PATH is a module constant derived from
+    config.SUMMARIES_INPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Sonar S2083 misfires here: config.SUMMARIES_INPUT_PATH is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
-    INPUT_PATH.write_text(  # NOSONAR(S2083)
+    config.SUMMARIES_INPUT_PATH.write_text(  # NOSONAR(S2083)
         json.dumps(digests, indent=1, ensure_ascii=False), encoding="utf-8"
     )
-    print(f"{len(digests)} community digests -> {INPUT_PATH}")
+    print(f"{len(digests)} community digests -> {config.SUMMARIES_INPUT_PATH}")
     return 0
 
 
 def merge(paths: list[str]) -> int:
-    known_ids = {str(d["id"]) for d in json.loads(INPUT_PATH.read_text(encoding="utf-8"))}
+    known_ids = {
+        str(d["id"]) for d in json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
+    }
     merged: dict[str, str] = (
-        json.loads(OUTPUT_PATH.read_text(encoding="utf-8")) if OUTPUT_PATH.exists() else {}
+        json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
+        if config.SUMMARIES_PATH.exists()
+        else {}
     )
     added, rejected = 0, []
     for path in paths:
@@ -138,7 +135,7 @@ def merge(paths: list[str]) -> int:
                 merged[str(community_id)] = summary
                 added += 1
 
-    OUTPUT_PATH.write_text(
+    config.SUMMARIES_PATH.write_text(
         json.dumps(
             dict(sorted(merged.items(), key=lambda kv: int(kv[0]))), indent=1, ensure_ascii=False
         ),
@@ -146,7 +143,7 @@ def merge(paths: list[str]) -> int:
     )
     for r in rejected:
         print(f"rejected - {r}")
-    print(f"{added} summaries merged ({len(merged)} total) -> {OUTPUT_PATH}")
+    print(f"{added} summaries merged ({len(merged)} total) -> {config.SUMMARIES_PATH}")
     missing = len(known_ids) - len(merged)
     if missing:
         print(f"{missing} significant communities still lack a summary")
@@ -186,21 +183,21 @@ def _membership(graph: dict) -> dict[str, list[str]]:
 
 def snapshot() -> int:
     """Record community membership before a re-cluster moves the ids."""
-    graph = io.read_json_dict(GRAPH_PATH)
+    graph = io.read_json_dict(config.GRAPH_PATH)
     members = _membership(graph)
     if not members:
         print(
-            f"No communities in {GRAPH_PATH}. Cluster the graph before snapshotting - "
+            f"No communities in {config.GRAPH_PATH}. Cluster the graph before snapshotting - "
             "an empty snapshot makes every later remap drop everything.",
             file=sys.stderr,
         )
         return 1
-    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(SNAPSHOT_PATH, "wt", encoding="utf-8") as handle:
+    config.SUMMARIES_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "wt", encoding="utf-8") as handle:
         json.dump(members, handle)
     print(
         f"Snapshotted {len(members)} communities "
-        f"({sum(len(v) for v in members.values())} member nodes) -> {SNAPSHOT_PATH}"
+        f"({sum(len(v) for v in members.values())} member nodes) -> {config.SUMMARIES_SNAPSHOT_PATH}"
     )
     return 0
 
@@ -216,25 +213,25 @@ def remap(
     members and carry it there when that share meets `bar`. Drop it otherwise,
     and report retention so the cost of the re-cluster is a measured number.
     """
-    if not SNAPSHOT_PATH.exists():
+    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
         print(
-            f"No membership snapshot at {SNAPSHOT_PATH}. Run `summaries snapshot` "
+            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}. Run `summaries snapshot` "
             "before re-clustering.",
             file=sys.stderr,
         )
         return 1
-    with gzip.open(SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
+    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
         old_members: dict[str, list[str]] = json.load(handle)
-    summaries = io.read_json_dict(OUTPUT_PATH)
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
     if len(summaries) < floor:
         print(
             f"Refusing to remap: only {len(summaries)} summaries loaded from "
-            f"{OUTPUT_PATH} (floor {floor}). A mis-specified path looks like this. "
+            f"{config.SUMMARIES_PATH} (floor {floor}). A mis-specified path looks like this. "
             "Pass --floor to lower it for a genuinely small store.",
             file=sys.stderr,
         )
         return 1
-    nodes = io.read_json_dict(GRAPH_PATH).get("nodes", [])
+    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     new_community = {
         node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
     }
@@ -245,7 +242,7 @@ def remap(
     if nodes and clustered / len(nodes) < coverage:
         print(
             f"Refusing to remap: only {clustered} of {len(nodes)} nodes in "
-            f"{GRAPH_PATH} carry a community "
+            f"{config.GRAPH_PATH} carry a community "
             f"({clustered / len(nodes):.1%}, floor {coverage:.0%}). The "
             "graph is effectively unclustered, so every summary would be dropped "
             "and reported as legitimate churn. A clustering step that printed "
@@ -289,13 +286,13 @@ def remap(
             continue
         remapped[target] = summaries[old_id]
 
-    OUTPUT_PATH.write_text(
+    config.SUMMARIES_PATH.write_text(
         json.dumps(dict(sorted(remapped.items(), key=lambda kv: int(kv[0]))), indent=1),
         encoding="utf-8",
     )
     total = len(summaries)
     share = (100 * len(remapped) // total) if total else 0
-    print(f"Retained {len(remapped)} of {total} summaries ({share}%) -> {OUTPUT_PATH}")
+    print(f"Retained {len(remapped)} of {total} summaries ({share}%) -> {config.SUMMARIES_PATH}")
     print(
         f"Dropped: {len(below_bar)} below {int(bar * 100)}% overlap, "
         f"{len(members_gone)} whose members are gone, "
@@ -488,13 +485,13 @@ def verify(sample: int | None = None, strict: bool = False) -> int:
     grounded. Reports rather than fails, so it can be run over a whole store
     without blocking; `strict` is for CI.
     """
-    loaded = io.read_json(INPUT_PATH, default=[]) or []
+    loaded = io.read_json(config.SUMMARIES_INPUT_PATH, default=[]) or []
     digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
-    prose = io.read_json_dict(OUTPUT_PATH)
+    prose = io.read_json_dict(config.SUMMARIES_PATH)
     if not digests or not prose:
         print(
-            f"Nothing to verify: {len(digests)} digests in {INPUT_PATH}, "
-            f"{len(prose)} summaries in {OUTPUT_PATH}. Run `summaries extract` first.",
+            f"Nothing to verify: {len(digests)} digests in {config.SUMMARIES_INPUT_PATH}, "
+            f"{len(prose)} summaries in {config.SUMMARIES_PATH}. Run `summaries extract` first.",
             file=sys.stderr,
         )
         return 1

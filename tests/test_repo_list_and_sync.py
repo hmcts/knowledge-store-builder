@@ -12,13 +12,15 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import generate_repository_list as repo_list  # noqa: E402
 from knowledgestore import sync_repositories as sync  # noqa: E402
 from knowledgestore import export_git_history as export  # noqa: E402
 from knowledgestore import cli  # noqa: E402
 
 
-class FiltersTest(unittest.TestCase):
+class FiltersTest(SettingsIsolated):
     def _filters(self, text):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "repository-filters.txt"
@@ -41,7 +43,7 @@ class FiltersTest(unittest.TestCase):
             self._filters("# only comments\n")
 
 
-class DiscoverTest(unittest.TestCase):
+class DiscoverTest(SettingsIsolated):
     def test_discovers_filters_and_sorts(self):
         calls = []
 
@@ -59,8 +61,8 @@ class DiscoverTest(unittest.TestCase):
         self.assertIn("--paginate", calls[0])
 
     def test_render_config_pipe_format(self):
-        self.addCleanup(setattr, repo_list, "GITHUB_ORG", repo_list.GITHUB_ORG)
-        repo_list.GITHUB_ORG = "myorg"
+        self.addCleanup(setattr, repo_list, "GITHUB_ORG", config.GITHUB_ORG)
+        config.configure(GITHUB_ORG="myorg")
         content = repo_list.render_config(
             [
                 {"name": "a-repo", "defaultBranch": "main"},
@@ -71,7 +73,7 @@ class DiscoverTest(unittest.TestCase):
         self.assertIn("repository-filters.txt", content)
 
 
-class TeamDiscoveryTest(unittest.TestCase):
+class TeamDiscoveryTest(SettingsIsolated):
     """The `team <slug>` rule: an estate defined by ownership, not naming.
 
     Teams without naming conventions (and the infrastructure estates being
@@ -150,7 +152,7 @@ class TeamDiscoveryTest(unittest.TestCase):
         self.assertEqual([r["name"] for r in repos], ["alpha", "beta"])
 
 
-class SyncRepositoryTest(unittest.TestCase):
+class SyncRepositoryTest(SettingsIsolated):
     def _repo(self):
         return export.RepositoryConfig(
             name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
@@ -214,7 +216,7 @@ class SyncRepositoryTest(unittest.TestCase):
                 sync.sync_repository(repo, target, run=fake_git)
 
 
-class MainProvenanceTest(unittest.TestCase):
+class MainProvenanceTest(SettingsIsolated):
     def test_sync_records_provenance_for_every_configured_repository(self):
         """Design promise: after `knowledgestore sync`, provenance.json
         describes every configured repository with its own sha/branch/
@@ -234,10 +236,10 @@ class MainProvenanceTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.addCleanup(setattr, sync, "CONFIG", sync.CONFIG)
-            sync.CONFIG = config_path
-            self.addCleanup(setattr, sync, "REPOSITORIES", sync.REPOSITORIES)
-            sync.REPOSITORIES = root / "repositories"
+            self.addCleanup(setattr, sync, "CONFIG", config.REPOSITORIES_CONFIG)
+            config.configure(REPOSITORIES_CONFIG=config_path)
+            self.addCleanup(setattr, sync, "REPOSITORIES", config.REPOSITORIES_DIR)
+            config.configure(REPOSITORIES_DIR=root / "repositories")
             # true IO boundary: no real git clone/fetch/reset
             self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
             sync.sync_repository = lambda repo, repositories_dir, run=None: 5
@@ -256,8 +258,8 @@ class MainProvenanceTest(unittest.TestCase):
             self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
             provenance.head_info = fake_head_info
 
-            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-            provenance.PROVENANCE_PATH = root / "provenance.json"
+            self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+            config.configure(PROVENANCE_PATH=root / "provenance.json")
 
             result = sync.main()
             recorded = provenance.read()  # the artefact downstream stages consume
@@ -282,7 +284,7 @@ class MainProvenanceTest(unittest.TestCase):
         )
 
 
-class SyncFailureIsolationTest(unittest.TestCase):
+class SyncFailureIsolationTest(SettingsIsolated):
     """One repository's failure must not cost the whole estate.
 
     A single `git fetch` exiting non-zero used to abort the run: repositories
@@ -301,10 +303,10 @@ class SyncFailureIsolationTest(unittest.TestCase):
             "".join(f"repo-{n}|git@example.com:o/repo-{n}.git|main\n" for n in "abc"),
             encoding="utf-8",
         )
-        self.addCleanup(setattr, sync, "CONFIG", sync.CONFIG)
-        sync.CONFIG = config_path
-        self.addCleanup(setattr, sync, "REPOSITORIES", sync.REPOSITORIES)
-        sync.REPOSITORIES = root / "repositories"
+        self.addCleanup(setattr, sync, "CONFIG", config.REPOSITORIES_CONFIG)
+        config.configure(REPOSITORIES_CONFIG=config_path)
+        self.addCleanup(setattr, sync, "REPOSITORIES", config.REPOSITORIES_DIR)
+        config.configure(REPOSITORIES_DIR=root / "repositories")
 
         self.attempted: list[str] = []
 
@@ -323,8 +325,8 @@ class SyncFailureIsolationTest(unittest.TestCase):
             "branch": branch,
             "committed": "2026-07-01T00:00:00+00:00",
         }
-        self.addCleanup(setattr, provenance, "PROVENANCE_PATH", provenance.PROVENANCE_PATH)
-        provenance.PROVENANCE_PATH = root / "provenance.json"
+        self.addCleanup(setattr, provenance, "PROVENANCE_PATH", config.PROVENANCE_PATH)
+        config.configure(PROVENANCE_PATH=root / "provenance.json")
         return provenance
 
     def test_a_failing_repository_does_not_skip_the_ones_after_it(self):
@@ -352,7 +354,7 @@ class SyncFailureIsolationTest(unittest.TestCase):
         self.assertEqual(set(recorded), {"repo-a", "repo-b", "repo-c"})
 
 
-class UnmatchedRuleWarningTest(unittest.TestCase):
+class UnmatchedRuleWarningTest(SettingsIsolated):
     """A rule that selects nothing must say so.
 
     Rules take the whole rest of the line, so `repo name  # note` becomes a
@@ -431,17 +433,12 @@ class UnmatchedRuleWarningTest(unittest.TestCase):
             old_root = config.ROOT
             try:
                 config.configure(root=str(root))
-                repo_list.FILTERS = config.FILTERS_PATH
-                repo_list.OUTPUT = config.REPOSITORIES_CONFIG
-                repo_list.GITHUB_ORG = "example-org"
+                config.configure(GITHUB_ORG="example-org")
                 runner = self._runner(["svc-a"])
                 lenient = repo_list.main([], runner=runner)
                 strict = repo_list.main(["--strict"], runner=runner)
             finally:
                 config.configure(root=str(old_root))
-                repo_list.FILTERS = config.FILTERS_PATH
-                repo_list.OUTPUT = config.REPOSITORIES_CONFIG
-                repo_list.GITHUB_ORG = config.GITHUB_ORG
 
         self.assertEqual(0, lenient, "a warning must not break an interactive run")
         self.assertEqual(1, strict, "--strict must fail when a rule selected nothing")
@@ -454,7 +451,7 @@ class UnmatchedRuleWarningTest(unittest.TestCase):
         self.assertEqual([], repo_list.unmatched_rules(filters, selected, runner=runner))
 
 
-class ExportHistoryRootTest(unittest.TestCase):
+class ExportHistoryRootTest(SettingsIsolated):
     """The CLI --root contract: a stage operates on the configured store root.
 
     export-history ignored config.ROOT in favour of a package-relative
@@ -493,7 +490,7 @@ class ExportHistoryRootTest(unittest.TestCase):
             self.assertIn("CCT-1", dataset.read_text(encoding="utf-8"))
 
 
-class CliTest(unittest.TestCase):
+class CliTest(SettingsIsolated):
     def test_stages_are_listed_in_pipeline_order(self):
         self.assertEqual(
             list(cli.STAGES),
@@ -542,7 +539,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(config.GRAPH_PATH.parent.parent, Path(tmp).resolve())
 
 
-class SemanticVocabularyTest(unittest.TestCase):
+class SemanticVocabularyTest(SettingsIsolated):
     def test_vocabulary_filters_short_stop_and_rare_tokens(self):
         from knowledgestore import build_semantic_index as semantic
 
@@ -564,9 +561,9 @@ class SemanticVocabularyTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            semantic.GRAPH_PATH = graph
-            semantic.LABELS_PATH = Path(tmp) / "missing.json"
-            semantic.SUMMARIES_PATH = Path(tmp) / "missing2.json"
+            config.configure(GRAPH_PATH=graph)
+            config.configure(LABELS_PATH=Path(tmp) / "missing.json")
+            config.configure(SUMMARIES_PATH=Path(tmp) / "missing2.json")
             vocab = semantic.collect_vocabulary()
         self.assertIn("address", vocab)
         self.assertIn("validation", vocab)
@@ -594,7 +591,7 @@ class _Sliceable(list):
         return _Sliceable(result) if isinstance(item, slice) else result
 
 
-class NearestNeighboursTest(unittest.TestCase):
+class NearestNeighboursTest(SettingsIsolated):
     def test_keeps_similar_tokens_and_skips_shared_stems(self):
         from knowledgestore import build_semantic_index as semantic
 
@@ -617,7 +614,7 @@ class NearestNeighboursTest(unittest.TestCase):
         self.assertIn("verdict", names)
 
 
-class IntentSummariseTest(unittest.TestCase):
+class IntentSummariseTest(SettingsIsolated):
     def test_reports_counts(self):
         import contextlib
         import gzip as _gzip
@@ -626,8 +623,8 @@ class IntentSummariseTest(unittest.TestCase):
         from knowledgestore import build_intent_index as intent
 
         with tempfile.TemporaryDirectory() as tmp:
-            intent.OUTPUT = Path(tmp) / "file-tickets.json.gz"
-            with _gzip.open(intent.OUTPUT, "wt", encoding="utf-8") as out:
+            config.configure(INTENT_INDEX_PATH=Path(tmp) / "file-tickets.json.gz")
+            with _gzip.open(config.INTENT_INDEX_PATH, "wt", encoding="utf-8") as out:
                 _json.dump({}, out)
             index = {"repo-a": {"a.ts": {"tickets": {"DD-1": 2}}}}
             buffer = io.StringIO()

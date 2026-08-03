@@ -1,88 +1,4 @@
-from __future__ import annotations
-
-import json
-from pathlib import Path
-
-
-from . import config, provenance
-
-
-def read_first_record(ndjson_path: Path) -> dict[str, object]:
-    with ndjson_path.open("r", encoding="utf-8") as source:
-        first_line = source.readline().strip()
-
-    if not first_line:
-        return {}
-
-    return json.loads(first_line)
-
-
-def count_lines(path: Path) -> int:
-    with path.open("r", encoding="utf-8") as source:
-        return sum(1 for _ in source)
-
-
-def synced_cell(name: str, recorded: dict[str, dict]) -> str:
-    entry = recorded.get(name)
-    if not entry or not entry.get("sha"):
-        return "—"
-    return f"{str(entry.get('committed', ''))[:10]} (`{entry['sha'][:8]}`)"
-
-
-def build_manifest(repository_dirs: list[Path]) -> None:
-    lines = [
-        "# Repository manifest",
-        "",
-        "This manifest describes the source repositories represented by "
-        "the combined Graphify knowledge graph.",
-        "",
-        "| Repository | Commits | Synced at | History | Current source |",
-        "|---|---:|---|---|---|",
-    ]
-
-    recorded = provenance.read()
-
-    for repository_dir in repository_dirs:
-        ndjson_path = repository_dir / "commits.ndjson"
-        first_record = read_first_record(ndjson_path)
-        commit_count = count_lines(ndjson_path)
-
-        repository_name = repository_dir.name
-        source_url = str(first_record.get("repository_url", "Unknown"))
-
-        lines.append(
-            f"| `{repository_name}` "
-            f"| {commit_count} "
-            f"| {synced_cell(repository_name, recorded)} "
-            f"| [History](git-history/{repository_name}/index.md) "
-            f"| `{source_url}` |"
-        )
-
-    lines.extend(
-        [
-            "",
-            "The repositories themselves are cloned into `repositories/` "
-            "during graph generation and are not committed to this parent "
-            "repository.",
-            "",
-        ]
-    )
-
-    config.MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # Sonar S2083 misfires here: config.MANIFEST_PATH is a module constant derived
-    # from configuration, not untrusted input; this is offline build tooling.
-    config.MANIFEST_PATH.write_text(  # NOSONAR(S2083)
-        "\n".join(lines),
-        encoding="utf-8",
-    )
-
-
-def build_context(repository_dirs: list[Path]) -> None:
-    repository_names = [repository_dir.name for repository_dir in repository_dirs]
-
-    repository_list = "\n".join(f"- `{repository_name}`" for repository_name in repository_names)
-
-    context = f"""# UI estate knowledge context
+# UI estate knowledge context
 
 ## Purpose
 
@@ -111,7 +27,7 @@ was produced.
 
 ## Included repositories
 
-{repository_list}
+- `repo-a`
 
 See [the repository manifest](knowledge/repository-manifest.md) for source
 locations and dataset details.
@@ -176,23 +92,3 @@ The normal process is:
 4. run Graphify;
 5. review the generated report;
 6. commit the changed datasets and `graphify-out/`.
-"""
-
-    config.CONTEXT_PATH.write_text(context, encoding="utf-8")
-
-
-def main() -> None:
-    repository_dirs = sorted(
-        path
-        for path in config.HISTORY_DIR.iterdir()
-        if path.is_dir() and (path / "commits.ndjson").is_file()
-    )
-
-    build_manifest(repository_dirs)
-    build_context(repository_dirs)
-
-    print(f"Generated context for {len(repository_dirs)} repositories")
-
-
-if __name__ == "__main__":
-    main()
