@@ -1,22 +1,29 @@
 # Asking questions of a knowledge store
 
-You have a question about a codebase estate — which repositories implement a
-thing, what breaks if a component changes, why some code exists — and the
-estate already has a knowledge store. This page gets you from nothing to a
-cited answer.
+A knowledge store can answer questions about an estate's structure, ownership,
+history and intent: which repositories implement something, where a component
+is used, what a change could affect, how a user journey works, and which commits
+or tickets explain why code exists. It cannot establish runtime behaviour or
+answer from sources that were not included in the store.
 
-## What you need
+## Choose how to ask
 
-**Claude Code with this repository's plugin. Nothing else** — no Python, no
-`pip`, and no access to the estate's source code.
+| Route | What you need | What it provides |
+|---|---|---|
+| Claude Code | The Knowledge Store plugin | Evidence-backed answers in ordinary language, including questions that need several store layers |
+| `graphify-out/explorer.html` | A browser | Search and basic answers from a self-contained page |
+| `graphify query` | A terminal and the `graphify` CLI | Graph results for a question written in ordinary language |
 
-The plugin is instructions, not software: skills that tell Claude how to find
-a store, traverse it and cite what it finds. The one tool the query skill
-runs is the `graphify` CLI, and it installs that itself on first use.
+For a command-only reference, see [CHEATSHEET.md](../CHEATSHEET.md).
 
-## Install
+## Ask with Claude Code
 
-Just want the commands? [CHEATSHEET.md](../CHEATSHEET.md).
+### Install the plugin
+
+This route needs no Python or `pip`. The query skill installs the `graphify` CLI
+on first use if it is not already available.
+
+Run these commands in Claude Code in a terminal:
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
@@ -24,85 +31,157 @@ Just want the commands? [CHEATSHEET.md](../CHEATSHEET.md).
 /reload-plugins
 ```
 
-- `install` asks for a scope: **user** (you, everywhere), **project**
-  (everyone on the current repository), **local** (you, here only).
-- **`/reload-plugins` is not optional.** Without it the plugin is installed
-  but inactive in the session you are sitting in — which looks exactly like a
-  broken install.
+The install command asks for a scope:
 
-Confirm it worked: `/reload-plugins` reports `3 skills`, and
-`claude plugin details knowledge-store` lists them by name alongside the
-token cost the plugin adds to each session.
+- **user**: available to you in every project
+- **project**: available to everyone working in the current repository
+- **local**: available only to you in the current repository
 
-## Ask
+`/reload-plugins` is required. Without it, the plugin is installed but inactive
+in the current session.
 
-Ask in your own words — there is no query syntax:
+In the **VS Code or JetBrains extension**, install through the interface instead:
+type `/plugins` to open **Manage plugins**, add `hmcts/knowledge-store-builder`
+on the **Marketplaces** tab, then install `knowledge-store` from the **Plugins**
+tab. The extension exposes only a subset of Claude Code's commands, so the three
+commands above are not all available there. What you configure either way is
+shared: plugins added in the extension are available in the CLI, and the reverse.
 
-- *Which repositories implement their own address formatting?*
-- *What is impacted if this component changes?*
-- *Walk me through what happens when a user submits this form.*
-- *Why does this module exist, and which tickets shaped it?*
+Check the installation:
 
-The `knowledge-store` skill finds a store before answering: the working
-directory first, then `$KNOWLEDGE_STORE`, then a location it remembered from
-last time, then the obvious places under your home directory — and if there
-is none, it asks where you want one and clones it.
+```bash
+claude plugin details knowledge-store
+```
 
-## What an answer is, and is not
+The output should list three skills: `knowledge-store`,
+`knowledge-store-build` and `knowledge-store-export`. This command needs the
+standalone CLI on your `PATH`; installing an IDE extension does not put it there,
+so use the extension's own **Manage plugins** view instead.
 
-- **Every claim traces to evidence in the store** — a node, an edge, a commit,
-  a schema field. If the store cannot show it, the answer says so rather than
-  guessing: absence of evidence is reported as a finding.
-- **Same-named components in different repositories are independent
-  implementations** unless an edge connects them. Proving that is one of the
-  most useful answers a store gives.
-- **The store is a snapshot.** It records the commit it was built from; if
-  your question concerns last week's changes, expect the answer to flag
-  staleness.
+The cheatsheet also covers installation in the Claude desktop app, cloud
+sessions and environments where plugins are unavailable.
 
-## No Claude licence?
+### Ask a question
 
-Every store ships `explorer.html` — open it in a browser, nothing to install,
-no network access. It searches the whole estate and answers recognised
-question shapes (which repositories, where used, what is impacted, ticket
-lookups) from pre-computed evidence, plus any topic briefs the store's
-maintainers have written. It cannot compose prose for a question nobody
-anticipated, and the page says so.
+Ask in ordinary language. There is no query syntax. For example:
 
-There is also `graphify query "<question>"` from a terminal, inside a clone
-of the store.
+- Which repositories implement their own address formatting?
+- What is impacted if this component changes?
+- Walk me through what happens when a user submits this form.
+- Why does this module exist, and which tickets shaped it?
 
-## The three skills
+The `knowledge-store` skill looks for a store in this order:
+
+1. the current working directory
+2. the path in `$KNOWLEDGE_STORE`
+3. locations remembered from earlier queries
+4. likely locations under your home directory
+
+If it finds more than one possible store, it asks which estate you mean. If it
+finds none, it asks whether you already have a clone or which store to clone and
+where to put it.
+
+## Understand the answer
+
+Under the [grounding contract](grounding-and-verification.md), every claim traces
+to evidence in the store: a node, edge, source path, schema field, ticket or
+commit subject. The answer identifies the repository and the evidence it used.
+**Absence of evidence is reported as a finding** — where the store cannot show
+something, the answer says so rather than filling the gap from general knowledge.
+
+Treat same-named components in different repositories as independent
+implementations unless an edge connects them. A shared name alone does not show
+that one calls, owns or depends on another.
+
+A store is a snapshot. It records the source commits used to build it, but a
+later clone or pull can still contain a store built before recent source
+changes. Answers about recent work should report possible staleness; authored
+briefs and summaries can also be older than the graph evidence.
+
+## Ask without Claude Code
+
+### Use `explorer.html`
+
+Clone the complete store and open `graphify-out/explorer.html` in a browser. The
+page is self-contained: it needs neither Claude nor network access.
+
+The explorer searches the estate and answers supported question shapes from
+pre-computed evidence, including repository, usage, impact and ticket lookups.
+It can also return topic briefs written by the store's maintainers. It cannot
+compose a new prose answer for an unanticipated question, inspect runtime
+behaviour or make a snapshot current.
+
+### Use the terminal
+
+From the root of a store clone:
+
+```bash
+pip install graphifyy                    # or: uv tool install graphifyy
+gunzip -k graphify-out/graph.json.gz     # stores commit the graph compressed
+graphify query "<question>"
+```
+
+Run `gunzip` before the query when `graphify-out/graph.json` is absent. The
+command reads the uncompressed graph and accepts a question in ordinary
+language.
+
+## Other knowledge-store tasks
 
 | Skill | Use it to |
 |---|---|
-| `knowledge-store` | ask a store questions — this page |
-| `knowledge-store-build` | build or refresh a store — see [Creating a store](creating-a-store.md) |
-| `knowledge-store-export` | hand a finding to a ticket or a data-protection owner, without the sensitive values |
+| `knowledge-store` | Ask questions of an existing store |
+| `knowledge-store-build` | Build or refresh a store; see [Creating and refreshing a knowledge store](creating-a-store.md) |
+| `knowledge-store-export` | Produce a dated, evidence-backed finding for a ticket or owner without copying sensitive values into it |
 
-Individual stores can add their own thin skill for estate specifics — which
-repositories matter, where journeys are written up — and leave the mechanics
-to these three.
+Individual stores can provide an additional skill containing estate-specific
+context. The three plugin skills provide the shared query, build and export
+workflows.
 
-## Keeping the plugin current
+## Update the plugin
 
-Installs come from this repository's `main`, and the plugin has no version —
-whatever is on `main` is what installs. Two consequences:
+The plugin installs from this repository's `main` branch and has no separate
+version. Adding the marketplace again does not fetch newer skills. Update the
+marketplace, reinstall the plugin and reload it:
 
-- **`add` does not re-fetch.** Take newer skills with
-  `/plugin marketplace update knowledge-store-builder`, then reinstall.
-- **A local branch is not installable.** A skill change ships when it merges,
-  not before — and do not install from a local path to test one: that
-  resolves to a temporary copy that is not what consumers get, and any
-  manifest error it reports is about that copy.
+```
+/plugin marketplace update knowledge-store-builder
+/plugin install knowledge-store@knowledge-store-builder
+/reload-plugins
+```
 
-If skills never appear after an install, the documented fix is to clear the
-plugin cache, restart Claude Code, and reinstall:
+Run `claude plugin details knowledge-store` again to check the installed skills.
+
+## Troubleshooting
+
+### The skills do not appear
+
+Run `/reload-plugins` first. If the skills still do not appear, clear Claude
+Code's plugin cache, restart Claude Code, then install and reload the plugin
+again:
 
 ```bash
 rm -rf ~/.claude/plugins/cache
 ```
 
-`skills: Invalid input` on install means the plugin manifest on `main` is
-broken — usually a component path missing its `./` prefix — not a problem
-with your machine. `CLAUDE.md` in this repository has the layout rules.
+```
+/plugin marketplace add hmcts/knowledge-store-builder
+/plugin install knowledge-store@knowledge-store-builder
+/reload-plugins
+```
+
+If the marketplace is already configured, replace `marketplace add` with:
+
+```
+/plugin marketplace update knowledge-store-builder
+```
+
+### Installation reports `skills: Invalid input`
+
+This message indicates an invalid component path in the plugin manifest, not an
+unsupported `skills` field. Component paths must be relative to the plugin root
+and start with `./`; a path such as `.claude/skills/` is invalid, while
+`./.claude/skills/` is valid.
+
+The plugin installs from `main`, so a published manifest error must be corrected
+there. After it is corrected, update the marketplace, reinstall the plugin and
+run `/reload-plugins`.
