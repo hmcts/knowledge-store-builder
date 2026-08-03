@@ -5,11 +5,46 @@ Claude Code, `graphify query` or a self-contained browser page. The pipeline
 extracts code structure, specifications and commit history; the build skill
 adds evidence-grounded prose where deterministic extraction is not enough.
 
+## Build one without reading the steps
+
+Install the [prerequisites](#install-the-prerequisites), then hand this to
+Claude Code. It runs the whole pipeline and comes back only when it needs you:
+
+```
+Build a knowledge store for the <org> GitHub organisation in this directory,
+following /knowledge-store:knowledge-store-build. Run every stage. Author the
+community summaries with as many parallel subagents as you can. Do not check
+in with me between stages - stop only if a stage fails, or if a decision is
+mine to make.
+```
+
+Two things to settle first:
+
+- `gh auth status` — discovery reads the organisation through the GitHub CLI.
+- **Raise the subagent limit.** Summary authoring fans out into batches of
+  roughly 50 clusters, and an estate can hold thousands of them.
+  `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` in `~/.claude/settings.json` caps how
+  many run at once; 40 is comfortable on a 12-core machine. Left low, that one
+  stage becomes the whole build's wall-clock.
+
+It should still stop and ask you **which repositories belong in the estate**.
+That decides what every later answer can see, and no agent should settle it for
+you — [Building an effective knowledge store](building-a-knowledge-store.md) is
+how to decide.
+
+Expect hours rather than minutes on a large estate: sync and history export
+dominate, then graph extraction. Stages are independent and idempotent, so an
+interrupted run picks up without repeating what finished.
+
+The rest of this guide is the same pipeline, stage by stage — for when you do
+care about the steps, or when the run above stops and you need to.
+
 ## Choose what to do
 
 | You want to | Start with |
 |---|---|
-| Build a store for the first time | [Install the prerequisites](#install-the-prerequisites), then [Create and define the store](#create-and-define-the-store) |
+| Build a store without running the stages yourself | [Build one without reading the steps](#build-one-without-reading-the-steps) |
+| Build a store stage by stage | [Install the prerequisites](#install-the-prerequisites), then [Create and define the store](#create-and-define-the-store) |
 | Bring an existing store up to date | [Refresh a store](#refresh-a-store) |
 | Change the library release used by a store | [Update the library version](#update-the-library-version) |
 | Ask questions of a store someone else maintains | [Asking questions of a knowledge store](asking-questions.md) |
@@ -22,8 +57,8 @@ deciding what belongs in a new estate; this guide covers the mechanics.
 
 Install the Knowledge Store plugin by following
 [Install the plugin](asking-questions.md#install-the-plugin). The
-`/knowledge-store:knowledge-store-build` carries the stage order, clustering procedure and
-authoring checks. The plugin is instructions; the library and command-line tools
+`/knowledge-store:knowledge-store-build` skill carries the stage order, clustering
+procedure and authoring checks. The plugin is instructions; the library and command-line tools
 run the pipeline on your machine.
 
 You need Python 3.10 or later, Git and the GitHub CLI. On macOS, install them
@@ -242,10 +277,15 @@ Recompress the final graph after clustering or any later graph mutation, then
 build the page:
 
 ```bash
-gzip -n -c graphify-out/graph.json > graphify-out/graph.json.gz
+gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
 knowledgestore status
 ```
+
+`-9` matches the compression the pipeline's own writers use, so a
+hand-recompressed graph is the same size as a stage-written one; `-n` keeps the
+filename and timestamp out of the header, which would otherwise change the file
+on every run.
 
 `graphify-out/explorer.html` is the self-contained query page. `status` reports
 provenance, layer coverage, dangling citations and whether the page predates a
@@ -369,9 +409,26 @@ features and scenarios to matching step definitions:
 | TypeScript | `**/*.ts` | `Given("...", ...)` from cucumber-js |
 
 Cucumber expressions, typed behave parameters, regular-expression groups and
-quoted values are normalised before matching. Override
-`config.STEP_DEFINITION_LANGUAGES` through the Python configuration API when an
-estate uses another language or layout.
+quoted values are normalised before matching.
+
+An estate in another language, or with an unusual layout, overrides
+`STEP_DEFINITION_LANGUAGES`. It is a nested table rather than a single value, so
+it has no environment variable and is set from Python — and it must be set
+**before the stage module is imported**, because each stage binds its settings
+once at import time:
+
+```python
+from knowledgestore import config
+
+config.configure(STEP_DEFINITION_LANGUAGES={...})   # first
+from knowledgestore import extract_gherkin          # then
+extract_gherkin.main()
+```
+
+In the other order the override is accepted and then silently ignored: the stage
+searches the three default languages and finds none of your step definitions.
+`knowledgestore --root` is unaffected, because the CLI configures before it
+imports the stage.
 
 ## Publish the store
 
