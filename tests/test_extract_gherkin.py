@@ -262,6 +262,19 @@ class GraphReportNoteTest(SettingsIsolated):
         self.assertIn("143", text, "the note reflects the latest run")
         self.assertNotIn("142", text, "the superseded figure is gone")
 
+    def test_the_note_does_not_claim_the_graph_grew(self):
+        """A refresh that removes repositories leaves the graph SMALLER than the
+        report graphify wrote, so the note must not assert a direction. It said
+        "larger than this report says" while the graph had gone from 809,441
+        nodes to 793,465 - a false statement in the one artefact people read to
+        reconcile the figures."""
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(Path(tmp))
+            gherkin.note_gherkin_layer({"features": 1}, nodes=793465, edges=1766912)
+            text = report.read_text(encoding="utf-8")
+        self.assertNotIn("larger than", text)
+        self.assertIn("793,465", text, "the note carries the real figures")
+
     def test_a_missing_report_is_not_an_error(self):
         # graphify may not have run, or the store may not keep the report
         with tempfile.TemporaryDirectory() as tmp:
