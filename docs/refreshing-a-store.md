@@ -104,6 +104,12 @@ fails with `No matching distribution found` until `--extra-index-url` is passed
 on the command line. Existing stores can be in that state; recompiling with the
 flags above is what removes the need for it.
 
+Either way, `knowledgestore check-install-docs` keeps the lock and the store's
+own documentation in step: while the lock names no index, every documented
+command that installs from it has to pass one. It exits non-zero, so put it in
+CI - it was written after a store's README spent weeks telling readers to run a
+command that could not work.
+
 The library and plugin update separately: this changes the pinned library
 release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer

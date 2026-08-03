@@ -145,7 +145,11 @@ destructive if it goes unnoticed.
 knowledgestore status                        # coverage, citations, page freshness
 knowledgestore status --drift                # how far the sources have moved
 knowledgestore summaries verify --sample 200 # is the prose grounded in evidence?
+knowledgestore check-install-docs            # can a reader run your install commands?
 ```
+
+`check-install-docs` exits non-zero, so it belongs in CI. `status` never fails
+by design - drift is a condition to read, not a broken build.
 
 ## When it does not work
 

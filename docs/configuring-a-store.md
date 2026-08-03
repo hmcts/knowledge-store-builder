@@ -57,3 +57,4 @@ estate uses another language or layout.
 | `deepdive` | `docs/deep-dives/`, `knowledge/deep-dives/` | Add a provenance-stamped repository dossier |
 | `explorer` | `graphify-out/explorer.html` | Build the self-contained search and Q&A page |
 | `status` | report only | Report provenance, coverage, citations, freshness and optional drift |
+| `check-install-docs` | report only | Check the documented install commands against what the lock declares |
