@@ -229,8 +229,8 @@ step-definition edges once, and nothing else noticed.
   grounding, and it is not delegable to the author. `docs/grounding-and-verification.md`
   states the contract and the techniques, cheapest first.
 - **Send findings out as exports, not as store content.** When a query turns up
-  something a team must act on, produce a dated export (the
-  `knowledge-store-export` skill) and attach it to the ticket that will own it.
+  something a team must act on, run `/knowledge-store:knowledge-store-export` and attach the
+  dated export to the ticket that will own it.
   Keep those out of the committed store: an export is a derivative, it is often
   sharper than the store it came from, and a ticket has the access control,
   owner and lifecycle that a file in a widely-cloned repository does not. For

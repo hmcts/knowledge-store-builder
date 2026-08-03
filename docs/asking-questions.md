@@ -26,7 +26,7 @@ on first use if it is not already available.
 Run these commands in Claude Code in a terminal:
 
 ```
-/plugin marketplace add hmcts/knowledge-store-builder
+/plugin marketplace add hmcts/knowledge-store:knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
@@ -41,7 +41,7 @@ The install command asks for a scope:
 in the current session.
 
 In the **VS Code or JetBrains extension**, install through the interface instead:
-type `/plugins` to open **Manage plugins**, add `hmcts/knowledge-store-builder`
+type `/plugins` to open **Manage plugins**, add `hmcts/knowledge-store:knowledge-store-builder`
 on the **Marketplaces** tab, then install `knowledge-store` from the **Plugins**
 tab. The extension exposes only a subset of Claude Code's commands, so the three
 commands above are not all available there. What you configure either way is
@@ -70,7 +70,7 @@ Ask in ordinary language. There is no query syntax. For example:
 - Walk me through what happens when a user submits this form.
 - Why does this module exist, and which tickets shaped it?
 
-The `knowledge-store` skill looks for a store in this order:
+`/knowledge-store:knowledge-store` looks for a store in this order:
 
 1. the current working directory
 2. the path in `$KNOWLEDGE_STORE`
@@ -129,9 +129,9 @@ language.
 
 | Skill | Use it to |
 |---|---|
-| `knowledge-store` | Ask questions of an existing store |
-| `knowledge-store-build` | Build or refresh a store; see [Creating and refreshing a knowledge store](creating-a-store.md) |
-| `knowledge-store-export` | Produce a dated, evidence-backed finding for a ticket or owner without copying sensitive values into it |
+| `/knowledge-store:knowledge-store` | Ask questions of an existing store |
+| `/knowledge-store:knowledge-store-build` | Build or refresh a store; see [Creating and refreshing a knowledge store](creating-a-store.md) |
+| `/knowledge-store:knowledge-store-export` | Produce a dated, evidence-backed finding for a ticket or owner without copying sensitive values into it |
 
 Individual stores can provide an additional skill containing estate-specific
 context. The three plugin skills provide the shared query, build and export
@@ -164,7 +164,7 @@ rm -rf ~/.claude/plugins/cache
 ```
 
 ```
-/plugin marketplace add hmcts/knowledge-store-builder
+/plugin marketplace add hmcts/knowledge-store:knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
