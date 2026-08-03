@@ -10,6 +10,7 @@ To build a store for the first time, see
 | You want to | Start with |
 |---|---|
 | Bring source repositories and generated artefacts up to date | [Refresh the store](#refresh-the-store) |
+| Take repositories out of the estate | [Remove repositories](#remove-repositories) |
 | Change the library release used by the store | [Update the library version](#update-the-library-version) |
 
 ## Refresh the store
@@ -29,10 +30,21 @@ knowledgestore intent
 ```
 
 Skip `summaries snapshot` only when the store has no summaries to preserve.
+**Take it immediately before each re-cluster**, not once per session: a snapshot
+of a clustering the summaries are no longer keyed to is not refused, it just
+retains less, silently. Two re-clusters in one refresh need two snapshots.
+
 Review discovery and sync counts, then repeat
 [Build the graph](creating-a-store.md#build-the-graph) against every configured
 repository. Re-clustering can change community IDs even when the estate
 contains the same repositories.
+
+Only repositories whose sources moved need re-extracting; a repository's own
+graph does not change because another left the estate. Record every clone's
+`HEAD` before `sync`, compare afterwards, and re-extract the ones that differ.
+Then reconcile the number of per-repository graphs against
+`config/repositories.txt` before merging, because a loop that skipped
+repositories still exits zero.
 
 After clustering, carry summaries onto new IDs by membership overlap:
 
@@ -59,6 +71,106 @@ Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
 ran, what authored coverage remains, whether grounding checks passed and
 whether the source-drift check is clean.
+
+## Remove repositories
+
+Removal is the more dangerous direction, because **nothing in the pipeline
+prunes what you remove**. Change the filters, re-resolve, then delete the
+leftovers by hand:
+
+```bash
+# config/repository-filters.txt: an `exclude <name>` line, or drop the rule
+# that selected them. Exclusion always wins over any include.
+knowledgestore discover                    # rewrites config/repositories.txt
+rm -rf repositories/<repo>                 # else it re-enters the graph
+rm -rf knowledge/git-history/<repo>        # else its tickets re-enter the index
+```
+
+Both deletions matter, for the same reason: those stages read the filesystem,
+not the configuration.
+
+| Left in place | What happens |
+|---|---|
+| `repositories/<repo>` | `merge-graphs` is given a shell glob of per-repository graphs, so a removed repository stays in the merged graph |
+| `knowledge/git-history/<repo>` | `intent` globs `*/commits.ndjson`, so removed repositories keep contributing file-to-ticket links |
+
+`sync --prune` prunes git refs, not repositories. `knowledge/provenance.json` is
+the one thing that self-corrects, because `sync` rewrites it from the configured
+set. Before merging, check for clones and history directories that are not in
+`config/repositories.txt` at all — an orphan from an earlier estate is invisible
+until it turns up in an answer.
+
+Then continue as a normal refresh: snapshot, rebuild the graph, cluster, remap.
+Removing repositories moves community IDs exactly as adding them does, and
+`remap` will report the summaries whose members are gone — that count should
+match the number of summaries describing the removed repositories, and is a
+correct loss rather than a regression.
+
+Authored prose does not fix itself. Topic briefs and deep dives still cite the
+removed repositories and no gate catches it:
+
+```bash
+grep -rl '<repo>' docs/topics/ docs/deep-dives/
+rm docs/deep-dives/<repo>.md && knowledgestore deepdive merge
+```
+
+Finally, check the estate's own regression tests: one that asserts an answer
+naming a removed repository will fail, correctly, and needs replacing rather
+than deleting if it was the only cover for that question shape.
+
+## When clustering will not persist
+
+`graphify cluster-only` can compute a clustering, decline to write it, and still
+print that it updated the graph. Its writer refuses a net reduction in node
+count, and the refusal is not fatal to the run.
+
+**Verify the artefact, never the exit code.** After any clustering step:
+
+```bash
+python3 -c "
+import json
+n = json.load(open('graphify-out/graph.json'))['nodes']
+have = sum(1 for x in n if x.get('community') is not None)
+print(f'{len(n)} nodes, {have} clustered ({have/len(n)*100:.1f}%)')"
+```
+
+Anything below 100% means the clustering did not land. Check the file's
+modification time too — a discarded write leaves the previous graph in place
+while labels, signatures and `GRAPH_REPORT.md` are rewritten for the clustering
+that was thrown away, so the outputs no longer agree with each other. Restore
+those three from version control before trying again.
+
+When the writer refuses, load the graph yourself and drive the public API. The
+node count reaching the writer then matches the file on disk, so there is
+nothing for the guard to fire on, and the output keeps graphify's own format
+(`community`, `community_name`, `norm_label` — the last is graphify-internal,
+which is why hand-writing the graph is not a substitute):
+
+```python
+from graphify.cluster import (cluster, community_member_sigs,
+                              label_communities_by_hub, remap_communities_to_previous)
+from graphify.export import to_json
+from graphify.paths import load_node_link_graph
+
+G = load_node_link_graph("graphify-out/graph.json")
+communities = cluster(G)
+communities = remap_communities_to_previous(communities, previous_node_community)
+labels = label_communities_by_hub(G, communities)      # or reuse by signature
+assert to_json(G, communities, "graphify-out/graph.json", community_labels=labels)
+```
+
+`remap_communities_to_previous` is the step that matters and the step
+`cluster-only` does not take: it aligns new community IDs with the previous ones
+by membership, which is what lets authored per-cluster prose survive.
+`previous_node_community` is `{node_id: community_id}`, and
+`knowledge/summaries/membership-snapshot.json.gz` already holds it the other way
+round — invert it. Without this, clustering from scratch renames most
+communities, and every summary keyed to a renamed ID is dropped by `remap` for
+no reason connected to the change you made.
+
+Do not pass `force=True` to work around the guard unless you can account for the
+reduction. Tracked upstream as
+[graphify#2436](https://github.com/Graphify-Labs/graphify/issues/2436).
 
 ## Update the library version
 

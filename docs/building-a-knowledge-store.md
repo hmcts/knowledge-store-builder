@@ -168,16 +168,40 @@ majority — 60% works — and drop it otherwise rather than misattach prose).
 
 **The damage scales with what you add, not with the act of re-clustering:**
 
-| Addition | Summary retention |
+| Change | Summary retention |
 |---|---|
 | +70 repositories | 54% |
 | +6 repositories | 93% |
 | +0 repositories, sources refreshed only | 71% |
+| −12 repositories, 1.8% of nodes | 88% |
 
 This matters because the intuitive response — batch every addition to avoid
 re-clustering — is wrong. A small, well-motivated addition is cheap. Measure
 retention on each refresh instead of assuming, and treat the backfill as a
 known, bounded cost rather than a disaster.
+
+**Removal costs roughly what an addition of the same size costs**, and the split
+`remap` reports separates the unavoidable part from the incidental. Of 635
+summaries dropped when 12 repositories left a 156-repository estate, 161
+described the departed repositories — a correct loss, and one you can predict
+before starting by grepping the summaries for their names — while 291 fell below
+the overlap bar and 183 were merged-cluster collisions. Only the first group is
+caused by the removal; the rest is the price of re-clustering, and would have
+been paid by any refresh.
+
+**Most of a re-cluster's cost is avoidable and often self-inflicted.** Clustering
+from scratch renames most communities, and every summary keyed to a renamed id is
+dropped for no reason connected to the change. Passing the previous membership
+through `remap_communities_to_previous` is what turns that into the 88% above; a
+run that skipped it renamed 22,507 of 28,004 communities on the same graph, which
+would have stranded almost every summary in the store. Retention is therefore a
+measure of your procedure at least as much as of the estate change.
+
+**Re-extraction is usually a fraction of the estate.** A repository's own graph
+does not change because another one left, and over five days only 14 of 156
+repositories had moved at all. Recording each clone's `HEAD` before `sync` and
+re-extracting only what differs turns hours into minutes; the merge, not the
+extraction, is then the floor.
 
 **A refresh that adds nothing is not free.** The last row is the surprise: the
 estate was unchanged and only the sources moved on, yet retention was worse than

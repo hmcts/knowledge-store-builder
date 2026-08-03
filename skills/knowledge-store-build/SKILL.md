@@ -264,6 +264,49 @@ failures silently produce an empty file over a good one.
 Whatever `remap` drops is then a backfill: extract digests again and author the
 uncovered clusters.
 
+Snapshot immediately **before each** re-cluster, not once per session. A
+snapshot of a clustering the summaries are no longer keyed to is not refused; it
+just retains less, and says nothing about why.
+
+**Verify the clustered graph, never the clustering command's exit code.**
+`graphify cluster-only` can compute a clustering, decline to write it, and still
+print that it updated the graph — its writer refuses a net reduction in node
+count, and that refusal does not fail the run. Check the artefact:
+
+```bash
+python3 -c "
+import json
+n = json.load(open('graphify-out/graph.json'))['nodes']
+have = sum(1 for x in n if x.get('community') is not None)
+print(f'{len(n)} nodes, {have} clustered ({have/len(n)*100:.1f}%)')"
+```
+
+Below 100% means it did not land, and remapping against an unclustered graph
+produces a retention number that means nothing. A discarded write also leaves
+labels, signatures and `GRAPH_REPORT.md` rewritten for the clustering it threw
+away, so restore those from version control before retrying.
+
+**Carry the previous membership into the re-cluster.** Clustering from scratch
+renames most communities, and every summary keyed to a renamed id is dropped for
+no reason connected to your change. `cluster-only` does not do this; driving the
+API does:
+
+```python
+from graphify.cluster import cluster, label_communities_by_hub, remap_communities_to_previous
+from graphify.export import to_json
+from graphify.paths import load_node_link_graph
+
+G = load_node_link_graph("graphify-out/graph.json")
+communities = remap_communities_to_previous(cluster(G), previous_node_community)
+labels = label_communities_by_hub(G, communities)
+assert to_json(G, communities, "graphify-out/graph.json", community_labels=labels)
+```
+
+`previous_node_community` is `{node_id: community_id}` — invert
+`knowledge/summaries/membership-snapshot.json.gz`, which stores it the other way
+round. Loading the graph yourself also means the node count reaching the writer
+matches the file on disk, so the guard above has nothing to fire on; do not reach
+for `force=True` to get past it unless you can account for the difference.
 
 Community ids are not stable across re-clustering, and summaries are keyed by
 id. After a re-cluster, do **not** assume the old file still applies. Either
@@ -271,6 +314,19 @@ regenerate, or remap by membership overlap: for each old cluster, find the new
 cluster holding most of its members and carry the summary across only if the
 overlap is convincing (60% is a reasonable bar). Drop the rest rather than risk
 prose attached to the wrong cluster.
+
+### Removing repositories from an estate
+
+Nothing in the pipeline prunes what you remove. After editing the filters and
+re-running `discover`, delete `repositories/<repo>` and
+`knowledge/git-history/<repo>` by hand: `merge-graphs` takes a shell glob of
+per-repository graphs and `intent` globs `*/commits.ndjson`, so both stages read
+the filesystem rather than the configuration and a leftover directory silently
+keeps a removed repository in every answer. Check for orphans that match no
+configured repository at all while you are there. Then treat it as a normal
+re-cluster, and expect `remap` to report the summaries whose members are gone —
+that is a correct loss. Full procedure in
+[docs/refreshing-a-store.md](../../docs/refreshing-a-store.md#remove-repositories).
 
 ## Writing topic briefs
 
