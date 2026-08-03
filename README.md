@@ -77,6 +77,7 @@ for extraction. The guide lists them.
 
 | Document | For |
 |---|---|
+| [`CHEATSHEET.md`](CHEATSHEET.md) | the commands, per surface, with nothing else around them |
 | [`docs/asking-questions.md`](docs/asking-questions.md) | getting answers from an existing store |
 | [`docs/creating-a-store.md`](docs/creating-a-store.md) | building and refreshing a store: setup, the pipeline, configuration |
 | [`docs/building-a-knowledge-store.md`](docs/building-a-knowledge-store.md) | the operator's judgement: defining an estate, what extraction yields, refresh economics, the traps |
