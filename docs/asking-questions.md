@@ -16,6 +16,8 @@ runs is the `graphify` CLI, and it installs that itself on first use.
 
 ## Install
 
+Just want the commands? [CHEATSHEET.md](../CHEATSHEET.md).
+
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder

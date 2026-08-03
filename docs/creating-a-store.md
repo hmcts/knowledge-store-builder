@@ -23,6 +23,8 @@ use the same install.
 
 ## Install the library
 
+Just want the commands? [CHEATSHEET.md](../CHEATSHEET.md).
+
 Releases are published to the **`hmcts-lib`** Azure Artifacts feed, not to
 PyPI, so the feed has to be named explicitly. It reads anonymously — no
 credentials, no HMCTS account:
