@@ -63,27 +63,12 @@ pip install --extra-index-url \
   https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
   hmcts-knowledge-store-builder
 pip install graphifyy
-gh auth status
 knowledgestore --help
 ```
 
-If `gh auth status` fails, run `gh auth login` before discovery. The
-`hmcts-lib` Azure Artifacts feed serves this package anonymously even though
+The `hmcts-lib` Azure Artifacts feed serves this package anonymously even though
 opening the feed root in a browser prompts for sign-in. Credentials are needed
 to publish packages, not to install them.
-
-To run an unreleased change instead of a release, install from the branch:
-
-```bash
-pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
-```
-
-**The library and the plugin are versioned differently, and it catches people
-out.** The library is released and pinned; the plugin's skills ship from `main`
-with no version at all. A store can therefore pin one library release while
-running newer skills. Neither is wrong — they are separate channels — but when a
-skill's behaviour does not match its documentation, the library's release number
-is not what to check.
 
 ### Select the repositories
 
@@ -114,9 +99,11 @@ Archived repositories are always excluded. Do not put a comment after a rule:
 the parser treats the whole remainder of the line as its value, so an inline
 comment prevents a match.
 
-Set the GitHub organisation, then resolve the filters:
+Discovery reads the GitHub API, so authenticate, name the organisation, then
+resolve the filters:
 
 ```bash
+gh auth status          # gh auth login first, if this fails
 export KSB_GITHUB_ORG=my-org
 knowledgestore discover
 ```
@@ -308,7 +295,7 @@ knowledgestore status --drift
 
 Do this only when deliberately moving a store to another library release. Find
 the version on the
-[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store:knowledge-store-builder/releases),
+[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases),
 then change `X.Y.Z` in `requirements.in`. Keep the exact `==` pin: Sonar
 requires dependencies to use an exact version.
 
@@ -334,8 +321,21 @@ pip install -r requirements.lock
 ```
 
 The emit flags retain the package feed and binary-only setting in the generated
-lock. The library is versioned; the plugin is not and installs its skills from
-this repository's `main` branch. Record both when diagnosing a mismatch.
+lock.
+
+**The library and the plugin are versioned differently.** The library is released
+and pinned; the plugin's skills install from this repository's `main` branch with
+no version at all, so a store can pin one library release while running newer
+skills. Neither is wrong — they are separate channels — but when a skill's
+behaviour does not match its documentation, the library's release number is not
+what to check.
+
+To run an unreleased library change rather than a release, install from the
+branch instead of the feed:
+
+```bash
+pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
+```
 
 ## Configure the store
 
