@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import extract_gherkin as gherkin  # noqa: E402
 
@@ -34,7 +35,7 @@ public class DefendantDetailsStepDefinitions {
 """
 
 
-class NormaliseStepTest(unittest.TestCase):
+class NormaliseStepTest(SettingsIsolated):
     def test_cucumber_expressions_and_quotes_align(self):
         annotation = gherkin.normalise_step(
             "user updates defendant details {string}, {string}, {string}"
@@ -49,7 +50,7 @@ class NormaliseStepTest(unittest.TestCase):
         )
 
 
-class ParseFeatureTest(unittest.TestCase):
+class ParseFeatureTest(SettingsIsolated):
     def test_parses_name_scenarios_tags_and_tickets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -72,13 +73,13 @@ class ParseFeatureTest(unittest.TestCase):
             self.assertIsNone(gherkin.parse_feature(path, root))
 
 
-class FeatureAreaTest(unittest.TestCase):
+class FeatureAreaTest(SettingsIsolated):
     def test_groups_by_first_directory_under_features(self):
         self.assertEqual(gherkin.feature_area("src/test/resources/features/CPS/PET.feature"), "CPS")
         self.assertEqual(gherkin.feature_area("elsewhere/x.feature"), "(root)")
 
 
-class StepDefinitionsTest(unittest.TestCase):
+class StepDefinitionsTest(SettingsIsolated):
     def test_maps_normalised_patterns_to_class_and_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -92,7 +93,7 @@ class StepDefinitionsTest(unittest.TestCase):
         self.assertEqual(patterns[key][0], "DefendantDetailsStepDefinitions")
 
 
-class GraphEnricherTest(unittest.TestCase):
+class GraphEnricherTest(SettingsIsolated):
     def _graph(self):
         return {
             "nodes": [
@@ -139,13 +140,13 @@ class GraphEnricherTest(unittest.TestCase):
         self.assertEqual(enricher.stats["duplicate"], 1)
 
 
-class NormIdTest(unittest.TestCase):
+class NormIdTest(SettingsIsolated):
     def test_lowercases_and_squashes_non_alphanumerics(self):
         self.assertEqual(gherkin.norm_id("CPS/PET File.feature"), "cps_pet_file_feature")
         self.assertEqual(gherkin.norm_id("__x--y__"), "x_y")
 
 
-class StepdefClassNodesTest(unittest.TestCase):
+class StepdefClassNodesTest(SettingsIsolated):
     def test_maps_java_class_nodes_by_source_file(self):
         graph = {
             "nodes": [
@@ -173,7 +174,7 @@ class StepdefClassNodesTest(unittest.TestCase):
         self.assertEqual(mapping, {"src/test/java/com/stepdefinitions/D.java": "a"})
 
 
-class EnrichRepositoryTest(unittest.TestCase):
+class EnrichRepositoryTest(SettingsIsolated):
     def test_walks_features_and_links_step_definitions(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo-a"
@@ -206,17 +207,17 @@ class EnrichRepositoryTest(unittest.TestCase):
         self.assertTrue(stepdef_edges)
 
 
-class WriteOutputsTest(unittest.TestCase):
+class WriteOutputsTest(SettingsIsolated):
     def test_writes_graph_labels_and_recompressed_gz(self):
         import gzip as _gzip
         import json as _json
 
         with tempfile.TemporaryDirectory() as tmp:
-            gherkin.GRAPH_PATH = Path(tmp) / "graph.json"
-            gherkin.LABELS_PATH = Path(tmp) / ".graphify_labels.json"
+            config.configure(GRAPH_PATH=Path(tmp) / "graph.json")
+            config.configure(LABELS_PATH=Path(tmp) / ".graphify_labels.json")
             graph = {"nodes": [{"id": "n"}], "links": []}
             gherkin.write_outputs(graph, {"1": "Area"})
-            written = _json.loads(gherkin.GRAPH_PATH.read_text(encoding="utf-8"))
+            written = _json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
             zipped = _json.loads(
                 _gzip.open(Path(tmp) / "graph.json.gz", "rt", encoding="utf-8").read()
             )
@@ -224,7 +225,7 @@ class WriteOutputsTest(unittest.TestCase):
         self.assertEqual(zipped, graph)
 
 
-class GraphReportNoteTest(unittest.TestCase):
+class GraphReportNoteTest(SettingsIsolated):
     """The audit report must not silently disagree with the graph beside it.
 
     `graphify` writes GRAPH_REPORT.md from its own pass, then this stage adds the
@@ -237,7 +238,7 @@ class GraphReportNoteTest(unittest.TestCase):
     def _report(self, tmp: Path) -> Path:
         report = tmp / "GRAPH_REPORT.md"
         report.write_text("# Graph Report\n\n- 100 nodes · 200 edges\n", encoding="utf-8")
-        gherkin.REPORT_PATH = report
+        config.configure(GRAPH_REPORT_PATH=report)
         return report
 
     def test_the_report_records_what_gherkin_added_after_it_was_written(self):
@@ -264,12 +265,12 @@ class GraphReportNoteTest(unittest.TestCase):
     def test_a_missing_report_is_not_an_error(self):
         # graphify may not have run, or the store may not keep the report
         with tempfile.TemporaryDirectory() as tmp:
-            gherkin.REPORT_PATH = Path(tmp) / "absent.md"
+            config.configure(GRAPH_REPORT_PATH=Path(tmp) / "absent.md")
             gherkin.note_gherkin_layer({"features": 1}, nodes=2, edges=3)
             self.assertFalse((Path(tmp) / "absent.md").exists())
 
 
-class ConfiguredLanguagesTest(unittest.TestCase):
+class ConfiguredLanguagesTest(SettingsIsolated):
     """An added step-definition language must take effect after import.
 
     The module used to copy config.STEP_DEFINITION_LANGUAGES to a module-level

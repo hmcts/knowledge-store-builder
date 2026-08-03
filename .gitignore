@@ -222,3 +222,10 @@ __marimo__/
 
 # IDE
 /.idea/
+
+# This repository is the pipeline, never a store. A stage run from the repository
+# root - or a test mid-refactor - drops these here, and one was committed by a
+# `git add -A`, which is what this guards against.
+knowledge/
+graphify-out/
+repositories/

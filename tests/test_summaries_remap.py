@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
 from knowledgestore import config  # noqa: E402
 
@@ -36,7 +37,7 @@ def _graph(members: dict[str, list[str]]) -> dict:
     return {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "links": []}
 
 
-class RemapTest(unittest.TestCase):
+class RemapTest(SettingsIsolated):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -44,15 +45,9 @@ class RemapTest(unittest.TestCase):
         (self.root / "graphify-out").mkdir(parents=True)
         self._old_root = config.ROOT
         config.configure(root=str(self.root))
-        summaries.GRAPH_PATH = config.GRAPH_PATH
-        summaries.OUTPUT_PATH = config.SUMMARIES_PATH
-        summaries.SNAPSHOT_PATH = config.SUMMARIES_SNAPSHOT_PATH
 
     def tearDown(self):
         config.configure(root=str(self._old_root))
-        summaries.GRAPH_PATH = config.GRAPH_PATH
-        summaries.OUTPUT_PATH = config.SUMMARIES_PATH
-        summaries.SNAPSHOT_PATH = config.SUMMARIES_SNAPSHOT_PATH
         self._tmp.cleanup()
 
     # --- helpers -------------------------------------------------------------
@@ -63,7 +58,7 @@ class RemapTest(unittest.TestCase):
     def write_partly_clustered_graph(self, clustered: int, unclustered: int):
         """A graph where only some nodes carry a community, as a failed write leaves it.
 
-        Writes through `summaries.GRAPH_PATH` — the path the code under test
+        Writes through `config.GRAPH_PATH` — the path the code under test
         actually reads — rather than `config.GRAPH_PATH`, which the two can
         disagree about once another module has reconfigured the root.
         """
@@ -71,7 +66,7 @@ class RemapTest(unittest.TestCase):
         graph["nodes"] += [
             {"id": f"n{i}", "label": f"n{i}"} for i in range(clustered, clustered + unclustered)
         ]
-        summaries.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
+        config.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
 
     def write_snapshot(self, members):
         with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "wt", encoding="utf-8") as f:
@@ -215,7 +210,7 @@ class RemapTest(unittest.TestCase):
         # every node is clustered.
         nodes = [{"id": "dup", "label": "dup", "community": 1} for _ in range(30)]
         nodes.append({"id": "other", "label": "other", "community": 2})
-        summaries.GRAPH_PATH.write_text(json.dumps({"nodes": nodes, "links": []}), encoding="utf-8")
+        config.GRAPH_PATH.write_text(json.dumps({"nodes": nodes, "links": []}), encoding="utf-8")
         self.write_snapshot({"1": ["dup"], "2": ["other"]})
         self.write_summaries({str(i): f"summary {i}" for i in range(1, 21)})
         self.assertEqual(summaries.remap(), 0, "a fully clustered graph must not be refused")

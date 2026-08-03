@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import build_explorer as explorer  # noqa: E402
 
 
@@ -25,7 +27,7 @@ def node(
     }
 
 
-class NodeKindTest(unittest.TestCase):
+class NodeKindTest(SettingsIsolated):
     def test_gherkin_and_ticket_kinds(self):
         self.assertEqual(explorer.node_kind(node("a", "F", kind="gherkin_feature")), "feature")
         self.assertEqual(explorer.node_kind(node("a", "S", kind="gherkin_scenario")), "scenario")
@@ -37,7 +39,7 @@ class NodeKindTest(unittest.TestCase):
         self.assertEqual(explorer.node_kind(concept), "concept")
 
 
-class NoiseTest(unittest.TestCase):
+class NoiseTest(SettingsIsolated):
     def test_minified_symbols_are_noise(self):
         for label in ("Zt()", "e", "$m()", "abc"):
             self.assertTrue(explorer.is_noise(node("a", label), "code"), label)
@@ -47,13 +49,13 @@ class NoiseTest(unittest.TestCase):
         self.assertFalse(explorer.is_noise(node("a", "e"), "feature"))
 
 
-class BuildIndexTest(unittest.TestCase):
+class BuildIndexTest(SettingsIsolated):
     def setUp(self):
-        self._min_degree = explorer.MIN_ENTRY_DEGREE
-        explorer.MIN_ENTRY_DEGREE = 0
+        self._min_degree = config.MIN_ENTRY_DEGREE
+        config.configure(MIN_ENTRY_DEGREE=0)
 
     def tearDown(self):
-        explorer.MIN_ENTRY_DEGREE = self._min_degree
+        config.configure(MIN_ENTRY_DEGREE=self._min_degree)
 
     def test_entries_and_edges_reference_kept_nodes_only(self):
         graph = {
@@ -94,7 +96,7 @@ class BuildIndexTest(unittest.TestCase):
         self.assertEqual(entries[0][7], ["CRC-12016"])
 
 
-class NodeTicketsTest(unittest.TestCase):
+class NodeTicketsTest(SettingsIsolated):
     def test_feature_tickets_come_from_metadata(self):
         feature = node("a", "F", kind="gherkin_feature")
         feature["metadata"]["tickets"] = ["DD-1", "DD-2"]
@@ -109,7 +111,7 @@ class NodeTicketsTest(unittest.TestCase):
         self.assertEqual(explorer.node_tickets(node("a", "X"), "code", intent), ["DD-1", "DD-2"])
 
 
-class EntryConnectionsTest(unittest.TestCase):
+class EntryConnectionsTest(SettingsIsolated):
     def test_orders_by_degree_dedupes_labels_and_caps(self):
         nodes = {f"n{i}": {"label": f"L{i}"} for i in range(8)}
         nodes["dup"] = {"label": "L1"}
@@ -120,7 +122,7 @@ class EntryConnectionsTest(unittest.TestCase):
         self.assertEqual(len(got), len(set(got)))  # deduped
 
 
-class KeptEdgesTest(unittest.TestCase):
+class KeptEdgesTest(SettingsIsolated):
     def test_emits_each_kept_edge_once_and_skips_dropped_nodes(self):
         kept = [("a", {}, "code"), ("b", {}, "code")]
         adjacency = {"a": {"b", "dropped"}, "b": {"a"}}
@@ -128,7 +130,7 @@ class KeptEdgesTest(unittest.TestCase):
         self.assertEqual(explorer.kept_edges(kept, adjacency, index_of), [0, 1])
 
 
-class LatestSyncedTest(unittest.TestCase):
+class LatestSyncedTest(SettingsIsolated):
     """Test timezone-aware chronological comparison of committed dates."""
 
     def test_returns_empty_string_when_no_entries(self):
@@ -191,28 +193,28 @@ class LatestSyncedTest(unittest.TestCase):
         self.assertEqual(explorer.latest_synced(recorded), "2026-07-30")
 
 
-class BuildPageSmokeTest(unittest.TestCase):
+class BuildPageSmokeTest(SettingsIsolated):
     """main() inlines app.js and all data blocks into one page."""
 
     def test_main_produces_page_with_all_blocks(self):
-        self.addCleanup(setattr, explorer, "MIN_ENTRY_DEGREE", explorer.MIN_ENTRY_DEGREE)
-        explorer.MIN_ENTRY_DEGREE = 0
+        self.addCleanup(setattr, explorer, "MIN_ENTRY_DEGREE", config.MIN_ENTRY_DEGREE)
+        config.configure(MIN_ENTRY_DEGREE=0)
         import json as _json
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            explorer.GRAPH_PATH = root / "graph.json"
-            explorer.LABELS_PATH = root / "labels.json"
-            explorer.INTENT_PATH = root / "missing-intent.json.gz"
-            explorer.TITLES_PATH = root / "missing-titles.json.gz"
-            explorer.SUMMARIES_PATH = root / "missing-summaries.json"
-            explorer.SYNONYMS_PATH = root / "missing-syn.json.gz"
-            explorer.TICKET_DESC_PATH = root / "missing-desc.json.gz"
-            explorer.TOPICS_PATH = root / "missing-topics.json"
-            explorer.DIVES_PATH = root / "missing-dives.json"
-            explorer.OUTPUT = root / "explorer.html"
-            explorer.PROVENANCE_PATH = root / "provenance.json"
-            with open(explorer.PROVENANCE_PATH, "w") as pf:
+            config.configure(GRAPH_PATH=root / "graph.json")
+            config.configure(LABELS_PATH=root / "labels.json")
+            config.configure(INTENT_INDEX_PATH=root / "missing-intent.json.gz")
+            config.configure(TICKET_TITLES_PATH=root / "missing-titles.json.gz")
+            config.configure(SUMMARIES_PATH=root / "missing-summaries.json")
+            config.configure(SYNONYMS_PATH=root / "missing-syn.json.gz")
+            config.configure(TICKET_DESCRIPTIONS_PATH=root / "missing-desc.json.gz")
+            config.configure(TOPICS_BRIEFS_PATH=root / "missing-topics.json")
+            config.configure(DEEPDIVES_PATH=root / "missing-dives.json")
+            config.configure(EXPLORER_PATH=root / "explorer.html")
+            config.configure(PROVENANCE_PATH=root / "provenance.json")
+            with open(config.PROVENANCE_PATH, "w") as pf:
                 _json.dump(
                     {
                         "repositories": {
@@ -225,12 +227,12 @@ class BuildPageSmokeTest(unittest.TestCase):
                     },
                     pf,
                 )
-            explorer.GRAPH_PATH.write_text(
+            config.GRAPH_PATH.write_text(
                 _json.dumps({"nodes": [node("n1", "AddressPipe")], "links": []}), encoding="utf-8"
             )
-            explorer.LABELS_PATH.write_text("{}", encoding="utf-8")
+            config.LABELS_PATH.write_text("{}", encoding="utf-8")
             code = explorer.main()
-            html = explorer.OUTPUT.read_text(encoding="utf-8")
+            html = config.EXPLORER_PATH.read_text(encoding="utf-8")
         self.assertEqual(code, 0)
         for block in (
             "data",
@@ -248,7 +250,7 @@ class BuildPageSmokeTest(unittest.TestCase):
         self.assertIn("sources synced to 2026-07-30", html)
 
 
-class IncludeEntryPolicyTest(unittest.TestCase):
+class IncludeEntryPolicyTest(SettingsIsolated):
     def test_business_kinds_always_included(self):
         feature = node("a", "F", kind="gherkin_feature")
         self.assertTrue(explorer.include_entry(feature, "feature", 0))
@@ -274,7 +276,7 @@ class IncludeEntryPolicyTest(unittest.TestCase):
             repo="my-e2e",
             source_file="src/test/pages/SjpCaseDecisionPage.po.ts",
         )
-        self.assertTrue(explorer.include_entry(po, "code", explorer.MIN_ENTRY_DEGREE))
+        self.assertTrue(explorer.include_entry(po, "code", config.MIN_ENTRY_DEGREE))
 
     def test_test_artifacts_dropped_when_no_e2e_repo_is_named(self):
         self.addCleanup(setattr, explorer, "E2E_REPOS", explorer.E2E_REPOS)
@@ -284,8 +286,8 @@ class IncludeEntryPolicyTest(unittest.TestCase):
 
     def test_degree_threshold_applies_to_plain_code(self):
         plain = node("a", "SomeClass")
-        self.assertFalse(explorer.include_entry(plain, "code", explorer.MIN_ENTRY_DEGREE - 1))
-        self.assertTrue(explorer.include_entry(plain, "code", explorer.MIN_ENTRY_DEGREE))
+        self.assertFalse(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE - 1))
+        self.assertTrue(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE))
 
 
 if __name__ == "__main__":

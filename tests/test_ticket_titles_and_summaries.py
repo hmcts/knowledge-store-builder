@@ -9,11 +9,13 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import config  # noqa: E402
 from knowledgestore import import_ticket_titles as titles  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
 
 
-class FindColumnsTest(unittest.TestCase):
+class FindColumnsTest(SettingsIsolated):
     def test_finds_jira_export_headers(self):
         self.assertEqual(titles.find_columns(["Issue key", "Summary", "Status"]), (0, 1))
         self.assertEqual(titles.find_columns(["Status", "Key", "Summary"]), (1, 2))
@@ -23,7 +25,7 @@ class FindColumnsTest(unittest.TestCase):
             titles.find_columns(["Status", "Assignee"])
 
 
-class MergeCsvTest(unittest.TestCase):
+class MergeCsvTest(SettingsIsolated):
     def test_merges_valid_rows_and_skips_junk(self):
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = Path(tmp) / "export.csv"
@@ -40,11 +42,11 @@ class MergeCsvTest(unittest.TestCase):
         self.assertEqual(store, {"CRC-12016": "Address pipe production incident"})
 
 
-class SummariesMergeTest(unittest.TestCase):
+class SummariesMergeTest(SettingsIsolated):
     def _with_paths(self, tmp):
-        summaries.INPUT_PATH = Path(tmp) / "communities-input.json"
-        summaries.OUTPUT_PATH = Path(tmp) / "communities.json"
-        summaries.INPUT_PATH.write_text(
+        config.configure(SUMMARIES_INPUT_PATH=Path(tmp) / "communities-input.json")
+        config.configure(SUMMARIES_PATH=Path(tmp) / "communities.json")
+        config.SUMMARIES_INPUT_PATH.write_text(
             json.dumps([{"id": 3, "label": "Hearing State Store", "size": 100}]), encoding="utf-8"
         )
 
@@ -62,7 +64,7 @@ class SummariesMergeTest(unittest.TestCase):
                 encoding="utf-8",
             )
             code = summaries.merge([str(batch)])
-            merged = json.loads(summaries.OUTPUT_PATH.read_text(encoding="utf-8"))
+            merged = json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 0)
         self.assertIn("3", merged)
 
@@ -72,12 +74,12 @@ class SummariesMergeTest(unittest.TestCase):
             batch = Path(tmp) / "gen.json"
             batch.write_text(json.dumps({"999": "x" * 100, "3": "too short"}), encoding="utf-8")
             code = summaries.merge([str(batch)])
-            merged = json.loads(summaries.OUTPUT_PATH.read_text(encoding="utf-8"))
+            merged = json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 1)
         self.assertEqual(merged, {})
 
 
-class TicketDescriptionsOutputTest(unittest.TestCase):
+class TicketDescriptionsOutputTest(SettingsIsolated):
     """The committed ticket-descriptions artefact keeps its contract."""
 
     def test_shape_of_committed_artifact(self):
@@ -95,7 +97,7 @@ class TicketDescriptionsOutputTest(unittest.TestCase):
         self.assertEqual(set(sample.keys()), {"d", "first", "last", "repos", "n"})
 
 
-class CommunityDigestTest(unittest.TestCase):
+class CommunityDigestTest(SettingsIsolated):
     def test_digest_gathers_repos_features_and_tickets(self):
         nodes = [
             {
@@ -124,16 +126,16 @@ class CommunityDigestTest(unittest.TestCase):
         self.assertCountEqual(digest["tickets"], ["DD-1", "DD-2"])
 
 
-class SummariesExtractTest(unittest.TestCase):
+class SummariesExtractTest(SettingsIsolated):
     def test_extract_filters_small_communities(self):
         import json as _json
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            summaries.GRAPH_PATH = root / "graph.json"
-            summaries.LABELS_PATH = root / "labels.json"
-            summaries.INTENT_PATH = root / "missing.json.gz"
-            summaries.INPUT_PATH = root / "communities-input.json"
+            config.configure(GRAPH_PATH=root / "graph.json")
+            config.configure(LABELS_PATH=root / "labels.json")
+            config.configure(INTENT_INDEX_PATH=root / "missing.json.gz")
+            config.configure(SUMMARIES_INPUT_PATH=root / "communities-input.json")
             big = [
                 {
                     "id": f"n{i}",
@@ -143,7 +145,7 @@ class SummariesExtractTest(unittest.TestCase):
                     "source_file": "x.ts",
                     "metadata": {},
                 }
-                for i in range(summaries.MIN_COMMUNITY_SIZE)
+                for i in range(config.MIN_COMMUNITY_SIZE)
             ]
             small = [
                 {
@@ -155,12 +157,12 @@ class SummariesExtractTest(unittest.TestCase):
                     "metadata": {},
                 }
             ]
-            summaries.GRAPH_PATH.write_text(
+            config.GRAPH_PATH.write_text(
                 _json.dumps({"nodes": big + small, "links": []}), encoding="utf-8"
             )
-            summaries.LABELS_PATH.write_text(_json.dumps({"1": "Big Area"}), encoding="utf-8")
+            config.LABELS_PATH.write_text(_json.dumps({"1": "Big Area"}), encoding="utf-8")
             code = summaries.extract()
-            digests = _json.loads(summaries.INPUT_PATH.read_text(encoding="utf-8"))
+            digests = _json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 0)
         self.assertEqual([d["id"] for d in digests], [1])
         self.assertEqual(digests[0]["label"], "Big Area")

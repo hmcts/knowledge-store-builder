@@ -31,14 +31,8 @@ from typing import TypedDict
 
 from . import config, kinds
 
-GRAPH_PATH = config.GRAPH_PATH
-LABELS_PATH = config.LABELS_PATH
-REPORT_PATH = config.GRAPH_REPORT_PATH
-REPOSITORIES = config.REPOSITORIES_DIR
-FEATURES_DIR = config.FEATURES_DIR
 FORMAT = "gherkin"
 
-TICKET = config.TICKET_PATTERN
 STEP_KEYWORD = re.compile(r"^(Given|When|Then|And|But)\s+", re.IGNORECASE)
 PLACEHOLDER = "¤"
 
@@ -113,14 +107,14 @@ def parse_feature_line(line: str, feature: Feature) -> None:
     """Fold one Gherkin line into the accumulating feature dict."""
     if line.startswith("@"):
         feature["tags"].update(tag.lstrip("@") for tag in line.split())
-        feature["tickets"].update(TICKET.findall(line))
+        feature["tickets"].update(config.TICKET_PATTERN.findall(line))
     elif line.startswith("Feature:"):
         feature["name"] = line.split(":", 1)[1].strip() or None
     elif line.startswith(("Scenario:", "Scenario Outline:")):
         name = line.split(":", 1)[1].strip()
         if name:
             feature["scenarios"].append(name)
-        feature["tickets"].update(TICKET.findall(line))
+        feature["tickets"].update(config.TICKET_PATTERN.findall(line))
     elif STEP_KEYWORD.match(line):
         feature["steps"].add(normalise_step(STEP_KEYWORD.sub("", line)))
 
@@ -132,7 +126,7 @@ def parse_feature(path: Path, repo_dir: Path) -> Feature | None:
         "scenarios": [],
         "steps": set(),
         "tags": set(),
-        "tickets": set(TICKET.findall(path.stem)),
+        "tickets": set(config.TICKET_PATTERN.findall(path.stem)),
     }
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         parse_feature_line(raw.strip(), feature)
@@ -143,8 +137,8 @@ def parse_feature(path: Path, repo_dir: Path) -> Feature | None:
 
 def feature_area(rel: str) -> str:
     """First directory under features/, used to group business communities."""
-    if FEATURES_DIR in rel:
-        tail = rel.split(FEATURES_DIR, 1)[1]
+    if config.FEATURES_DIR in rel:
+        tail = rel.split(config.FEATURES_DIR, 1)[1]
         if "/" in tail:
             return tail.split("/")[0]
     return "(root)"
@@ -332,9 +326,9 @@ def note_gherkin_layer(stats: dict, nodes: int, edges: int) -> None:
     The note is bounded by a marker and replaced on every run, so re-running an
     idempotent stage does not turn the report into a changelog.
     """
-    if not REPORT_PATH.is_file():
+    if not config.GRAPH_REPORT_PATH.is_file():
         return
-    existing = REPORT_PATH.read_text(encoding="utf-8")
+    existing = config.GRAPH_REPORT_PATH.read_text(encoding="utf-8")
     if REPORT_NOTE_MARKER in existing:
         existing = existing.split(REPORT_NOTE_MARKER)[0].rstrip() + "\n"
     note = (
@@ -349,9 +343,9 @@ def note_gherkin_layer(stats: dict, nodes: int, edges: int) -> None:
         "Later stages can move these figures again. Measure the graph itself when "
         "the number matters; read this report for the commit it was built from.\n"
     )
-    # Sonar S2083: REPORT_PATH is a module constant from configuration, and this
+    # Sonar S2083: config.GRAPH_REPORT_PATH is a module constant from configuration, and this
     # is offline build tooling operating on a local clone.
-    REPORT_PATH.write_text(existing + note, encoding="utf-8")  # NOSONAR(S2083)
+    config.GRAPH_REPORT_PATH.write_text(existing + note, encoding="utf-8")  # NOSONAR(S2083)
 
 
 def write_outputs(graph: dict, labels: dict[str, str]) -> None:
@@ -360,26 +354,30 @@ def write_outputs(graph: dict, labels: dict[str, str]) -> None:
     # build tooling operating on a local clone, not a service handling
     # untrusted input.
     serialised = json.dumps(graph, ensure_ascii=False)
-    GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
-    LABELS_PATH.write_text(  # NOSONAR(S2083)
+    config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
+    config.LABELS_PATH.write_text(  # NOSONAR(S2083)
         json.dumps(labels, ensure_ascii=False), encoding="utf-8"
     )
     with gzip.open(
-        GRAPH_PATH.with_suffix(".json.gz"), "wt", encoding="utf-8", compresslevel=9
+        config.GRAPH_PATH.with_suffix(".json.gz"), "wt", encoding="utf-8", compresslevel=9
     ) as out:
         out.write(serialised)
 
 
 def main() -> int:
-    if not GRAPH_PATH.exists():
-        print(f"Graph not found: {GRAPH_PATH} (gunzip -k graph.json.gz first)")
+    if not config.GRAPH_PATH.exists():
+        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
         return 1
 
-    graph = json.loads(GRAPH_PATH.read_text(encoding="utf-8"))
-    labels = json.loads(LABELS_PATH.read_text(encoding="utf-8")) if LABELS_PATH.exists() else {}
+    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    labels = (
+        json.loads(config.LABELS_PATH.read_text(encoding="utf-8"))
+        if config.LABELS_PATH.exists()
+        else {}
+    )
 
     enricher = GraphEnricher(graph, labels)
-    for repo_dir in sorted(REPOSITORIES.iterdir()):
+    for repo_dir in sorted(config.REPOSITORIES_DIR.iterdir()):
         if (repo_dir / ".git").is_dir():
             enrich_repository(repo_dir, enricher)
 

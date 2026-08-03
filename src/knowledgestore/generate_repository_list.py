@@ -26,9 +26,6 @@ from pathlib import Path
 
 from . import config
 
-FILTERS = config.FILTERS_PATH
-OUTPUT = config.REPOSITORIES_CONFIG
-GITHUB_ORG = config.GITHUB_ORG
 
 HEADER_TEMPLATE = (
     "# Generated from the {org} organisation repository listing\n"
@@ -109,7 +106,7 @@ def list_organisation_repositories(runner=run_gh) -> list[dict]:
             [
                 "api",
                 "--paginate",
-                f"/orgs/{GITHUB_ORG}/repos?per_page=100&type=all",
+                f"/orgs/{config.GITHUB_ORG}/repos?per_page=100&type=all",
                 "--jq",
                 LISTING_JQ,
             ]
@@ -124,7 +121,7 @@ def list_team_repositories(slug: str, runner=run_gh) -> list[dict]:
             [
                 "api",
                 "--paginate",
-                f"/orgs/{GITHUB_ORG}/teams/{slug}/repos?per_page=100",
+                f"/orgs/{config.GITHUB_ORG}/teams/{slug}/repos?per_page=100",
                 "--jq",
                 LISTING_JQ,
             ]
@@ -178,7 +175,7 @@ def _report_unmatched(problems: list[tuple[int, str]]) -> None:
     """
     for line_number, rule in problems:
         print(
-            f"[warn] {FILTERS}:{line_number}: rule `{rule}` matched no repository",
+            f"[warn] {config.FILTERS_PATH}:{line_number}: rule `{rule}` matched no repository",
             file=sys.stderr,
         )
     if problems:
@@ -210,10 +207,10 @@ def discover(filters: Filters, runner=run_gh) -> list[dict]:
 def render_config(repositories: list[dict]) -> str:
     """Render discovered repositories as the config file content."""
     lines = [
-        f"{r['name']}|git@github.com:{GITHUB_ORG}/{r['name']}.git|{r['defaultBranch']}"
+        f"{r['name']}|git@github.com:{config.GITHUB_ORG}/{r['name']}.git|{r['defaultBranch']}"
         for r in repositories
     ]
-    return HEADER_TEMPLATE.format(org=GITHUB_ORG) + "\n".join(lines) + "\n"
+    return HEADER_TEMPLATE.format(org=config.GITHUB_ORG) + "\n".join(lines) + "\n"
 
 
 def main(argv: list[str] | None = None, runner=run_gh) -> int:
@@ -221,7 +218,7 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("-h", "--help", action="help")
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    if not GITHUB_ORG:
+    if not config.GITHUB_ORG:
         print(
             "No GitHub organisation configured. Set KSB_GITHUB_ORG to the "
             "organisation whose repositories make up your estate.",
@@ -248,12 +245,12 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
             print("GitHub CLI is not authenticated. Run: gh auth login", file=sys.stderr)
             return 1
 
-    filters = read_filters(FILTERS)
+    filters = read_filters(config.FILTERS_PATH)
     repositories = discover(filters, runner=runner)
     problems = unmatched_rules(filters, repositories, runner=runner)
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render_config(repositories), encoding="utf-8")
-    print(f"Generated {OUTPUT}")
+    config.REPOSITORIES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    config.REPOSITORIES_CONFIG.write_text(render_config(repositories), encoding="utf-8")
+    print(f"Generated {config.REPOSITORIES_CONFIG}")
     _report_unmatched(problems)
     print(
         f"Repositories selected: {len(repositories)} "

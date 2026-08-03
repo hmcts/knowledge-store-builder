@@ -32,10 +32,6 @@ from collections import Counter
 from . import config
 from . import io
 
-GRAPH_PATH = config.GRAPH_PATH
-LABELS_PATH = config.LABELS_PATH
-SUMMARIES_PATH = config.SUMMARIES_PATH
-OUTPUT = config.SYNONYMS_PATH
 
 TOKEN = re.compile(r"[a-z]{4,24}")
 MIN_DF = 3
@@ -51,12 +47,12 @@ STOP = set(
 
 
 def collect_vocabulary() -> list[str]:
-    graph = json.loads(GRAPH_PATH.read_text(encoding="utf-8"))
+    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     texts = [n.get("label") or "" for n in graph["nodes"]]
-    if LABELS_PATH.exists():
-        texts += list(json.loads(LABELS_PATH.read_text(encoding="utf-8")).values())
-    if SUMMARIES_PATH.exists():
-        texts += list(json.loads(SUMMARIES_PATH.read_text(encoding="utf-8")).values())
+    if config.LABELS_PATH.exists():
+        texts += list(json.loads(config.LABELS_PATH.read_text(encoding="utf-8")).values())
+    if config.SUMMARIES_PATH.exists():
+        texts += list(json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8")).values())
 
     frequency: Counter = Counter()
     for text in texts:
@@ -111,12 +107,12 @@ def main() -> int:
             neighbours[token] = near
             kept_pairs += len(near)
 
-    io.write_gzip_json(OUTPUT, neighbours)
+    io.write_gzip_json(config.SYNONYMS_PATH, neighbours)
 
-    size_kb = OUTPUT.stat().st_size / 1024
+    size_kb = config.SYNONYMS_PATH.stat().st_size / 1024
     print(
         f"{len(neighbours)} tokens with neighbours ({kept_pairs} pairs, "
-        f"sim >= {MIN_SIMILARITY}) -> {OUTPUT} ({size_kb:.0f} KB)"
+        f"sim >= {MIN_SIMILARITY}) -> {config.SYNONYMS_PATH} ({size_kb:.0f} KB)"
     )
     return 0
 

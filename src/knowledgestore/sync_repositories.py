@@ -21,9 +21,6 @@ from .export_git_history import RepositoryConfig, read_repository_config
 
 from . import config
 
-CONFIG = config.REPOSITORIES_CONFIG
-REPOSITORIES = config.REPOSITORIES_DIR
-
 
 def run_git(arguments: list[str]) -> str:
     """Run git and return stdout. Raises on failure."""
@@ -67,29 +64,31 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
 def main() -> int:
     from . import provenance
 
-    if not CONFIG.is_file():
-        print(f"Repository configuration not found: {CONFIG}", file=sys.stderr)
+    if not config.REPOSITORIES_CONFIG.is_file():
+        print(f"Repository configuration not found: {config.REPOSITORIES_CONFIG}", file=sys.stderr)
         return 1
 
-    REPOSITORIES.mkdir(parents=True, exist_ok=True)
+    config.REPOSITORIES_DIR.mkdir(parents=True, exist_ok=True)
     entries: dict[str, dict] = {}
     failures: list[tuple[str, str]] = []
-    for repo in read_repository_config(CONFIG):
+    for repo in read_repository_config(config.REPOSITORIES_CONFIG):
         print(f"\nSynchronising {repo.name}")
         # One repository's failure must not cost the estate. Aborting here used
         # to skip every repository after it and, because provenance is written
         # after the loop, discard the record for those that had already
         # succeeded - so one unreachable remote produced nothing at all.
         try:
-            count = sync_repository(repo, REPOSITORIES)
+            count = sync_repository(repo, config.REPOSITORIES_DIR)
         except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
             print(f"{repo.name}: FAILED - {error}", file=sys.stderr)
             failures.append((repo.name, str(error)))
             continue
         print(f"{repo.name}: {count} commits available")
-        entries[repo.name] = provenance.head_info(REPOSITORIES / repo.name, repo.default_branch)
+        entries[repo.name] = provenance.head_info(
+            config.REPOSITORIES_DIR / repo.name, repo.default_branch
+        )
     provenance.write(entries)
-    print(f"\nProvenance recorded for {len(entries)} repositories -> {provenance.PROVENANCE_PATH}")
+    print(f"\nProvenance recorded for {len(entries)} repositories -> {config.PROVENANCE_PATH}")
     if failures:
         total = len(entries) + len(failures)
         print(f"\n{len(failures)} of {total} repositories failed to sync:")

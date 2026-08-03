@@ -8,10 +8,11 @@ import unittest
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import export_git_history as export  # noqa: E402
 
 
-class ParseNumstatTest(unittest.TestCase):
+class ParseNumstatTest(SettingsIsolated):
     def test_parses_additions_deletions_and_binary(self):
         output = "3\t1\tsrc/a.ts\n-\t-\tlogo.png\n"
         files = export.parse_numstat(output)
@@ -31,7 +32,7 @@ class ParseNumstatTest(unittest.TestCase):
         self.assertEqual(export.parse_numstat("not-a-numstat-line\n\n"), [])
 
 
-class NormaliseMessageTest(unittest.TestCase):
+class NormaliseMessageTest(SettingsIsolated):
     def test_collapses_blank_runs_and_line_endings(self):
         self.assertEqual(
             export.normalise_message("a\r\n\n\n\nb\r"),
@@ -39,7 +40,7 @@ class NormaliseMessageTest(unittest.TestCase):
         )
 
 
-class ConfigTest(unittest.TestCase):
+class ConfigTest(SettingsIsolated):
     def test_reads_valid_lines_and_skips_comments(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "repos.txt"
@@ -60,7 +61,7 @@ class ConfigTest(unittest.TestCase):
                 export.read_repository_config(cfg)
 
 
-class GetCommitsIntegrationTest(unittest.TestCase):
+class GetCommitsIntegrationTest(SettingsIsolated):
     """Regression guard for the \\x1f field-separator bug: commits with an
     EMPTY body were silently dropped because str.strip() treats the field
     separator as whitespace. Every commit must survive the round trip."""
@@ -98,7 +99,7 @@ class GetCommitsIntegrationTest(unittest.TestCase):
         self.assertFalse(by_subject["second subject"]["is_merge"])
 
 
-class NumstatSinglePassTest(unittest.TestCase):
+class NumstatSinglePassTest(SettingsIsolated):
     """File statistics must come from the one `git log` pass, unchanged.
 
     `get_commits` used to spawn `git show --numstat` per commit — on a real
@@ -181,7 +182,7 @@ class NumstatSinglePassTest(unittest.TestCase):
         self.assertEqual([f["path"] for f in merge["files"]], ["c.txt"])
 
 
-class RenderingContractTest(unittest.TestCase):
+class RenderingContractTest(SettingsIsolated):
     """The markdown/ndjson output shapes are the dataset contract."""
 
     def _commit(self):
@@ -236,7 +237,7 @@ class RenderingContractTest(unittest.TestCase):
         self.assertIn("intentionally excludes complete patches", year_md)
 
 
-class ExportRepositoryEndToEndTest(unittest.TestCase):
+class ExportRepositoryEndToEndTest(SettingsIsolated):
     """Whole-stage integration over a real fixture repository."""
 
     def _git(self, cwd, *args):

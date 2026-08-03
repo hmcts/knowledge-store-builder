@@ -25,11 +25,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
 from knowledgestore import config  # noqa: E402
 
 
-class IdentifierExtractionTest(unittest.TestCase):
+class IdentifierExtractionTest(SettingsIsolated):
     """What counts as a claim about code, and what is just English."""
 
     def test_camel_case_is_an_identifier(self):
@@ -69,20 +70,16 @@ class IdentifierExtractionTest(unittest.TestCase):
         self.assertEqual(summaries.prose_identifiers(text), set())
 
 
-class VerifyTest(unittest.TestCase):
+class VerifyTest(SettingsIsolated):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         (self.root / "knowledge" / "summaries").mkdir(parents=True)
         self._old_root = config.ROOT
         config.configure(root=str(self.root))
-        summaries.INPUT_PATH = config.SUMMARIES_INPUT_PATH
-        summaries.OUTPUT_PATH = config.SUMMARIES_PATH
 
     def tearDown(self):
         config.configure(root=str(self._old_root))
-        summaries.INPUT_PATH = config.SUMMARIES_INPUT_PATH
-        summaries.OUTPUT_PATH = config.SUMMARIES_PATH
         self._tmp.cleanup()
 
     def write(self, digests, prose):

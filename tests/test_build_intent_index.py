@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
+from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
 
 
@@ -28,7 +29,7 @@ def make_files():
     return defaultdict(lambda: {"tickets": defaultdict(int), "first": None, "last": None})
 
 
-class CleanDescriptionTest(unittest.TestCase):
+class CleanDescriptionTest(SettingsIsolated):
     def test_strips_single_ticket_prefix(self):
         self.assertEqual(
             intent.clean_description("DD-24302: address field length changed to 35"),
@@ -45,7 +46,7 @@ class CleanDescriptionTest(unittest.TestCase):
         self.assertEqual(intent.clean_description("plain subject."), "plain subject")
 
 
-class JunkFilterTest(unittest.TestCase):
+class JunkFilterTest(SettingsIsolated):
     def test_junk_descriptions_match(self):
         for junk in ("wip", "Fixed", "addressed PR comments", "update", "refactoring"):
             self.assertIsNotNone(intent.JUNK_DESCRIPTION.match(junk), junk)
@@ -56,7 +57,7 @@ class JunkFilterTest(unittest.TestCase):
         )
 
 
-class ApplyCommitTest(unittest.TestCase):
+class ApplyCommitTest(SettingsIsolated):
     def _commit(self, subject, merge=False, date="2024-05-01T10:00:00+00:00"):
         return {
             "repository": "repo-a",
@@ -94,7 +95,7 @@ class ApplyCommitTest(unittest.TestCase):
         self.assertEqual(len(descriptions["DD-9"]["descriptions"]), 0)
 
 
-class IndexRepositoryTest(unittest.TestCase):
+class IndexRepositoryTest(SettingsIsolated):
     def test_end_to_end_over_ndjson(self):
         commits = [
             {
