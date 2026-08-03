@@ -16,7 +16,7 @@ Why the reader who is only asking needs no Python, and how the two fit together:
 ### Claude Code in a terminal
 
 ```
-/plugin marketplace add hmcts/knowledge-store-builder
+/plugin marketplace add hmcts/knowledge-store:knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
@@ -33,7 +33,7 @@ The extension exposes only a subset of Claude Code's commands, so install throug
 its interface rather than the commands above:
 
 - Type `/plugins` to open **Manage plugins**
-- **Marketplaces** tab → add `hmcts/knowledge-store-builder`
+- **Marketplaces** tab → add `hmcts/knowledge-store:knowledge-store-builder`
 - **Plugins** tab → install `knowledge-store`
 
 What you configure either way is shared: plugins added in the extension are
@@ -43,7 +43,7 @@ available in the CLI, and the reverse.
 
 - **+** next to the prompt box → **Plugins** → **Add plugin**
 - Choose `knowledge-store`. If it is not listed, add the marketplace
-  `hmcts/knowledge-store-builder` first.
+  `hmcts/knowledge-store:knowledge-store-builder` first.
 - Pick a scope: **user** (you, everywhere), **project** (everyone on this
   repository), **local** (you, here only).
 - Later: **+** → **Plugins** → **Manage plugins** to enable, disable or remove.
@@ -135,9 +135,9 @@ knowledgestore gherkin      # then cluster, then:
 knowledgestore explorer
 ```
 
-Cluster **after** `gherkin`, and read the clustering section of the
-`knowledge-store-build` skill first — `graphify cluster-only` reports success
-without writing its result, which is destructive if it goes unnoticed.
+Cluster **after** `gherkin`. Follow `/knowledge-store:knowledge-store-build` for this step:
+`graphify cluster-only` reports success without writing its result, which is
+destructive if it goes unnoticed.
 
 ### Checks worth running
 
