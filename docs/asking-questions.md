@@ -130,7 +130,7 @@ language.
 | Skill | Use it to |
 |---|---|
 | `/knowledge-store:knowledge-store` | Ask questions of an existing store |
-| `/knowledge-store:knowledge-store-build` | Build or refresh a store; see [Creating and refreshing a knowledge store](creating-a-store.md) |
+| `/knowledge-store:knowledge-store-build` | Build or refresh a store; see [Creating a knowledge store](creating-a-store.md) or [Refreshing a knowledge store](refreshing-a-store.md) |
 | `/knowledge-store:knowledge-store-export` | Produce a dated, evidence-backed finding for a ticket or owner without copying sensitive values into it |
 
 Individual stores can provide an additional skill containing estate-specific

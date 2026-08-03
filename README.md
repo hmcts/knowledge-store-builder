@@ -1,4 +1,4 @@
-# knowledge-store-builder
+# Knowledge Store Builder
 
 ## What does this repository do?
 
@@ -41,9 +41,12 @@ Querying an existing knowledge store requires only the plugin.
 
 Choose the path that matches your role:
 
-- **Build a knowledge store** — You own or maintain a software estate and want
-  to create or refresh its knowledge store.
-  → [Creating and refreshing](docs/creating-a-store.md)
+- **Build a knowledge store** — You own a software estate and want to create
+  its knowledge store.
+  → [Creating a knowledge store](docs/creating-a-store.md)
+- **Refresh a knowledge store** — You maintain an existing store and want to
+  update its sources, generated layers or library version.
+  → [Refreshing and maintaining a knowledge store](docs/refreshing-a-store.md)
 - **Use a knowledge store** — Someone has already built one, and you want to
   ask questions about it.
   → [Asking questions](docs/asking-questions.md)
@@ -79,7 +82,9 @@ for extraction. The guide lists them.
 |---|---|
 | [`CHEATSHEET.md`](CHEATSHEET.md) | the commands, per surface, with nothing else around them |
 | [`docs/asking-questions.md`](docs/asking-questions.md) | getting answers from an existing store |
-| [`docs/creating-a-store.md`](docs/creating-a-store.md) | building and refreshing a store: setup, the pipeline, configuration |
+| [`docs/creating-a-store.md`](docs/creating-a-store.md) | creating and publishing a store |
+| [`docs/refreshing-a-store.md`](docs/refreshing-a-store.md) | refreshing an existing store and updating its library version |
+| [`docs/configuring-a-store.md`](docs/configuring-a-store.md) | pipeline settings, BDD support and stage outputs |
 | [`docs/building-a-knowledge-store.md`](docs/building-a-knowledge-store.md) | the operator's judgement: defining an estate, what extraction yields, refresh economics, the traps |
 | [`docs/grounding-and-verification.md`](docs/grounding-and-verification.md) | whether a store's answers are fact-based, and how to verify subagent-authored content |
 | [`docs/retrieval-architecture.md`](docs/retrieval-architecture.md) | how this differs from vector RAG, and where each answer layer lives |

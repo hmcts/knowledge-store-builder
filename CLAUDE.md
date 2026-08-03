@@ -129,10 +129,12 @@ Consequences for anyone changing this library:
 ## Writing documentation
 
 User-facing docs are **persona-led**: one document, one reader. The README
-serves the evaluator and routes the other two personas to their guide —
-`docs/asking-questions.md` (asker: plugin only) and `docs/creating-a-store.md`
-(builder: library + tools). Do not grow the README back into a manual; usage
-detail belongs in the guide that owns the persona.
+serves the evaluator and routes the other two personas to their guide.
+`docs/asking-questions.md` serves the asker (plugin only).
+`docs/creating-a-store.md` serves the builder (library + tools) and routes
+maintenance and reference tasks to shorter builder subguides. Do not grow the
+README back into a manual; usage detail belongs in the guide that owns the
+persona.
 
 Before writing or reworking any of them, use the `technical-writer` skill in
 `.claude/skills/` — it carries the house register (value-first, commands before
