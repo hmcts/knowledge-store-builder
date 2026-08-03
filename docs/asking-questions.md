@@ -26,7 +26,7 @@ on first use if it is not already available.
 Run these commands in Claude Code in a terminal:
 
 ```
-/plugin marketplace add hmcts/knowledge-store:knowledge-store-builder
+/plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
@@ -41,7 +41,7 @@ The install command asks for a scope:
 in the current session.
 
 In the **VS Code or JetBrains extension**, install through the interface instead:
-type `/plugins` to open **Manage plugins**, add `hmcts/knowledge-store:knowledge-store-builder`
+type `/plugins` to open **Manage plugins**, add `hmcts/knowledge-store-builder`
 on the **Marketplaces** tab, then install `knowledge-store` from the **Plugins**
 tab. The extension exposes only a subset of Claude Code's commands, so the three
 commands above are not all available there. What you configure either way is
@@ -164,7 +164,7 @@ rm -rf ~/.claude/plugins/cache
 ```
 
 ```
-/plugin marketplace add hmcts/knowledge-store:knowledge-store-builder
+/plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
