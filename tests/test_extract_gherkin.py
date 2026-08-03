@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 
+from knowledgestore import config  # noqa: E402
 from knowledgestore import extract_gherkin as gherkin  # noqa: E402
 
 FEATURE = """@regression @DD-123
@@ -266,6 +267,54 @@ class GraphReportNoteTest(unittest.TestCase):
             gherkin.REPORT_PATH = Path(tmp) / "absent.md"
             gherkin.note_gherkin_layer({"features": 1}, nodes=2, edges=3)
             self.assertFalse((Path(tmp) / "absent.md").exists())
+
+
+class ConfiguredLanguagesTest(unittest.TestCase):
+    """An added step-definition language must take effect after import.
+
+    The module used to copy config.STEP_DEFINITION_LANGUAGES to a module-level
+    name at import time and read the copy. This module is imported before a
+    caller can configure anything, so config.configure() was accepted - it
+    raises KeyError only for an unknown setting - and then silently ignored: the
+    stage searched the three default languages, matched none of the estate's
+    step definitions, and reported success.
+    """
+
+    def setUp(self):
+        self.original = config.STEP_DEFINITION_LANGUAGES
+
+    def tearDown(self):
+        config.configure(STEP_DEFINITION_LANGUAGES=self.original)
+
+    def test_a_language_added_after_import_is_searched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "steps").mkdir()
+            (repo / "steps" / "address_steps.go").write_text(
+                'Given("user amends the defendant address", func() {})\n',
+                encoding="utf-8",
+            )
+
+            # the three default languages cannot see a .go file
+            self.assertEqual(gherkin.parse_step_definitions(repo), {})
+
+            config.configure(
+                STEP_DEFINITION_LANGUAGES={
+                    "go": {
+                        "glob": "**/*.go",
+                        "annotation": r"\b(?:Given|When|Then)\s*\(\s*\"(.*?)\"\s*,",
+                        "symbol": None,
+                    }
+                }
+            )
+            found = gherkin.parse_step_definitions(repo)
+
+        self.assertIn(
+            "user amends the defendant address",
+            found,
+            "configure() after import was accepted and then ignored",
+        )
+        self.assertEqual(found["user amends the defendant address"][1], "steps/address_steps.go")
 
 
 if __name__ == "__main__":

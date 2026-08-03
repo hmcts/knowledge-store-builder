@@ -61,6 +61,14 @@ select = ["E4", "E7", "E9", "F", "C901"]
 [tool.ruff.lint.mccabe]
 max-complexity = 15
 
+[tool.pytest.ini_options]
+# Test the working tree, never a copy of this package installed in the
+# environment. Without this, `pytest` on a machine holding a non-editable
+# install of the released library imports site-packages instead of src/: the
+# suite passes without running any of your changes. CI installs with -e, so it
+# never sees this, which is what makes it easy to miss.
+pythonpath = ["src"]
+
 [tool.pyright]
 include = ["src"]
 # Stage modules read module-level path constants that tests and configure()
