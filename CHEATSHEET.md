@@ -27,8 +27,17 @@ is the `graphify` CLI, and it installs that itself.
 `/reload-plugins` is not optional — without it the plugin is installed but
 inactive in the session you are in, which looks like a broken install.
 
-Anywhere you can type slash commands — including the IDE extensions — these are
-the same three steps.
+### VS Code or JetBrains extension
+
+The extension exposes only a subset of Claude Code's commands, so install through
+its interface rather than the commands above:
+
+- Type `/plugins` to open **Manage plugins**
+- **Marketplaces** tab → add `hmcts/knowledge-store-builder`
+- **Plugins** tab → install `knowledge-store`
+
+What you configure either way is shared: plugins added in the extension are
+available in the CLI, and the reverse.
 
 ### Claude desktop app
 
@@ -152,4 +161,6 @@ knowledgestore summaries verify --sample 200 # is the prose grounded in evidence
 | `remap` drops almost every summary | the graph is unclustered — check community coverage before remapping |
 
 Confirm a plugin install: `claude plugin details knowledge-store` lists
-**Skills (3)** by name, alongside the token cost it adds to each session.
+**Skills (3)** by name, alongside the token cost it adds to each session. That
+needs the standalone CLI on your `PATH` — an IDE extension does not put it there,
+so in the extension use **Manage plugins** (`/plugins`) instead.
