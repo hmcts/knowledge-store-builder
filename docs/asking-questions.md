@@ -85,7 +85,7 @@ where to put it.
 
 Under the [grounding contract](grounding-and-verification.md), every claim traces
 to evidence in the store: a node, edge, source path, schema field, ticket or
-commit subject. The answer identifies the repository and the evidence it used.
+commit message. The answer identifies the repository and the evidence it used.
 **Absence of evidence is reported as a finding** — where the store cannot show
 something, the answer says so rather than filling the gap from general knowledge.
 

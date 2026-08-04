@@ -21,7 +21,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 
 **Every claim in a store, and every claim in an answer from a store, traces to
 evidence in the store.** Node names, source paths, repository names, ticket ids,
-schema field names, commit subjects. Nothing else is admissible.
+schema field names, commit subjects and bodies. Nothing else is admissible.
 
 Three things follow.
 

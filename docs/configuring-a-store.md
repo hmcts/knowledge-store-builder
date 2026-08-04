@@ -12,7 +12,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 |---|---|---|
 | `KSB_ROOT` | current directory | Store root; `knowledgestore --root <path>` sets the same value for one command |
 | `KSB_GITHUB_ORG` | none | GitHub organisation used by discovery |
-| `KSB_TICKET_PATTERN` | uppercase project key and number | Ticket IDs recognised in commit subjects |
+| `KSB_TICKET_PATTERN` | uppercase project key and number | Ticket IDs recognised in commit messages |
 | `KSB_TICKET_BROWSE_URL` | none | URL prefix used to turn ticket IDs into links |
 | `KSB_EXPLORER_TITLE` | `Estate Explorer` | Browser-page title |
 | `KSB_BRIEF_REQUEST_URL` | none | Destination for “request a topic brief”; unset hides the link |
