@@ -142,14 +142,25 @@ Two layers connect code to intent:
    index['<repo>']['<source file>']
    ```
 
-   Descriptions mined from commit messages — the subject, or the body where the
-   subject named no ticket — are in `ticket-descriptions.json.gz`; real tracker
-   titles, if imported, in `ticket-titles.json.gz`.
+   `ticket-descriptions.json.gz` holds, per ticket, three views of what its
+   commits said:
+
+   | Field | What it is |
+   |---|---|
+   | `d` | the curated description: the subject where it says something, otherwise the body's opening prose |
+   | `s` | the commit subjects as written, including the terse ones `d` filters out |
+   | `b` | the body prose, kept even where the subject was serviceable |
+
+   `s` and `b` are **absent** on a ticket whose commits offered neither, so read
+   them with `.get(...)`. Real tracker titles, if imported, are in
+   `ticket-titles.json.gz`.
 
 Recipe: graph neighbourhood of X → linked features (business language) →
-intent-index tickets for X's source files → their descriptions. Quote the commit
-message you are using, and say so when no tracker title exists. **Never guess
-what a ticket was about.**
+intent-index tickets for X's source files → what their commits said. Read `d`
+first; go to `s` and `b` when it is thin or absent, because a ticket with no
+description can still have the author's own words. Quote the commit text you are
+using and say whether it was a subject or a body, and say so when no tracker
+title exists. **Never guess what a ticket was about.**
 
 ## User journeys
 

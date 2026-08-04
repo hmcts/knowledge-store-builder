@@ -91,11 +91,41 @@ The **intent index** (`src/knowledgestore/build_intent_index.py`) mines those
 datasets: ticket ids matching `[A-Z][A-Z0-9]{1,9}-\d{1,6}` (configurable) are
 extracted from commit subjects — and from commit bodies where the subject names
 none — producing a file → tickets map with first and last touch dates, and a
-ticket → description corpus built from those messages themselves. A body is
-reduced to prose before it is read: trailers, separators, a merge's list of
-commits, anything an automated author wrote, and each repository's own recurring
-template lines are discarded, because none of them evidences intent. This is why
-a store can answer *why* a file exists without any issue-tracker API access.
+per-ticket record of what its commits said.
+
+That record keeps the commit text in **three fields**, because one curated
+description can only ever carry one source: a description (the subject where it
+says something, the body's opening prose where it does not), the subjects as
+their authors wrote them, and the body prose. Keeping them apart is what makes
+the terse subjects a description filter rejects, and the bodies that sit behind a
+perfectly serviceable subject, reachable at all — both are primary evidence, and
+neither survives being collapsed into a single field.
+
+A body is reduced to prose before it is read: separators, a merge's list of
+commits, git trailers, anything an automated author wrote, and each repository's
+own recurring template lines are discarded, because none of them evidences
+intent. Trailers are matched by **shape** as well as by name — a hyphenated key,
+or a value of a single token — because no fixed list of names holds the trailers
+a team invents, and the recurring-line filter cannot rescue the miss: a trailer
+whose value is a unique hash never repeats, so it never crosses the repetition
+thresholds. The shape test deliberately spares `KEY: what changed`, where the key
+is a ticket or a rule id, since those lines are among the most useful a body
+carries.
+
+**A body is evidence only when a person wrote it, and the reliable signal is the
+identity the commit records — not the words in the body.** Matching what a
+machine *says* does not transfer, because each tool writes differently: one
+dependency bot announces "Bumps [package] from X to Y" and another writes "Update
+dependency package to vY", so a filter tuned to the first catches none of the
+second. Identity generalises instead. The `[bot]` account convention covers
+current and future GitHub App automation with no list to maintain, and
+`KSB_AUTOMATION_IDENTITIES` covers the older automation that predates it — which
+is why that setting exists. One caution, because it is easy to get wrong: an
+address on a shared no-reply domain is **not** a bot signal, since real
+contributors use those addresses too; only the local part is read.
+
+Together this is why a store can answer *why* a file exists without any
+issue-tracker API access.
 
 ## The prose layer, and how it is checked
 
