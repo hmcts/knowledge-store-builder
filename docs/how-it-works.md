@@ -144,6 +144,19 @@ connections) and test files — sources matching `.spec.`, `__tests__` or
 `/test/` — are excluded, except in repositories the estate declares as
 end-to-end suites, where the tests *are* the business documentation.
 
+**Absence is disclosed, not hidden.** The ranker alone cannot keep the store's
+"absence of evidence is a finding" promise: a question about something the
+estate does not contain still scores, because its ordinary words match
+thousands of entries. Measured on a real estate, an out-of-domain question
+outscored a legitimate one, so no score or coverage threshold separates them.
+What does separate them is whether a word matches anything at all — so the page
+names the query words the index holds no evidence for, and answers with that
+finding alone when no word is evidenced. It discloses rather than abstains
+because nothing distinguishes a question word from a subject without an English
+lexicon: an earlier rule that abstained when the rarest word was absent
+silenced four legitimate questions, because ordinary words like "used" and
+"taken" are themselves missing from a small corpus.
+
 Ask-mode ranking is a port of graphify's own query scorer, and is documented
 in the application source in one line: *IDF-weighted terms,
 exact/prefix/substring/source tiers, full-query bonus, squared term-coverage

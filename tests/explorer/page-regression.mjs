@@ -134,7 +134,21 @@ check('what is going on with demo-core?', 'deep dive: demo-core',
 check('how are payments taken?', 'open question',
   ['No pre-written brief covers this question']);
 // nothing in the graph matches: say so plainly
-check('how is quantum scheduling implemented?', 'nothing in the graph matches', []);
+// A question whose subject is absent but whose ordinary words are not: the
+// answer still composes, and the meta line names the word with no evidence
+// behind it. Disclosure rather than silence - an earlier abstain-on-rarest-term
+// rule silenced four legitimate questions here, because ordinary question words
+// ("used", "taken", "walk") are themselves absent from a small corpus.
+check('how does quantum payment reconciliation work?', 'no evidence for: quantum', [], ['quantum']);
+
+check('how is quantum scheduling implemented?', 'no evidence',
+  ['No evidence in this estate', 'quantum'],
+  // Absence is now reported as a finding that NAMES the missing terms,
+  // rather than a generic "try different terms". The engine only takes
+  // this path when every content term has zero matches across the whole
+  // index - a score or coverage threshold could not tell an absent topic
+  // from a poorly-ranked real one.
+  ['quantum']);
 
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);

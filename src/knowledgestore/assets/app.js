@@ -310,6 +310,31 @@ function termTiers(norm, bare, src, terms, w) {
   return { matched, tiered, flat };
 }
 
+/**
+ * Query terms for which the index holds no evidence at all.
+ *
+ * "Absence of evidence is a finding" is a stated promise of this store, and
+ * the ranker alone cannot keep it: a question about something the estate does
+ * not contain still scores, because its ordinary words ("storage", "work",
+ * "rate") match thousands of entries. Measured on a real estate, an
+ * out-of-domain question outscored a legitimate one - so a score or
+ * term-coverage threshold would silence real questions while letting these
+ * through. What separates them cleanly is whether the distinctive words match
+ * anything at all: an absent term has zero hits across the whole index, while
+ * every in-domain question had at least one hit for each of its terms.
+ *
+ * @param {string[]} terms @returns {string[]} terms with no match anywhere
+ */
+function unevidencedTerms(terms) {
+  const missing = [];
+  for (const t of terms) {
+    let seen = false;
+    for (let i = 0; i < N && !seen; i++) if (hay[i].includes(t)) seen = true;
+    if (!seen) missing.push(t);
+  }
+  return missing;
+}
+
 /** Discounted contribution of semantic-neighbour terms.
  * @param {string} norm @param {string} bare
  * @param {[string, number][]} expansions @param {Record<string, number>} w */
@@ -801,6 +826,65 @@ function routeQuestion(lq, ranked, seeds) {
   return vCluster(ranked);
 }
 
+/** Name the query words the index holds no evidence for, and return true when
+ *  none of them are evidenced - in which case the finding has been rendered as
+ *  the whole answer.
+ *
+ *  Disclose, do not silence. An earlier design abstained when the rarest term
+ *  was absent, which looked right on a large estate and then silenced four
+ *  legitimate questions on a small one: ordinary question words ("used",
+ *  "taken", "walk") are themselves absent from a small corpus, so one of them
+ *  becomes the "rarest" term. Nothing distinguishes a question word from a
+ *  subject without an English lexicon, and a blocklist of them would never be
+ *  complete. So the note is additive - the reader is told which of their words
+ *  the graph holds nothing for, and still gets whatever did match.
+ *
+ *  Pre-written prose (a topic brief or deep dive) is exempt: it was written for
+ *  the question rather than matched against the index.
+ *  @param {string[]} terms
+ *  @param {boolean} prewritten
+ *  @returns {boolean}
+ */
+function reportUnevidenced(terms, prewritten) {
+  const missing = prewritten ? [] : unevidencedTerms(terms);
+  if (missing.length) {
+    expansionNote += ' | no evidence for: ' + missing.join(', ');
+  }
+  if (!terms.length || missing.length < terms.length) return false;
+  meta.textContent =
+    'question type: no evidence - the graph holds nothing for ' +
+    missing.map((t) => '"' + t + '"').join(', ');
+  out.innerHTML =
+    '<div class="card"><h3>No evidence in this estate</h3><p>Nothing in the graph matches ' +
+    missing.map((t) => '<code>' + esc(t) + '</code>').join(', ') +
+    '. That is a finding rather than a ranking problem: this estate contains no such ' +
+    "component, schema or feature. Try the estate's own vocabulary." +
+    '</p></div>';
+  return true;
+}
+
+/**
+ * Put pre-written prose above the composed answer, or invite one where none
+ * exists. A topic brief outranks a deep dive because it was written to answer a
+ * question, while a dive was written about a repository.
+ * @param {{title: string, html: string, source: string}|null} topic
+ * @param {{repo: string, title: string, html: string, source: string, sha: string}|null} dive
+ * @param {string} raw the question as typed
+ */
+function prependPrewritten(topic, dive, raw) {
+  if (topic) {
+    out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
+    meta.textContent = 'topic brief: ' + topic.title
+      + (meta.textContent ? ' | ' + meta.textContent : '');
+  } else if (dive) {
+    out.innerHTML = diveHtml(dive) + out.innerHTML;
+    meta.textContent = 'deep dive: ' + dive.repo
+      + (meta.textContent ? ' | ' + meta.textContent : '');
+  } else {
+    out.innerHTML += requestBriefHtml(raw);
+  }
+}
+
 function runAsk() {
   const raw = q.value.trim();
   if (!raw) {
@@ -822,6 +906,7 @@ function runAsk() {
   applySummaryBoost(ranked, terms, expansions);
   const topic = matchTopic(raw.toLowerCase(), expansions);
   const dive = topic ? null : matchDive(raw.toLowerCase());
+  if (reportUnevidenced(terms, Boolean(topic || dive))) return;
   if (!ranked.length && !topic && !dive) {
     meta.textContent = 'nothing in the graph matches those words - try different terms';
     out.innerHTML = '';
@@ -833,17 +918,7 @@ function runAsk() {
     out.innerHTML = '';
     meta.textContent = '';
   }
-  if (topic) {
-    out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
-    meta.textContent = 'topic brief: ' + topic.title
-      + (meta.textContent ? ' | ' + meta.textContent : '');
-  } else if (dive) {
-    out.innerHTML = diveHtml(dive) + out.innerHTML;
-    meta.textContent = 'deep dive: ' + dive.repo
-      + (meta.textContent ? ' | ' + meta.textContent : '');
-  } else {
-    out.innerHTML += requestBriefHtml(raw);
-  }
+  prependPrewritten(topic, dive, raw);
 }
 
 function run() { (mode === 'ask' ? runAsk : runSearch)(); }
