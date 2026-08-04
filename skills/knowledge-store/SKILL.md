@@ -179,7 +179,7 @@ worth keeping, offer to save it under `docs/journeys/`.
   knows nothing about deployment, configuration or production.
 - **Recency.** When the question concerns recent changes, run `knowledgestore status --drift`
   (if the pipeline is installed) and report concretely — "the store predates
-  9 commits to cpp-context-progression" — rather than a vague staleness caveat.
+  9 commits to <repository>" — rather than a vague staleness caveat.
 
 ## Honesty rules
 
