@@ -142,14 +142,14 @@ Two layers connect code to intent:
    index['<repo>']['<source file>']
    ```
 
-   Descriptions mined from commit subjects are in
-   `ticket-descriptions.json.gz`; real tracker titles, if imported, in
-   `ticket-titles.json.gz`.
+   Descriptions mined from commit messages — the subject, or the body where the
+   subject named no ticket — are in `ticket-descriptions.json.gz`; real tracker
+   titles, if imported, in `ticket-titles.json.gz`.
 
 Recipe: graph neighbourhood of X → linked features (business language) →
-intent-index tickets for X's source files → their descriptions. Quote commit
-subjects and say so when no tracker title exists. **Never guess what a ticket
-was about.**
+intent-index tickets for X's source files → their descriptions. Quote the commit
+message you are using, and say so when no tracker title exists. **Never guess
+what a ticket was about.**
 
 ## User journeys
 
@@ -184,9 +184,10 @@ worth keeping, offer to save it under `docs/journeys/`.
 ## Honesty rules
 
 - **Every claim traces to evidence in the store** — node names, source paths,
-  repository names, ticket ids, schema fields, commit subjects. Interpreting what
-  a name implies is fine; asserting behaviour the evidence does not show is not.
-  The test: could a reader check your claim against the same evidence and agree?
+  repository names, ticket ids, schema fields, commit subjects and bodies.
+  Interpreting what a name implies is fine; asserting behaviour the evidence does
+  not show is not. The test: could a reader check your claim against the same
+  evidence and agree?
 - **Say which layer answered**, because they differ in reliability: a committed
   brief or summary was LLM-authored against a specific build and goes stale
   silently; nodes and edges are mechanical. When prose and graph disagree, the

@@ -51,7 +51,7 @@ repositories    ──► graph (AST parsers,               traversal, ranking a
                     graph's own vocabulary)           "results") — pure lookup
 
                 ──► ticket descriptions               business detail on every
-                    (mined from commit subjects)      ticket, with provenance
+                    (mined from commit messages)      ticket, with provenance
 
                 ──► topic briefs                      served whole when a
                     (LLM writes analyst-grade         question hits a topic's

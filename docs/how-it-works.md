@@ -89,10 +89,13 @@ rewrite is pinned by a test asserting the dataset is unchanged.
 
 The **intent index** (`src/knowledgestore/build_intent_index.py`) mines those
 datasets: ticket ids matching `[A-Z][A-Z0-9]{1,9}-\d{1,6}` (configurable) are
-extracted from commit subjects, producing a file → tickets map with first and
-last touch dates, and a ticket → description corpus built from the subjects
-themselves. This is why a store can answer *why* a file exists without any
-issue-tracker API access.
+extracted from commit subjects — and from commit bodies where the subject names
+none — producing a file → tickets map with first and last touch dates, and a
+ticket → description corpus built from those messages themselves. A body is
+reduced to prose before it is read: trailers, separators, a merge's list of
+commits, anything an automated author wrote, and each repository's own recurring
+template lines are discarded, because none of them evidences intent. This is why
+a store can answer *why* a file exists without any issue-tracker API access.
 
 ## The prose layer, and how it is checked
 

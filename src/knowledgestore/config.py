@@ -115,6 +115,22 @@ TICKET_PATTERN = re.compile(
 )
 # Ticket ids in the explorer link here, with the id appended. Empty renders
 # them as plain text, which is right until you say where your tracker lives.
+# Automation identities whose commit bodies are not evidence, beyond the GitHub
+# App `[bot]` convention that needs no list. Overridable because the default is
+# matched as a whole word and several of these are also surnames: measured on
+# one estate the list matched 23 identities and every one was a machine, but an
+# estate employing someone called Jenkins would lose that person's commit bodies
+# with no other recourse. Comma-separated; empty disables the list entirely and
+# leaves only the `[bot]` rule.
+AUTOMATION_IDENTITIES = [
+    name.strip()
+    for name in os.environ.get(
+        "KSB_AUTOMATION_IDENTITIES",
+        "jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa",
+    ).split(",")
+    if name.strip()
+]
+
 TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
 
 # --- explorer page -------------------------------------------------------
