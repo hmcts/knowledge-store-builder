@@ -261,8 +261,22 @@ the re-cluster is a measured number. It refuses to run on a wrong snapshot (no
 shared node ids) or an implausibly small summary set (`--floor`), because both
 failures silently produce an empty file over a good one.
 
-Whatever `remap` drops is then a backfill: extract digests again and author the
-uncovered clusters.
+Whatever `remap` drops is then a backfill — but not from scratch. `remap`
+writes `knowledge/summaries/remap-report.json`: every displaced summary with
+its prose, the reason (`below-bar`, `collision`, `members-gone`) and its best
+new target. When a backfilled cluster's id appears as a `best_target` there,
+give the author the displaced paragraph alongside the new digest with the
+instruction: **revise to match this digest exactly; drop anything it no longer
+shows**. Revised prose gets no trust discount — it goes through `merge` and
+grounding verification like anything authored fresh. Measured on this
+pipeline's own calibration, prose carried across clusters unrevised flags at
+roughly four times the rate of prose written against its own digest, which is
+why the spool feeds revision and never direct reinstatement.
+
+`verify` uses the report's carried map to print grounding split by provenance
+(carried vs authored). Read the two numbers together: retention improving
+while carried grounding degrades means the remap is preserving coverage at
+the cost of truth, and the bar or the prose needs attention.
 
 Snapshot immediately **before each** re-cluster, not once per session. A
 snapshot of a clustering the summaries are no longer keyed to is not refused; it

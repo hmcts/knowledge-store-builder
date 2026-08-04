@@ -68,6 +68,9 @@ SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
 # Community membership as it was before a re-cluster, so summaries can be
 # remapped onto the new ids afterwards. Written by `summaries snapshot`.
 SUMMARIES_SNAPSHOT_PATH = ROOT / "knowledge" / "summaries" / "membership-snapshot.json.gz"
+# What the last remap carried and what it displaced, with the displaced prose
+# itself - the backfill's raw material for revise-rather-than-rewrite.
+REMAP_REPORT_PATH = ROOT / "knowledge" / "summaries" / "remap-report.json"
 SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
 # What each repository's clone pointed at when the store was last built.
 # Written by the sync stage; read by status, the manifest and the explorer.
@@ -213,6 +216,7 @@ def _recompute_paths() -> None:
         SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SUMMARIES_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-snapshot.json.gz",
+        REMAP_REPORT_PATH=root / "knowledge" / "summaries" / "remap-report.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
         PROVENANCE_PATH=root / "knowledge" / "provenance.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
