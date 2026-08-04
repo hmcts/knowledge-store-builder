@@ -25,10 +25,10 @@ cd "$repo_root"
 prefix=${JS_TOOLCHAIN_PREFIX:-$repo_root/.js-toolchain}
 bin=$prefix/node_modules/.bin
 
-if [ ! -x "$bin/eslint" ] || [ ! -x "$bin/tsc" ]; then
+if [[ ! -x "$bin/eslint" ]] || [[ ! -x "$bin/tsc" ]]; then
   echo "installing pinned JS toolchain into ${prefix#"$repo_root"/}"
   mkdir -p "$prefix"
-  [ -f "$prefix/package.json" ] || printf '{"name":"js-toolchain","private":true}\n' > "$prefix/package.json"
+  [[ -f "$prefix/package.json" ]] || printf '{"name":"js-toolchain","private":true}\n' > "$prefix/package.json"
   npm install --prefix "$prefix" --ignore-scripts --no-audit --no-fund --silent \
     "eslint@$ESLINT_VERSION" "typescript@$TYPESCRIPT_VERSION"
 fi
