@@ -502,6 +502,7 @@ class CliTest(SettingsIsolated):
                 "intent",
                 "ticket-titles",
                 "gherkin",
+                "packages",
                 "summaries",
                 "semantic",
                 "topics",

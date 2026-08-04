@@ -33,6 +33,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "merge real ticket titles from an issue-tracker CSV export",
     ),
     "gherkin": ("extract_gherkin", "add Gherkin features, scenarios and ticket links to the graph"),
+    "packages": (
+        "build_package_edges",
+        "add cross-repository package nodes and import edges (npm layer)",
+    ),
     "summaries": (
         "build_community_summaries",
         "extract community digests, or merge written summaries back in",

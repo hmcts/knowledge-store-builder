@@ -67,6 +67,7 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
+knowledgestore packages        # cross-repository package nodes and import edges
 ```
 
 **Cluster after `gherkin`, not before**, so the Gherkin layer is clustered with

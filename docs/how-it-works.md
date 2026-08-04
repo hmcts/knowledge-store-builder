@@ -43,7 +43,10 @@ linked to the scenarios that use them by normalising both sides to a common
 form — Cucumber expressions (`{int}`, `{string}`), typed parameters
 (`{amount:d}`), regular-expression groups, quoted values and outline
 parameters all reduce to the same placeholder, so a business step matches
-whichever language declared it.
+whichever language declared it. Data tables and doc strings are deliberately
+not modelled — they are example data, not structure — and the parser is a
+measured structural subset: `Rule:`, `Example:` and localised keywords appeared
+zero times across the 1,266 feature files it was built against.
 
 **Communities** are detected by modularity optimisation over the merged
 graph, driven by graphify: graspologic's Leiden where that library is
@@ -59,6 +62,16 @@ anchors them — so two mechanisms restore continuity:
   its member set). A later run reuses a saved name only while the signature
   matches; a community whose membership changed gets renamed from its hub
   rather than keeping a name that now describes something else.
+
+**Cross-repository package edges** are the one place the graph connects
+repositories directly (`src/knowledgestore/build_package_edges.py`): a node
+per shared npm package, citing the `package.json` that declares it, with
+edges from the files that import it — each edge citing the importing file.
+Deliberately declaration-level: measured on a real estate, symbol-name
+collisions across repositories were template scaffolding and vendored
+copies — independent implementations, which the store already answers
+correctly — so symbol-level identity (SCIP) stays deferred until
+package-level answers prove insufficient.
 
 What id continuity cannot fix is **splits**: re-clustering from scratch can
 shatter a stable community into fragments, and prose attached to the whole

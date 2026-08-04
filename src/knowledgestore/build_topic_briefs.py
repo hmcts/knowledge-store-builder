@@ -93,9 +93,28 @@ def linked_tickets(graph: dict, matched_ids: set) -> set[str]:
     return tickets
 
 
+def _degrees(graph: dict) -> dict:
+    """Connection count per node id, one pass over the edge list."""
+    degree: dict = {}
+    for link in graph.get("links", []):
+        for end in (link.get("source"), link.get("target")):
+            if end is not None:
+                degree[end] = degree.get(end, 0) + 1
+    return degree
+
+
 def topic_dossier(topic: Topic, graph: dict, summaries: dict, descriptions: dict) -> dict:
-    """Deterministic evidence pack a brief is written from."""
-    by_repo: dict[str, list] = {}
+    """Deterministic evidence pack a brief is written from.
+
+    Matching nodes are ranked by connectivity before the per-repository cap is
+    applied. The cap used to keep the first matches in node-iteration order,
+    which handed the brief's author arbitrary matching evidence rather than
+    the strongest: at estate scale a keyword can match hundreds of nodes per
+    repository, and the twelve that survived were whichever the file happened
+    to list first.
+    """
+    degree = _degrees(graph)
+    by_repo_nodes: dict[str, list] = {}
     features: list[str] = []
     matched_ids: set = set()
     for node in graph["nodes"]:
@@ -106,9 +125,13 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict, descriptions: dict
         if kind == kinds.FEATURE:
             features.append(node["label"])
         elif kind != kinds.TICKET:
-            entries = by_repo.setdefault(node.get("repo", ""), [])
-            if len(entries) < MAX_NODES_PER_REPO:
-                entries.append(f"{node['label']} ({node.get('source_file') or '?'})")
+            by_repo_nodes.setdefault(node.get("repo", ""), []).append(node)
+    by_repo: dict[str, list] = {}
+    for repo, nodes in by_repo_nodes.items():
+        nodes.sort(key=lambda n: (-degree.get(n.get("id"), 0), n["label"]))
+        by_repo[repo] = [
+            f"{n['label']} ({n.get('source_file') or '?'})" for n in nodes[:MAX_NODES_PER_REPO]
+        ]
     tickets = linked_tickets(graph, matched_ids)
 
     matched_summaries = [
