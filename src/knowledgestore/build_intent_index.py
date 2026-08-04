@@ -4,6 +4,8 @@ For every source file in the estate, records which Jira tickets the non-merge
 commits that touched it name, with first/last touch dates. Ticket ids and
 descriptions come from the commit subject, and - where the subject offers
 nothing - from the commit body, once that body has been reduced to prose.
+Subjects and bodies are also kept as fields of their own, so evidence a curated
+description cannot carry is still in the artefact.
 This answers "what business change shaped this file?" as a lookup, e.g.:
 
     import gzip, json
@@ -48,6 +50,18 @@ TRAILER_PREFIXES = (
     "on-behalf-of:",
 )
 SEPARATOR_LINE = re.compile(r"^[-=]{3,}$")
+# Trailers are recognised by shape as well as by the names above, because that
+# list can never hold every trailer a team invents, and the learned-boilerplate
+# filter cannot rescue the miss: a trailer whose value is a unique hash never
+# repeats, so it never crosses the repetition thresholds. Measured on one estate,
+# bodies that were nothing but trailer lines were the majority of the bodies
+# surviving cleaning - migration metadata stored as intent evidence. Same move as
+# identity-not-phrasing and repetition-not-patterns: match the shape, not a name.
+TRAILER_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9-]{1,30}):\s*(.*)$")
+# `KEY: what changed` is content, not a trailer. A bare uppercase token reads as a
+# reference - a ticket, a static-analysis rule id - and those lines are among the
+# most valuable a body can carry, so the shape test must never claim them.
+REFERENCE_KEY = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 BOT_LINE = re.compile(
     r"^(bumps \[|dependency-type:|- \[release notes\]|updated-dependencies:)", re.IGNORECASE
 )
@@ -91,6 +105,12 @@ MIN_BODY_CHARS = 25
 # One body must not attribute a file to every ticket it happens to list.
 BODY_TICKET_LIMIT = 3
 BODY_DESCRIPTION_CHARS = 300
+
+# Per ticket, how much of the commit's own words to keep. `d` is a curated
+# description and stays at two; these are the evidence fields, where more is
+# better because each entry is a different commit's account of the work.
+SUBJECT_LIMIT = 3
+BODY_LIMIT = 2
 
 # Contributor and pull-request templates differ between teams and between
 # estates, so no shipped pattern list can recognise them. They are instead
@@ -168,10 +188,35 @@ def learn_boilerplate(counts: dict[str, int], bodies: int) -> frozenset[str]:
     )
 
 
+def _is_trailer(line: str) -> bool:
+    """Whether a line is a git trailer rather than something a person wrote.
+
+    Judged on shape: a hyphenated key (`Former-commit-id`, `Signed-off-by`) or a
+    value of one token (`Severity: minor`, a bare URL) is metadata. A plain key
+    with a phrase after it - `Tests: added unit tests for the pipe` - says
+    something, and stays.
+    """
+    probe = line.strip()
+    if BOT_LINE.match(probe) or probe.lower().startswith(AUTHOR_LINE):
+        # Markers the whole-body rejection reads have to survive line filtering.
+        # `updated-dependencies:` is trailer-shaped, and removing it here would
+        # leave the rest of a machine's body looking like prose.
+        return False
+    match = TRAILER_LINE.match(probe)
+    if match is None:
+        return False
+    key, value = match.group(1), match.group(2).strip()
+    if REFERENCE_KEY.match(key) or config.TICKET_PATTERN.fullmatch(key):
+        return False
+    return "-" in key or " " not in value
+
+
 def _keep_line(line: str, boilerplate: frozenset[str]) -> bool:
     """Whether one body line is prose rather than plumbing."""
     probe = line.lstrip()
     if probe.lower().startswith(TRAILER_PREFIXES):
+        return False
+    if _is_trailer(probe):
         return False
     if SEPARATOR_LINE.match(probe):
         return False
@@ -261,6 +306,16 @@ def body_description(body: str, boilerplate: frozenset[str] = frozenset()) -> st
     return _truncate(" ".join(blocks[0]), BODY_DESCRIPTION_CHARS)
 
 
+def body_evidence(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
+    """A body's prose as its author wrote it, truncated at a word boundary.
+
+    All of the prose, not only the opening paragraph a description falls back to:
+    this is stored as evidence in its own right, so what a person said about the
+    change after their first sentence counts too.
+    """
+    return _truncate(clean_body(body, boilerplate), BODY_DESCRIPTION_CHARS)
+
+
 def _automated_identity(person: object) -> bool:
     """Whether one author or committer identity is a machine."""
     if not isinstance(person, dict):
@@ -316,6 +371,36 @@ def commit_description(subject: str, body: str, boilerplate: frozenset[str] = fr
     return body_description(body, boilerplate)
 
 
+def ticket_pool() -> defaultdict[str, dict]:
+    """The per-ticket accumulator `apply_commit` folds commits into.
+
+    One definition, because the shape is shared between the stage and its tests
+    and a pool missing a field fails only where that field is written.
+    """
+    return defaultdict(
+        lambda: {
+            "descriptions": defaultdict(int),
+            "subjects": defaultdict(int),
+            "bodies": defaultdict(int),
+            "repos": set(),
+            "first": None,
+            "last": None,
+            "count": 0,
+        }
+    )
+
+
+def _pool_text(info: dict, description: str, subject: str, prose: str) -> None:
+    """Add one commit's text to a ticket's pools, skipping what it does not have.
+
+    Counted per ticket, not per commit: a commit naming two tickets is evidence
+    about both, and the counts are what ranks the text within each ticket.
+    """
+    for pool, text in (("descriptions", description), ("subjects", subject), ("bodies", prose)):
+        if text:
+            info[pool][text] += 1
+
+
 def _widen_range(record: dict, date: str) -> None:
     """Widen a first/last date range to include this date."""
     if record["first"] is None or date < record["first"]:
@@ -343,7 +428,12 @@ def apply_commit(
     boilerplate: frozenset[str] = frozenset(),
 ) -> bool:
     """Fold one commit's tickets into the per-file entries and the per-ticket
-    description pool. True if ticketed.
+    pools of description, subject and body text. True if ticketed.
+
+    The three pools are independent on purpose. A description is curated - the
+    subject where it says something, the body where it does not - so it can carry
+    only one of the two, and the junk filter drops the weakest subjects
+    altogether. The subject and body pools keep both, as written.
 
     Merge commits are skipped: a merge's file list is the whole branch, so
     indexing one would attribute hundreds of files to a single ticket.
@@ -354,15 +444,16 @@ def apply_commit(
     if not tickets:
         return False
     date = commit["author_date"][:10]
-    description = commit_description(commit["subject"], commit_body(commit), boilerplate)
-    keep_description = bool(description)
+    body = commit_body(commit)
+    description = commit_description(commit["subject"], body, boilerplate)
+    subject = clean_description(commit["subject"])
+    prose = body_evidence(body, boilerplate)
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])
         _widen_range(info, date)
-        if keep_description:
-            info["descriptions"][description] += 1
+        _pool_text(info, description, subject, prose)
     for changed in commit.get("files", []):
         entry = files[changed["path"]]
         for ticket in tickets:
@@ -427,6 +518,51 @@ def index_repository(
     return finalised, commits_seen
 
 
+def _ranked(pool: dict[str, int], limit: int) -> list[str]:
+    """The most repeated texts in a pool first, capped.
+
+    Ties break on the text itself, and that is not cosmetic: two runs on the same
+    inputs have to be byte-identical, and equal counts would otherwise come out in
+    whatever order the pool happened to be filled in.
+    """
+    return [text for text, _ in sorted(pool.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
+
+
+def _ticket_record(info: dict) -> dict:
+    """One ticket's entry in the committed artefact.
+
+    Per ticket: the best commit-message descriptions (most repeated, then
+    longest), the subjects and the body prose as their authors wrote them, plus
+    dates, repos and commit count. This is the estate's own record of what each
+    ticket changed - the fallback business detail while Jira titles remain an
+    offline CSV import.
+
+    `d` is always written, empty list included, because that is what consumers
+    already read. `s` and `b` are omitted when there is nothing to store: most
+    tickets have no body prose at all, and a field present but empty reads as
+    evidence that was found rather than evidence that does not exist.
+    """
+    record: dict = {
+        "d": [
+            d
+            for d, _ in sorted(info["descriptions"].items(), key=lambda kv: (-kv[1], -len(kv[0])))[
+                :2
+            ]
+        ]
+    }
+    for name, texts in (
+        ("s", _ranked(info["subjects"], SUBJECT_LIMIT)),
+        ("b", _ranked(info["bodies"], BODY_LIMIT)),
+    ):
+        if texts:
+            record[name] = texts
+    record["first"] = info["first"]
+    record["last"] = info["last"]
+    record["repos"] = sorted(info["repos"])
+    record["n"] = info["count"]
+    return record
+
+
 def summarise(
     index: dict[str, dict[str, dict]],
     commits_seen: int,
@@ -469,15 +605,7 @@ def main() -> int:
         return 1
 
     index: dict[str, dict[str, dict]] = {}
-    descriptions: dict[str, dict] = defaultdict(
-        lambda: {
-            "descriptions": defaultdict(int),
-            "repos": set(),
-            "first": None,
-            "last": None,
-            "count": 0,
-        }
-    )
+    descriptions: dict[str, dict] = ticket_pool()
     commits_seen = 0
     report = BodyReport()
     for ndjson in ndjson_files:
@@ -487,32 +615,19 @@ def main() -> int:
     with io.gzip_text(config.INTENT_INDEX_PATH) as out:
         json.dump(index, out, ensure_ascii=False)
 
-    # Per-ticket: the best commit-message descriptions (most repeated, then
-    # longest), plus dates, repos and commit count. This is the estate's own
-    # record of what each ticket changed - the fallback business detail
-    # while Jira titles remain an offline CSV import.
-    ticket_out = {
-        ticket: {
-            "d": [
-                d
-                for d, _ in sorted(
-                    info["descriptions"].items(),
-                    key=lambda kv: (-kv[1], -len(kv[0])),
-                )[:2]
-            ],
-            "first": info["first"],
-            "last": info["last"],
-            "repos": sorted(info["repos"]),
-            "n": info["count"],
-        }
-        for ticket, info in descriptions.items()
-    }
+    ticket_out = {ticket: _ticket_record(info) for ticket, info in descriptions.items()}
     with io.gzip_text(config.TICKET_DESCRIPTIONS_PATH) as out:
         json.dump(ticket_out, out, ensure_ascii=False)
     described = sum(1 for t in ticket_out.values() if t["d"])
+    subjected = sum(1 for t in ticket_out.values() if t.get("s"))
+    bodied = sum(1 for t in ticket_out.values() if t.get("b"))
     print(
         f"Ticket descriptions: {len(ticket_out):,} tickets, "
         f"{described:,} with usable descriptions -> {config.TICKET_DESCRIPTIONS_PATH}"
+    )
+    print(
+        f"  commit text kept as evidence: {subjected:,} tickets with subjects, "
+        f"{bodied:,} with body prose."
     )
 
     summarise(index, commits_seen, report)

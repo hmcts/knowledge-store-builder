@@ -129,7 +129,8 @@ class TicketDescriptionsOutputTest(SettingsIsolated):
         data = json.load(gzip.open(path, "rt", encoding="utf-8"))
         self.assertGreater(len(data), 1000)
         sample = next(iter(data.values()))
-        self.assertEqual(set(sample.keys()), {"d", "first", "last", "repos", "n"})
+        # `s` and `b` are present only where the commits offered that evidence.
+        self.assertEqual(set(sample.keys()) - {"s", "b"}, {"d", "first", "last", "repos", "n"})
 
 
 class CommunityDigestTest(SettingsIsolated):

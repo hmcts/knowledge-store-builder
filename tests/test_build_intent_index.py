@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import gzip
+import io
 import json
 import tempfile
 import unittest
@@ -15,15 +18,8 @@ from knowledgestore import config  # noqa: E402
 
 
 def make_descriptions():
-    return defaultdict(
-        lambda: {
-            "descriptions": defaultdict(int),
-            "repos": set(),
-            "first": None,
-            "last": None,
-            "count": 0,
-        }
-    )
+    # The stage owns the shape, so a field added there is present here too.
+    return intent.ticket_pool()
 
 
 def make_files():
@@ -149,6 +145,68 @@ class CleanBodyTest(SettingsIsolated):
             "Address entry now rejects lines longer than 35 characters,\n"
             "matching the downstream schema.",
         )
+
+
+PROSE_LINE = "Address entry now rejects long lines, matching the downstream schema."
+
+
+class TrailerShapeTest(SettingsIsolated):
+    """Git trailers are recognised by shape, not only by name. A fixed list of
+    names misses the trailers a team invents, and the learned-boilerplate filter
+    cannot rescue the miss: a trailer whose value is a unique hash never repeats,
+    so it never crosses the repetition thresholds. Measured on one estate, bodies
+    that were nothing but trailer lines were the majority of the bodies surviving
+    cleaning, most of them one migration trailer carrying a commit hash.
+
+    The break the dropping tests catch is machine metadata stored as intent
+    evidence. The break the keeping tests catch is worse: a shape rule wide enough
+    to eat `KEY: what changed`, which is the most valuable line a body can hold."""
+
+    def test_an_unlisted_hyphenated_trailer_is_dropped(self):
+        body = f"Former-commit-id: 0f1e2d3c4b5a69788796a5b4c3d2e1f009182736\n{PROSE_LINE}"
+        self.assertEqual(intent.clean_body(body), PROSE_LINE)
+
+    def test_a_body_of_nothing_but_trailers_is_rejected_entirely(self):
+        body = (
+            "Former-commit-id: 0f1e2d3c4b5a69788796a5b4c3d2e1f009182736\n"
+            "Reviewed-on: https://example.example/c/12345\n"
+            "Depends-on: I0123456789abcdef0123456789abcdef01234567\n"
+        )
+        self.assertEqual(intent.clean_body(body), "")
+
+    def test_a_single_token_value_is_a_trailer_whatever_its_key(self):
+        body = f"Severity: minor\nVerified: yes\n{PROSE_LINE}"
+        self.assertEqual(intent.clean_body(body), PROSE_LINE)
+
+    def test_a_bare_url_line_is_dropped(self):
+        self.assertEqual(
+            intent.clean_body(f"https://example.example/path\n{PROSE_LINE}"), PROSE_LINE
+        )
+        self.assertEqual(intent.clean_body("https://example.example/a/rather/long/path/here"), "")
+
+    def test_a_ticket_reference_and_what_changed_is_kept(self):
+        # The regression that matters most. `DD-8855: fixed the defendant lookup`
+        # is trailer-shaped - hyphenated key, colon, value - and is the single most
+        # valuable line a body can carry: the ticket and what changed, in the
+        # author's own words. A shape rule wide enough to drop it would discard
+        # exactly the evidence this stage exists to collect, and the loss would be
+        # invisible in the artefact.
+        body = "DD-8855: fixed the defendant lookup and cleared its cache"
+        self.assertEqual(intent.clean_body(body), body)
+
+    def test_a_reference_key_with_a_single_token_value_is_kept(self):
+        # `S1192: SESSION_START_TIME` is a rule id and a symbol, not a trailer,
+        # even though the value is one token.
+        body = f"S1192: SESSION_START_TIME\n{PROSE_LINE}"
+        self.assertEqual(intent.clean_body(body), body.rstrip("\n"))
+
+    def test_a_ticket_key_with_a_single_token_value_is_kept(self):
+        body = f"DD-8855: hotfix\n{PROSE_LINE}"
+        self.assertEqual(intent.clean_body(body), body.rstrip("\n"))
+
+    def test_a_plain_key_with_a_multi_word_value_is_kept(self):
+        body = "Tests: added unit tests for the address pipe, covering the length rule"
+        self.assertEqual(intent.clean_body(body), body)
 
 
 class BodyTicketIdsTest(SettingsIsolated):
@@ -547,6 +605,136 @@ class BoilerplateTest(SettingsIsolated):
         self.assertNotIn("done.", counts)
         self.assertEqual(counts["on review."], 5)
         self.assertEqual(intent.learn_boilerplate(counts, bodies), frozenset({"on review."}))
+
+
+GOOD_SUBJECT = "DD-1: introduce address validation rules"
+PROSE = "Address entry now rejects lines longer than 35 characters, matching the schema."
+
+
+class EvidenceFieldsTest(SettingsIsolated):
+    """`s` and `b` carry the commit's own words as written: every subject,
+    including the weak ones a curated description discards, and body prose even
+    when the subject is serviceable.
+
+    The break each test catches is primary evidence never reaching the artefact.
+    A single description field can only hold one of the two, so a body behind a
+    working subject and a subject the junk filter rejects were both unreachable -
+    and the grounding contract admits commit subjects and bodies as evidence."""
+
+    def _artefact(self, commits, repo="repo-a"):
+        """The committed ticket-descriptions artefact, built by the real stage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "history" / repo
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            config.configure(
+                HISTORY_DIR=root / "history",
+                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(intent.main(), 0)
+            return json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8"))
+
+    def test_junk_subject_discarded_by_d_is_kept_verbatim_in_s(self):
+        ticket = self._artefact([make_commit("DD-1: wip")])["DD-1"]
+        self.assertEqual(ticket["d"], [])
+        self.assertEqual(ticket["s"], ["wip"])
+
+    def test_a_bare_ticket_reference_is_never_stored_as_a_subject(self):
+        """Stripping the reference from a subject that is only a reference leaves
+        the empty string. An empty string is not evidence, and a field of empty
+        strings would read as though it were."""
+        artefact = self._artefact(
+            [
+                make_commit("DD-1"),
+                make_commit("DD-2"),
+                make_commit("DD-2: widen the address field"),
+            ]
+        )
+        self.assertNotIn("s", artefact["DD-1"])
+        self.assertNotIn("b", artefact["DD-1"])
+        self.assertEqual(artefact["DD-2"]["s"], ["widen the address field"])
+
+    def test_body_is_kept_when_the_subject_is_perfectly_good(self):
+        # The point of the change: a fallback can never surface a body that sits
+        # behind a serviceable subject, and most bodies do.
+        ticket = self._artefact([make_commit(GOOD_SUBJECT, body=PROSE)])["DD-1"]
+        self.assertEqual(ticket["d"], ["introduce address validation rules"])
+        self.assertEqual(ticket["b"], [PROSE])
+
+    def test_d_is_unchanged_for_a_good_subject_and_for_a_junk_one(self):
+        """The compatibility guarantee: `d` stays subject-first, body-as-fallback,
+        junk filtered. The explorer and the skills read it."""
+        artefact = self._artefact(
+            [
+                make_commit(GOOD_SUBJECT, body=PROSE),
+                make_commit("DD-2: wip", body=PROSE),
+                make_commit("DD-3: wip"),
+            ]
+        )
+        self.assertEqual(artefact["DD-1"]["d"], ["introduce address validation rules"])
+        self.assertEqual(artefact["DD-2"]["d"], [PROSE])
+        self.assertEqual(artefact["DD-3"]["d"], [])
+
+    def test_s_deduplicates_and_caps_at_three_most_frequent_first(self):
+        counts = {"widen the address field": 4, "correct the postcode lookup": 3, "tidy up": 2}
+        commits = [
+            make_commit(f"DD-1: {subject}") for subject, n in counts.items() for _ in range(n)
+        ]
+        commits.append(make_commit("DD-1: revert the release branch"))
+        self.assertEqual(self._artefact(commits)["DD-1"]["s"], list(counts))
+
+    def test_b_deduplicates_and_caps_at_two_most_frequent_first(self):
+        bodies = {
+            f"Change number {i} to the address entry rules, which is prose.": 3 - i
+            for i in range(3)
+        }
+        commits = [
+            make_commit("DD-1: wip", body=body) for body, n in bodies.items() for _ in range(n)
+        ]
+        self.assertEqual(self._artefact(commits)["DD-1"]["b"], list(bodies)[:2])
+
+    def test_b_truncates_at_a_word_boundary(self):
+        ticket = self._artefact([make_commit("DD-1: wip", body=("abcd " * 70).strip())])["DD-1"]
+        self.assertEqual(ticket["b"], [("abcd " * 60).strip()])
+        self.assertEqual(len(ticket["b"][0]), 299)
+
+    def test_a_bot_authored_body_is_absent_from_b(self):
+        ticket = self._artefact(
+            [
+                make_commit(
+                    "DD-1: bump the pinned library",
+                    body=PROSE,
+                    author={"name": "dependabot[bot]", "email": "support@example.example"},
+                )
+            ]
+        )["DD-1"]
+        self.assertNotIn("b", ticket)
+        self.assertEqual(ticket["s"], ["bump the pinned library"])
+
+    def test_a_learned_boilerplate_line_is_absent_from_b(self):
+        commits = [
+            make_commit("DD-1: wip", body=f"{CHECKLIST}\n\nWidened field {i} to 35 characters.")
+            for i in range(5)
+        ]
+        ticket = self._artefact(commits)["DD-1"]
+        self.assertEqual(
+            ticket["b"],
+            ["Widened field 0 to 35 characters.", "Widened field 1 to 35 characters."],
+        )
+
+    def test_equal_counts_order_by_text_not_by_insertion(self):
+        """Two runs on the same inputs must be byte-identical, so equal counts
+        cannot fall back to insertion or hash order."""
+        subjects = [
+            "zebra diagram added to the guidance",
+            "middle of the alphabet, address rules",
+            "apple pie ordering on the summary page",
+        ]
+        commits = [make_commit(f"DD-1: {subject}") for subject in subjects]
+        self.assertEqual(self._artefact(commits)["DD-1"]["s"], sorted(subjects))
 
 
 if __name__ == "__main__":
