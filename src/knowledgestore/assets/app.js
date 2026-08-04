@@ -280,6 +280,10 @@ function idfFor(terms) {
 }
 
 const T_EXACT = 1000, T_PREFIX = 100, T_SUB = 1, T_SRC = 0.5;
+// A semantic neighbour is inferred, not evidence, so its tiers are capped at
+// the direct substring tier and below - never the prefix tier. See
+// expansionBonus for the measurement that forced this.
+const T_EXPAND = T_SUB, T_EXPAND_SUB = T_SRC;
 
 /** Whole-query tier: a multi-word query equal to (or prefixing) a label
  * must dominate the per-token sums (graphify serve.py parity).
@@ -338,12 +342,29 @@ function unevidencedTerms(terms) {
 /** Discounted contribution of semantic-neighbour terms.
  * @param {string} norm @param {string} bare
  * @param {[string, number][]} expansions @param {Record<string, number>} w */
+/**
+ * Bonus for semantic neighbours of the query terms.
+ *
+ * Capped at the direct substring tier deliberately. These tiers were once
+ * T_PREFIX/T_SUB - the same as a direct term match - and expansion bonuses are
+ * added outside the coverage scaling that `termTiers` results pass through
+ * (cov^2). On a multi-term question that combination let one weak neighbour
+ * dominate: measured on a real estate, "what handles video transcription of
+ * hearings?" returned ten Helm-chart `image` fields, because `image` is a
+ * neighbour of `video`, and an exact label match on it scored 229 against 13
+ * for the entry whose own label contains "transcription".
+ *
+ * A neighbour is a guess about vocabulary; a term match is evidence in the
+ * index. Ranking the guess above the evidence inverts the store's grounding
+ * contract, so expansions now break ties and bridge vocabulary without ever
+ * outranking a direct hit.
+ */
 function expansionBonus(norm, bare, expansions, w) {
   let bonus = 0;
   for (const [t, wgt] of expansions) {
     const tw = w[t] * wgt;
-    if (t === norm || t === bare || norm.startsWith(t)) bonus += T_PREFIX * tw;
-    else if (norm.includes(t)) bonus += T_SUB * tw;
+    if (t === norm || t === bare || norm.startsWith(t)) bonus += T_EXPAND * tw;
+    else if (norm.includes(t)) bonus += T_EXPAND_SUB * tw;
   }
   return bonus;
 }
