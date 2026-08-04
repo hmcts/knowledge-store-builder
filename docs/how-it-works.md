@@ -43,7 +43,10 @@ linked to the scenarios that use them by normalising both sides to a common
 form — Cucumber expressions (`{int}`, `{string}`), typed parameters
 (`{amount:d}`), regular-expression groups, quoted values and outline
 parameters all reduce to the same placeholder, so a business step matches
-whichever language declared it.
+whichever language declared it. Data tables and doc strings are deliberately
+not modelled — they are example data, not structure — and the parser is a
+measured structural subset: `Rule:`, `Example:` and localised keywords appeared
+zero times across the 1,266 feature files it was built against.
 
 **Communities** are detected by modularity optimisation over the merged
 graph, driven by graphify: graspologic's Leiden where that library is

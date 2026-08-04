@@ -139,6 +139,44 @@ class DossierTest(SettingsIsolated):
         self.assertIn("welsh-toggle.ts", joined)
 
 
+class DossierRankingTest(SettingsIsolated):
+    """The per-repository cap keeps the STRONGEST matches, not the first.
+
+    The old behaviour kept the first twelve in node-iteration order, so a
+    well-connected match listed late in the file was silently dropped in
+    favour of leaf nodes listed early - arbitrary evidence for the author.
+    """
+
+    def test_high_degree_match_listed_last_survives_the_cap(self):
+        from knowledgestore.build_topic_briefs import MAX_NODES_PER_REPO, Topic, topic_dossier
+
+        # cap + 1 matching leaf nodes first, then one hub matching node last
+        leaves = [
+            {
+                "id": f"n{i}",
+                "label": f"welsh leaf {i:02d}",
+                "repo": "app",
+                "source_file": f"src/{i}.ts",
+                "metadata": {"kind": "function"},
+            }
+            for i in range(MAX_NODES_PER_REPO + 1)
+        ]
+        hub = {
+            "id": "hub",
+            "label": "welsh hub service",
+            "repo": "app",
+            "source_file": "src/hub.ts",
+            "metadata": {"kind": "class"},
+        }
+        links = [{"source": "hub", "target": f"n{i}"} for i in range(5)]
+        graph = {"nodes": leaves + [hub], "links": links}
+        topic = Topic(slug="welsh", title="Welsh", keywords=["welsh"])
+        dossier = topic_dossier(topic, graph, {}, {})
+        joined = " ".join(dossier["nodes_by_repo"]["app"])
+        self.assertIn("welsh hub service", joined, "the best-connected match must survive")
+        self.assertEqual(len(dossier["nodes_by_repo"]["app"]), MAX_NODES_PER_REPO)
+
+
 class MarkdownTest(SettingsIsolated):
     def test_headings_paragraphs_and_inline(self):
         html = briefs.markdown_to_html(
