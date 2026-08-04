@@ -45,8 +45,10 @@ form — Cucumber expressions (`{int}`, `{string}`), typed parameters
 parameters all reduce to the same placeholder, so a business step matches
 whichever language declared it.
 
-**Communities** are detected by Leiden modularity optimisation over the
-merged graph (graspologic's implementation, driven by graphify).
+**Communities** are detected by modularity optimisation over the merged
+graph, driven by graphify: graspologic's Leiden where that library is
+installed, seeded networkx Louvain otherwise — the same seed either way, so
+like-for-like reruns are stable and churn is graph-change-driven.
 Community ids are not stable across runs — nothing in modularity optimisation
 anchors them — so two mechanisms restore continuity:
 

@@ -553,10 +553,19 @@ class SemanticVocabularyTest(SettingsIsolated):
                 json.dumps(
                     {
                         "nodes": [
-                            {"label": "address validation address validation address validation"},
+                            # df = 3: once in each of three texts
+                            {"label": "address validation service"},
+                            {"label": "address validation pipe"},
+                            {"label": "address validation form"},
                             {"label": "there there there"},  # stopword
                             {"label": "ab ab ab"},  # too short
                             {"label": "rareword"},  # below MIN_DF
+                            # MIN_DF means DOCUMENT frequency: repetition inside a
+                            # single text must not qualify a token. The old
+                            # implementation counted occurrences, and this test
+                            # used to codify that by repeating a phrase three
+                            # times in one label.
+                            {"label": "shouted shouted shouted"},
                         ],
                         "links": [],
                     }
@@ -571,6 +580,22 @@ class SemanticVocabularyTest(SettingsIsolated):
         self.assertIn("validation", vocab)
         self.assertNotIn("there", vocab)
         self.assertNotIn("rareword", vocab)
+        self.assertNotIn("shouted", vocab, "occurrences in one text are not document frequency")
+
+    def test_manifest_records_what_decided_the_artefact_and_is_deterministic(self):
+        from knowledgestore import build_semantic_index as semantic
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config.configure(SYNONYMS_PATH=Path(tmp) / "token-neighbours.json.gz")
+            semantic.write_manifest(["alpha", "beta"], dimensions=384)
+            first = (Path(tmp) / "manifest.json").read_bytes()
+            semantic.write_manifest(["alpha", "beta"], dimensions=384)
+            second = (Path(tmp) / "manifest.json").read_bytes()
+            manifest = json.loads(first)
+        self.assertEqual(first, second, "no timestamps - as deterministic as the artefact")
+        for key in ("model", "dimensions", "min_df", "min_similarity", "vocabulary_sha256"):
+            self.assertIn(key, manifest)
+        self.assertEqual(manifest["vocabulary_size"], 2)
 
 
 class FakeRow:
