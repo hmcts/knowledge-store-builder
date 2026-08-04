@@ -314,6 +314,17 @@ def remap(
     # old rule; measured on a real refresh, the share rule chose a
     # better-fitting summary for 36 of 86 contested clusters, median +16.7%
     # overlap, with identical retention.)
+    #
+    # Greedy per-target, and full bipartite assignment is rejected rather than
+    # deferred. The obvious objection to greedy is that a loser here might have
+    # been the best available summary for some other cluster, which optimal
+    # matching would have found. Evaluated on a real refresh's own evidence
+    # before this was written, it rescued zero summaries beyond the share rule:
+    # a loser's second choice never cleared the 60% carry bar, because a summary
+    # that contributed most of one cluster has little left for another. The
+    # measurement is what makes this greedy loop correct, not an assumption that
+    # optimal matching is too complex - do not "upgrade" it without repeating
+    # the measurement and finding a different answer.
     by_target: dict[str, list[tuple[str, float]]] = {}
     for old_id, (target, share_of_old) in claims.items():
         by_target.setdefault(target, []).append((old_id, share_of_old))
