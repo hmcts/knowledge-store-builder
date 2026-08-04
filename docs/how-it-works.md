@@ -63,6 +63,16 @@ anchors them — so two mechanisms restore continuity:
   matches; a community whose membership changed gets renamed from its hub
   rather than keeping a name that now describes something else.
 
+**Cross-repository package edges** are the one place the graph connects
+repositories directly (`src/knowledgestore/build_package_edges.py`): a node
+per shared npm package, citing the `package.json` that declares it, with
+edges from the files that import it — each edge citing the importing file.
+Deliberately declaration-level: measured on a real estate, symbol-name
+collisions across repositories were template scaffolding and vendored
+copies — independent implementations, which the store already answers
+correctly — so symbol-level identity (SCIP) stays deferred until
+package-level answers prove insufficient.
+
 What id continuity cannot fix is **splits**: re-clustering from scratch can
 shatter a stable community into fragments, and prose attached to the whole
 does not describe a part. The measured cost of that, and the economics of

@@ -51,6 +51,7 @@ estate uses another language or layout.
 | `intent` | `knowledge/intent/*.json.gz` | Link files to tickets and mine ticket descriptions |
 | `ticket-titles` | `knowledge/intent/ticket-titles.json.gz` | Import real issue titles from CSV |
 | `gherkin` | updated graph and labels | Add features, scenarios, ticket nodes and step-definition links |
+| `packages` | updated graph | Add cross-repository package nodes and import edges (npm layer) |
 | `summaries` | `knowledge/summaries/` | Extract, merge, verify and remap community prose |
 | `semantic` | `knowledge/semantic/token-neighbours.json.gz` | Bridge vocabulary gaps at query time |
 | `topics` | `docs/topics/`, `knowledge/topics/briefs.json` | Add pre-written answers to recurring questions |
