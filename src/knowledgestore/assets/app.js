@@ -284,6 +284,16 @@ const T_EXACT = 1000, T_PREFIX = 100, T_SUB = 1, T_SRC = 0.5;
 // the direct substring tier and below - never the prefix tier. See
 // expansionBonus for the measurement that forced this.
 const T_EXPAND = T_SUB, T_EXPAND_SUB = T_SRC;
+// Known and deliberately unchanged: the 1000/100/1 spread between these tiers
+// outweighs every idf in a real corpus (roughly 2.7 to 9), so a whole-label
+// match on a question's most generic word beats a substring match on its most
+// distinctive one. Measured on a real estate: for "what handles video
+// transcription of hearings?" an exact match on "hearing" (idf 2.68) scores
+// 167 after coverage scaling, while a substring match on "transcription"
+// (idf 8.92) scores 8.9 - a 19x inversion of specificity. Rebalancing is a
+// graphify-parity change and cannot be judged on a twelve-question set; it
+// needs a graded set wide enough to show the regressions it would cause. Do not
+// change these constants without one.
 
 /** Whole-query tier: a multi-word query equal to (or prefixing) a label
  * must dominate the per-token sums (graphify serve.py parity).
