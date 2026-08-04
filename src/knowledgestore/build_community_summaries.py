@@ -275,9 +275,16 @@ def remap(
     members_gone: list[str] = []
     for old_id in sorted(summaries, key=lambda k: (len(k), k)):
         members = old_members.get(str(old_id))
-        landed = (
-            Counter(new_community[m] for m in members if m in new_community) if members else None
-        )
+        if not members:
+            members_gone.append(old_id)
+            displaced[old_id] = {
+                "reason": "members-gone",
+                "best_target": None,
+                "share": None,
+                "prose": summaries[old_id],
+            }
+            continue
+        landed = Counter(new_community[m] for m in members if m in new_community)
         if not landed:
             members_gone.append(old_id)
             displaced[old_id] = {
