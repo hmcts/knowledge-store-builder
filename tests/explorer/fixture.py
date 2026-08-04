@@ -120,14 +120,44 @@ INTENT = {
             "last": "2024-02-01",
         },
     },
+    "demo-core": {
+        "src/payment.service.ts": {
+            "tickets": {"DEMO-2": 2},
+            "first": "2024-03-02",
+            "last": "2024-03-09",
+        },
+    },
 }
+# The three evidence fields of ticket-descriptions.json.gz. DEMO-2 carries
+# vocabulary that exists nowhere else in this estate - one word only in a
+# subject, one only in a body - so a question using either can only be
+# answered from ticket evidence. Its body also holds markup and an ampersand,
+# and spans several lines, because that is what real bodies do.
 TICKET_DESCRIPTIONS = {
     "DEMO-1": {
         "d": ["Add address formatting to the payment confirmation screen"],
+        "s": [
+            "Add address formatting to the payment confirmation screen",
+            "wip",
+        ],
         "first": "2024-01-05",
         "last": "2024-02-01",
         "repos": ["demo-app-a", "demo-e2e"],
         "n": 3,
+    },
+    "DEMO-2": {
+        "d": ["Charge the card once per basket"],
+        "s": ["Charge the card once per basket", "Log the settlement reference"],
+        "b": [
+            "BREAKING CHANGE: the postalCode field replaces postcode in the "
+            "confirmation payload.\n"
+            "- callers must send postalCode\n"
+            "- see ADR 0007 <script>alert(1)</script> & the migration plan"
+        ],
+        "first": "2024-03-02",
+        "last": "2024-03-09",
+        "repos": ["demo-core"],
+        "n": 2,
     },
 }
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}

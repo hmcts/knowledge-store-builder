@@ -38,10 +38,13 @@ if (!html.includes(appSource)) {
 }
 
 // Linear-time extraction of the embedded JSON blocks (no backtracking-prone
-// regex over a potentially very large page).
+// regex over a potentially very large page). The build escapes "</" inside the
+// data, so splitting on the close tag is safe - but an opening "<script" can
+// appear in the data itself (a commit body quoting markup), so take the FIRST
+// one in each part, which is the block's own tag, never a later one from data.
 const jsonBlocks = {};
 for (const part of html.split('</script>')) {
-  const open = part.lastIndexOf('<script');
+  const open = part.indexOf('<script');
   if (open < 0) continue;
   const tagEnd = part.indexOf('>', open);
   const idMatch = /id="(\w+)"/.exec(part.slice(open, tagEnd));
@@ -84,21 +87,34 @@ function strip(h) {
 }
 let failures = 0;
 
-function check(question, wantMode, wantSubstrings, wantMetaSubstrings = []) {
+/** @param {string} haystack @param {string[]} wanted @param {string} label */
+const absentFrom = (haystack, wanted, label) =>
+  wanted.filter((s) => !haystack.includes(s)).map((s) => `${label} missing: "${s}"`);
+
+/** @param {string} haystack @param {string[]} unwanted @param {string} label */
+const presentIn = (haystack, unwanted, label) =>
+  unwanted.filter((s) => haystack.includes(s)).map((s) => `${label} must not contain: "${s}"`);
+
+/** Drive one question and assert on the answer.
+ * @param {string} question
+ * @param {string} wantMode substring of the meta line
+ * @param {string[]} wantSubstrings substrings of the answer's visible text
+ * @param {string[]} wantMetaSubstrings further substrings of the meta line
+ * @param {{text?: string[], meta?: string[]}} forbidden substrings that must
+ *   NOT appear, in the visible text or the meta line
+ */
+function check(question, wantMode, wantSubstrings, wantMetaSubstrings = [], forbidden = {}) {
   api.q.value = question;
   api.runAsk();
   const gotMode = api.meta.textContent;
   const text = strip(api.out.innerHTML);
-  const problems = [];
-  if (!gotMode.includes(wantMode)) {
-    problems.push(`mode: wanted "${wantMode}", got "${gotMode}"`);
-  }
-  for (const s of wantSubstrings) {
-    if (!text.includes(s)) problems.push(`missing: "${s}"`);
-  }
-  for (const s of wantMetaSubstrings) {
-    if (!gotMode.includes(s)) problems.push(`meta missing: "${s}"`);
-  }
+  const problems = [
+    ...absentFrom(gotMode, [wantMode], 'mode'),
+    ...absentFrom(text, wantSubstrings, 'answer'),
+    ...absentFrom(gotMode, wantMetaSubstrings, 'meta'),
+    ...presentIn(text, forbidden.text || [], 'answer'),
+    ...presentIn(gotMode, forbidden.meta || [], 'meta'),
+  ];
   if (problems.length) {
     failures++;
     console.error(`FAIL  ${question}`);
@@ -149,6 +165,43 @@ check('how is quantum scheduling implemented?', 'no evidence',
   // index - a score or coverage threshold could not tell an absent topic
   // from a poorly-ranked real one.
   ['quantum']);
+
+// Ticket evidence: the commit subjects and bodies the ticket artefact carries
+// are a retrieval surface of their own. In this estate "postalCode" appears
+// only in DEMO-2's commit body and "settlement" only in one of its subjects,
+// so nothing else can answer these two questions - and neither word may be
+// reported as unevidenced while its evidence is on screen.
+check('why does the payment flow use postalCode?', 'business intent',
+  ['DEMO-2', 'commit body', 'postalCode'], [],
+  { meta: ['no evidence for: postalcode'] });
+check('which settlement reference is logged?', 'commit evidence',
+  ['DEMO-2', 'commit subject', 'Log the settlement reference'], [],
+  { meta: ['no evidence for: settlement'], text: ['No evidence in this estate'] });
+
+// A commit body is user-authored text of up to four thousand characters: the
+// page must escape it rather than interpret it, keep the line breaks a
+// bulleted body depends on, and never let it read as a tracker title.
+api.q.value = 'DEMO-2';
+api.runAsk();
+const ticketHtml = api.out.innerHTML;
+const bodyAt = ticketHtml.indexOf('BREAKING CHANGE');
+for (const [name, ok] of [
+  ['a commit body is labelled as one', /commit body/i.test(ticketHtml)],
+  ['markup in a body is escaped',
+    ticketHtml.includes('&lt;script&gt;') && !ticketHtml.includes('<script>')],
+  ['an ampersand in a body is escaped', ticketHtml.includes('&amp; the migration plan')],
+  ["a body's line breaks survive rendering", ticketHtml.includes('payload.<br>')],
+  ['the body sits inside a disclosure, not in the title',
+    bodyAt > 0 && bodyAt > ticketHtml.indexOf('<details')],
+]) {
+  if (ok) {
+    console.log(`ok    DEMO-2 lookup: ${name}`);
+  } else {
+    failures++;
+    console.error(`FAIL  DEMO-2 lookup: ${name}`);
+    console.error(`      html: ${ticketHtml.slice(0, 300)}`);
+  }
+}
 
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);

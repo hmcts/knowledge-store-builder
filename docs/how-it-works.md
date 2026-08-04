@@ -177,6 +177,22 @@ connections) and test files — sources matching `.spec.`, `__tests__` or
 `/test/` — are excluded, except in repositories the estate declares as
 end-to-end suites, where the tests *are* the business documentation.
 
+**What the commits said is a retrieval surface, indexed per ticket.** The page
+searches all three evidence fields the ticket artefact carries — the curated
+description, the commit subjects as written, and the body prose — because a body
+is where a breaking change, a renamed schema field or a pointer to a decision
+record gets written down, and none of that is in any node label. The index is
+built over tickets rather than over entries deliberately: the entry haystack is
+built once per indexed entry, and the same ticket is carried by many entries, so
+evidence inlined there is multiplied by every entry citing it — hundreds of
+megabytes of haystack in the browser on a real estate, against a few megabytes
+for one index over tickets, which is scanned linearly for the same order of work
+a question already costs. What matches is shown as an additional section, never
+in place of the composed answer, and each piece of evidence appears under the
+name of the field it came from: a reader has to be able to tell a tracker title
+from a commit subject from a commit body, because the store's grounding contract
+turns on which of the three a statement came from.
+
 **Absence is disclosed, not hidden.** The ranker alone cannot keep the store's
 "absence of evidence is a finding" promise: a question about something the
 estate does not contain still scores, because its ordinary words match
@@ -188,7 +204,10 @@ finding alone when no word is evidenced. It discloses rather than abstains
 because nothing distinguishes a question word from a subject without an English
 lexicon: an earlier rule that abstained when the rarest word was absent
 silenced four legitimate questions, because ordinary words like "used" and
-"taken" are themselves missing from a small corpus.
+"taken" are themselves missing from a small corpus. The rule reads both indexes,
+the entries and the ticket evidence: a word only a commit body holds *is*
+evidenced, and naming it as absent directly above its own commit body would be
+the page contradicting itself.
 
 Ask-mode ranking is a port of graphify's own query scorer, and is documented
 in the application source in one line: *IDF-weighted terms,

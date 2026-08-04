@@ -250,6 +250,9 @@ h2 { font-size:15px; margin:18px 0 8px; color:var(--muted); font-weight:600; }
 .trow { font-size:13.5px; margin:6px 0; padding-left:10px; border-left:3px solid var(--chip); }
 .trow .tid { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--accent); }
 .trow .tdates { color:var(--muted); font-size:12px; }
+.ev { font-size:13px; margin:4px 0 0 10px; }
+.ev .ev-l { color:var(--muted); font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
+.cbody { font-size:13px; line-height:1.5; margin:6px 0 6px 10px; }
 .summary b { color:var(--accent); }
 table.rt { border-collapse:collapse; width:100%; font-size:13.5px; margin:6px 0 14px; }
 table.rt td, table.rt th { text-align:left; padding:5px 10px 5px 0; vertical-align:top;
@@ -391,9 +394,13 @@ def main() -> int:
     # Sonar S2083 misfires here: config.EXPLORER_PATH is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
     config.EXPLORER_PATH.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
-    size_mb = config.EXPLORER_PATH.stat().st_size / 1_048_576
+    # Bytes as well as megabytes: a change to the page's own code or to what it
+    # embeds moves the size by kilobytes, which one decimal place of a megabyte
+    # cannot show, and the growth is what a store's clone cost is measured in.
+    size_bytes = config.EXPLORER_PATH.stat().st_size
     print(
-        f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {config.EXPLORER_PATH} ({size_mb:.1f} MB)"
+        f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {config.EXPLORER_PATH} "
+        f"({size_bytes / 1_048_576:.1f} MB, {size_bytes:,} bytes)"
     )
     return 0
 
