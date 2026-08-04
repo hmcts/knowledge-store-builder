@@ -15,14 +15,13 @@ committed, so consumers get intent lookups without regenerating history.
 
 from __future__ import annotations
 
-import gzip
 import json
 import re
 from collections import defaultdict
 from pathlib import Path
 
 
-from . import config
+from . import config, io
 
 
 TICKET_PREFIX = re.compile(r"^[\s\[\(]*[A-Z][A-Z0-9]{1,9}-\d{1,6}[\]\)]*[\s:,\-–]*")
@@ -134,8 +133,7 @@ def main() -> int:
         index[ndjson.parent.name], repo_commits = index_repository(ndjson, descriptions)
         commits_seen += repo_commits
 
-    config.INTENT_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(config.INTENT_INDEX_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
+    with io.gzip_text(config.INTENT_INDEX_PATH) as out:
         json.dump(index, out, ensure_ascii=False)
 
     # Per-ticket: the best commit-message descriptions (most repeated, then
@@ -158,7 +156,7 @@ def main() -> int:
         }
         for ticket, info in descriptions.items()
     }
-    with gzip.open(config.TICKET_DESCRIPTIONS_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
+    with io.gzip_text(config.TICKET_DESCRIPTIONS_PATH) as out:
         json.dump(ticket_out, out, ensure_ascii=False)
     described = sum(1 for t in ticket_out.values() if t["d"])
     print(

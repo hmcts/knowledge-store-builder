@@ -21,7 +21,6 @@ Run after the graph has been built/merged:
 
 from __future__ import annotations
 
-import gzip
 import json
 import re
 from collections import defaultdict
@@ -29,7 +28,7 @@ from pathlib import Path
 from typing import TypedDict
 
 
-from . import config, kinds
+from . import config, io, kinds
 
 FORMAT = "gherkin"
 
@@ -358,9 +357,7 @@ def write_outputs(graph: dict, labels: dict[str, str]) -> None:
     config.LABELS_PATH.write_text(  # NOSONAR(S2083)
         json.dumps(labels, ensure_ascii=False), encoding="utf-8"
     )
-    with gzip.open(
-        config.GRAPH_PATH.with_suffix(".json.gz"), "wt", encoding="utf-8", compresslevel=9
-    ) as out:
+    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:
         out.write(serialised)
 
 

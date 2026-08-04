@@ -192,8 +192,7 @@ def snapshot() -> int:
             file=sys.stderr,
         )
         return 1
-    config.SUMMARIES_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "wt", encoding="utf-8") as handle:
+    with io.gzip_text(config.SUMMARIES_SNAPSHOT_PATH) as handle:
         json.dump(members, handle)
     print(
         f"Snapshotted {len(members)} communities "

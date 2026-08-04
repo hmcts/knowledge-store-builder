@@ -92,6 +92,33 @@ class IoTest(SettingsIsolated):
             self.assertEqual(pio.load_labels(Path(tmp) / "missing.json"), {})
 
 
+class DeterministicGzipTest(SettingsIsolated):
+    """Committed .gz artefacts must not churn when their content is unchanged.
+
+    Python's gzip writer embeds the current time and the output filename in
+    the header by default, so every rebuild rewrote byte-different artefacts
+    with identical content - quietly defeating the byte-identical guarantee
+    the README makes and dirtying version control on every run. Found while
+    writing docs/how-it-works.md, whose determinism claim was checked against
+    the code and turned out to be false.
+    """
+
+    def test_same_content_same_bytes_regardless_of_time_and_name(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            first, second = Path(tmp) / "first.json.gz", Path(tmp) / "second.json.gz"
+            with mock.patch("gzip.time.time", return_value=1_000_000):
+                pio.write_gzip_json(first, {"k": [1, 2, 3]})
+            with mock.patch("gzip.time.time", return_value=2_000_000):
+                pio.write_gzip_json(second, {"k": [1, 2, 3]})
+            self.assertEqual(
+                first.read_bytes(), second.read_bytes(), "header must not carry time or name"
+            )
+            self.assertEqual(first.read_bytes()[4:8], b"\x00\x00\x00\x00", "mtime field zero")
+            self.assertEqual(pio.read_gzip_json(second), {"k": [1, 2, 3]}, "round trip intact")
+
+
 class NoImportTimeCopiesTest(SettingsIsolated):
     """No stage module may copy a setting at import time.
 
