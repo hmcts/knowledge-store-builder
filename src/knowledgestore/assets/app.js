@@ -826,6 +826,43 @@ function routeQuestion(lq, ranked, seeds) {
   return vCluster(ranked);
 }
 
+/** Name the query words the index holds no evidence for, and return true when
+ *  none of them are evidenced - in which case the finding has been rendered as
+ *  the whole answer.
+ *
+ *  Disclose, do not silence. An earlier design abstained when the rarest term
+ *  was absent, which looked right on a large estate and then silenced four
+ *  legitimate questions on a small one: ordinary question words ("used",
+ *  "taken", "walk") are themselves absent from a small corpus, so one of them
+ *  becomes the "rarest" term. Nothing distinguishes a question word from a
+ *  subject without an English lexicon, and a blocklist of them would never be
+ *  complete. So the note is additive - the reader is told which of their words
+ *  the graph holds nothing for, and still gets whatever did match.
+ *
+ *  Pre-written prose (a topic brief or deep dive) is exempt: it was written for
+ *  the question rather than matched against the index.
+ *  @param {string[]} terms
+ *  @param {boolean} prewritten
+ *  @returns {boolean}
+ */
+function reportUnevidenced(terms, prewritten) {
+  const missing = prewritten ? [] : unevidencedTerms(terms);
+  if (missing.length) {
+    expansionNote += ' | no evidence for: ' + missing.join(', ');
+  }
+  if (!terms.length || missing.length < terms.length) return false;
+  meta.textContent =
+    'question type: no evidence - the graph holds nothing for ' +
+    missing.map((t) => '"' + t + '"').join(', ');
+  out.innerHTML =
+    '<div class="card"><h3>No evidence in this estate</h3><p>Nothing in the graph matches ' +
+    missing.map((t) => '<code>' + esc(t) + '</code>').join(', ') +
+    '. That is a finding rather than a ranking problem: this estate contains no such ' +
+    "component, schema or feature. Try the estate's own vocabulary." +
+    '</p></div>';
+  return true;
+}
+
 function runAsk() {
   const raw = q.value.trim();
   if (!raw) {
@@ -847,34 +884,7 @@ function runAsk() {
   applySummaryBoost(ranked, terms, expansions);
   const topic = matchTopic(raw.toLowerCase(), expansions);
   const dive = topic ? null : matchDive(raw.toLowerCase());
-  // Absence first, and named. Pre-written prose (a topic brief or deep dive)
-  // still answers, because it was written for the question rather than matched
-  // against the index.
-  const missing = topic || dive ? [] : unevidencedTerms(terms);
-  // Disclose, do not silence. An earlier attempt abstained when the rarest
-  // term was absent, which looked right on a large estate and then silenced
-  // four legitimate questions on a small one: ordinary question words ("used",
-  // "taken", "walk") are themselves absent from a small corpus, so one of them
-  // becomes the "rarest" term. Nothing distinguishes a question word from a
-  // subject without an English lexicon, and a blocklist of them would never be
-  // complete. So the note is additive - the reader is told which of their words
-  // the graph holds nothing for, and still gets whatever did match. Only a
-  // question with no evidenced word at all is answered with the finding alone.
-  if (missing.length) {
-    expansionNote += ' | no evidence for: ' + missing.join(', ');
-  }
-  if (terms.length && missing.length === terms.length) {
-    meta.textContent =
-      'question type: no evidence - the graph holds nothing for ' +
-      missing.map((t) => '"' + t + '"').join(', ');
-    out.innerHTML =
-      '<div class="card"><h3>No evidence in this estate</h3><p>Nothing in the graph matches ' +
-      missing.map((t) => '<code>' + esc(t) + '</code>').join(', ') +
-      '. That is a finding rather than a ranking problem: this estate contains no such ' +
-      "component, schema or feature. Try the estate's own vocabulary." +
-      '</p></div>';
-    return;
-  }
+  if (reportUnevidenced(terms, Boolean(topic || dive))) return;
   if (!ranked.length && !topic && !dive) {
     meta.textContent = 'nothing in the graph matches those words - try different terms';
     out.innerHTML = '';
