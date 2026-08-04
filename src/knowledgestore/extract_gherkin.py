@@ -316,7 +316,7 @@ REPORT_NOTE_MARKER = "<!-- knowledgestore: gherkin layer -->"
 
 
 def note_gherkin_layer(stats: dict, nodes: int, edges: int) -> None:
-    """Record in graphify's report that the graph grew after it was written.
+    """Record in graphify's report that the graph changed after it was written.
 
     `graphify` writes GRAPH_REPORT.md from its own pass; this stage then adds
     features, scenarios and ticket nodes, and the report is never regenerated.
@@ -336,7 +336,7 @@ def note_gherkin_layer(stats: dict, nodes: int, edges: int) -> None:
         "## Added after this report was written\n\n"
         "The totals above describe the graph as `graphify` left it. The `gherkin` "
         "stage ran afterwards and added the business-intent layer, so the "
-        "committed graph is larger than this report says:\n\n"
+        "committed graph no longer matches this report:\n\n"
         f"- graph now: **{nodes:,} nodes, {edges:,} edges**\n"
         f"- added here: {stats.get('features', 0):,} features, "
         f"{stats.get('scenarios', 0):,} scenarios, {stats.get('tickets', 0):,} ticket nodes\n\n"
