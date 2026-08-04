@@ -61,7 +61,7 @@ const hay = DATA.map(
  * is a couple of megabytes of text, and scanning it linearly is the same order
  * of work the page already does for every question.
  * @type {string[]} */
-const TICKET_IDS = Object.keys(TICKET_INFO).sort();
+const TICKET_IDS = Object.keys(TICKET_INFO).sort(cmpId);
 /** @type {string[]} */
 const ticketHay = TICKET_IDS.map((t) => {
   const info = TICKET_INFO[t];
@@ -161,7 +161,11 @@ const DIVES = JSON.parse(getEl('dives').textContent || '{}');
  * @param {string} t */
 function ticketLink(t) {
   if (!TICKET_BROWSE_URL) return esc(t);   // no tracker configured: plain text
-  return '<a href="' + TICKET_BROWSE_URL + encodeURIComponent(t)
+  // The tracker URL is estate configuration, read from the page's embedded
+  // config block, so it is escaped like any other embedded text before it goes
+  // into an attribute: a quote in it would otherwise close the attribute and
+  // whatever followed would be live markup.
+  return '<a href="' + esc(TICKET_BROWSE_URL) + encodeURIComponent(t)
     + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
 }
 
@@ -200,7 +204,7 @@ const LABEL_BODY = 'commit body, as written';
 /** Escaped for display, with line breaks kept. Bodies are bulleted lists as
  * often as prose, and lose their meaning as one run-on paragraph.
  * @param {string} s */
-const escLines = (s) => esc(s).replace(/\n/g, '<br>');
+const escLines = (s) => esc(s).split('\n').join('<br>');
 
 /** One labelled row per text, so the reader knows which field they are reading.
  * @param {string} label @param {string[]|undefined} texts */
@@ -213,7 +217,7 @@ const evidenceRows = (label, texts) =>
  * so it belongs in the technical-detail idiom rather than a summary line.
  * @param {string[]|undefined} bodies */
 const bodyDetails = (bodies) =>
-  bodies && bodies.length
+  bodies?.length
     ? '<details class="tech"><summary>' + LABEL_BODY + ' (' + bodies.length + ')</summary>'
       + bodies.map((b) => '<div class="cbody">' + escLines(b) + '</div>').join('')
       + '</details>'
@@ -693,7 +697,7 @@ function ticketEvidenceHtml(matches, terms) {
  * @param {{id: string}[]} matches @param {string[]} terms */
 function appendTicketEvidence(matches, terms) {
   if (!matches.length) return;
-  out.innerHTML += ticketEvidenceHtml(matches, terms);
+  out.insertAdjacentHTML('beforeend', ticketEvidenceHtml(matches, terms));
   if (!meta.textContent) modeNote('commit evidence');
 }
 

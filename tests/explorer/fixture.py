@@ -146,8 +146,14 @@ TICKET_DESCRIPTIONS = {
         "n": 3,
     },
     "DEMO-2": {
-        "d": ["Charge the card once per basket"],
-        "s": ["Charge the card once per basket", "Log the settlement reference"],
+        # a quote, an apostrophe and an event handler, because a description
+        # also lands in a title attribute: an unescaped quote would close the
+        # attribute and what follows would be a live handler
+        "d": ['Charge the basket\'s card once, not per "line item" onmouseover=alert(1)'],
+        "s": [
+            'Charge the basket\'s card once, not per "line item" onmouseover=alert(1)',
+            "Log the settlement reference",
+        ],
         "b": [
             "BREAKING CHANGE: the postalCode field replaces postcode in the "
             "confirmation payload.\n"
@@ -219,6 +225,11 @@ def main() -> int:
         root=STORE,
         EXPLORER_TITLE="Demo Estate Explorer",
         BRIEF_REQUEST_URL="https://example.invalid/issues/new",
+        # A tracker URL is estate configuration that reaches the page and is
+        # interpolated into an href. This one carries an ampersand and an
+        # attempt to close the attribute and inject an event handler, so the
+        # regression can prove the page escapes what it embeds.
+        TICKET_BROWSE_URL='https://example.invalid/browse/?a=1&b="><img src=x onerror=alert(1)>&id=',
         MIN_ENTRY_DEGREE=1,
     )
 

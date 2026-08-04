@@ -89,6 +89,9 @@ function tie(day) {
 
 const makeEl = () => ({
   textContent: '', innerHTML: '', value: '', placeholder: '', style: {},
+  insertAdjacentHTML(position, html) {
+    this.innerHTML = position === 'afterbegin' ? html + this.innerHTML : this.innerHTML + html;
+  },
   checked: true, classList: { toggle() {} }, addEventListener() {}, add() {},
 });
 const elements = {
