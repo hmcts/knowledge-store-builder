@@ -113,6 +113,16 @@ BODY_DESCRIPTION_CHARS = 300
 # better because each entry is a different commit's account of the work.
 SUBJECT_LIMIT = 3
 BODY_LIMIT = 2
+# Deliberately not BODY_DESCRIPTION_CHARS, and the two must not be tidied back
+# together: a description field keeps a *label*, which a consumer renders on one
+# line, while an evidence field keeps the *rationale* - and the rationale is
+# precisely what a label-sized cut removes, because the opening line is the
+# summary and the reasoning follows it. Breaking-change notices, field renames and
+# decision cross-references all sit past character 300. Measured on one estate, a
+# 300-character cut discarded 34.1% of all body prose while 4,000 discards 3.6%,
+# and the 99th-percentile body is 1,359 characters - so this bounds a pathological
+# body, a pasted stack trace or file, rather than summarising anything.
+BODY_EVIDENCE_CHARS = 4000
 
 # Contributor and pull-request templates differ between teams and between
 # estates, so no shipped pattern list can recognise them. They are instead
@@ -311,11 +321,12 @@ def body_description(body: str, boilerplate: frozenset[str] = frozenset()) -> st
 def body_evidence(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
     """A body's prose as its author wrote it, truncated at a word boundary.
 
-    All of the prose, not only the opening paragraph a description falls back to:
-    this is stored as evidence in its own right, so what a person said about the
-    change after their first sentence counts too.
+    All of the prose, not only the opening paragraph a description falls back to,
+    and cut at BODY_EVIDENCE_CHARS rather than the description length: this is
+    stored as evidence in its own right, so what a person said about the change
+    after their first sentence is the part worth having.
     """
-    return _truncate(clean_body(body, boilerplate), BODY_DESCRIPTION_CHARS)
+    return _truncate(clean_body(body, boilerplate), BODY_EVIDENCE_CHARS)
 
 
 def _automated_identity(person: object) -> bool:

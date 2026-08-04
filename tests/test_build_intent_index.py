@@ -697,9 +697,21 @@ class EvidenceFieldsTest(SettingsIsolated):
         self.assertEqual(self._artefact(commits)["DD-1"]["b"], list(bodies)[:2])
 
     def test_b_truncates_at_a_word_boundary(self):
-        ticket = self._artefact([make_commit("DD-1: wip", body=("abcd " * 70).strip())])["DD-1"]
-        self.assertEqual(ticket["b"], [("abcd " * 60).strip()])
-        self.assertEqual(len(ticket["b"][0]), 299)
+        ticket = self._artefact([make_commit("DD-1: wip", body=("abcd " * 900).strip())])["DD-1"]
+        self.assertEqual(ticket["b"], [("abcd " * 800).strip()])
+        self.assertEqual(len(ticket["b"][0]), 3999)
+
+    def test_a_nine_hundred_character_body_is_whole_in_b_and_a_label_in_d(self):
+        """The asymmetry the two caps exist to express, and the regression that
+        matters if someone later tidies them back into one constant: `d` is a
+        label a consumer renders, `b` is the evidence, and the rationale in a body
+        is exactly what a label-sized cut removes."""
+        body = ("word " * 180).strip()
+        self.assertEqual(len(body), 899)
+        ticket = self._artefact([make_commit("DD-1: wip", body=body)])["DD-1"]
+        self.assertEqual(ticket["b"], [body])
+        self.assertEqual(ticket["d"], [("word " * 60).strip()])
+        self.assertEqual(len(ticket["d"][0]), 299)
 
     def test_a_bot_authored_body_is_absent_from_b(self):
         ticket = self._artefact(
