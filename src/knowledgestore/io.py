@@ -8,8 +8,10 @@ sys.path[0] pointing at scripts/.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
+from io import TextIOWrapper
 from pathlib import Path
 
 
@@ -49,9 +51,36 @@ def read_gzip_json_dict(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def write_gzip_json(path: Path, data) -> None:
+@contextlib.contextmanager
+def gzip_text(path: Path, compresslevel: int = 9):
+    """Deterministic gzip text writer: fixed compression level, no timestamp
+    and no filename in the header — identical content produces identical bytes,
+    the behaviour of `gzip -9 -n`.
+
+    Python's default writer embeds the current time and the output filename,
+    so every rebuild rewrote committed artefacts whose content had not
+    changed, quietly defeating the byte-identical guarantee and dirtying
+    version control on every run.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt", encoding="utf-8", compresslevel=9) as out:
+    with (
+        open(path, "wb") as raw,
+        # filename="" explicitly: GzipFile otherwise lifts raw.name into the
+        # header's FNAME field, which is the other source of byte churn.
+        gzip.GzipFile(
+            filename="", fileobj=raw, mode="wb", compresslevel=compresslevel, mtime=0
+        ) as binary,
+    ):
+        text = TextIOWrapper(binary, encoding="utf-8")
+        try:
+            yield text
+        finally:
+            text.flush()
+            text.detach()
+
+
+def write_gzip_json(path: Path, data) -> None:
+    with gzip_text(path) as out:
         json.dump(data, out, ensure_ascii=False)
 
 
