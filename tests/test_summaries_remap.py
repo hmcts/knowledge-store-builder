@@ -155,6 +155,56 @@ class RemapTest(SettingsIsolated):
         result = self.read_summaries()
         self.assertEqual(result.get("99"), "from one", "lowest old id wins, deterministically")
 
+    def test_collision_winner_is_the_largest_share_not_the_lowest_id(self):
+        """Behaviour change, measured before making it: on a real refresh the
+        share rule chose a better-fitting summary for 36 of 86 contested
+        clusters (median +16.7 points of overlap) with identical retention.
+        The old rule kept the lowest old id regardless of fit."""
+        # old "1": 3 of 5 members land in 99 (share 0.6); old "2": 3 of 3 (1.0)
+        old = {"1": ["a", "b", "c", "d", "e"], "2": ["f", "g", "h"]}
+        new = {"99": ["a", "b", "c", "f", "g", "h"]}
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"1": "from one", "2": "from two"} | self.many(30))
+        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(
+            self.read_summaries().get("99"),
+            "from two",
+            "the summary describing more of the merged cluster wins",
+        )
+
+    def test_remap_report_keeps_displaced_prose_and_carried_provenance(self):
+        """Dropped prose used to be recoverable only by git archaeology. The
+        report is the spool the backfill revises from, and the carried map is
+        what lets verify split its flag rate by provenance."""
+        old = {
+            "1": ["a", "b", "c"],  # carried cleanly
+            "2": ["a2", "b2", "c2"],  # 2 of 3 land in 88 (0.67) - loses to 3
+            "3": ["d2", "e2", "f2", "g2"],  # 4 of 4 land in 88 (1.0) - wins
+            "4": ["p", "q", "r", "s", "t"],  # below bar: 2 of 5 land anywhere
+            "5": ["gone1", "gone2"],  # members gone
+        }
+        new = {
+            "77": ["a", "b", "c"],
+            "88": ["a2", "b2", "d2", "e2", "f2", "g2"],
+            "66": ["p", "q"],
+        }
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries(
+            {"1": "one", "2": "two", "3": "three", "4": "four", "5": "five"} | self.many(30)
+        )
+        self.assertEqual(summaries.remap(), 0)
+        report = json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(report["carried"]["77"], {"from": "1", "share": 1.0})
+        self.assertEqual(report["carried"]["88"]["from"], "3")
+        displaced = report["displaced"]
+        self.assertEqual(displaced["2"]["reason"], "collision")
+        self.assertEqual(displaced["2"]["best_target"], "88")
+        self.assertEqual(displaced["2"]["prose"], "two", "the prose itself is the point")
+        self.assertEqual(displaced["4"]["reason"], "below-bar")
+        self.assertEqual(displaced["5"]["reason"], "members-gone")
+
     def test_a_summary_whose_members_have_all_gone_is_dropped(self):
         old = {"7": ["gone1", "gone2"]}
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})

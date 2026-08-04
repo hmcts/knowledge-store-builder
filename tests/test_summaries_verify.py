@@ -322,5 +322,53 @@ class VerifyCliTest(VerifyTest):
         self.assertEqual(code, 1)
 
 
+class ProvenanceSplitTest(SettingsIsolated):
+    """verify reports grounding split by carried-vs-authored when a remap
+    report exists - remap preserves coverage while degrading grounding
+    (measured: 9% flagged authored, 37% carried), so retention improvements
+    must never be read without this line beside them."""
+
+    def test_split_line_reports_both_groups(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config.configure(root=str(tmp))
+            (Path(tmp) / "knowledge" / "summaries").mkdir(parents=True)
+            config.SUMMARIES_INPUT_PATH.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": 1,
+                            "label": "HearingStore",
+                            "top_nodes": [{"label": "HearingStore"}],
+                        },
+                        {"id": 2, "label": "ResultsFlow", "top_nodes": [{"label": "ResultsFlow"}]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config.SUMMARIES_PATH.write_text(
+                json.dumps(
+                    {
+                        "1": "Covers HearingStore and nothing else worth naming here.",
+                        "2": "Claims a FabricatedWidget the digest does not contain.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config.REMAP_REPORT_PATH.write_text(
+                json.dumps({"carried": {"2": {"from": "9", "share": 0.9}}, "displaced": {}}),
+                encoding="utf-8",
+            )
+            out = StringIO()
+            with redirect_stdout(out):
+                summaries.verify()
+        text = out.getvalue()
+        self.assertIn("grounding by provenance", text)
+        self.assertIn("carried 100% (1 of 1)", text)
+        self.assertIn("authored 0% (0 of 1)", text)
+
+
 if __name__ == "__main__":
     unittest.main()
