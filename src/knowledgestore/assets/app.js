@@ -105,9 +105,11 @@ let mode = 'search';
   .sort((a, b) => a.localeCompare(b))
   .forEach((r) => repoSel.add(new Option(r, r)));
 
+/** HTML meta-characters, plus the newline where line breaks are being kept.
+ * @type {Record<string, string>} */
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\n': '<br>' };
 /** @param {string} s */
-const esc = (s) =>
-  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ESCAPES[c] || c);
 /** @param {string} s @returns {string[]} */
 const tok = (s) => s.toLowerCase().match(/[a-z0-9]+/g) || [];
 
@@ -203,8 +205,12 @@ const LABEL_BODY = 'commit body, as written';
 
 /** Escaped for display, with line breaks kept. Bodies are bulleted lists as
  * often as prose, and lose their meaning as one run-on paragraph.
+ *
+ * One pass, so the order cannot be got wrong: inserting the breaks first and
+ * escaping afterwards would escape the breaks, and that mistake is invisible
+ * until someone reads a body.
  * @param {string} s */
-const escLines = (s) => esc(s).split('\n').join('<br>');
+const escLines = (s) => s.replace(/[&<>"\n]/g, (c) => ESCAPES[c] || c);
 
 /** One labelled row per text, so the reader knows which field they are reading.
  * @param {string} label @param {string[]|undefined} texts */
