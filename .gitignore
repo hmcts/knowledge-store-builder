@@ -234,3 +234,9 @@ knowledge_context.md
 # Working plans and specs are estate-flavoured scratch. This repository is
 # public; planning material lives with the estate that motivated it, never here.
 docs/superpowers/
+
+# JS toolchain for the explorer gates (tests/explorer/check-js.sh installs it
+# here). node_modules is listed too: this repository has no package.json, so a
+# bare `npm install` resolves upwards and can drop one at the root.
+.js-toolchain/
+node_modules/

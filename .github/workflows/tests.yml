@@ -34,14 +34,10 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install pinned JS toolchain
-        run: npm install --no-save --ignore-scripts --no-audit --no-fund eslint@10.8.0 typescript@7.0.2
-
-      - name: Lint explorer JavaScript
-        run: ./node_modules/.bin/eslint src/knowledgestore/assets/app.js tests/explorer/*.mjs
-
-      - name: Type-check explorer application
-        run: ./node_modules/.bin/tsc --checkJs --noEmit --target es2020 --lib es2020,dom src/knowledgestore/assets/app.js
+      # One script, run here and by contributors, so the pinned versions and the
+      # checked paths cannot differ between the two.
+      - name: Lint and type-check explorer JavaScript
+        run: tests/explorer/check-js.sh
 
       - name: Explorer scorer unit tests
         run: node tests/explorer/engine-unit.mjs
