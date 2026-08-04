@@ -57,7 +57,9 @@ SEPARATOR_LINE = re.compile(r"^[-=]{3,}$")
 # bodies that were nothing but trailer lines were the majority of the bodies
 # surviving cleaning - migration metadata stored as intent evidence. Same move as
 # identity-not-phrasing and repetition-not-patterns: match the shape, not a name.
-TRAILER_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9-]{1,30}):\s*(.*)$")
+# No `\s*` before the value: it would overlap with `(.*)`, which is ambiguous
+# enough to backtrack. The value is stripped in code instead.
+TRAILER_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9-]{1,30}):(.*)$")
 # `KEY: what changed` is content, not a trailer. A bare uppercase token reads as a
 # reference - a ticket, a static-analysis rule id - and those lines are among the
 # most valuable a body can carry, so the shape test must never claim them.
