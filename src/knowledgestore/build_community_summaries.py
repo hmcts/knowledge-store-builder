@@ -144,9 +144,15 @@ def merge(paths: list[str]) -> int:
     for r in rejected:
         print(f"rejected - {r}")
     print(f"{added} summaries merged ({len(merged)} total) -> {config.SUMMARIES_PATH}")
-    missing = len(known_ids) - len(merged)
+    missing = len(known_ids - set(merged))
     if missing:
         print(f"{missing} significant communities still lack a summary")
+    retained_below = len(set(merged) - known_ids)
+    if retained_below:
+        print(
+            f"{retained_below} summaries cover clusters now below the significance "
+            "threshold - retained; they cost nothing and may become significant again"
+        )
     return 1 if rejected else 0
 
 

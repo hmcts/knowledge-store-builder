@@ -68,6 +68,41 @@ class SummariesMergeTest(SettingsIsolated):
         self.assertEqual(code, 0)
         self.assertIn("3", merged)
 
+    def test_summaries_kept_on_now_insignificant_clusters_do_not_go_negative(self):
+        """After a re-cluster, communities.json can legitimately hold summaries
+        for clusters that fell below the significance threshold. The coverage
+        arithmetic used to be len(known) - len(merged), which printed
+        "-54 significant communities still lack a summary" - a negative count
+        that reads as a defect. Coverage is a set difference, not a size
+        difference."""
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._with_paths(tmp)
+            # pre-existing summary for a cluster the digests no longer contain
+            config.SUMMARIES_PATH.write_text(
+                json.dumps({"7": "Prose for a cluster now below the threshold. " * 3}),
+                encoding="utf-8",
+            )
+            batch = Path(tmp) / "gen.json"
+            batch.write_text(
+                json.dumps(
+                    {
+                        "3": "A valid summary for the one significant community, "
+                        "long enough to clear the lower bound."
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out = StringIO()
+            with redirect_stdout(out):
+                code = summaries.merge([str(batch)])
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertNotIn("-1 significant", text, "coverage must never be negative")
+        self.assertIn("1 summaries cover clusters now below the significance", text)
+
     def test_unknown_id_and_bad_length_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._with_paths(tmp)

@@ -390,7 +390,8 @@ Write `docs/deep-dives/<repo>.md` from the bundle. Structure that works:
 2. `## Scale and shape` — nodes, share of the estate, community spread.
 3. `## What changes, and why` — churn leaders and the instability numbers
    (revert share, fix share) with sample tickets quoted.
-4. `## Hidden coupling` — the co-change pairs, especially cross-concern ones
+4. `## Hidden coupling` — the co-ticket pairs (files recurring under the same
+   tickets — ticket-level coupling, not commit-level co-change), especially cross-concern ones
    (domain files coupled to build files); hotspots (high churn AND high
    degree) are the refactoring targets worth naming.
 5. `## Coupling surface` — schema/event names other repositories also carry.

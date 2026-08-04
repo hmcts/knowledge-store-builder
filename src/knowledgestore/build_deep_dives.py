@@ -101,6 +101,11 @@ def _is_test_pair(a: str, b: str) -> bool:
 
 
 def cochange_section(files: dict) -> list[dict]:
+    """Files recurring under the same ticket - co-ticket coupling.
+
+    This is ticket-level, not commit-level: two files touched by the same
+    ticket in different commits still pair. The JSON key stays `cochange`
+    for artefact stability; documentation says co-ticket."""
     by_ticket: dict[str, list[str]] = defaultdict(list)
     for path, info in files.items():
         for t in info.get("tickets", {}):
