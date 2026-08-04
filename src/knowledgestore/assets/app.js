@@ -310,6 +310,31 @@ function termTiers(norm, bare, src, terms, w) {
   return { matched, tiered, flat };
 }
 
+/**
+ * Query terms for which the index holds no evidence at all.
+ *
+ * "Absence of evidence is a finding" is a stated promise of this store, and
+ * the ranker alone cannot keep it: a question about something the estate does
+ * not contain still scores, because its ordinary words ("storage", "work",
+ * "rate") match thousands of entries. Measured on a real estate, an
+ * out-of-domain question outscored a legitimate one - so a score or
+ * term-coverage threshold would silence real questions while letting these
+ * through. What separates them cleanly is whether the distinctive words match
+ * anything at all: an absent term has zero hits across the whole index, while
+ * every in-domain question had at least one hit for each of its terms.
+ *
+ * @param {string[]} terms @returns {string[]} terms with no match anywhere
+ */
+function unevidencedTerms(terms) {
+  const missing = [];
+  for (const t of terms) {
+    let seen = false;
+    for (let i = 0; i < N && !seen; i++) if (hay[i].includes(t)) seen = true;
+    if (!seen) missing.push(t);
+  }
+  return missing;
+}
+
 /** Discounted contribution of semantic-neighbour terms.
  * @param {string} norm @param {string} bare
  * @param {[string, number][]} expansions @param {Record<string, number>} w */
@@ -822,6 +847,34 @@ function runAsk() {
   applySummaryBoost(ranked, terms, expansions);
   const topic = matchTopic(raw.toLowerCase(), expansions);
   const dive = topic ? null : matchDive(raw.toLowerCase());
+  // Absence first, and named. Pre-written prose (a topic brief or deep dive)
+  // still answers, because it was written for the question rather than matched
+  // against the index.
+  const missing = topic || dive ? [] : unevidencedTerms(terms);
+  // Disclose, do not silence. An earlier attempt abstained when the rarest
+  // term was absent, which looked right on a large estate and then silenced
+  // four legitimate questions on a small one: ordinary question words ("used",
+  // "taken", "walk") are themselves absent from a small corpus, so one of them
+  // becomes the "rarest" term. Nothing distinguishes a question word from a
+  // subject without an English lexicon, and a blocklist of them would never be
+  // complete. So the note is additive - the reader is told which of their words
+  // the graph holds nothing for, and still gets whatever did match. Only a
+  // question with no evidenced word at all is answered with the finding alone.
+  if (missing.length) {
+    expansionNote += ' | no evidence for: ' + missing.join(', ');
+  }
+  if (terms.length && missing.length === terms.length) {
+    meta.textContent =
+      'question type: no evidence - the graph holds nothing for ' +
+      missing.map((t) => '"' + t + '"').join(', ');
+    out.innerHTML =
+      '<div class="card"><h3>No evidence in this estate</h3><p>Nothing in the graph matches ' +
+      missing.map((t) => '<code>' + esc(t) + '</code>').join(', ') +
+      '. That is a finding rather than a ranking problem: this estate contains no such ' +
+      "component, schema or feature. Try the estate's own vocabulary." +
+      '</p></div>';
+    return;
+  }
   if (!ranked.length && !topic && !dive) {
     meta.textContent = 'nothing in the graph matches those words - try different terms';
     out.innerHTML = '';
