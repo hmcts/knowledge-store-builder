@@ -29,6 +29,8 @@ ruff check src tests
 ruff format --check src tests
 pyright
 
+tests/explorer/check-js.sh          # eslint + tsc --checkJs, the versions CI pins
+
 node tests/explorer/engine-unit.mjs
 python3 tests/explorer/fixture.py
 node tests/explorer/page-regression.mjs
@@ -37,6 +39,19 @@ node tests/explorer/page-regression.mjs
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked
 with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
 the page regression verifies that the tested code is the code that ships.
+
+**Run `check-js.sh`, not your own npm or npx command.** CI runs that script, so
+it is the only invocation that means anything. Two traps make an ad-hoc one
+worse than no check: this repository has no `package.json`, so a bare
+`npm install` searches upwards and installs outside the checkout, and `npx tsc`
+then resolves whatever stray `node_modules` sits above the repository and
+reports unrelated errors from it. Four implicit-`any` errors reached CI that
+way, hidden behind noise from another project's type definitions.
+
+**Rebuild the fixture whenever `app.js` changes.** `page-regression.mjs`
+asserts the built page inlines the current `app.js` byte-for-byte, so a stale
+fixture fails it for the right reason but a confusing one — run
+`python3 tests/explorer/fixture.py` first, as the block above does.
 
 **Tests defend the product's designed behaviour under change. A test earns
 its place by failing when the product breaks — name the break it catches
