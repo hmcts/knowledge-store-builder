@@ -27,6 +27,7 @@ import json
 from . import config, io
 
 FORMAT = "packages"
+MANIFEST = "package.json"
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
@@ -35,9 +36,9 @@ _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
 def _named_packages(repo_dir) -> list[tuple[str, str]]:
     """(package name, repo-relative package.json path) declared by one clone."""
     found = []
-    candidates = [repo_dir / "package.json"]
+    candidates = [repo_dir / MANIFEST]
     for sub in ("projects", "packages", "libs"):
-        candidates.extend(sorted((repo_dir / sub).glob("*/package.json")))
+        candidates.extend(sorted((repo_dir / sub).glob(f"*/{MANIFEST}")))
     for manifest in candidates:
         if not manifest.is_file():
             continue
@@ -51,7 +52,7 @@ def _named_packages(repo_dir) -> list[tuple[str, str]]:
 
 
 def _declared_dependencies(repo_dir) -> set[str]:
-    manifest = repo_dir / "package.json"
+    manifest = repo_dir / MANIFEST
     if not manifest.is_file():
         return set()
     try:
@@ -139,26 +140,37 @@ def _edge(source: str, target: str, relation: str, rel: str) -> dict:
     }
 
 
-def main() -> int:
-    if not config.GRAPH_PATH.exists():
-        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
-        return 1
-    if not config.REPOSITORIES_DIR.is_dir():
-        print(f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first")
-        return 1
-
-    clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
+def _discover_providers(clones: list) -> dict[str, tuple[str, str]]:
+    """package name -> (provider repo, manifest path); first repo wins a conflict."""
     providers: dict[str, tuple[str, str]] = {}
     for repo_dir in clones:
         for name, manifest_rel in _named_packages(repo_dir):
-            # deterministic on the rare conflict: lexicographically-first repo wins
             if name not in providers or repo_dir.name < providers[name][0]:
                 providers[name] = (repo_dir.name, manifest_rel)
+    return providers
 
-    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
-    _strip_layer(graph)
+
+def _ensure_package_node(
+    graph: dict, reps: dict, providers: dict, name: str, package_nodes: dict
+) -> tuple[dict, int]:
+    """The package's node, creating it with its provided_by edge on first sight."""
+    node = package_nodes.get(name)
+    if node is not None:
+        return node, 0
+    provider_repo, manifest_rel = providers[name]
+    node = _package_node(name, provider_repo, manifest_rel)
+    package_nodes[name] = node
+    graph["nodes"].append(node)
+    anchor = _anchor_under(reps, provider_repo, manifest_rel.rsplit(MANIFEST, 1)[0])
+    if anchor:
+        graph["links"].append(_edge(node["id"], anchor, "provided_by", manifest_rel))
+        return node, 1
+    return node, 0
+
+
+def _add_package_layer(graph: dict, clones: list, providers: dict) -> tuple[int, int, int]:
+    """Mutate the graph in place; return (packages, consumer pairs, edges added)."""
     reps = _representatives(graph)
-
     package_nodes: dict[str, dict] = {}
     edges = 0
     consumer_pairs = 0
@@ -170,19 +182,9 @@ def main() -> int:
             if name in providers and providers[name][0] != consumer
         }
         for name in sorted(shared):
-            provider_repo, manifest_rel = providers[name]
+            node, added = _ensure_package_node(graph, reps, providers, name, package_nodes)
+            edges += added
             importing = _importing_files(repo_dir, name)
-            node = package_nodes.get(name)
-            if node is None:
-                node = _package_node(name, provider_repo, manifest_rel)
-                anchor = _anchor_under(
-                    reps, provider_repo, manifest_rel.rsplit("package.json", 1)[0]
-                )
-                if anchor:
-                    graph["links"].append(_edge(node["id"], anchor, "provided_by", manifest_rel))
-                    edges += 1
-                package_nodes[name] = node
-                graph["nodes"].append(node)
             node["metadata"].setdefault("consumers", []).append(
                 {"repo": consumer, "import_sites": len(importing)}
             )
@@ -192,6 +194,23 @@ def main() -> int:
                 if source:
                     graph["links"].append(_edge(source, node["id"], "imports_package", rel))
                     edges += 1
+    return len(package_nodes), consumer_pairs, edges
+
+
+def main() -> int:
+    if not config.GRAPH_PATH.exists():
+        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    if not config.REPOSITORIES_DIR.is_dir():
+        print(f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first")
+        return 1
+
+    clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
+    providers = _discover_providers(clones)
+
+    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    _strip_layer(graph)
+    package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -199,7 +218,7 @@ def main() -> int:
         out.write(serialised)
 
     print(
-        f"Packages: {len(package_nodes)} shared across repositories "
+        f"Packages: {package_count} shared across repositories "
         f"({len(providers)} named in total), {consumer_pairs} consumer relationships, "
         f"{edges} edges added"
     )
