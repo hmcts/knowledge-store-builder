@@ -193,6 +193,20 @@ name of the field it came from: a reader has to be able to tell a tracker title
 from a commit subject from a commit body, because the store's grounding contract
 turns on which of the three a statement came from.
 
+**Which tickets it returns is decided by how much each matched word tells you.**
+Counting matched words ranks the generic above the distinctive — the same defect
+recorded below for the node ranker — and a section headed as evidence is worse
+wrong than absent. So each word is weighted by how rare it is in the ticket
+corpus itself, measured there rather than in the entry index, because a word can
+be everywhere in code names and nowhere in commit prose. Rarity alone is not
+enough: in a corpus of terse subjects, ordinary English is itself rare, so a long
+body matching two unremarkable words can still outvote the one word that carries
+the question. Two further measures settle it, both ordinary information
+retrieval — a length discount, because a long body matches anything by surface
+area, and a bar below which a word is not decisive enough to justify showing a
+ticket at all. No stopword list: which words are ordinary depends on the corpus,
+no fixed list is ever complete, and both measures recalibrate from the data.
+
 **Absence is disclosed, not hidden.** The ranker alone cannot keep the store's
 "absence of evidence is a finding" promise: a question about something the
 estate does not contain still scores, because its ordinary words match

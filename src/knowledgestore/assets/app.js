@@ -67,6 +67,11 @@ const ticketHay = TICKET_IDS.map((t) => {
   const info = TICKET_INFO[t];
   return (info.d || []).concat(info.s || [], info.b || []).join('\n').toLowerCase();
 });
+/** One ticket's evidence runs from a six-word subject to four thousand
+ * characters of body prose, and a long text matches ordinary words by sheer
+ * surface area. Scoring needs the mean to normalise against. */
+const ticketLen = ticketHay.map((text) => text.length);
+const avgTicketLen = ticketLen.reduce((a, b) => a + b, 0) / (ticketLen.length || 1);
 /** @type {number[][]} */
 const ADJ = DATA.map(() => []);
 for (let i = 0; i < EDGE_FLAT.length; i += 2) {
@@ -443,6 +448,22 @@ function unevidencedTerms(terms) {
 }
 
 const MAX_EVIDENCE_TICKETS = 3;
+/**
+ * A word counts as decisive when it is at least this informative a share of the
+ * most informative word the corpus holds for the question, and a ticket has to
+ * match a decisive word to be shown at all. Ordering alone is not enough: the
+ * page shows three tickets under a heading saying they answer the question, so a
+ * ticket that matched none of its decisive words must not appear, rather than
+ * appearing third.
+ *
+ * Measured on a real estate: for a question whose subject word scored 5.90, its
+ * ordinary words scored 5.27 and 3.96, so a bar at nine tenths of the best
+ * admits the subject and excludes the rest.
+ */
+const DECISIVE_SHARE = 0.9;
+/** BM25's constants at their usual values: `K1` caps what repeating a word can
+ * add, `B` how much a text's length discounts it. */
+const BM25_K1 = 1.2, BM25_B = 0.75;
 
 /** Lexicographic order, independent of locale. @param {string} a @param {string} b */
 function cmpId(a, b) {
@@ -450,46 +471,137 @@ function cmpId(a, b) {
   return a > b ? 1 : 0;
 }
 
-/** How much of the query one ticket's evidence carries.
- * @param {string} text @param {string[]} terms
- * @returns {{distinct: number, hits: number, real: number}} distinct terms
- *   matched, total occurrences, and how many matched terms were longer than
- *   a single character */
-function evidenceScore(text, terms) {
-  let distinct = 0, hits = 0, real = 0;
+/** @type {Map<string, number>} */
+const ticketDfCache = new Map();
+
+/**
+ * How many tickets' evidence holds each term.
+ *
+ * Cached per term and computed only for terms not seen before: a question has a
+ * handful of terms and the corpus has thousands of tickets, so the scan is worth
+ * doing once. Deliberately not `idfFor`, which counts document frequency over
+ * node labels: a word can be everywhere in labels and nowhere in commit text, or
+ * the reverse, and borrowing the wrong denominator would mis-weight silently.
+ *
+ * @param {string[]} terms @returns {Record<string, number>}
+ */
+function ticketDfFor(terms) {
+  const missing = terms.filter((t) => !ticketDfCache.has(t));
+  if (missing.length) {
+    /** @type {Record<string, number>} */
+    const counts = {};
+    missing.forEach((t) => (counts[t] = 0));
+    for (const text of ticketHay) {
+      for (const t of missing) if (text.includes(t)) counts[t]++;
+    }
+    for (const t of missing) ticketDfCache.set(t, counts[t]);
+  }
+  /** @type {Record<string, number>} */
+  const df = {};
+  for (const t of terms) df[t] = ticketDfCache.get(t) || 0;
+  return df;
+}
+
+/**
+ * How informative each of the question's words is within the ticket corpus, and
+ * the weight of the most informative word the corpus actually holds.
+ *
+ * @param {string[]} terms
+ * @returns {{w: Record<string, number>, strongest: number}}
+ */
+function ticketWeights(terms) {
+  const df = ticketDfFor(terms);
+  const total = ticketHay.length;
+  /** @type {Record<string, number>} */
+  const w = {};
+  let strongest = 0;
+  for (const t of terms) {
+    w[t] = Math.log(1 + total / (1 + df[t]));
+    // A word the corpus does not hold at all scores as the rarest of them by
+    // this measure, and must not set the bar for the words it does hold - or a
+    // question with one absent word would suppress every real match.
+    if (df[t] > 0 && t.length > 1 && w[t] > strongest) strongest = w[t];
+  }
+  return { w, strongest };
+}
+
+/** How much of the question one ticket's evidence carries.
+ *
+ * A term's contribution is its rarity weight, scaled by how often the ticket
+ * repeats it and discounted by how long the ticket's evidence is - BM25's
+ * standard form. Length matters here more than in most indexes: this corpus
+ * mixes one-line subjects with thousands of characters of body prose, and
+ * without the discount a long body wins simply by covering more words.
+ *
+ * @param {string} text @param {number} len @param {string[]} terms
+ * @param {Record<string, number>} w @param {number} floor
+ * @returns {{weight: number, hits: number, decisive: boolean}} summed
+ *   contribution, total occurrences, and whether any matched term was decisive
+ *   enough to justify showing the ticket at all */
+function evidenceScore(text, len, terms, w, floor) {
+  let weight = 0, hits = 0;
+  let decisive = false;
+  const norm = BM25_K1 * (1 - BM25_B + BM25_B * (len / avgTicketLen));
   for (const t of terms) {
     const n = text.split(t).length - 1;
     if (!n) continue;
-    distinct++;
+    weight += w[t] * (n * (BM25_K1 + 1)) / (n + norm);
     hits += n;
-    if (t.length > 1) real++;
+    // a single character is in almost every body ever written, so a match on
+    // one is an accident however rare the corpus makes it look
+    if (t.length > 1 && w[t] >= floor) decisive = true;
   }
-  return { distinct, hits, real };
+  return { weight, hits, decisive };
 }
 
 /**
  * Tickets whose commit evidence carries the question's words.
  *
- * At least one term of two or more characters has to match: a single letter is
- * in almost every body ever written, and a ticket surfaced on one is noise
- * dressed as evidence.
+ * Ranked by how much the matched words tell you, not by how many matched.
+ * Measured on a real estate, counting matches put the generic above the
+ * distinctive: a question with one distinctive word and two ordinary ones
+ * returned three tickets that had matched only the ordinary two, while none of
+ * the 34 tickets whose evidence held the distinctive word appeared at all. That
+ * is the same defect already recorded against the node ranker - a scorer blind
+ * to rarity ranks the generic first - and this page states its result as
+ * evidence, so being wrong here is worse than being silent.
  *
- * Ordered by how much of the question the evidence covers, then by total
- * occurrences, then by ticket id. The last is not cosmetic - two runs of the
- * same question have to agree, and equal scores would otherwise come out in
- * whatever order the artefact happened to be written in.
+ * Rarity alone did not fix it, and the reason is worth keeping. In a corpus of
+ * terse commit subjects, ordinary English is *rare*: on that estate the word
+ * "was" appeared in 65 of 12,742 tickets, scoring almost as distinctive as the
+ * subject word it was competing with, so two ordinary words still outvoted the
+ * one that carried the question. Two further measures separate them, and both
+ * are ordinary information retrieval:
+ *
+ * - **length normalisation** (BM25, in `evidenceScore`). The tickets that won
+ *   on ordinary words had long prose bodies, which match anything by surface
+ *   area; the ones that deserved to win were one-line subjects naming the thing
+ *   asked about.
+ * - **a decisive-word bar** (`DECISIVE_SHARE`). A ticket that matched none of
+ *   the question's most informative words is not shown at all, however much
+ *   ordinary vocabulary it accumulated.
+ *
+ * No stopword list, deliberately: which words are ordinary depends on the
+ * corpus, no fixed list is ever complete, and both measures here recalibrate
+ * themselves from the data as an estate grows.
+ *
+ * Ordered by summed contribution, then total occurrences, then ticket id. The
+ * last is not cosmetic - two runs of the same question have to agree, and equal
+ * scores would otherwise come out in whatever order the artefact was written in.
  *
  * @param {string[]} terms
- * @returns {{id: string, distinct: number, hits: number}[]} the strongest few
+ * @returns {{id: string, weight: number, hits: number}[]} the strongest few
  */
 function ticketEvidence(terms) {
-  /** @type {{id: string, distinct: number, hits: number}[]} */
+  const { w, strongest } = ticketWeights(terms);
+  const floor = strongest * DECISIVE_SHARE;
+  /** @type {{id: string, weight: number, hits: number}[]} */
   const scored = [];
   for (let i = 0; i < TICKET_IDS.length; i++) {
-    const { distinct, hits, real } = evidenceScore(ticketHay[i], terms);
-    if (real) scored.push({ id: TICKET_IDS[i], distinct, hits });
+    const { weight, hits, decisive } = evidenceScore(ticketHay[i], ticketLen[i], terms, w, floor);
+    if (decisive) scored.push({ id: TICKET_IDS[i], weight, hits });
   }
-  scored.sort((a, b) => b.distinct - a.distinct || b.hits - a.hits || cmpId(a.id, b.id));
+  scored.sort((a, b) => b.weight - a.weight || b.hits - a.hits || cmpId(a.id, b.id));
   return scored.slice(0, MAX_EVIDENCE_TICKETS);
 }
 
