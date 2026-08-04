@@ -583,6 +583,8 @@ class SemanticVocabularyTest(SettingsIsolated):
         self.assertNotIn("shouted", vocab, "occurrences in one text are not document frequency")
 
     def test_manifest_records_what_decided_the_artefact_and_is_deterministic(self):
+        import json
+
         from knowledgestore import build_semantic_index as semantic
 
         with tempfile.TemporaryDirectory() as tmp:
