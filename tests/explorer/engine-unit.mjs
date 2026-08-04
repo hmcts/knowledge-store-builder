@@ -150,6 +150,25 @@ assert('a dive match survives a zero-hit ranked list',
 assert('the zero-hit dive question is not reported as unmatched',
   !context.meta.textContent.includes('nothing in the graph matches'), context.meta.textContent);
 
+// Inferred evidence must never outrank direct evidence.
+//
+// Measured on a real estate before this was fixed: "what handles video
+// transcription of hearings?" returned ten Helm-chart `image` fields as its
+// top ten, because `image` is a semantic neighbour of `video`. A neighbour
+// matching a label exactly earned the prefix tier (x100) and escaped the
+// coverage scaling that direct term matches are subject to (cov^2 = 0.0625 for
+// one term of four), so a guess at similarity 0.27 scored 229 while the true
+// answer - whose own label contains the query term "transcription" - scored 13.
+//
+// A neighbour is inferred; a term match is evidence. Here "address" is a direct
+// prefix match on AddressPipe, while ResultsService matches only the neighbour
+// "result" expanded from "outcome". AddressPipe must win.
+const dTerms = ['outcome', 'address'];
+const dRanked = context.rankNodes(dTerms, context.expandTerms(dTerms));
+assert('a semantic neighbour does not outrank a direct term match',
+  dRanked.length > 0 && DATA[dRanked[0][1]][0] === 'AddressPipe',
+  JSON.stringify(dRanked.slice(0, 3).map((r) => [DATA[r[1]][0], r[0].toFixed(2)])));
+
 // bfs: hop distances and cap
 const reached = context.bfs([0], 2, 100);
 assert('bfs reaches two hops with correct distances',
