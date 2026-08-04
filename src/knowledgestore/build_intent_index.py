@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
-from dataclasses import dataclass
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -62,9 +62,29 @@ AUTHOR_LINE = "author: "
 BOT_ACCOUNT = "[bot]"
 # Automation predating or outside the GitHub App [bot] convention. Whole-word
 # matched, so `snyk` also catches `snyk-bot`.
-BOT_IDENTITY = re.compile(
-    r"\b(jenkins|renovate|snyk|greenkeeper|devops-team|embedded_devops_sa)\b", re.IGNORECASE
-)
+# Deliberately not a module-level constant. Stage modules in this library read
+# `config` when called, never when imported, because `configure()` runs after
+# import and a constant captured at import silently ignores it - a defect this
+# codebase has already paid for once. Cached per list so 180,000 commits do not
+# recompile it.
+_IDENTITY_PATTERNS: dict[tuple[str, ...], re.Pattern[str] | None] = {}
+
+
+def _identity_pattern() -> re.Pattern[str] | None:
+    """The automation-identity matcher for the settings in force right now.
+
+    None when the list is empty, which leaves only the `[bot]` convention.
+    """
+    names = tuple(config.AUTOMATION_IDENTITIES)
+    if names not in _IDENTITY_PATTERNS:
+        _IDENTITY_PATTERNS[names] = (
+            re.compile(r"\b(" + "|".join(re.escape(n) for n in names) + r")\b", re.IGNORECASE)
+            if names
+            else None
+        )
+    return _IDENTITY_PATTERNS[names]
+
+
 MERGE_BULLET = "* "
 MIN_MERGE_BULLETS = 2
 MIN_BODY_CHARS = 25
@@ -90,6 +110,10 @@ class BodyReport:
     boilerplate_emptied: int = 0
     automated: int = 0
     bot_text: int = 0
+    # Named, not just counted: the identity list is matched as a whole word and
+    # several entries are also surnames, so an operator must be able to see a
+    # person in this list rather than discover the loss from a missing answer.
+    automated_identities: Counter[str] = field(default_factory=Counter)
 
 
 def clean_description(subject: str) -> str:
@@ -247,7 +271,20 @@ def _automated_identity(person: object) -> bool:
         return True
     # The local part only: real contributors use NNNNNN+user@users.noreply.github.com
     # addresses, so the host is never a bot signal.
-    return bool(BOT_IDENTITY.search(name) or BOT_IDENTITY.search(email.split("@")[0]))
+    pattern = _identity_pattern()
+    if pattern is None:
+        return False
+    return bool(pattern.search(name) or pattern.search(email.split("@")[0]))
+
+
+def _identity_label(commit: dict) -> str:
+    """The author identity to name in the run report."""
+    person = commit.get("author")
+    if not isinstance(person, dict):
+        return "unknown"
+    name = str(person.get("name") or "").strip()
+    email = str(person.get("email") or "").strip()
+    return f"{name} <{email}>" if name or email else "unknown"
 
 
 def is_automated(commit: dict) -> bool:
@@ -341,6 +378,7 @@ def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: Bo
         return
     if is_automated(commit):
         report.automated += 1
+        report.automated_identities[_identity_label(commit)] += 1
         return
     if clean_body(raw, boilerplate):
         return
@@ -408,6 +446,15 @@ def summarise(
         f"Bodies discarded: {bodies.automated:,} by automated authorship, "
         f"{bodies.bot_text:,} by bot-generated text."
     )
+    if bodies.automated_identities:
+        named = ", ".join(
+            f"{who} ({n:,})"
+            for who, n in sorted(
+                bodies.automated_identities.items(), key=lambda kv: (-kv[1], kv[0])
+            )[:8]
+        )
+        print(f"  treated as automation: {named}")
+        print("  a person in that list means KSB_AUTOMATION_IDENTITIES needs narrowing")
     print(
         f"Learned boilerplate: {bodies.boilerplate_lines:,} repeated body lines suppressed, "
         f"emptying {bodies.boilerplate_emptied:,} bodies."

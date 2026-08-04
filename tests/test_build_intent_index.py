@@ -11,6 +11,7 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
+from knowledgestore import config  # noqa: E402
 
 
 def make_descriptions():
@@ -388,6 +389,64 @@ class AutomatedAuthorTest(SettingsIsolated):
 
 
 CHECKLIST = "Checklist: tests updated, docs updated, ticket linked."
+
+
+class ConfigurableAutomationTest(SettingsIsolated):
+    """The identity list is matched as a whole word, and several entries are also
+    surnames. Measured on one estate it matched 23 identities and every one was a
+    machine - but the rule as written discards the bodies of anyone called
+    Jenkins, so an estate must be able to narrow it, and a run must say when it
+    fired.
+
+    The break each test catches: a person's evidence discarded with no override
+    and nothing in the output to notice it by."""
+
+    BODY = "Completes DD-42 by pinning the newer release across the workspaces."
+
+    def _linked(self, **identity):
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit("update the pinned library", body=self.BODY, **identity)
+        intent.apply_commit(commit, files, descriptions)
+        return files["src/x.ts"]["tickets"] != {}
+
+    def test_a_person_sharing_a_name_with_a_build_server_is_lost_by_default(self):
+        # Not a bug being fixed: the documented cost of a whole-word list, pinned
+        # so narrowing it stays a deliberate choice rather than a surprise.
+        self.assertFalse(self._linked(author={"name": "Bob Jenkins", "email": "b@example.example"}))
+
+    def test_narrowing_the_list_keeps_that_person(self):
+        config.AUTOMATION_IDENTITIES = ["renovate", "snyk"]
+        self.assertTrue(self._linked(author={"name": "Bob Jenkins", "email": "b@example.example"}))
+
+    def test_emptying_the_list_leaves_only_the_bot_convention(self):
+        config.AUTOMATION_IDENTITIES = []
+        self.assertTrue(self._linked(author={"name": "jenkins", "email": "j@example.example"}))
+        self.assertFalse(
+            self._linked(author={"name": "renovate[bot]", "email": "r@example.example"})
+        )
+
+    def test_the_list_is_read_when_called_not_when_imported(self):
+        # configure() runs after import; a pattern captured at import would ignore it.
+        config.AUTOMATION_IDENTITIES = ["jenkins"]
+        self.assertFalse(self._linked(author={"name": "jenkins", "email": "j@example.example"}))
+        config.AUTOMATION_IDENTITIES = ["renovate"]
+        self.assertTrue(self._linked(author={"name": "jenkins", "email": "j@example.example"}))
+
+    def test_the_report_names_who_was_treated_as_automation(self):
+        commits = [
+            make_commit(
+                "DD-1: bump the pinned library",
+                body=self.BODY,
+                author={"name": "jenkins", "email": "jenkins@example.example"},
+            ),
+            make_commit("DD-1: widen the address field", body=self.BODY),
+        ]
+        report = intent.BodyReport()
+        with tempfile.TemporaryDirectory() as tmp:
+            intent.index_repository(write_ndjson(tmp, commits), make_descriptions(), report)
+        self.assertEqual(
+            dict(report.automated_identities), {"jenkins <jenkins@example.example>": 1}
+        )
 
 
 class BoilerplateTest(SettingsIsolated):
