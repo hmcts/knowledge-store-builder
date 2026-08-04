@@ -884,6 +884,28 @@ function reportUnevidenced(terms, prewritten) {
   return true;
 }
 
+/**
+ * Put pre-written prose above the composed answer, or invite one where none
+ * exists. A topic brief outranks a deep dive because it was written to answer a
+ * question, while a dive was written about a repository.
+ * @param {{title: string, html: string, source: string}|null} topic
+ * @param {{repo: string, title: string, html: string, source: string, sha: string}|null} dive
+ * @param {string} raw the question as typed
+ */
+function prependPrewritten(topic, dive, raw) {
+  if (topic) {
+    out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
+    meta.textContent = 'topic brief: ' + topic.title
+      + (meta.textContent ? ' | ' + meta.textContent : '');
+  } else if (dive) {
+    out.innerHTML = diveHtml(dive) + out.innerHTML;
+    meta.textContent = 'deep dive: ' + dive.repo
+      + (meta.textContent ? ' | ' + meta.textContent : '');
+  } else {
+    out.innerHTML += requestBriefHtml(raw);
+  }
+}
+
 function runAsk() {
   const raw = q.value.trim();
   if (!raw) {
@@ -917,17 +939,7 @@ function runAsk() {
     out.innerHTML = '';
     meta.textContent = '';
   }
-  if (topic) {
-    out.innerHTML = topicBriefHtml(topic) + out.innerHTML;
-    meta.textContent = 'topic brief: ' + topic.title
-      + (meta.textContent ? ' | ' + meta.textContent : '');
-  } else if (dive) {
-    out.innerHTML = diveHtml(dive) + out.innerHTML;
-    meta.textContent = 'deep dive: ' + dive.repo
-      + (meta.textContent ? ' | ' + meta.textContent : '');
-  } else {
-    out.innerHTML += requestBriefHtml(raw);
-  }
+  prependPrewritten(topic, dive, raw);
 }
 
 function run() { (mode === 'ask' ? runAsk : runSearch)(); }
