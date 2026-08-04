@@ -358,6 +358,9 @@ function unevidencedTerms(terms) {
  * index. Ranking the guess above the evidence inverts the store's grounding
  * contract, so expansions now break ties and bridge vocabulary without ever
  * outranking a direct hit.
+ *
+ * @param {string} norm @param {string} bare
+ * @param {[string, number][]} expansions @param {Record<string, number>} w
  */
 function expansionBonus(norm, bare, expansions, w) {
   let bonus = 0;
