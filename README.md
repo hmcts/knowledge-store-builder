@@ -92,6 +92,7 @@ later, Git and the GitHub CLI. The guides list them.
 | [`docs/building-a-knowledge-store.md`](docs/building-a-knowledge-store.md) | the operator's judgement: defining an estate, what extraction yields, refresh economics, the traps |
 | [`docs/grounding-and-verification.md`](docs/grounding-and-verification.md) | whether a store's answers are fact-based, and how to verify subagent-authored content |
 | [`docs/retrieval-architecture.md`](docs/retrieval-architecture.md) | how this differs from vector RAG, and where each answer layer lives |
+| [`docs/how-it-works.md`](docs/how-it-works.md) | the science: each mechanism, its constants, and where its behaviour is proven |
 | [`CLAUDE.md`](CLAUDE.md) | working on this repository: the dev install, the checks, and what has bitten us |
 
 ## Licence
