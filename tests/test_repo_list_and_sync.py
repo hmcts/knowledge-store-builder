@@ -501,6 +501,9 @@ class CliTest(SettingsIsolated):
                 "context",
                 "intent",
                 "ticket-titles",
+                # the other route to the same enrichment: ask the tracker
+                # rather than import an export of it
+                "fetch-tickets",
                 "gherkin",
                 "packages",
                 "summaries",
