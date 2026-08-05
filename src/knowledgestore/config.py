@@ -173,7 +173,7 @@ TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
 # differ between estates and no library can know them all, so add yours with
 # KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
 #
-#   KSB_SENSITIVE_PATTERNS='{"listing-reference": "\\bREF/[0-9]{4}\\b"}'
+#   KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'
 # One default only, and deliberately: an email address has the same shape
 # everywhere, so it is the only identifier this library can recognise without
 # assuming a jurisdiction or a subject domain. Reference formats for cases,

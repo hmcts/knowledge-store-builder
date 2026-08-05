@@ -831,16 +831,16 @@ class RedactedValuesTest(EstateRulesDeclared):
         tickets, _, _ = run_stage(
             [
                 make_commit(
-                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
-                    body=f"{CASE_REFERENCE} - the second hearing is missing from the record.",
+                    f"DD-1: cannot open the record for {CASE_REFERENCE}",
+                    body=f"{CASE_REFERENCE} - the second entry is missing from the export.",
                 )
             ]
         )
         ticket = tickets["DD-1"]
-        self.assertEqual(ticket["d"], [f"cannot open the hearing for {CASE_GONE}"])
-        self.assertEqual(ticket["s"], [f"cannot open the hearing for {CASE_GONE}"])
+        self.assertEqual(ticket["d"], [f"cannot open the record for {CASE_GONE}"])
+        self.assertEqual(ticket["s"], [f"cannot open the record for {CASE_GONE}"])
         self.assertEqual(
-            ticket["b"], [f"{CASE_GONE} - the second hearing is missing from the record."]
+            ticket["b"], [f"{CASE_GONE} - the second entry is missing from the export."]
         )
         self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
 
@@ -896,7 +896,7 @@ class RedactedValuesTest(EstateRulesDeclared):
         tickets, _, _ = run_stage(
             [
                 make_commit(
-                    "DD-1: correct the listing order",
+                    "DD-1: correct the sort order",
                     body=(
                         f"{CASE_REFERENCE} and {OTHER_CASE_REFERENCE} were listed "
                         "on the same day by mistake."
@@ -989,7 +989,7 @@ class RedactedValuesTest(EstateRulesDeclared):
                 make_commit(
                     f"DD-1: {CASE_REFERENCE}",
                     date="2024-03-04T09:00:00+00:00",
-                    path="src/hearing.ts",
+                    path="src/record.ts",
                 ),
                 make_commit("DD-2: widen the address field to 35 characters"),
             ]
@@ -1001,7 +1001,7 @@ class RedactedValuesTest(EstateRulesDeclared):
         self.assertEqual(emptied["last"], "2024-03-04")
         self.assertEqual(emptied["repos"], ["repo-a"])
         self.assertEqual(emptied["n"], 1)
-        self.assertEqual(index["repo-a"]["src/hearing.ts"]["tickets"], {"DD-1": 1})
+        self.assertEqual(index["repo-a"]["src/record.ts"]["tickets"], {"DD-1": 1})
 
 
 class RedactionRulesAreConfigurableTest(SettingsIsolated):
@@ -1017,21 +1017,21 @@ class RedactionRulesAreConfigurableTest(SettingsIsolated):
         than kept in a second list nobody remembers to extend."""
         config.SENSITIVE_PATTERNS = {
             **config.SENSITIVE_PATTERNS,
-            "listing-reference": r"\bREF/\d{4}\b",
+            "record-reference": r"\bREC/\d{4}\b",
         }
-        tickets, _, output = run_stage([make_commit("DD-1: rework the listing for REF/0000")])
+        tickets, _, output = run_stage([make_commit("DD-1: rework the summary for REC/0000")])
         self.assertEqual(
-            tickets["DD-1"]["d"], ["rework the listing for [listing reference withheld]"]
+            tickets["DD-1"]["d"], ["rework the summary for [record reference withheld]"]
         )
-        self.assertIn("listing-reference (1)", output)
+        self.assertIn("record-reference (1)", output)
 
     def test_the_environment_override_adds_to_the_defaults(self):
         with mock.patch.dict(
-            os.environ, {"KSB_SENSITIVE_PATTERNS": '{"listing-ref": "REF/[0-9]+"}'}
+            os.environ, {"KSB_SENSITIVE_PATTERNS": '{"record-ref": "REC/[0-9]+"}'}
         ):
             importlib.reload(config)
         try:
-            self.assertIn("listing-ref", config.SENSITIVE_PATTERNS)
+            self.assertIn("record-ref", config.SENSITIVE_PATTERNS)
             # the shipped default survives an override that adds to it
             self.assertIn("email-address", config.SENSITIVE_PATTERNS)
         finally:
@@ -1076,7 +1076,7 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
             {
                 "DD-1": {
                     "d": [],
-                    "b": [f"{CASE_REFERENCE} - the second hearing is missing from the record."],
+                    "b": [f"{CASE_REFERENCE} - the second entry is missing from the export."],
                     "first": "2024-03-04",
                     "last": "2024-03-04",
                     "repos": ["repo-a"],
@@ -1093,7 +1093,7 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
         _, output = self._check(
             {
                 "DD-1": {
-                    "d": [f"cannot open the hearing for {CASE_REFERENCE}"],
+                    "d": [f"cannot open the record for {CASE_REFERENCE}"],
                     "s": [f"{POSTCODE} - the lookup returns nothing"],
                     "b": [f"Signed in as {EMAIL_ADDRESS} to reproduce the failure."],
                 }
@@ -1102,7 +1102,10 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
         for identifier in (CASE_REFERENCE, POSTCODE, EMAIL_ADDRESS):
             self.assertNotIn(identifier, output)
         # Nor the narrative written beside it, which is the rest of the value.
-        for word in ("hearing", "lookup", "reproduce"):
+        # These words are taken from the fixture above deliberately: an assertion
+        # naming words the fixture does not contain passes without checking
+        # anything, which is how this became vacuous once the fixture was reworded.
+        for word in ("record", "lookup", "reproduce"):
             self.assertNotIn(word, output)
 
     def test_a_clean_artefact_passes(self):
@@ -1124,7 +1127,7 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
         tickets, _, _ = run_stage(
             [
                 make_commit(
-                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
+                    f"DD-1: cannot open the record for {CASE_REFERENCE}",
                     body=(
                         f"Signed in as {EMAIL_ADDRESS} to check {POSTCODE} "
                         f"against {NI_NUMBER} on the day."
