@@ -79,6 +79,45 @@ knowledgestore explorer        # the self-contained search page
 
 Stages are independent and idempotent — re-run one without repeating the rest.
 
+### Ticket detail from the issue tracker: `fetch-tickets`
+
+Optional, and off unless the store has tracker credentials
+(`KSB_TRACKER_BASE_URL`, `KSB_TRACKER_TOKEN`). Run it after `intent`, which is
+what discovers the tickets:
+
+```bash
+knowledgestore fetch-tickets     # -> knowledge/intent/ticket-tracker.json.gz
+```
+
+With no credentials it names the missing settings, writes nothing and exits 0 —
+that is a correct outcome, not a failure to work around. **Do not obtain or
+invent credentials to make it run**, and never put a token on a command line or
+into any file in the store; it comes from the environment the operator set up.
+Fetched tickets are never re-fetched, so a build without credentials reads the
+committed cache. Commit `knowledge/intent/ticket-tracker.json.gz` with the rest.
+
+Four numbers from its report belong in yours, and three of them are findings
+rather than statistics:
+
+- **denied** — tickets the run's token could not read. Say the number, and say
+  that a run with broader access would close it. Never describe a denial as a
+  ticket that does not exist: a permission gap recorded as absence becomes
+  permanent and invisible.
+- **undecided prefixes** — ticket prefixes in neither `KSB_TRACKER_PROJECTS` nor
+  `KSB_TRACKER_DENY`, written to `knowledge/intent/tracker-undecided.json` with
+  their ticket counts. Nothing was requested for them. **Report the list and stop
+  there** — whether this store may read a project is not your decision, and
+  neither quietly adding prefixes to the allowlist nor reporting them as skipped
+  is yours to make.
+- **redacted** — identifiers withheld from fetched text, under the same rules as
+  mined commit text. Carry the count; never the value.
+- **failed** — nothing was cached for those tickets and the next run retries
+  them. A run with failures is not a broken build.
+
+Fetched summaries and descriptions are **what the tracker says a ticket was**,
+not evidence you derived. Attribute them that way, exactly as commit-mined text
+is attributed to commits, and never merge the two into one claim.
+
 ### Clustering: `cluster-only` does not persist its result
 
 `graphify cluster-only` re-extracts from the store root before clustering. For

@@ -32,6 +32,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "import_ticket_titles",
         "merge real ticket titles from an issue-tracker CSV export",
     ),
+    "fetch-tickets": (
+        "fetch_tickets",
+        "ask the issue tracker about discovered tickets (opt-in; needs credentials)",
+    ),
     "gherkin": ("extract_gherkin", "add Gherkin features, scenarios and ticket links to the graph"),
     "packages": (
         "build_package_edges",

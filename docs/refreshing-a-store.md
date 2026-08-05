@@ -34,6 +34,36 @@ Skip `summaries snapshot` only when the store has no summaries to preserve.
 of a clustering the summaries are no longer keyed to is not refused, it just
 retains less, silently. Two re-clusters in one refresh need two snapshots.
 
+If the store reads its issue tracker, run `fetch-tickets` after `intent`, which
+is the stage that discovers which tickets exist:
+
+```bash
+knowledgestore fetch-tickets
+```
+
+It asks the tracker only about tickets it has never had an answer for, so a
+refresh costs requests for the tickets the refresh added. Read three numbers from
+its report:
+
+- **denied** — tickets waiting on access this token does not have. They are
+  retried by every later run, so a colleague with broader permissions can close
+  the gap without any change to the store.
+- **undecided prefixes** — prefixes in neither `KSB_TRACKER_PROJECTS` nor
+  `KSB_TRACKER_DENY`, listed in `knowledge/intent/tracker-undecided.json`.
+  Nothing was requested for them. Decide, then re-run.
+- **redacted** — identifiers withheld from fetched text, under the same rules as
+  mined commit text. Carry it into your report: it is a finding about the tracker
+  rather than a build statistic.
+
+Failures are normal and not fatal: a 5xx, a dropped connection or a page the
+tracker refused outright is not cached, so the next run retries it. If a whole
+page keeps failing, lower `KSB_TRACKER_PAGE_SIZE` — a tracker that rejects a
+search because one key in it is unreadable rejects the whole page.
+
+A build with no tracker credentials skips the stage and reads the committed
+cache, so `knowledge/intent/ticket-tracker.json.gz` has to be committed like any
+other layer.
+
 Review discovery and sync counts, then repeat
 [Build the graph](creating-a-store.md#build-the-graph) against every configured
 repository. Re-clustering can change community IDs even when the estate

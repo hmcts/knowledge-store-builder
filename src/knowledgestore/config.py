@@ -34,6 +34,23 @@ def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
+def _env_float(name: str, default: float) -> float:
+    return float(os.environ.get(name, default))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """A switch that is off unless it is explicitly turned on.
+
+    Anything other than the affirmative spellings below is false, including an
+    empty value: a setting that opts into fetching narrative text must not be
+    enabled by `KSB_...=` left over in a shell.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _env_set(name: str, default: set[str]) -> set[str]:
     value = os.environ.get(name)
     return {v.strip() for v in value.split(",") if v.strip()} if value else default
@@ -91,6 +108,13 @@ CONTEXT_PATH = ROOT / "knowledge_context.md"
 INTENT_INDEX_PATH = ROOT / "knowledge" / "intent" / "file-tickets.json.gz"
 TICKET_DESCRIPTIONS_PATH = ROOT / "knowledge" / "intent" / "ticket-descriptions.json.gz"
 TICKET_TITLES_PATH = ROOT / "knowledge" / "intent" / "ticket-titles.json.gz"
+# What the issue tracker said about each discovered ticket, one request per
+# ticket ever. Written by `fetch-tickets`; a build without tracker credentials
+# reads the committed file rather than degrading.
+TICKET_TRACKER_PATH = ROOT / "knowledge" / "intent" / "ticket-tracker.json.gz"
+# Ticket prefixes nobody has decided about yet: not in the allowlist, not in the
+# deny list, so not requested and not silently dropped either.
+TRACKER_UNDECIDED_PATH = ROOT / "knowledge" / "intent" / "tracker-undecided.json"
 SUMMARIES_INPUT_PATH = ROOT / "knowledge" / "summaries" / "communities-input.json"
 SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
 # Community membership as it was before a re-cluster, so summaries can be
@@ -160,6 +184,36 @@ AUTOMATION_IDENTITIES = [
 ]
 
 TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
+
+# --- asking the tracker what a ticket is (the `fetch-tickets` stage) ------
+# Every setting here is empty or off by default, because the stage is opt-in:
+# the pipeline is complete without it, and a store with no tracker credentials
+# reads whatever the last credentialled run committed.
+#
+# The tracker's API root, e.g. https://tracker.example/jira - the part before
+# /rest/api/2. Empty means the stage is not configured and does nothing.
+TRACKER_BASE_URL = os.environ.get("KSB_TRACKER_BASE_URL", "")
+# A personal access token, sent as `Authorization: Bearer <token>`. Never
+# written to an artefact, a log line or an error message - see fetch_tickets.py.
+TRACKER_TOKEN = os.environ.get("KSB_TRACKER_TOKEN", "")
+# The ticket prefixes this store may read, comma-separated (`AAA,BBB`). Empty
+# means none, which is not the same as "all": prefixes that are in neither list
+# are reported for a person to decide about, and never requested.
+TRACKER_PROJECTS = _env_set("KSB_TRACKER_PROJECTS", set())
+# Prefixes that must never be requested, whatever the allowlist says. A deny
+# entry wins, so an allowlist edit cannot re-enable a project somebody withdrew.
+TRACKER_DENY = _env_set("KSB_TRACKER_DENY", set())
+# Narrative text is not requested unless asked for. A response that never
+# carried a description is a stronger guarantee than one that carried it and had
+# it discarded locally, so these two settings change the request, not the store.
+TRACKER_FETCH_DESCRIPTION = _env_bool("KSB_TRACKER_FETCH_DESCRIPTION", False)
+TRACKER_FETCH_COMMENTS = _env_bool("KSB_TRACKER_FETCH_COMMENTS", False)
+# Tickets per search request. One request per ticket turns a large estate into
+# tens of thousands of calls; batching turns the same work into hundreds.
+TRACKER_PAGE_SIZE = _env_int("KSB_TRACKER_PAGE_SIZE", 100)
+# Pause between pages. One request is in flight at a time regardless; this is
+# what keeps a first run from reading as traffic worth alerting on.
+TRACKER_DELAY_SECONDS = _env_float("KSB_TRACKER_DELAY_SECONDS", 1.0)
 
 # --- identifiers redacted out of mined commit text ------------------------
 # Commit messages are written for colleagues, not for publication, and some of
@@ -284,6 +338,8 @@ def _recompute_paths() -> None:
         INTENT_INDEX_PATH=root / "knowledge" / "intent" / "file-tickets.json.gz",
         TICKET_DESCRIPTIONS_PATH=root / "knowledge" / "intent" / "ticket-descriptions.json.gz",
         TICKET_TITLES_PATH=root / "knowledge" / "intent" / "ticket-titles.json.gz",
+        TICKET_TRACKER_PATH=root / "knowledge" / "intent" / "ticket-tracker.json.gz",
+        TRACKER_UNDECIDED_PATH=root / "knowledge" / "intent" / "tracker-undecided.json",
         SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SUMMARIES_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-snapshot.json.gz",
