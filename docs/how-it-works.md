@@ -177,6 +177,36 @@ connections) and test files — sources matching `.spec.`, `__tests__` or
 `/test/` — are excluded, except in repositories the estate declares as
 end-to-end suites, where the tests *are* the business documentation.
 
+**What the commits said is a retrieval surface, indexed per ticket.** The page
+searches all three evidence fields the ticket artefact carries — the curated
+description, the commit subjects as written, and the body prose — because a body
+is where a breaking change, a renamed schema field or a pointer to a decision
+record gets written down, and none of that is in any node label. The index is
+built over tickets rather than over entries deliberately: the entry haystack is
+built once per indexed entry, and the same ticket is carried by many entries, so
+evidence inlined there is multiplied by every entry citing it — hundreds of
+megabytes of haystack in the browser on a real estate, against a few megabytes
+for one index over tickets, which is scanned linearly for the same order of work
+a question already costs. What matches is shown as an additional section, never
+in place of the composed answer, and each piece of evidence appears under the
+name of the field it came from: a reader has to be able to tell a tracker title
+from a commit subject from a commit body, because the store's grounding contract
+turns on which of the three a statement came from.
+
+**Which tickets it returns is decided by how much each matched word tells you.**
+Counting matched words ranks the generic above the distinctive — the same defect
+recorded below for the node ranker — and a section headed as evidence is worse
+wrong than absent. So each word is weighted by how rare it is in the ticket
+corpus itself, measured there rather than in the entry index, because a word can
+be everywhere in code names and nowhere in commit prose. Rarity alone is not
+enough: in a corpus of terse subjects, ordinary English is itself rare, so a long
+body matching two unremarkable words can still outvote the one word that carries
+the question. Two further measures settle it, both ordinary information
+retrieval — a length discount, because a long body matches anything by surface
+area, and a bar below which a word is not decisive enough to justify showing a
+ticket at all. No stopword list: which words are ordinary depends on the corpus,
+no fixed list is ever complete, and both measures recalibrate from the data.
+
 **Absence is disclosed, not hidden.** The ranker alone cannot keep the store's
 "absence of evidence is a finding" promise: a question about something the
 estate does not contain still scores, because its ordinary words match
@@ -188,7 +218,10 @@ finding alone when no word is evidenced. It discloses rather than abstains
 because nothing distinguishes a question word from a subject without an English
 lexicon: an earlier rule that abstained when the rarest word was absent
 silenced four legitimate questions, because ordinary words like "used" and
-"taken" are themselves missing from a small corpus.
+"taken" are themselves missing from a small corpus. The rule reads both indexes,
+the entries and the ticket evidence: a word only a commit body holds *is*
+evidenced, and naming it as absent directly above its own commit body would be
+the page contradicting itself.
 
 Ask-mode ranking is a port of graphify's own query scorer, and is documented
 in the application source in one line: *IDF-weighted terms,

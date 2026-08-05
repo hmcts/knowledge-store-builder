@@ -120,14 +120,50 @@ INTENT = {
             "last": "2024-02-01",
         },
     },
+    "demo-core": {
+        "src/payment.service.ts": {
+            "tickets": {"DEMO-2": 2},
+            "first": "2024-03-02",
+            "last": "2024-03-09",
+        },
+    },
 }
+# The three evidence fields of ticket-descriptions.json.gz. DEMO-2 carries
+# vocabulary that exists nowhere else in this estate - one word only in a
+# subject, one only in a body - so a question using either can only be
+# answered from ticket evidence. Its body also holds markup and an ampersand,
+# and spans several lines, because that is what real bodies do.
 TICKET_DESCRIPTIONS = {
     "DEMO-1": {
         "d": ["Add address formatting to the payment confirmation screen"],
+        "s": [
+            "Add address formatting to the payment confirmation screen",
+            "wip",
+        ],
         "first": "2024-01-05",
         "last": "2024-02-01",
         "repos": ["demo-app-a", "demo-e2e"],
         "n": 3,
+    },
+    "DEMO-2": {
+        # a quote, an apostrophe and an event handler, because a description
+        # also lands in a title attribute: an unescaped quote would close the
+        # attribute and what follows would be a live handler
+        "d": ['Charge the basket\'s card once, not per "line item" onmouseover=alert(1)'],
+        "s": [
+            'Charge the basket\'s card once, not per "line item" onmouseover=alert(1)',
+            "Log the settlement reference",
+        ],
+        "b": [
+            "BREAKING CHANGE: the postalCode field replaces postcode in the "
+            "confirmation payload.\n"
+            "- callers must send postalCode\n"
+            "- see ADR 0007 <script>alert(1)</script> & the migration plan"
+        ],
+        "first": "2024-03-02",
+        "last": "2024-03-09",
+        "repos": ["demo-core"],
+        "n": 2,
     },
 }
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}
@@ -189,6 +225,11 @@ def main() -> int:
         root=STORE,
         EXPLORER_TITLE="Demo Estate Explorer",
         BRIEF_REQUEST_URL="https://example.invalid/issues/new",
+        # A tracker URL is estate configuration that reaches the page and is
+        # interpolated into an href. This one carries an ampersand and an
+        # attempt to close the attribute and inject an event handler, so the
+        # regression can prove the page escapes what it embeds.
+        TICKET_BROWSE_URL='https://example.invalid/browse/?a=1&b="><img src=x onerror=alert(1)>&id=',
         MIN_ENTRY_DEGREE=1,
     )
 

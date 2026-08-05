@@ -107,8 +107,11 @@ page is self-contained: it needs neither Claude nor network access.
 
 The explorer searches the estate and answers supported question shapes from
 pre-computed evidence, including repository, usage, impact and ticket lookups.
-It can also return topic briefs written by the store's maintainers. It cannot
-compose a new prose answer for an unanticipated question, inspect runtime
+It searches what the commits said as well as the code: a question whose words
+appear only in a commit subject or a commit body still finds the tickets that
+carry them, and every quotation is shown under the name of the field it came
+from. It can also return topic briefs written by the store's maintainers. It
+cannot compose a new prose answer for an unanticipated question, inspect runtime
 behaviour or make a snapshot current.
 
 ### Use the terminal

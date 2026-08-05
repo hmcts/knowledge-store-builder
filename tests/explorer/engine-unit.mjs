@@ -6,6 +6,7 @@
 //
 // Run: node tests/explorer/engine-unit.mjs
 
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 
 // [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets, communityId]
@@ -42,8 +43,83 @@ const TOPICS = {
   },
 };
 
+// Ticket evidence, as ticket-descriptions.json.gz carries it: `d` the curated
+// description, `s` the commit subjects verbatim, `b` the body prose. The keys
+// are deliberately NOT in sorted order, so retrieval that depended on object
+// iteration order would not produce the required ordering.
+//
+// Vocabulary that exists nowhere else in this fixture: "settlement" only in a
+// subject, "postalCode" only in a body, "reconciliation" only in the tie-break
+// tickets. A question using one of those can be answered from ticket evidence
+// alone or not at all.
+const TICKET_INFO = {
+  'DD-1': {
+    d: ['Amend the defendant address journey'],
+    s: ['Amend the defendant address journey', 'wip'],
+    b: ['BREAKING CHANGE: postalCode replaces postcode.\n'
+        + '- callers must migrate\n'
+        + '- see ADR 0007 <script>alert(1)</script> & the migration plan'],
+    first: '2024-01-05', last: '2024-02-01', repos: ['repo-e2e'], n: 4,
+  },
+  'CRC-12016': {
+    d: ['Format the address on the confirmation screen'],
+    s: ['Format the address on the confirmation screen', 'Log the settlement reference'],
+    first: '2024-01-05', last: '2024-03-01', repos: ['repo-a'], n: 3,
+  },
+  // one term, repeated: coverage of the query must beat sheer frequency
+  'MANY-1': {
+    d: ['Address the address validation on the address form'],
+    s: ['Address the address validation on the address form'],
+    first: '2024-02-02', last: '2024-02-03', repos: ['repo-b'], n: 2,
+  },
+  'TIE-3': tie('2024-04-03'),
+  'TIE-1': tie('2024-04-01'),
+  'TIE-4': tie('2024-04-04'),
+  'TIE-2': tie('2024-04-02'),
+  // The same distinctive word, three times over, inside a long prose body: a
+  // long text matches anything by surface area. Its id sorts before RARE-1's,
+  // so nothing but length normalisation can put the focused ticket first.
+  'LONG-1': {
+    b: ['The voucher work is described here at length. '
+        + 'It touches the basket, the confirmation screen and the receipt. '.repeat(6)
+        + 'The voucher rules were agreed with the business, and the voucher '
+        + 'behaviour is unchanged for existing baskets.'],
+    first: '2024-06-03', last: '2024-06-04', repos: ['repo-a'], n: 1,
+  },
+  // two distinctive words, and none of the corpus's ordinary ones
+  'RARE-1': {
+    d: ['Add the voucher chargeback reversal'],
+    s: ['Add the voucher chargeback reversal'],
+    first: '2024-06-01', last: '2024-06-02', repos: ['repo-a'], n: 2,
+  },
+};
+
+/** Four tickets with identical evidence, so only the id can order them.
+ * @param {string} day */
+function tie(day) {
+  return {
+    d: ['Nightly reconciliation of the ledger'],
+    first: day, last: day, repos: ['repo-a'], n: 1,
+  };
+}
+
+// Twelve tickets carrying the corpus's ordinary vocabulary - "was", "removed",
+// "legacy" - and nothing distinctive. Their job is to make those words common,
+// because how informative a word is can only be measured against a corpus. A
+// handful of tickets would make every word rare and hide the defect these
+// exercise.
+for (let i = 1; i <= 12; i++) {
+  TICKET_INFO['NOISE-' + i] = {
+    d: ['The legacy flag was removed from screen ' + i],
+    first: '2024-05-01', last: '2024-05-02', repos: ['repo-a'], n: 1,
+  };
+}
+
 const makeEl = () => ({
   textContent: '', innerHTML: '', value: '', placeholder: '', style: {},
+  insertAdjacentHTML(position, html) {
+    this.innerHTML = position === 'afterbegin' ? html + this.innerHTML : this.innerHTML + html;
+  },
   checked: true, classList: { toggle() {} }, addEventListener() {}, add() {},
 });
 const elements = {
@@ -52,7 +128,7 @@ const elements = {
   titles: { textContent: '{}' },
   summaries: { textContent: JSON.stringify(SUMMARIES) },
   synonyms: { textContent: JSON.stringify(SYN) },
-  tickets: { textContent: '{}' },
+  tickets: { textContent: JSON.stringify(TICKET_INFO) },
   config: { textContent: '{}' },
   topics: { textContent: JSON.stringify(TOPICS) },
   dives: { textContent: JSON.stringify(DIVES) },
@@ -173,6 +249,154 @@ assert('a semantic neighbour does not outrank a direct term match',
 const reached = context.bfs([0], 2, 100);
 assert('bfs reaches two hops with correct distances',
   reached.get(0) === 0 && reached.get(2) === 1 && reached.get(4) === 2);
+
+/* ---- ticket evidence: the `s` and `b` fields as a retrieval surface ---- */
+
+const evidenceIds = (terms) => context.ticketEvidence(terms).map((m) => m.id);
+
+// A word only a commit body holds is still evidence. Breaks if the body field
+// is not indexed - which was the state of the page before this existed.
+assert('a term only a commit body holds surfaces its ticket',
+  deepEqual(evidenceIds(['postalcode']), ['DD-1']), JSON.stringify(evidenceIds(['postalcode'])));
+
+// Same for a subject the description filter rejected or never carried.
+assert('a term only a commit subject holds surfaces its ticket',
+  deepEqual(evidenceIds(['settlement']), ['CRC-12016']),
+  JSON.stringify(evidenceIds(['settlement'])));
+
+// A single letter matches almost any prose, so it is an accident, not a query.
+assert('a one-character term alone surfaces nothing',
+  deepEqual(evidenceIds(['a']), []), JSON.stringify(evidenceIds(['a'])));
+assert('a one-character term alongside a real one still retrieves',
+  deepEqual(evidenceIds(['a', 'postalcode']), ['DD-1']),
+  JSON.stringify(evidenceIds(['a', 'postalcode'])));
+
+// Cap and determinism: four tickets carry identical evidence, so their weights
+// and occurrence counts are equal and only the id can order them - and only
+// three may be shown.
+assert('at most three tickets, ordered by id when the weights tie',
+  deepEqual(evidenceIds(['reconciliation']), ['TIE-1', 'TIE-2', 'TIE-3']),
+  JSON.stringify(evidenceIds(['reconciliation'])));
+
+// Carrying a rarer word beats repeating a commoner one: DD-1 has "address" and
+// the corpus's only "postalCode", MANY-1 has "address" six times over.
+assert('a rarer term outranks more occurrences of a commoner one',
+  evidenceIds(['address', 'postalcode'])[0] === 'DD-1',
+  JSON.stringify(context.ticketEvidence(['address', 'postalcode'])));
+
+/* ---- how informative a word is decides the ranking ----
+ *
+ * The regression that matters, measured on a real estate before this was fixed.
+ * A question carrying one distinctive word and two ordinary ones ("was",
+ * "removed") returned three tickets, and not one of them was among the 34 whose
+ * evidence held the distinctive word: every winner had matched only the two
+ * ordinary words. Counting how many terms a ticket matched treats every word as
+ * equally informative, so three tickets matching two throwaway words beat the
+ * ticket carrying the word that gives the question its meaning - and the page
+ * then states, under a labelled evidence heading, that those tickets answer it.
+ * Confidently wrong is worse than silent.
+ *
+ * What separates them is rarity measured in the ticket corpus itself. Not a
+ * stopword list: which words are ordinary varies by corpus, a fixed list is
+ * never complete, and this estate has taught that lesson once already.
+ */
+const skewed = ['was', 'voucher', 'removed'];
+assert('the distinctive word decides the ranking, not the ordinary ones',
+  evidenceIds(skewed)[0] === 'RARE-1', JSON.stringify(context.ticketEvidence(skewed)));
+assert('tickets matching only the ordinary words are not returned at all',
+  !evidenceIds(skewed).some((id) => id.startsWith('NOISE-')),
+  JSON.stringify(evidenceIds(skewed)));
+
+// Two rare words carry more of a question than three ordinary ones, whatever the
+// term count says: RARE-1 matches two of these five terms, each NOISE ticket
+// matches three.
+const mixed = ['voucher', 'chargeback', 'was', 'removed', 'legacy'];
+assert('two rare terms outrank three common ones',
+  evidenceIds(mixed)[0] === 'RARE-1', JSON.stringify(context.ticketEvidence(mixed)));
+
+// Where two tickets carry the same distinctive word, the one whose evidence is
+// about that word beats the one that merely contains it. Measured on a real
+// estate: the tickets that wrongly won a question were long prose bodies holding
+// its ordinary words, and the tickets that deserved to win were one-line
+// subjects naming its subject. LONG-1 repeats "voucher" three times in a long
+// body and sorts first by id, so only length normalisation puts RARE-1 above it.
+assert('a short focused ticket outranks a long one repeating the same word',
+  evidenceIds(['voucher'])[0] === 'RARE-1', JSON.stringify(context.ticketEvidence(['voucher'])));
+
+// A word in every ticket's evidence tells you nothing about which ticket to
+// read, so it must contribute almost nothing to the score.
+const weightOf = (terms) => context.ticketEvidence(terms)[0].weight;
+assert('a word in almost every ticket contributes almost nothing',
+  weightOf(['the']) < weightOf(['voucher']) / 2,
+  `ubiquitous ${weightOf(['the'])} vs rare ${weightOf(['voucher'])}`);
+
+// The absence rule and the new surface must agree. Before this, a term the
+// index held only in a commit body was reported as unevidenced while its
+// evidence was rendered directly below - the page contradicting itself.
+assert('a term evidenced only in a commit body is not reported as unevidenced',
+  deepEqual(context.unevidencedTerms(['postalcode']), []),
+  JSON.stringify(context.unevidencedTerms(['postalcode'])));
+assert('a term evidenced only in a commit subject is not reported as unevidenced',
+  deepEqual(context.unevidencedTerms(['settlement']), []),
+  JSON.stringify(context.unevidencedTerms(['settlement'])));
+assert('a term nothing holds is still reported as unevidenced',
+  deepEqual(context.unevidencedTerms(['quantum']), ['quantum']),
+  JSON.stringify(context.unevidencedTerms(['quantum'])));
+
+/* ---- display ---- */
+
+context.q.value = 'DD-1';
+context.runAsk();
+const ticketHtml = context.out.innerHTML;
+assert('a ticket lookup names the commit body as a commit body',
+  /commit body/i.test(ticketHtml));
+assert('the body is not presented as the ticket title',
+  ticketHtml.includes('“Amend the defendant address journey”')
+  && ticketHtml.indexOf('BREAKING CHANGE') > ticketHtml.indexOf('<details'),
+  ticketHtml.slice(0, 300));
+assert('markup in a body is escaped, not rendered',
+  ticketHtml.includes('&lt;script&gt;') && !ticketHtml.includes('<script>')
+  && ticketHtml.includes('&amp;'),
+  ticketHtml.slice(ticketHtml.indexOf('BREAKING CHANGE'), ticketHtml.indexOf('BREAKING CHANGE') + 260));
+assert("a body's line breaks survive rendering",
+  ticketHtml.includes('postcode.<br>') && !ticketHtml.includes('postcode.\n'),
+  ticketHtml.slice(ticketHtml.indexOf('BREAKING CHANGE'), ticketHtml.indexOf('BREAKING CHANGE') + 260));
+
+context.q.value = 'CRC-12016';
+context.runAsk();
+const crcHtml = context.out.innerHTML;
+// the evidence rows sit between the answer paragraph and the first disclosure
+const crcEvidence = crcHtml.slice(crcHtml.indexOf('</div>'), crcHtml.indexOf('<details'));
+assert('a subject the description does not carry is shown, labelled as a subject',
+  /commit subject/i.test(crcEvidence) && crcEvidence.includes('Log the settlement reference'),
+  crcEvidence);
+assert('a subject the description already says is not repeated',
+  !crcEvidence.includes('Format the address on the confirmation screen'), crcEvidence);
+
+// Ask mode: a question only ticket evidence can answer gets that evidence,
+// and is neither silenced nor reported as unevidenced.
+context.q.value = 'what happened to postalCode?';
+context.runAsk();
+assert('a question only a commit body answers surfaces that ticket',
+  context.out.innerHTML.includes('DD-1') && /commit body/i.test(context.out.innerHTML),
+  context.out.innerHTML.slice(0, 300));
+assert('a body-evidenced question is not answered "no evidence in this estate"',
+  !context.out.innerHTML.includes('No evidence in this estate'),
+  context.out.innerHTML.slice(0, 200));
+assert('the body-evidenced term is not named as unevidenced',
+  !context.meta.textContent.includes('no evidence for: postalcode'),
+  context.meta.textContent);
+
+// A question no ticket evidence matches must render byte-for-byte as it did
+// before ticket evidence existed: this is an additional section, never a
+// replacement. Recorded from the unmodified engine against this fixture.
+context.q.value = 'which repositories implement AddressPipe?';
+context.runAsk();
+const unchanged = createHash('sha256')
+  .update(context.meta.textContent + ' ' + context.out.innerHTML)
+  .digest('hex');
+assert('a question with no ticket evidence renders exactly as before',
+  unchanged === '734c03f122f115a1689d34123e3fca76b0e5eb1e211cdfc5722a4bb79fe282cc', unchanged);
 
 if (failures) {
   console.error('\n' + failures + ' engine assertion(s) failed');

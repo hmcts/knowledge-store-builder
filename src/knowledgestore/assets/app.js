@@ -21,7 +21,14 @@
  * One searchable graph entry:
  * [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets, communityId]
  * @typedef {[string, string, string, string, string, number, string[], string[], number]} Entry
- * @typedef {{d: string[], first: string, last: string, repos: string[], n: number}} TicketInfo
+ */
+
+/**
+ * A ticket's record in the committed ticket artefact: `d` the curated
+ * description, `s` the commit subjects as written, `b` the body prose. `s` and
+ * `b` are absent when the commits offered no such evidence.
+ * @typedef {{d: string[], s?: string[], b?: string[], first: string, last: string,
+ *            repos: string[], n: number}} TicketInfo
  */
 
 /** @type {Record<string, string>} */
@@ -44,6 +51,27 @@ const labelLower = DATA.map((e) => e[0].toLowerCase());
 const hay = DATA.map(
   (e) => (e[0] + ' ' + e[1] + ' ' + e[2] + ' ' + e[3] + ' ' + e[7].join(' ')).toLowerCase()
 );
+/** Ticket ids in a stable order, with one lowercased evidence haystack each -
+ * the ticket's description, its commit subjects and its body prose together.
+ *
+ * Indexed per ticket, and deliberately not folded into `hay`: `hay` is built per
+ * indexed entry, and the same ticket is carried by many entries, so evidence
+ * inlined there is multiplied by every entry citing it - measured at hundreds of
+ * megabytes of haystack in the browser on a real estate. One index over tickets
+ * is a couple of megabytes of text, and scanning it linearly is the same order
+ * of work the page already does for every question.
+ * @type {string[]} */
+const TICKET_IDS = Object.keys(TICKET_INFO).sort(cmpId);
+/** @type {string[]} */
+const ticketHay = TICKET_IDS.map((t) => {
+  const info = TICKET_INFO[t];
+  return (info.d || []).concat(info.s || [], info.b || []).join('\n').toLowerCase();
+});
+/** One ticket's evidence runs from a six-word subject to four thousand
+ * characters of body prose, and a long text matches ordinary words by sheer
+ * surface area. Scoring needs the mean to normalise against. */
+const ticketLen = ticketHay.map((text) => text.length);
+const avgTicketLen = ticketLen.reduce((a, b) => a + b, 0) / (ticketLen.length || 1);
 /** @type {number[][]} */
 const ADJ = DATA.map(() => []);
 for (let i = 0; i < EDGE_FLAT.length; i += 2) {
@@ -82,9 +110,11 @@ let mode = 'search';
   .sort((a, b) => a.localeCompare(b))
   .forEach((r) => repoSel.add(new Option(r, r)));
 
+/** HTML meta-characters, plus the newline where line breaks are being kept.
+ * @type {Record<string, string>} */
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\n': '<br>' };
 /** @param {string} s */
-const esc = (s) =>
-  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ESCAPES[c] || c);
 /** @param {string} s @returns {string[]} */
 const tok = (s) => s.toLowerCase().match(/[a-z0-9]+/g) || [];
 
@@ -138,7 +168,11 @@ const DIVES = JSON.parse(getEl('dives').textContent || '{}');
  * @param {string} t */
 function ticketLink(t) {
   if (!TICKET_BROWSE_URL) return esc(t);   // no tracker configured: plain text
-  return '<a href="' + TICKET_BROWSE_URL + encodeURIComponent(t)
+  // The tracker URL is estate configuration, read from the page's embedded
+  // config block, so it is escaped like any other embedded text before it goes
+  // into an attribute: a quote in it would otherwise close the attribute and
+  // whatever followed would be live markup.
+  return '<a href="' + esc(TICKET_BROWSE_URL) + encodeURIComponent(t)
     + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
 }
 
@@ -162,6 +196,75 @@ function ticketRows(tickets, max) {
     if (++shown === max) break;
   }
   return html;
+}
+
+/* ---- commit evidence: what a ticket's own commits said ----
+ * Each field is shown under its own name. A reader has to be able to tell a
+ * tracker title from a commit subject from a commit body: the store's grounding
+ * contract turns on which of the three a statement came from, and a body
+ * presented as a title would be a false attribution. */
+
+const LABEL_DESCRIPTION = 'description, from commit messages';
+const LABEL_SUBJECT = 'commit subject';
+const LABEL_BODY = 'commit body, as written';
+
+/** Escaped for display, with line breaks kept. Bodies are bulleted lists as
+ * often as prose, and lose their meaning as one run-on paragraph.
+ *
+ * One pass, so the order cannot be got wrong: inserting the breaks first and
+ * escaping afterwards would escape the breaks, and that mistake is invisible
+ * until someone reads a body.
+ * @param {string} s */
+const escLines = (s) => s.replace(/[&<>"\n]/g, (c) => ESCAPES[c] || c);
+
+/** One labelled row per text, so the reader knows which field they are reading.
+ * @param {string} label @param {string[]|undefined} texts */
+const evidenceRows = (label, texts) =>
+  (texts || [])
+    .map((t) => '<div class="ev"><span class="ev-l">' + label + '</span> ' + escLines(t) + '</div>')
+    .join('');
+
+/** Commit bodies behind a disclosure: a body runs to thousands of characters,
+ * so it belongs in the technical-detail idiom rather than a summary line.
+ * @param {string[]|undefined} bodies */
+const bodyDetails = (bodies) =>
+  bodies?.length
+    ? '<details class="tech"><summary>' + LABEL_BODY + ' (' + bodies.length + ')</summary>'
+      + bodies.map((b) => '<div class="cbody">' + escLines(b) + '</div>').join('')
+      + '</details>'
+    : '';
+
+/** @param {number} n @param {string} one @param {string} many */
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+
+/** Whether a text carries any of the query terms. A single-character term never
+ * counts: it matches almost any prose, so a hit on one is an accident.
+ * @param {string} text @param {string[]} terms */
+const carriesTerm = (text, terms) => {
+  const l = text.toLowerCase();
+  return terms.some((t) => t.length > 1 && l.includes(t));
+};
+
+/** @param {string} s reduced for comparing two texts by what they say */
+const normText = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** The commit subjects that say something the shown description does not. The
+ * description is curated from the same subjects, so an exact repeat is the
+ * ordinary case and showing it twice would be noise.
+ * @param {TicketInfo|undefined} info @param {string[]} shown texts already on screen
+ * @returns {string[]} */
+function extraSubjects(info, shown) {
+  const keys = shown.filter(Boolean).map(normText);
+  /** @type {string[]} */
+  const extra = [];
+  for (const s of info?.s || []) {
+    const key = normText(s);
+    if (key && !keys.some((k) => k.includes(key))) {
+      keys.push(key);
+      extra.push(s);
+    }
+  }
+  return extra;
 }
 
 /** @param {Entry} e */
@@ -327,6 +430,10 @@ function termTiers(norm, bare, src, terms, w) {
  * anything at all: an absent term has zero hits across the whole index, while
  * every in-domain question had at least one hit for each of its terms.
  *
+ * Both indexes are consulted, the entries and the ticket evidence. A word that
+ * only a commit body holds is evidenced - the page would otherwise report "no
+ * evidence for: X" directly above X's own commit body.
+ *
  * @param {string[]} terms @returns {string[]} terms with no match anywhere
  */
 function unevidencedTerms(terms) {
@@ -334,9 +441,168 @@ function unevidencedTerms(terms) {
   for (const t of terms) {
     let seen = false;
     for (let i = 0; i < N && !seen; i++) if (hay[i].includes(t)) seen = true;
+    for (let i = 0; i < ticketHay.length && !seen; i++) if (ticketHay[i].includes(t)) seen = true;
     if (!seen) missing.push(t);
   }
   return missing;
+}
+
+const MAX_EVIDENCE_TICKETS = 3;
+/**
+ * A word counts as decisive when it is at least this informative a share of the
+ * most informative word the corpus holds for the question, and a ticket has to
+ * match a decisive word to be shown at all. Ordering alone is not enough: the
+ * page shows three tickets under a heading saying they answer the question, so a
+ * ticket that matched none of its decisive words must not appear, rather than
+ * appearing third.
+ *
+ * Measured on a real estate: for a question whose subject word scored 5.90, its
+ * ordinary words scored 5.27 and 3.96, so a bar at nine tenths of the best
+ * admits the subject and excludes the rest.
+ */
+const DECISIVE_SHARE = 0.9;
+/** BM25's constants at their usual values: `K1` caps what repeating a word can
+ * add, `B` how much a text's length discounts it. */
+const BM25_K1 = 1.2, BM25_B = 0.75;
+
+/** Lexicographic order, independent of locale. @param {string} a @param {string} b */
+function cmpId(a, b) {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
+/** @type {Map<string, number>} */
+const ticketDfCache = new Map();
+
+/**
+ * How many tickets' evidence holds each term.
+ *
+ * Cached per term and computed only for terms not seen before: a question has a
+ * handful of terms and the corpus has thousands of tickets, so the scan is worth
+ * doing once. Deliberately not `idfFor`, which counts document frequency over
+ * node labels: a word can be everywhere in labels and nowhere in commit text, or
+ * the reverse, and borrowing the wrong denominator would mis-weight silently.
+ *
+ * @param {string[]} terms @returns {Record<string, number>}
+ */
+function ticketDfFor(terms) {
+  const missing = terms.filter((t) => !ticketDfCache.has(t));
+  if (missing.length) {
+    /** @type {Record<string, number>} */
+    const counts = {};
+    missing.forEach((t) => (counts[t] = 0));
+    for (const text of ticketHay) {
+      for (const t of missing) if (text.includes(t)) counts[t]++;
+    }
+    for (const t of missing) ticketDfCache.set(t, counts[t]);
+  }
+  /** @type {Record<string, number>} */
+  const df = {};
+  for (const t of terms) df[t] = ticketDfCache.get(t) || 0;
+  return df;
+}
+
+/**
+ * How informative each of the question's words is within the ticket corpus, and
+ * the weight of the most informative word the corpus actually holds.
+ *
+ * @param {string[]} terms
+ * @returns {{w: Record<string, number>, strongest: number}}
+ */
+function ticketWeights(terms) {
+  const df = ticketDfFor(terms);
+  const total = ticketHay.length;
+  /** @type {Record<string, number>} */
+  const w = {};
+  let strongest = 0;
+  for (const t of terms) {
+    w[t] = Math.log(1 + total / (1 + df[t]));
+    // A word the corpus does not hold at all scores as the rarest of them by
+    // this measure, and must not set the bar for the words it does hold - or a
+    // question with one absent word would suppress every real match.
+    if (df[t] > 0 && t.length > 1 && w[t] > strongest) strongest = w[t];
+  }
+  return { w, strongest };
+}
+
+/** How much of the question one ticket's evidence carries.
+ *
+ * A term's contribution is its rarity weight, scaled by how often the ticket
+ * repeats it and discounted by how long the ticket's evidence is - BM25's
+ * standard form. Length matters here more than in most indexes: this corpus
+ * mixes one-line subjects with thousands of characters of body prose, and
+ * without the discount a long body wins simply by covering more words.
+ *
+ * @param {string} text @param {number} len @param {string[]} terms
+ * @param {Record<string, number>} w @param {number} floor
+ * @returns {{weight: number, hits: number, decisive: boolean}} summed
+ *   contribution, total occurrences, and whether any matched term was decisive
+ *   enough to justify showing the ticket at all */
+function evidenceScore(text, len, terms, w, floor) {
+  let weight = 0, hits = 0;
+  let decisive = false;
+  const norm = BM25_K1 * (1 - BM25_B + BM25_B * (len / avgTicketLen));
+  for (const t of terms) {
+    const n = text.split(t).length - 1;
+    if (!n) continue;
+    weight += w[t] * (n * (BM25_K1 + 1)) / (n + norm);
+    hits += n;
+    // a single character is in almost every body ever written, so a match on
+    // one is an accident however rare the corpus makes it look
+    if (t.length > 1 && w[t] >= floor) decisive = true;
+  }
+  return { weight, hits, decisive };
+}
+
+/**
+ * Tickets whose commit evidence carries the question's words.
+ *
+ * Ranked by how much the matched words tell you, not by how many matched.
+ * Measured on a real estate, counting matches put the generic above the
+ * distinctive: a question with one distinctive word and two ordinary ones
+ * returned three tickets that had matched only the ordinary two, while none of
+ * the 34 tickets whose evidence held the distinctive word appeared at all. That
+ * is the same defect already recorded against the node ranker - a scorer blind
+ * to rarity ranks the generic first - and this page states its result as
+ * evidence, so being wrong here is worse than being silent.
+ *
+ * Rarity alone did not fix it, and the reason is worth keeping. In a corpus of
+ * terse commit subjects, ordinary English is *rare*: on that estate the word
+ * "was" appeared in 65 of 12,742 tickets, scoring almost as distinctive as the
+ * subject word it was competing with, so two ordinary words still outvoted the
+ * one that carried the question. Two further measures separate them, and both
+ * are ordinary information retrieval:
+ *
+ * - **length normalisation** (BM25, in `evidenceScore`). The tickets that won
+ *   on ordinary words had long prose bodies, which match anything by surface
+ *   area; the ones that deserved to win were one-line subjects naming the thing
+ *   asked about.
+ * - **a decisive-word bar** (`DECISIVE_SHARE`). A ticket that matched none of
+ *   the question's most informative words is not shown at all, however much
+ *   ordinary vocabulary it accumulated.
+ *
+ * No stopword list, deliberately: which words are ordinary depends on the
+ * corpus, no fixed list is ever complete, and both measures here recalibrate
+ * themselves from the data as an estate grows.
+ *
+ * Ordered by summed contribution, then total occurrences, then ticket id. The
+ * last is not cosmetic - two runs of the same question have to agree, and equal
+ * scores would otherwise come out in whatever order the artefact was written in.
+ *
+ * @param {string[]} terms
+ * @returns {{id: string, weight: number, hits: number}[]} the strongest few
+ */
+function ticketEvidence(terms) {
+  const { w, strongest } = ticketWeights(terms);
+  const floor = strongest * DECISIVE_SHARE;
+  /** @type {{id: string, weight: number, hits: number}[]} */
+  const scored = [];
+  for (let i = 0; i < TICKET_IDS.length; i++) {
+    const { weight, hits, decisive } = evidenceScore(ticketHay[i], ticketLen[i], terms, w, floor);
+    if (decisive) scored.push({ id: TICKET_IDS[i], weight, hits });
+  }
+  scored.sort((a, b) => b.weight - a.weight || b.hits - a.hits || cmpId(a.id, b.id));
+  return scored.slice(0, MAX_EVIDENCE_TICKETS);
 }
 
 /** Discounted contribution of semantic-neighbour terms.
@@ -506,6 +772,53 @@ function ticketMetaLine(info, hasTitle) {
   return ' <span style="color:var(--muted)">' + info.n + ' commits, ' + range + source + '.</span>';
 }
 
+/** Which indexed entries carry a ticket, as a phrase.
+ * @param {string} id */
+function ticketReach(id) {
+  /** @type {number[]} */
+  const idxs = [];
+  for (let i = 0; i < N; i++) if (DATA[i][7].includes(id)) idxs.push(i);
+  if (!idxs.length) return ' — carried by no indexed entry.';
+  const repos = [...new Set(idxs.map((i) => DATA[i][1]).filter(Boolean))];
+  return ' — ' + plural(idxs.length, 'entry', 'entries')
+    + ' in ' + plural(repos.length, 'repository', 'repositories') + ': '
+    + idxs.slice(0, 4).map((i) => esc(DATA[i][0])).join(', ')
+    + (idxs.length > 4 ? ' …' : '');
+}
+
+/** The pieces of one ticket's evidence that carry any of the query terms, each
+ * under the name of the field it came from.
+ * @param {string} id @param {string[]} terms */
+function matchingEvidence(id, terms) {
+  const info = TICKET_INFO[id];
+  if (!info) return '';
+  /** @param {string[]|undefined} texts */
+  const carrying = (texts) => (texts || []).filter((x) => carriesTerm(x, terms));
+  return evidenceRows(LABEL_DESCRIPTION, carrying(info.d))
+    + evidenceRows(LABEL_SUBJECT, carrying(info.s))
+    + bodyDetails(carrying(info.b));
+}
+
+/** What the commits themselves said, for the tickets whose evidence carries the
+ * question's words. An extra section: the composed answer above it is untouched.
+ * @param {{id: string}[]} matches @param {string[]} terms */
+function ticketEvidenceHtml(matches, terms) {
+  return '<h2>What the commits say about these words</h2>'
+    + matches
+      .map((m) => '<div class="trow"><span class="tid">' + ticketLink(m.id) + '</span>'
+        + ticketReach(m.id) + matchingEvidence(m.id, terms) + '</div>')
+      .join('');
+}
+
+/** Add the commit-evidence section, and name it in the meta line when that
+ * evidence is the only thing that answered the question.
+ * @param {{id: string}[]} matches @param {string[]} terms */
+function appendTicketEvidence(matches, terms) {
+  if (!matches.length) return;
+  out.insertAdjacentHTML('beforeend', ticketEvidenceHtml(matches, terms));
+  if (!meta.textContent) modeNote('commit evidence');
+}
+
 /** @param {string} id */
 function vTicket(id) {
   modeNote('Jira ticket lookup');
@@ -522,6 +835,8 @@ function vTicket(id) {
       + ' touches <b>' + hits.length + '</b> graph entries across <b>' + repos.length + '</b> repositories.'
       + ticketMetaLine(info, Boolean(TITLES[id])))
     + (secondDescription ? '<div class="trow"><span class="tid">also</span> ' + esc(secondDescription) + '</div>' : '')
+    + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, secondDescription || '']))
+    + bodyDetails(info?.b)
     + summariesFor(hits, 2)
     + featureCards(hits, 4)
     + techDetails(shown.map((i) => card(DATA[i])).join(''), shown.length);
@@ -930,8 +1245,9 @@ function runAsk() {
   applySummaryBoost(ranked, terms, expansions);
   const topic = matchTopic(raw.toLowerCase(), expansions);
   const dive = topic ? null : matchDive(raw.toLowerCase());
+  const evidence = ticketEvidence(terms);
   if (reportUnevidenced(terms, Boolean(topic || dive))) return;
-  if (!ranked.length && !topic && !dive) {
+  if (!ranked.length && !topic && !dive && !evidence.length) {
     meta.textContent = 'nothing in the graph matches those words - try different terms';
     out.innerHTML = '';
     return;
@@ -942,6 +1258,7 @@ function runAsk() {
     out.innerHTML = '';
     meta.textContent = '';
   }
+  appendTicketEvidence(evidence, terms);
   prependPrewritten(topic, dive, raw);
 }
 
@@ -974,4 +1291,5 @@ run();
 /** @type {any} */ (globalThis).__explorerApi = {
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
   matchTopic, matchDive, runAsk, runSearch, q, out, meta,
+  ticketEvidence, unevidencedTerms, extraSubjects,
 };
