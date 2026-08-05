@@ -97,7 +97,7 @@ def fields_for(summary: str, **extra) -> dict:
 class FetchTicketsTestCase(SettingsIsolated):
     """Shared setup: a store root, discovered tickets, tracker settings."""
 
-    def store(self, tmp, discovered: list[str], **settings) -> Path:
+    def _store(self, tmp, discovered: list[str], **settings) -> Path:
         root = Path(tmp)
         config.configure(root=root)
         defaults = {
@@ -114,7 +114,7 @@ class FetchTicketsTestCase(SettingsIsolated):
         pio.write_gzip_json(config.TICKET_DESCRIPTIONS_PATH, {key: {"d": []} for key in discovered})
         return root
 
-    def run_stage(self, tracker, sleeps: list | None = None, today: str = TODAY):
+    def _run_stage(self, tracker, sleeps: list | None = None, today: str = TODAY):
         """Run the stage, capturing what it printed. Returns (code, output)."""
         out, err = StringIO(), StringIO()
         with redirect_stdout(out), redirect_stderr(err):
@@ -126,7 +126,7 @@ class FetchTicketsTestCase(SettingsIsolated):
             )
         return code, out.getvalue() + err.getvalue()
 
-    def cache(self) -> dict:
+    def _cache(self) -> dict:
         return pio.read_gzip_json_dict(config.TICKET_TRACKER_PATH)
 
 
@@ -138,9 +138,9 @@ class NotConfiguredTest(FetchTicketsTestCase):
         a failure that stops a build, and not a committed empty cache that later
         reads as "the tracker knew nothing"."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"], TRACKER_BASE_URL="", TRACKER_TOKEN="")
+            self._store(tmp, ["AAA-1"], TRACKER_BASE_URL="", TRACKER_TOKEN="")
             tracker = FakeTracker()
-            code, output = self.run_stage(tracker)
+            code, output = self._run_stage(tracker)
             written = sorted(
                 p.name for p in (Path(tmp) / "knowledge" / "intent").iterdir() if p.is_file()
             )
@@ -157,14 +157,14 @@ class PrefixDecisionTest(FetchTicketsTestCase):
         asks about every prefix it discovered reads projects this store was
         never authorised for."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(
+            self._store(
                 tmp,
                 ["AAA-1", "BBB-2", "AAA-3"],
                 TRACKER_PROJECTS={"AAA"},
                 TRACKER_DENY={"BBB"},
             )
             tracker = FakeTracker({"AAA-1": fields_for("First"), "AAA-3": fields_for("Third")})
-            code, _ = self.run_stage(tracker)
+            code, _ = self._run_stage(tracker)
         self.assertEqual(code, 0)
         self.assertEqual(tracker.keys_requested, ["AAA-1", "AAA-3"])
 
@@ -173,18 +173,18 @@ class PrefixDecisionTest(FetchTicketsTestCase):
         adding it to the deny list; if a stale allowlist entry could re-enable
         it, the withdrawal would be silently undone by the older setting."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(
+            self._store(
                 tmp,
                 ["AAA-1", "BBB-2"],
                 TRACKER_PROJECTS={"AAA", "BBB"},
                 TRACKER_DENY={"BBB"},
             )
             tracker = FakeTracker({"AAA-1": fields_for("First")})
-            code, output = self.run_stage(tracker)
+            code, output = self._run_stage(tracker)
         self.assertEqual(code, 0)
         self.assertEqual(tracker.keys_requested, ["AAA-1"])
         self.assertNotIn("BBB-2", str(tracker.urls))
-        self.assertNotIn("BBB", self.cache())
+        self.assertNotIn("BBB", self._cache())
         self.assertIn("BBB", output, "a withheld prefix must still be accounted for")
 
     def test_undecided_prefixes_are_reported_and_not_requested(self):
@@ -195,13 +195,13 @@ class PrefixDecisionTest(FetchTicketsTestCase):
         product: not requested, written to a file with its ticket count, and the
         path named in the summary so a person can decide."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(
+            self._store(
                 tmp,
                 ["AAA-1", "CCC-7", "CCC-8", "DDD-9"],
                 TRACKER_PROJECTS={"AAA"},
             )
             tracker = FakeTracker({"AAA-1": fields_for("First")})
-            code, output = self.run_stage(tracker)
+            code, output = self._run_stage(tracker)
             undecided = json.loads(config.TRACKER_UNDECIDED_PATH.read_text(encoding="utf-8"))
         self.assertEqual(code, 0)
         self.assertEqual(tracker.keys_requested, ["AAA-1"])
@@ -218,10 +218,10 @@ class BatchingTest(FetchTicketsTestCase):
         breaches rate limits and looks like an attack in the access log."""
         keys = [f"AAA-{n}" for n in range(1, 8)]
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, keys, TRACKER_PAGE_SIZE=3)
+            self._store(tmp, keys, TRACKER_PAGE_SIZE=3)
             tracker = FakeTracker({key: fields_for(f"Summary {key}") for key in keys})
-            code, _ = self.run_stage(tracker)
-            cached = self.cache()
+            code, _ = self._run_stage(tracker)
+            cached = self._cache()
         self.assertEqual(code, 0)
         self.assertEqual(len(tracker.urls), 3, "7 keys at 3 per page is 3 requests")
         self.assertEqual(
@@ -238,9 +238,9 @@ class BatchingTest(FetchTicketsTestCase):
         order rather than on how far it got."""
         discovered = ["AAA-3", "AAA-20", "AAA-1", "AAA-2"]
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, discovered, TRACKER_PAGE_SIZE=2)
+            self._store(tmp, discovered, TRACKER_PAGE_SIZE=2)
             tracker = FakeTracker({key: fields_for(key) for key in discovered})
-            self.run_stage(tracker)
+            self._run_stage(tracker)
         self.assertEqual(
             [requested_keys(url) for url in tracker.urls],
             [["AAA-1", "AAA-2"], ["AAA-20", "AAA-3"]],
@@ -258,8 +258,8 @@ class BatchingTest(FetchTicketsTestCase):
             return FakeTracker({k: fields_for(k) for k in requested_keys(url)})(url, headers)
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2", "AAA-3"], TRACKER_PAGE_SIZE=1)
-            code, _ = self.run_stage(watching_opener)
+            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3"], TRACKER_PAGE_SIZE=1)
+            code, _ = self._run_stage(watching_opener)
         self.assertEqual(code, 0)
         self.assertEqual(seen, [0, 1, 2], "each page is on disk before the next is asked for")
 
@@ -270,12 +270,12 @@ class OutcomeTest(FetchTicketsTestCase):
         historic ticket that does not exist never starts existing, so re-asking
         every run costs a request per run forever."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2"])
+            self._store(tmp, ["AAA-1", "AAA-2"])
             first = FakeTracker({"AAA-1": fields_for("First")})
-            _, first_output = self.run_stage(first)
-            cached = self.cache()
+            _, first_output = self._run_stage(first)
+            cached = self._cache()
             second = FakeTracker({"AAA-1": fields_for("First")})
-            code, output = self.run_stage(second)
+            code, output = self._run_stage(second)
         self.assertEqual(cached["AAA-2"], {"absent": True, "checked": TODAY})
         self.assertIn("1 absent", first_output)
         self.assertEqual(code, 0)
@@ -288,13 +288,13 @@ class OutcomeTest(FetchTicketsTestCase):
         not what exists. Cached as absence, a later operator with broader access
         would never retry it and the gap would be permanent and invisible."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2"], TRACKER_PAGE_SIZE=1)
+            self._store(tmp, ["AAA-1", "AAA-2"], TRACKER_PAGE_SIZE=1)
             first = FakeTracker({}, statuses=[401, 403])
-            _, first_output = self.run_stage(first)
-            denied = self.cache()
+            _, first_output = self._run_stage(first)
+            denied = self._cache()
             second = FakeTracker({"AAA-1": fields_for("First"), "AAA-2": fields_for("Second")})
-            code, output = self.run_stage(second)
-            after = self.cache()
+            code, output = self._run_stage(second)
+            after = self._cache()
         self.assertEqual(denied["AAA-1"], {"denied": True, "checked": TODAY})
         self.assertEqual(denied["AAA-2"], {"denied": True, "checked": TODAY})
         self.assertIn("2 denied", first_output)
@@ -309,10 +309,10 @@ class OutcomeTest(FetchTicketsTestCase):
         tracker that was briefly unwell has said nothing about the ticket, and
         caching that silence would turn an outage into missing knowledge."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2"], TRACKER_PAGE_SIZE=1)
+            self._store(tmp, ["AAA-1", "AAA-2"], TRACKER_PAGE_SIZE=1)
             tracker = FakeTracker({"AAA-2": fields_for("Second")}, statuses=[503])
-            code, output = self.run_stage(tracker)
-            cached = self.cache()
+            code, output = self._run_stage(tracker)
+            cached = self._cache()
         self.assertEqual(code, 0)
         self.assertNotIn("AAA-1", cached, "an unwell tracker must not be quoted")
         self.assertEqual(cached["AAA-2"]["summary"], "Second")
@@ -330,9 +330,9 @@ class OutcomeTest(FetchTicketsTestCase):
             return fetch_tickets.Response(200, "<html>Please sign in</html>")
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"])
-            code, output = self.run_stage(sign_in_page)
-            cached = self.cache()
+            self._store(tmp, ["AAA-1"])
+            code, output = self._run_stage(sign_in_page)
+            cached = self._cache()
         self.assertEqual(code, 0)
         self.assertEqual(cached, {}, "a reply that names no ticket is not an answer")
         self.assertIn("1 failed", output)
@@ -346,9 +346,9 @@ class OutcomeTest(FetchTicketsTestCase):
             raise OSError("connection refused")
 
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"])
-            code, output = self.run_stage(broken)
-            cached = self.cache()
+            self._store(tmp, ["AAA-1"])
+            code, output = self._run_stage(broken)
+            cached = self._cache()
         self.assertEqual(code, 0)
         self.assertEqual(cached, {})
         self.assertIn("1 failed", output)
@@ -362,10 +362,10 @@ class RateLimitTest(FetchTicketsTestCase):
         tracker was willing to serve a moment later."""
         sleeps: list[float] = []
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"], TRACKER_DELAY_SECONDS=0.25)
+            self._store(tmp, ["AAA-1"], TRACKER_DELAY_SECONDS=0.25)
             tracker = FakeTracker({"AAA-1": fields_for("First")}, statuses=[(429, "7")])
-            code, output = self.run_stage(tracker, sleeps=sleeps)
-            cached = self.cache()
+            code, output = self._run_stage(tracker, sleeps=sleeps)
+            cached = self._cache()
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [7.0], "the tracker's own Retry-After, not the page delay")
         self.assertEqual(len(tracker.urls), 2, "the page is retried, not abandoned")
@@ -378,10 +378,10 @@ class RateLimitTest(FetchTicketsTestCase):
         is a burst that gets a client throttled or noticed."""
         sleeps: list[float] = []
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2", "AAA-3"], TRACKER_PAGE_SIZE=1)
+            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3"], TRACKER_PAGE_SIZE=1)
             config.configure(TRACKER_DELAY_SECONDS=0.5)
             tracker = FakeTracker({f"AAA-{n}": fields_for(str(n)) for n in (1, 2, 3)})
-            self.run_stage(tracker, sleeps=sleeps)
+            self._run_stage(tracker, sleeps=sleeps)
         self.assertEqual(sleeps, [0.5, 0.5], "between pages, not before the first")
 
 
@@ -394,13 +394,13 @@ class ProjectionTest(FetchTicketsTestCase):
         request."""
         default = FakeTracker({"AAA-1": fields_for("First")})
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"])
-            self.run_stage(default)
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(default)
 
         asked = FakeTracker({"AAA-1": fields_for("First")})
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
-            self.run_stage(asked)
+            self._store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
+            self._run_stage(asked)
 
         self.assertEqual(
             requested_fields(default.urls[0]),
@@ -427,9 +427,9 @@ class ProjectionTest(FetchTicketsTestCase):
             comment={"comments": [{"body": "A comment nobody asked for"}]},
         )
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"])
-            self.run_stage(FakeTracker({"AAA-1": volunteered}))
-            record = self.cache()["AAA-1"]
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": volunteered}))
+            record = self._cache()["AAA-1"]
         self.assertNotIn("description", record)
         self.assertNotIn("comments", record)
 
@@ -437,15 +437,15 @@ class ProjectionTest(FetchTicketsTestCase):
         """Breaks if the record shape changes. Consumers read these keys, and a
         renamed field is a change to their data, not a refactor."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
+            self._store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
             fields = fields_for(
                 "Amend the hearing outcome",
                 parent={"key": "AAA-900"},
                 description="Some narrative",
                 comment={"comments": [{"body": "First note"}, {"body": "  "}]},
             )
-            self.run_stage(FakeTracker({"AAA-1": fields}))
-            record = self.cache()["AAA-1"]
+            self._run_stage(FakeTracker({"AAA-1": fields}))
+            record = self._cache()["AAA-1"]
         self.assertEqual(
             record,
             {
@@ -476,9 +476,9 @@ class ProjectionTest(FetchTicketsTestCase):
             "parent": None,
         }
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"])
-            self.run_stage(FakeTracker({"AAA-1": open_ticket}))
-            record = self.cache()["AAA-1"]
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": open_ticket}))
+            record = self._cache()["AAA-1"]
         self.assertEqual(
             record,
             {
@@ -498,14 +498,14 @@ class RedactionTest(FetchTicketsTestCase):
         nominally cleaner - and the count has to be reported, because a silent
         filter cannot be told from an estate with nothing to withhold."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
+            self._store(tmp, ["AAA-1"], TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
             fields = fields_for(
                 "Raised by xxxxx@xxxxx.example",
                 description="Chase yyyyy@yyyyy.example about it",
                 comment={"comments": [{"body": "cc zzzzz@zzzzz.example"}]},
             )
-            code, output = self.run_stage(FakeTracker({"AAA-1": fields}))
-            record = self.cache()["AAA-1"]
+            code, output = self._run_stage(FakeTracker({"AAA-1": fields}))
+            record = self._cache()["AAA-1"]
             raw = config.TICKET_TRACKER_PATH.read_bytes()
         self.assertEqual(code, 0)
         self.assertEqual(record["summary"], "Raised by [email address withheld]")
@@ -522,7 +522,7 @@ class SummaryTest(FetchTicketsTestCase):
         failures are invisible looks like a complete one, and the operator has
         no way to know a project is waiting on access they do not have."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(
+            self._store(
                 tmp,
                 ["AAA-1", "AAA-2", "AAA-3", "AAA-4", "CCC-5"],
                 TRACKER_PAGE_SIZE=1,
@@ -534,7 +534,7 @@ class SummaryTest(FetchTicketsTestCase):
                 {"AAA-3": fields_for("Raised by xxxxx@xxxxx.example")},
                 statuses=[403, 500],
             )
-            code, output = self.run_stage(tracker)
+            code, output = self._run_stage(tracker)
         self.assertEqual(code, 0)
         for expected in (
             "1 fetched",
@@ -560,15 +560,15 @@ class DeterminismTest(FetchTicketsTestCase):
         cached: list[list[str]] = []
         for _ in range(2):
             with tempfile.TemporaryDirectory() as tmp:
-                self.store(tmp, keys, TRACKER_PAGE_SIZE=2)
-                self.run_stage(FakeTracker(dict(issues)))
+                self._store(tmp, keys, TRACKER_PAGE_SIZE=2)
+                self._run_stage(FakeTracker(dict(issues)))
                 outputs.append(
                     (
                         config.TICKET_TRACKER_PATH.read_bytes(),
                         config.TRACKER_UNDECIDED_PATH.read_bytes(),
                     )
                 )
-                cached.append(list(self.cache()))
+                cached.append(list(self._cache()))
         self.assertEqual(outputs[0], outputs[1])
         self.assertEqual(cached[0], ["AAA-1", "AAA-2", "AAA-20", "AAA-3"], "keys sorted on write")
 
@@ -579,13 +579,13 @@ class DeterminismTest(FetchTicketsTestCase):
         artefact then reorders itself during some later unrelated rebuild,
         producing a diff nobody can attribute to a change."""
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-9"])
-            self.run_stage(FakeTracker({"AAA-9": fields_for("Ninth")}))
+            self._store(tmp, ["AAA-9"])
+            self._run_stage(FakeTracker({"AAA-9": fields_for("Ninth")}))
             pio.write_gzip_json(
                 config.TICKET_DESCRIPTIONS_PATH, {"AAA-9": {"d": []}, "AAA-1": {"d": []}}
             )
-            self.run_stage(FakeTracker({"AAA-1": fields_for("First")}))
-            order = list(self.cache())
+            self._run_stage(FakeTracker({"AAA-1": fields_for("First")}))
+            order = list(self._cache())
         self.assertEqual(order, ["AAA-1", "AAA-9"])
 
 
@@ -600,9 +600,9 @@ class CredentialTest(FetchTicketsTestCase):
 
     def test_credential_reaches_the_request_and_nothing_else(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.store(tmp, ["AAA-1", "AAA-2", "CCC-3"], TRACKER_PAGE_SIZE=1)
+            self._store(tmp, ["AAA-1", "AAA-2", "CCC-3"], TRACKER_PAGE_SIZE=1)
             tracker = FakeTracker({"AAA-1": fields_for("First")}, statuses=[500])
-            code, output = self.run_stage(tracker)
+            code, output = self._run_stage(tracker)
             artefacts = (
                 config.TICKET_TRACKER_PATH.read_bytes() + config.TRACKER_UNDECIDED_PATH.read_bytes()
             )
@@ -618,7 +618,7 @@ class CredentialTest(FetchTicketsTestCase):
 
             # A raised message must not carry it either, whatever went wrong.
             config.configure(TRACKER_BASE_URL=f"ftp://{TOKEN}@example.example/jira")
-            _, refused = self.run_stage(FakeTracker())
+            _, refused = self._run_stage(FakeTracker())
             self.assertNotIn(TOKEN, refused)
             with self.assertRaises(ValueError) as raised:
                 fetch_tickets.tracker_root(f"ftp://{TOKEN}@example.example/jira")
