@@ -778,13 +778,40 @@ NI_NUMBER = "AB000000C"
 POSTCODE = "ZZ99 9ZZ"
 EMAIL_ADDRESS = "someone@example.example"
 
+# The library ships one rule - an email address, the only identifier with the same
+# shape everywhere. Every other format belongs to a jurisdiction or a subject
+# domain, so a consuming store declares it. These tests declare the same shapes an
+# estate would, which also means they exercise the configuration path rather than
+# trusting a default to be there.
+ESTATE_RULES = {
+    "case-reference": r"\b\d{2}[A-Z]{2}\d{7}\b",
+    "national-insurance-number": r"\b[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]\b",
+    "postcode": r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b",
+}
+
 CASE_GONE = "[case reference withheld]"
 EMAIL_GONE = "[email address withheld]"
 NI_GONE = "[national insurance number withheld]"
 POSTCODE_GONE = "[postcode withheld]"
 
 
-class RedactedValuesTest(SettingsIsolated):
+class EstateRulesDeclared(SettingsIsolated):
+    """A test case with this estate's identifier formats declared, as a consuming
+    store declares them in its settings.
+
+    Isolation still comes from SettingsIsolated.run, which restores every setting
+    afterwards; setUp here only supplies what a store would supply. Declaring them
+    rather than relying on shipped defaults is deliberate: the library ships one
+    rule, so a test that assumed four would be testing a default that no longer
+    exists instead of the mechanism that matters.
+    """
+
+    def setUp(self):
+        super().setUp()
+        config.SENSITIVE_PATTERNS = {**config.SENSITIVE_PATTERNS, **ESTATE_RULES}
+
+
+class RedactedValuesTest(EstateRulesDeclared):
     """An identifier a rule matches is replaced in place, and the words around it
     are kept.
 
@@ -1005,7 +1032,8 @@ class RedactionRulesAreConfigurableTest(SettingsIsolated):
             importlib.reload(config)
         try:
             self.assertIn("listing-ref", config.SENSITIVE_PATTERNS)
-            self.assertIn("case-reference", config.SENSITIVE_PATTERNS)
+            # the shipped default survives an override that adds to it
+            self.assertIn("email-address", config.SENSITIVE_PATTERNS)
         finally:
             importlib.reload(config)
 
@@ -1014,7 +1042,7 @@ class RedactionRulesAreConfigurableTest(SettingsIsolated):
             with self.assertRaises(ValueError):
                 importlib.reload(config)
         importlib.reload(config)
-        self.assertIn("case-reference", config.SENSITIVE_PATTERNS)
+        self.assertIn("email-address", config.SENSITIVE_PATTERNS)
 
     def test_a_pattern_that_cannot_compile_fails_the_run(self):
         commits = [make_commit(GOOD_SUBJECT)]
@@ -1023,7 +1051,7 @@ class RedactionRulesAreConfigurableTest(SettingsIsolated):
             run_stage(commits)
 
 
-class CheckEvidenceStageTest(SettingsIsolated):
+class CheckEvidenceStageTest(EstateRulesDeclared):
     """The gate over an artefact a store has *already* committed. Filtering new
     output cannot help a store whose file is in version control and embedded in a
     published page, so there has to be a way to check what is there.

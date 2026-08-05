@@ -127,20 +127,28 @@ contributors use those addresses too; only the local part is read.
 Together this is why a store can answer *why* a file exists without any
 issue-tracker API access.
 
-### Withholding text that identifies a case
+### Redacting text that identifies a person or a record
 
 Commit messages are written for colleagues, not for publication. Some describe
-one particular matter rather than the software: a case or claim reference,
-sometimes the people involved, sometimes what happened. A store commits the text
-it mines and its page embeds it, so **whatever is mined is republished** — to
-everyone who can read the store, a wider audience than the repository the commit
-sits in.
+one particular record rather than the software — a reference to a case, a claim, an
+account, a patient, whatever the organisation's subject happens to be — sometimes
+the people involved, sometimes what happened to them. A store commits the text it
+mines and its page embeds it, so **whatever is mined is republished**, to everyone
+who can read the store: a wider audience than the repository the commit sits in.
 
 Anything in a mined value matching a rule in `KSB_SENSITIVE_PATTERNS` is
 therefore replaced before it is stored — as a description, as a subject and as
-body prose alike. The shipped rules match a case-reference shape, an email
-address, a National Insurance number and a UK postcode. An estate adds its own
-identifier formats, because no library can know them all.
+body prose alike.
+
+**One rule ships, and only one.** An email address has the same shape everywhere,
+so it is the only identifier this library can recognise without assuming a
+jurisdiction or a subject domain. Every other format belongs to an organisation:
+reference numbers for cases, claims, accounts or patients are locally defined, and
+national identifiers and postal codes vary by country. A library that shipped one
+country's formats would protect that estate and quietly miss every other one —
+worse than shipping none, because it reads as coverage. **So each estate declares
+its own**, and the run prints the rules in force so an operator can see what is
+actually being applied rather than assuming.
 
 **The matched span is replaced; the words around it are kept.** A commit message
 is usually an account of a defect that was found and fixed, and that account is

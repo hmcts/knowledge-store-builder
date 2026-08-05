@@ -673,6 +673,19 @@ def report_redactions(redactions: RedactionReport) -> None:
     The identifiers themselves are never printed, here or anywhere: reporting
     them would republish what redaction just removed.
     """
+    # Name the rules in force, not only what they caught. The library ships one
+    # default - an email address - because every other identifier format is
+    # specific to a jurisdiction or a subject domain. So "nothing matched" has two
+    # very different causes: an estate with clean commit messages, or an estate
+    # that never declared the formats its own references take. An operator cannot
+    # tell those apart from a count, and only one of them is good news.
+    in_force = ", ".join(sorted(config.SENSITIVE_PATTERNS))
+    print(f"  redaction rules in force: {in_force}")
+    if len(config.SENSITIVE_PATTERNS) == 1 and "email-address" in config.SENSITIVE_PATTERNS:
+        print(
+            "    only the shipped default - declare this estate's own reference, "
+            "identifier and postal formats in KSB_SENSITIVE_PATTERNS"
+        )
     if not redactions.by_rule:
         print("  redacted 0 identifiers: no mined text matched a redaction rule")
         return

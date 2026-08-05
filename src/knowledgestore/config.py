@@ -174,12 +174,17 @@ TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
 # KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
 #
 #   KSB_SENSITIVE_PATTERNS='{"listing-reference": "\\bREF/[0-9]{4}\\b"}'
+# One default only, and deliberately: an email address has the same shape
+# everywhere, so it is the only identifier this library can recognise without
+# assuming a jurisdiction or a subject domain. Reference formats for cases,
+# claims, patients, accounts or citizens differ per organisation, and national
+# identifiers and postal codes differ per country - a library that shipped one
+# country's would protect that estate and quietly miss every other one, which is
+# worse than shipping none because it reads as coverage. Each estate declares its
+# own in KSB_SENSITIVE_PATTERNS, and the run names the rules in force so an
+# operator can see what is actually being applied.
 DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
-    # Two digits, two letters, seven digits - the case-reference shape.
-    "case-reference": r"\b\d{2}[A-Z]{2}\d{7}\b",
     "email-address": r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b",
-    "national-insurance-number": r"\b[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]\b",
-    "postcode": r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b",
 }
 SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 

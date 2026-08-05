@@ -73,7 +73,7 @@ person, and `check-evidence` fails if any remain in the committed artefact —
 including ones a store committed before the rule existed. Read that count as a
 finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See
-[Withholding text that identifies a case](how-it-works.md#withholding-text-that-identifies-a-case).
+[Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record).
 
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
