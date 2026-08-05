@@ -928,9 +928,10 @@ class WithholdingRulesAreConfigurableTest(SettingsIsolated):
         self.assertIn("case-reference", config.SENSITIVE_PATTERNS)
 
     def test_a_pattern_that_cannot_compile_fails_the_run(self):
+        commits = [make_commit(GOOD_SUBJECT)]
         config.SENSITIVE_PATTERNS = {"unclosed-group": "([A-Z"}
         with self.assertRaises(re.error):
-            run_stage([make_commit(GOOD_SUBJECT)])
+            run_stage(commits)
 
 
 class CheckEvidenceStageTest(SettingsIsolated):
