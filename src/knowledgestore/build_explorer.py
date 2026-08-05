@@ -105,6 +105,16 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
         return False
     if kind in ("feature", "scenario", "ticket"):
         return True
+    if node.get("type") == "package":
+        # A manifest-declared package is a search target however isolated it is.
+        # graphify's manifest ingest deliberately does not invent a stub node for
+        # an external dependency, and prunes the dangling `depends_on` edge, so a
+        # package node's degree counts only the links that stay inside the corpus
+        # - routinely zero. Degree-gating them therefore hides real, named things:
+        # on one estate that upstream change took `depends_on` from 8,404 edges to
+        # 9 and pushed 21,133 labelled nodes below the bar. Nothing has to link to
+        # a package for the package to be the answer to "what is this service?".
+        return True
     label = node.get("label", "")
     if label.startswith("."):  # instance methods - not search targets
         return False

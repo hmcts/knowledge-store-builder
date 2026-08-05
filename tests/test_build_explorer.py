@@ -284,6 +284,32 @@ class IncludeEntryPolicyTest(SettingsIsolated):
         po = node("a", "SomePage", repo="my-e2e", source_file="src/test/pages/P.po.ts")
         self.assertFalse(explorer.include_entry(po, "code", 99))
 
+    def test_package_declarations_are_indexed_without_connections(self):
+        """A manifest-declared package is a search target however isolated it is.
+
+        graphify's manifest ingest deliberately stops short of inventing a stub
+        node for an external dependency, and prunes the dangling `depends_on`
+        edge, so a first-party package node's degree collapses to whatever links
+        to it inside the corpus - routinely zero. Degree-gating those nodes
+        de-indexes real, named things: measured on one estate, that change took
+        `depends_on` edges from 8,404 to 9 and dropped 21,133 labelled nodes below
+        the bar, including the one a graded retrieval question was asserting on.
+        Nothing needs to link to a package for the package to be the answer.
+        """
+        pkg = node("r::pkg_thing_backend", "thing_backend", source_file="backend/pyproject.toml")
+        pkg["type"] = "package"
+        self.assertTrue(explorer.include_entry(pkg, "code", 0))
+
+    def test_package_nodes_still_need_a_label(self):
+        """The label gate stays ahead of the package exemption.
+
+        Java package-hierarchy nodes are also typed as packages by some
+        extractors and carry no label; exempting them from the degree bar would
+        put unnameable entries into the index.
+        """
+        unnamed = {"id": "r::pkg_uk_gov", "repo": "r", "file_type": "concept", "type": "package"}
+        self.assertFalse(explorer.include_entry(unnamed, "concept", 0))
+
     def test_degree_threshold_applies_to_plain_code(self):
         plain = node("a", "SomeClass")
         self.assertFalse(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE - 1))
