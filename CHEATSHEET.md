@@ -146,10 +146,13 @@ knowledgestore status                        # coverage, citations, page freshne
 knowledgestore status --drift                # how far the sources have moved
 knowledgestore summaries verify --sample 200 # is the prose grounded in evidence?
 knowledgestore check-install-docs            # can a reader run your install commands?
+knowledgestore check-evidence                # does committed commit text identify a case?
 ```
 
-`check-install-docs` exits non-zero, so it belongs in CI. `status` never fails
-by design - drift is a condition to read, not a broken build.
+`check-install-docs` and `check-evidence` exit non-zero, so they belong in CI.
+`check-evidence` names the ticket, the field and the rule, never the value.
+`status` never fails by design - drift is a condition to read, not a broken
+build.
 
 ## When it does not work
 

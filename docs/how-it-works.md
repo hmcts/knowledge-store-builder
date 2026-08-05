@@ -127,6 +127,51 @@ contributors use those addresses too; only the local part is read.
 Together this is why a store can answer *why* a file exists without any
 issue-tracker API access.
 
+### Withholding text that identifies a case
+
+Commit messages are written for colleagues, not for publication. Some describe
+one particular matter rather than the software: a case or claim reference,
+sometimes the people involved, sometimes what happened. A store commits the text
+it mines and its page embeds it, so **whatever is mined is republished** — to
+everyone who can read the store, a wider audience than the repository the commit
+sits in.
+
+A mined value matching any rule in `KSB_SENSITIVE_PATTERNS` is therefore not
+stored at all: not as a description, not as a subject, not as body prose. The
+shipped rules match a case-reference shape, an email address, a National
+Insurance number and a UK postcode. An estate adds its own identifier formats,
+because no library can know them all.
+
+**The whole value is dropped, not the span that matched.** A commit message
+naming a case is describing that case rather than the architecture, so the rest
+of the sentence is case narrative too — redacting only the reference leaves the
+account of what happened attached to a ticket that still identifies whose matter
+it was. Span redaction reads as diligence while leaving the disclosure. What the
+commit *links* is unaffected: the ticket keeps its dates, repositories, commit
+count and file entries, none of which identifies anybody.
+
+Every run reports how many values were withheld and under which rule, including
+when the answer is none — a silent filter is indistinguishable from an estate
+with nothing to withhold. A count above zero is a finding about the estate as
+much as about the store, because the commit messages still carry that text.
+
+Two limits, both deliberate:
+
+- **Personal names are not detected.** Recognising them in commit prose is
+  unreliable in both directions, and a rule that half-works invites reliance on
+  it. Names go where they sit beside a reference the rules do match, which is a
+  shape a matcher can be sure of.
+- **This reduces exposure; it does not certify a file.** A clean result means
+  nothing matched the rules — never that a file holds no personal data.
+
+Filtering as text is mined does nothing for an artefact already committed and
+already embedded in a published page, so `knowledgestore check-evidence` gates
+what is there and **exits non-zero** on a match. It names the ticket, the field
+and the rule, and never the value: a gate that printed the text would copy it
+into a build log, read more widely and kept longer than the artefact. It is a
+stage of its own rather than a flag on `status` because `status` never fails by
+design.
+
 ## The prose layer, and how it is checked
 
 Community summaries are the one layer a model writes. The pipeline constrains

@@ -5,7 +5,9 @@ commits that touched it name, with first/last touch dates. Ticket ids and
 descriptions come from the commit subject, and - where the subject offers
 nothing - from the commit body, once that body has been reduced to prose.
 Subjects and bodies are also kept as fields of their own, so evidence a curated
-description cannot carry is still in the artefact.
+description cannot carry is still in the artefact. Any value that identifies a
+specific case or person is withheld whole and never stored; `sensitive.py` holds
+that rule, its reasoning and its limits.
 This answers "what business change shaped this file?" as a lookup, e.g.:
 
     import gzip, json
@@ -26,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-from . import config, io
+from . import config, io, sensitive
 
 
 TICKET_PREFIX = re.compile(r"^[\s\[\(]*[A-Z][A-Z0-9]{1,9}-\d{1,6}[\]\)]*[\s:,\-–]*")
@@ -414,6 +416,23 @@ def _pool_text(info: dict, description: str, subject: str, prose: str) -> None:
             info[pool][text] += 1
 
 
+def stored_value(text: str, withheld: Counter[str] | None = None) -> str:
+    """One mined value, or "" when a withholding rule claims it.
+
+    The whole value goes, not the span that matched - `sensitive.py` carries the
+    reasoning and the limits. What a commit *links* is kept: the ticket, its
+    dates, its repositories and its file entries are built from the commit's
+    metadata, none of which identifies anybody.
+    """
+    rule = sensitive.matched_rule(text)
+    if not rule:
+        return text
+    if withheld is not None:
+        # Per field, because each is a value the artefact would have carried.
+        withheld[rule] += 1
+    return ""
+
+
 def _widen_range(record: dict, date: str) -> None:
     """Widen a first/last date range to include this date."""
     if record["first"] is None or date < record["first"]:
@@ -439,6 +458,7 @@ def apply_commit(
     files: dict[str, dict],
     descriptions: dict[str, dict],
     boilerplate: frozenset[str] = frozenset(),
+    withheld: Counter[str] | None = None,
 ) -> bool:
     """Fold one commit's tickets into the per-file entries and the per-ticket
     pools of description, subject and body text. True if ticketed.
@@ -447,6 +467,9 @@ def apply_commit(
     subject where it says something, the body where it does not - so it can carry
     only one of the two, and the junk filter drops the weakest subjects
     altogether. The subject and body pools keep both, as written.
+
+    Any of the three that identifies a specific case or person is withheld
+    whole, counted under the rule that claimed it, and never stored.
 
     Merge commits are skipped: a merge's file list is the whole branch, so
     indexing one would attribute hundreds of files to a single ticket.
@@ -458,9 +481,9 @@ def apply_commit(
         return False
     date = commit["author_date"][:10]
     body = commit_body(commit)
-    description = commit_description(commit["subject"], body, boilerplate)
-    subject = clean_description(commit["subject"])
-    prose = body_evidence(body, boilerplate)
+    description = stored_value(commit_description(commit["subject"], body, boilerplate), withheld)
+    subject = stored_value(clean_description(commit["subject"]), withheld)
+    prose = stored_value(body_evidence(body, boilerplate), withheld)
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
@@ -496,6 +519,7 @@ def index_repository(
     ndjson: Path,
     descriptions: dict[str, dict],
     report: BodyReport | None = None,
+    withheld: Counter[str] | None = None,
 ) -> tuple[dict[str, dict], int]:
     """Build the file -> ticket map for one repository's dataset.
 
@@ -518,7 +542,7 @@ def index_repository(
             commit = json.loads(line)
             if report is not None:
                 _record_discarded_body(commit, boilerplate, report)
-            if apply_commit(commit, files, descriptions, boilerplate):
+            if apply_commit(commit, files, descriptions, boilerplate, withheld):
                 commits_seen += 1
     finalised = {
         path: {
@@ -611,6 +635,32 @@ def summarise(
     print(f"Wrote {config.INTENT_INDEX_PATH} ({size_mb:.1f} MB)")
 
 
+def report_withheld(withheld: Counter[str]) -> None:
+    """Say how much mined text was withheld, and under which rule.
+
+    Always, including the nothing-withheld case: a silent filter is
+    indistinguishable from an estate with nothing to withhold, and the two call
+    for opposite responses. A count above zero is a finding about the estate as
+    much as about the store - commit messages are carrying case detail, and this
+    filters what the store publishes, not what the repositories hold.
+
+    The values themselves are never printed, here or anywhere: reporting them
+    would republish what the rule exists to withhold.
+    """
+    if not withheld:
+        print("  withheld 0 values: no mined text matched a withholding rule")
+        return
+    named = ", ".join(
+        f"{rule} ({count:,})"
+        for rule, count in sorted(withheld.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
+    print(f"  withheld {sum(withheld.values()):,} values that identify a case or person: {named}")
+    print(
+        "  each was dropped whole, not redacted; the commit messages still carry that text, "
+        "so treat the count as a finding about the estate"
+    )
+
+
 def main() -> int:
     ndjson_files = sorted(config.HISTORY_DIR.glob("*/commits.ndjson"))
     if not ndjson_files:
@@ -621,8 +671,11 @@ def main() -> int:
     descriptions: dict[str, dict] = ticket_pool()
     commits_seen = 0
     report = BodyReport()
+    withheld: Counter[str] = Counter()
     for ndjson in ndjson_files:
-        index[ndjson.parent.name], repo_commits = index_repository(ndjson, descriptions, report)
+        index[ndjson.parent.name], repo_commits = index_repository(
+            ndjson, descriptions, report, withheld
+        )
         commits_seen += repo_commits
 
     with io.gzip_text(config.INTENT_INDEX_PATH) as out:
@@ -642,6 +695,7 @@ def main() -> int:
         f"  commit text kept as evidence: {subjected:,} tickets with subjects, "
         f"{bodied:,} with body prose."
     )
+    report_withheld(withheld)
 
     summarise(index, commits_seen, report)
     return 0

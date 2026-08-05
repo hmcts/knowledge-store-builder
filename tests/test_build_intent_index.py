@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import importlib
 import io
 import json
+import os
+import re
 import tempfile
 import unittest
 from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
+from knowledgestore import check_evidence  # noqa: E402
 from knowledgestore import config  # noqa: E402
 
 
@@ -54,6 +59,32 @@ def write_ndjson(directory, commits):
     ndjson = Path(directory) / "commits.ndjson"
     ndjson.write_text("\n".join(json.dumps(c) for c in commits) + "\n", encoding="utf-8")
     return ndjson
+
+
+def run_stage(commits, repo="repo-a"):
+    """Run the real stage over one repository's commits.
+
+    Returns its two committed artefacts and everything it printed: the ticket
+    records, the file -> ticket index, and the run report.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        history = root / "history" / repo
+        history.mkdir(parents=True)
+        write_ndjson(history, commits)
+        config.configure(
+            HISTORY_DIR=root / "history",
+            INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+            TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+        )
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            assert intent.main() == 0
+        return (
+            json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8")),
+            json.load(gzip.open(config.INTENT_INDEX_PATH, "rt", encoding="utf-8")),
+            printed.getvalue(),
+        )
 
 
 class CleanDescriptionTest(SettingsIsolated):
@@ -623,19 +654,7 @@ class EvidenceFieldsTest(SettingsIsolated):
 
     def _artefact(self, commits, repo="repo-a"):
         """The committed ticket-descriptions artefact, built by the real stage."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            history = root / "history" / repo
-            history.mkdir(parents=True)
-            write_ndjson(history, commits)
-            config.configure(
-                HISTORY_DIR=root / "history",
-                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
-                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
-            )
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(intent.main(), 0)
-            return json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8"))
+        return run_stage(commits, repo)[0]
 
     def test_junk_subject_discarded_by_d_is_kept_verbatim_in_s(self):
         ticket = self._artefact([make_commit("DD-1: wip")])["DD-1"]
@@ -747,6 +766,246 @@ class EvidenceFieldsTest(SettingsIsolated):
         ]
         commits = [make_commit(f"DD-1: {subject}") for subject in subjects]
         self.assertEqual(self._artefact(commits)["DD-1"]["s"], sorted(subjects))
+
+
+# Invented, and only ever invented: an all-zero case reference in a ZZ block, the
+# ZZ99 postcode reserved for "nowhere real", an all-zero National Insurance
+# number and an example.example address. Nothing resembling real data belongs in
+# a fixture - a test file is published as widely as the code it checks.
+CASE_REFERENCE = "00ZZ0000000"
+NI_NUMBER = "AB000000C"
+POSTCODE = "ZZ99 9ZZ"
+EMAIL_ADDRESS = "someone@example.example"
+
+
+class WithheldValuesTest(SettingsIsolated):
+    """Mined commit text that identifies a specific case never reaches the
+    artefact - not in `d`, not in `s`, not in `b`.
+
+    The break each test catches: a store committing, and a browser page
+    embedding, a case reference together with the account of proceedings written
+    beside it. The whole value goes rather than the matched span, because a commit
+    message naming a case is describing that case, so the rest of the sentence is
+    case narrative too - removing only the reference would leave the narrative
+    attached to a ticket that still identifies whose case it was."""
+
+    def test_a_case_reference_is_absent_from_d_s_and_b(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
+                    body=f"{CASE_REFERENCE} - the second hearing is missing from the record.",
+                )
+            ]
+        )
+        ticket = tickets["DD-1"]
+        self.assertEqual(ticket["d"], [])
+        self.assertNotIn("s", ticket)
+        self.assertNotIn("b", ticket)
+        self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
+
+    def test_an_email_address_is_dropped(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: widen the address field",
+                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
+                )
+            ]
+        )
+        self.assertNotIn("b", tickets["DD-1"])
+        self.assertNotIn(EMAIL_ADDRESS, json.dumps(tickets))
+        # Only the value carrying it: the subject said nothing about a person.
+        self.assertEqual(tickets["DD-1"]["s"], ["widen the address field"])
+
+    def test_a_national_insurance_number_is_dropped(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the claimant import",
+                    body=f"The record carries {NI_NUMBER} twice, so the import rejects it.",
+                )
+            ]
+        )
+        self.assertNotIn("b", tickets["DD-1"])
+        self.assertNotIn(NI_NUMBER, json.dumps(tickets))
+
+    def test_a_postcode_is_dropped(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the address lookup",
+                    body=f"The lookup returns nothing for {POSTCODE}, so the form cannot be sent.",
+                )
+            ]
+        )
+        self.assertNotIn("b", tickets["DD-1"])
+        self.assertNotIn(POSTCODE, json.dumps(tickets))
+
+    def test_withholding_every_value_still_leaves_the_ticket_and_its_links(self):
+        """Evidence is dropped, not the ticket. Dates, repositories, the commit
+        count and the file -> ticket link are what a store answers "when was this
+        touched, and by whose work?" from, and none of them identifies a case."""
+        tickets, index, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
+                    date="2024-03-04T09:00:00+00:00",
+                    path="src/hearing.ts",
+                ),
+                make_commit("DD-2: widen the address field to 35 characters"),
+            ]
+        )
+        self.assertEqual(tickets["DD-2"]["d"], ["widen the address field to 35 characters"])
+        withheld = tickets["DD-1"]
+        self.assertEqual(withheld["d"], [])
+        self.assertNotIn("s", withheld)
+        self.assertEqual(withheld["first"], "2024-03-04")
+        self.assertEqual(withheld["last"], "2024-03-04")
+        self.assertEqual(withheld["repos"], ["repo-a"])
+        self.assertEqual(withheld["n"], 1)
+        self.assertEqual(index["repo-a"]["src/hearing.ts"]["tickets"], {"DD-1": 1})
+
+    def test_the_summary_reports_the_withheld_count_under_each_rule(self):
+        """A silent filter is indistinguishable from having no data, and an
+        estate producing case-identifying commit messages is a finding about the
+        estate - so the run says how much went and under which rule, without
+        printing any of it."""
+        _, _, output = run_stage(
+            [
+                make_commit(f"DD-1: cannot open the hearing for {CASE_REFERENCE}"),
+                make_commit(
+                    "DD-2: widen the address field",
+                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
+                ),
+            ]
+        )
+        self.assertIn("withheld 3 values", output)
+        self.assertIn("case-reference (2)", output)
+        self.assertIn("email-address (1)", output)
+        self.assertNotIn(CASE_REFERENCE, output)
+        self.assertNotIn(EMAIL_ADDRESS, output)
+
+    def test_a_run_that_withheld_nothing_says_so(self):
+        _, _, output = run_stage([make_commit(GOOD_SUBJECT)])
+        self.assertIn("withheld 0 values", output)
+
+
+class WithholdingRulesAreConfigurableTest(SettingsIsolated):
+    """Case-reference and identifier formats differ between estates, and a
+    library cannot know them all, so the rules are a setting.
+
+    The break each test catches: an estate unable to describe its own identifier
+    format, and - worse - an override that empties the rule set without saying so,
+    which reads exactly like an estate with nothing to withhold."""
+
+    def test_a_pattern_added_in_config_is_honoured(self):
+        config.SENSITIVE_PATTERNS = {
+            **config.SENSITIVE_PATTERNS,
+            "listing-reference": r"\bREF/\d{4}\b",
+        }
+        tickets, _, output = run_stage([make_commit("DD-1: rework the listing for REF/0000")])
+        self.assertEqual(tickets["DD-1"]["d"], [])
+        self.assertNotIn("s", tickets["DD-1"])
+        self.assertIn("listing-reference (2)", output)
+
+    def test_the_environment_override_adds_to_the_defaults(self):
+        with mock.patch.dict(
+            os.environ, {"KSB_SENSITIVE_PATTERNS": '{"listing-ref": "REF/[0-9]+"}'}
+        ):
+            importlib.reload(config)
+        try:
+            self.assertIn("listing-ref", config.SENSITIVE_PATTERNS)
+            self.assertIn("case-reference", config.SENSITIVE_PATTERNS)
+        finally:
+            importlib.reload(config)
+
+    def test_an_unparseable_override_raises_rather_than_emptying_the_rules(self):
+        with mock.patch.dict(os.environ, {"KSB_SENSITIVE_PATTERNS": "{not json"}):
+            with self.assertRaises(ValueError):
+                importlib.reload(config)
+        importlib.reload(config)
+        self.assertIn("case-reference", config.SENSITIVE_PATTERNS)
+
+    def test_a_pattern_that_cannot_compile_fails_the_run(self):
+        config.SENSITIVE_PATTERNS = {"unclosed-group": "([A-Z"}
+        with self.assertRaises(re.error):
+            run_stage([make_commit(GOOD_SUBJECT)])
+
+
+class CheckEvidenceStageTest(SettingsIsolated):
+    """The gate over an artefact a store has *already* committed. Filtering new
+    output cannot help a store whose file is in version control and embedded in a
+    published page, so there has to be a way to check what is there.
+
+    The break each test catches: a gate that passes a file carrying a case
+    reference, or one that reports the finding by printing the value into a CI
+    log - which republishes exactly what it was called to protect."""
+
+    def _check(self, tickets):
+        """Run the real stage over a written artefact; return (exit code, output)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            artefact = Path(tmp) / "ticket-descriptions.json.gz"
+            with gzip.open(artefact, "wt", encoding="utf-8") as out:
+                json.dump(tickets, out, ensure_ascii=False)
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                code = check_evidence.main([str(artefact)])
+            return code, printed.getvalue()
+
+    def test_a_match_fails_the_gate_and_names_the_ticket_and_field(self):
+        code, output = self._check(
+            {
+                "DD-1": {
+                    "d": [],
+                    "b": [f"{CASE_REFERENCE} - the second hearing is missing from the record."],
+                    "first": "2024-03-04",
+                    "last": "2024-03-04",
+                    "repos": ["repo-a"],
+                    "n": 1,
+                }
+            }
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("DD-1", output)
+        self.assertIn("field b", output)
+        self.assertIn("case-reference", output)
+
+    def test_the_gate_never_prints_the_value_it_matched(self):
+        _, output = self._check(
+            {
+                "DD-1": {
+                    "d": [f"cannot open the hearing for {CASE_REFERENCE}"],
+                    "s": [f"{POSTCODE} - the lookup returns nothing"],
+                    "b": [f"Signed in as {EMAIL_ADDRESS} to reproduce the failure."],
+                }
+            }
+        )
+        for identifier in (CASE_REFERENCE, POSTCODE, EMAIL_ADDRESS):
+            self.assertNotIn(identifier, output)
+        # Nor the narrative written beside it, which is the rest of the value.
+        for word in ("hearing", "lookup", "reproduce"):
+            self.assertNotIn(word, output)
+
+    def test_a_clean_artefact_passes(self):
+        code, output = self._check(
+            {
+                "DD-1": {
+                    "d": ["widen the address field to 35 characters"],
+                    "b": ["Address entry now rejects lines longer than the schema allows."],
+                }
+            }
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("DD-1", output)
+
+    def test_a_missing_artefact_is_reported_rather_than_passed_in_silence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                code = check_evidence.main([str(Path(tmp) / "absent.json.gz")])
+        self.assertEqual(code, 0)
+        self.assertIn("nothing to check", printed.getvalue())
 
 
 if __name__ == "__main__":

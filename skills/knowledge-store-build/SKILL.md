@@ -449,8 +449,22 @@ materially — new repositories, or many new summaries.
 
 ```bash
 knowledgestore explorer
+knowledgestore check-evidence               # must pass before you commit
 node tests/explorer/estate-regression.mjs   # if the estate has one
 ```
+
+`intent` withholds mined commit text that identifies a specific case or person —
+a case reference, an email address, a National Insurance number, a UK postcode —
+dropping the whole value rather than the matched span, and reports how many went
+under each rule. **Carry that count into your report.** It is a finding about the
+estate rather than a build statistic: the commit messages still hold the text,
+whatever the store now publishes.
+
+`check-evidence` exits non-zero when such text is still in the committed
+artefact, including anything mined before the rule existed. It names the ticket,
+the field and the rule and never the value — hold to that yourself: no matched
+value in your report, in a ticket, or in this conversation. A clean result means
+nothing matched the rules, never that the file holds no personal data.
 
 Commit `knowledge/`, `knowledge_context.md`, `docs/topics/` and
 `graphify-out/`. Never commit `repositories/`, `knowledge/git-history/` or the

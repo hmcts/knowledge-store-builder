@@ -509,8 +509,9 @@ class CliTest(SettingsIsolated):
                 "deepdive",
                 "explorer",
                 "status",
-                # not part of a build: a gate a store runs in CI
+                # not part of a build: gates a store runs in CI
                 "check-install-docs",
+                "check-evidence",
             ],
         )
 
