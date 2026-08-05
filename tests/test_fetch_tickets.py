@@ -603,9 +603,21 @@ class CredentialTest(FetchTicketsTestCase):
             self._store(tmp, ["AAA-1", "AAA-2", "CCC-3"], TRACKER_PAGE_SIZE=1)
             tracker = FakeTracker({"AAA-1": fields_for("First")}, statuses=[500])
             code, output = self._run_stage(tracker)
-            artefacts = (
-                config.TICKET_TRACKER_PATH.read_bytes() + config.TRACKER_UNDECIDED_PATH.read_bytes()
-            )
+            # A second run with nothing queued, so a page actually succeeds. Without
+            # it the 500 means no issue is ever fetched, `projected_record` never
+            # runs, and the most likely place for a credential to be copied - the
+            # stored record itself - is never reached by this test.
+            fetched = FakeTracker({"AAA-1": fields_for("First"), "AAA-2": fields_for("Second")})
+            code, second = self._run_stage(fetched)
+            output += second
+            # Decompressed, deliberately. The cache is gzip, so reading its raw
+            # bytes cannot find a token inside it - the assertion would read as a
+            # check and verify nothing. This is the highest-consequence artefact
+            # of the two: it is committed, so a credential written here would
+            # persist in a repository's history rather than in a transient log.
+            artefacts = json.dumps(
+                pio.read_gzip_json(config.TICKET_TRACKER_PATH, default={})
+            ) + config.TRACKER_UNDECIDED_PATH.read_text(encoding="utf-8")
 
             # The header is the one legitimate carrier - assert it, so the rest
             # of this test cannot pass by the token never being sent at all.
@@ -614,7 +626,7 @@ class CredentialTest(FetchTicketsTestCase):
             self.assertNotIn(TOKEN, "".join(tracker.urls))
             self.assertEqual(code, 0)
             self.assertNotIn(TOKEN, output)
-            self.assertNotIn(TOKEN.encode(), artefacts)
+            self.assertNotIn(TOKEN, artefacts)
 
             # A raised message must not carry it either, whatever went wrong.
             config.configure(TRACKER_BASE_URL=f"ftp://{TOKEN}@example.example/jira")
