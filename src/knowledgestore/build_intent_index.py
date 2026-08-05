@@ -5,9 +5,9 @@ commits that touched it name, with first/last touch dates. Ticket ids and
 descriptions come from the commit subject, and - where the subject offers
 nothing - from the commit body, once that body has been reduced to prose.
 Subjects and bodies are also kept as fields of their own, so evidence a curated
-description cannot carry is still in the artefact. Any value that identifies a
-specific case or person is withheld whole and never stored; `sensitive.py` holds
-that rule, its reasoning and its limits.
+description cannot carry is still in the artefact. Identifiers naming a specific
+case or person are redacted out of subjects and bodies before anything else reads
+them; `sensitive.py` holds that rule, what it achieves and what it does not.
 This answers "what business change shaped this file?" as a lookup, e.g.:
 
     import gzip, json
@@ -150,6 +150,16 @@ class BodyReport:
     automated_identities: Counter[str] = field(default_factory=Counter)
 
 
+@dataclass
+class RedactionReport:
+    """What redaction took out, so a run can say so rather than filter silently."""
+
+    by_rule: Counter[str] = field(default_factory=Counter)
+    # Values whose every word was an identifier, so redaction left nothing to
+    # store. Counted separately: text changed and text lost are different facts.
+    emptied: int = 0
+
+
 def clean_description(subject: str) -> str:
     """Strip leading ticket references, leaving the human description."""
     cleaned = subject.strip()
@@ -171,12 +181,19 @@ def normalise_line(line: str) -> str:
 
 def count_body_lines(ndjson: Path) -> tuple[dict[str, int], int]:
     """Per normalised body line, how many of a repository's commits carry it,
-    and how many of its commits have a body at all."""
+    and how many of its commits have a body at all.
+
+    Counted on redacted text, because the second pass filters redacted lines
+    against these keys: learn `Contact team@example.example for help` and the
+    redacted line would no longer match it, so a template would survive as
+    prose. Redacting here costs a pass and keeps the two halves in step. No
+    counting - the same identifiers are counted once, where they are stored.
+    """
     counts: dict[str, int] = defaultdict(int)
     bodies = 0
     with ndjson.open(encoding="utf-8") as source:
         for line in source:
-            body = str(json.loads(line).get("body") or "")
+            body = sensitive.redact(str(json.loads(line).get("body") or ""))
             if not body.strip():
                 continue
             bodies += 1
@@ -416,20 +433,19 @@ def _pool_text(info: dict, description: str, subject: str, prose: str) -> None:
             info[pool][text] += 1
 
 
-def stored_value(text: str, withheld: Counter[str] | None = None) -> str:
-    """One mined value, or "" when a withholding rule claims it.
+def stored_value(text: str, report: RedactionReport | None = None) -> str:
+    """One redacted value, or "" when redaction left it saying nothing.
 
-    The whole value goes, not the span that matched - `sensitive.py` carries the
-    reasoning and the limits. What a commit *links* is kept: the ticket, its
-    dates, its repositories and its file entries are built from the commit's
-    metadata, none of which identifies anybody.
+    Applied to each field's final text rather than to the subject or body it came
+    from, because "nothing left" is a property of the stored value: cleaning
+    strips a ticket prefix, so a subject of a reference and nothing else only
+    becomes bare placeholder once it has been through that.
     """
-    rule = sensitive.matched_rule(text)
-    if not rule:
+    if not text or not sensitive.is_redaction_only(text):
         return text
-    if withheld is not None:
+    if report is not None:
         # Per field, because each is a value the artefact would have carried.
-        withheld[rule] += 1
+        report.emptied += 1
     return ""
 
 
@@ -458,7 +474,7 @@ def apply_commit(
     files: dict[str, dict],
     descriptions: dict[str, dict],
     boilerplate: frozenset[str] = frozenset(),
-    withheld: Counter[str] | None = None,
+    redactions: RedactionReport | None = None,
 ) -> bool:
     """Fold one commit's tickets into the per-file entries and the per-ticket
     pools of description, subject and body text. True if ticketed.
@@ -468,8 +484,11 @@ def apply_commit(
     only one of the two, and the junk filter drops the weakest subjects
     altogether. The subject and body pools keep both, as written.
 
-    Any of the three that identifies a specific case or person is withheld
-    whole, counted under the rule that claimed it, and never stored.
+    The subject and the body are **redacted first**, before anything derives a
+    value from them, because the length and junk filters have to judge the text
+    that will actually be stored - redaction changes the length. Tickets are read
+    from the unredacted commit: a ticket id is a link, not a value, and the rules
+    cannot match one.
 
     Merge commits are skipped: a merge's file list is the whole branch, so
     indexing one would attribute hundreds of files to a single ticket.
@@ -480,10 +499,12 @@ def apply_commit(
     if not tickets:
         return False
     date = commit["author_date"][:10]
-    body = commit_body(commit)
-    description = stored_value(commit_description(commit["subject"], body, boilerplate), withheld)
-    subject = stored_value(clean_description(commit["subject"]), withheld)
-    prose = stored_value(body_evidence(body, boilerplate), withheld)
+    counts = None if redactions is None else redactions.by_rule
+    subject_text = sensitive.redact(commit["subject"], counts)
+    body = sensitive.redact(commit_body(commit), counts)
+    description = stored_value(commit_description(subject_text, body, boilerplate), redactions)
+    subject = stored_value(clean_description(subject_text), redactions)
+    prose = stored_value(body_evidence(body, boilerplate), redactions)
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
@@ -499,8 +520,12 @@ def apply_commit(
 
 
 def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: BodyReport) -> None:
-    """Note why a commit's body was discarded, so the run can report it."""
-    raw = str(commit.get("body") or "")
+    """Note why a commit's body was discarded, so the run can report it.
+
+    Reads the redacted body, so it classifies the same text the indexing pass
+    stores. Not counted here: this pass reports on bodies, not on redaction.
+    """
+    raw = sensitive.redact(str(commit.get("body") or ""))
     if commit.get("is_merge") or not raw.strip():
         return
     if is_automated(commit):
@@ -519,7 +544,7 @@ def index_repository(
     ndjson: Path,
     descriptions: dict[str, dict],
     report: BodyReport | None = None,
-    withheld: Counter[str] | None = None,
+    redactions: RedactionReport | None = None,
 ) -> tuple[dict[str, dict], int]:
     """Build the file -> ticket map for one repository's dataset.
 
@@ -542,7 +567,7 @@ def index_repository(
             commit = json.loads(line)
             if report is not None:
                 _record_discarded_body(commit, boilerplate, report)
-            if apply_commit(commit, files, descriptions, boilerplate, withheld):
+            if apply_commit(commit, files, descriptions, boilerplate, redactions):
                 commits_seen += 1
     finalised = {
         path: {
@@ -635,29 +660,31 @@ def summarise(
     print(f"Wrote {config.INTENT_INDEX_PATH} ({size_mb:.1f} MB)")
 
 
-def report_withheld(withheld: Counter[str]) -> None:
-    """Say how much mined text was withheld, and under which rule.
+def report_redactions(redactions: RedactionReport) -> None:
+    """Say how many identifiers were redacted, under which rule, and how many
+    values were left with nothing.
 
-    Always, including the nothing-withheld case: a silent filter is
-    indistinguishable from an estate with nothing to withhold, and the two call
-    for opposite responses. A count above zero is a finding about the estate as
-    much as about the store - commit messages are carrying case detail, and this
-    filters what the store publishes, not what the repositories hold.
+    Always, including the nothing-redacted case: a silent filter is
+    indistinguishable from an estate with nothing to redact, and the two call for
+    opposite responses. A count above zero is a finding about the estate as much
+    as about the store - the commit messages still carry that text, whatever the
+    store now publishes.
 
-    The values themselves are never printed, here or anywhere: reporting them
-    would republish what the rule exists to withhold.
+    The identifiers themselves are never printed, here or anywhere: reporting
+    them would republish what redaction just removed.
     """
-    if not withheld:
-        print("  withheld 0 values: no mined text matched a withholding rule")
+    if not redactions.by_rule:
+        print("  redacted 0 identifiers: no mined text matched a redaction rule")
         return
     named = ", ".join(
         f"{rule} ({count:,})"
-        for rule, count in sorted(withheld.items(), key=lambda kv: (-kv[1], kv[0]))
+        for rule, count in sorted(redactions.by_rule.items(), key=lambda kv: (-kv[1], kv[0]))
     )
-    print(f"  withheld {sum(withheld.values()):,} values that identify a case or person: {named}")
+    print(f"  redacted {sum(redactions.by_rule.values()):,} identifiers in mined text: {named}")
     print(
-        "  each was dropped whole, not redacted; the commit messages still carry that text, "
-        "so treat the count as a finding about the estate"
+        f"  {redactions.emptied:,} values were left with nothing but redactions and were "
+        "not stored; names are not detected, so a redacted value can still describe "
+        "an identifiable person's case"
     )
 
 
@@ -671,10 +698,10 @@ def main() -> int:
     descriptions: dict[str, dict] = ticket_pool()
     commits_seen = 0
     report = BodyReport()
-    withheld: Counter[str] = Counter()
+    redactions = RedactionReport()
     for ndjson in ndjson_files:
         index[ndjson.parent.name], repo_commits = index_repository(
-            ndjson, descriptions, report, withheld
+            ndjson, descriptions, report, redactions
         )
         commits_seen += repo_commits
 
@@ -695,7 +722,7 @@ def main() -> int:
         f"  commit text kept as evidence: {subjected:,} tickets with subjects, "
         f"{bodied:,} with body prose."
     )
-    report_withheld(withheld)
+    report_redactions(redactions)
 
     summarise(index, commits_seen, report)
     return 0

@@ -768,28 +768,39 @@ class EvidenceFieldsTest(SettingsIsolated):
         self.assertEqual(self._artefact(commits)["DD-1"]["s"], sorted(subjects))
 
 
-# Invented, and only ever invented: an all-zero case reference in a ZZ block, the
+# Invented, and only ever invented: all-zero case references in a ZZ block, the
 # ZZ99 postcode reserved for "nowhere real", an all-zero National Insurance
 # number and an example.example address. Nothing resembling real data belongs in
 # a fixture - a test file is published as widely as the code it checks.
 CASE_REFERENCE = "00ZZ0000000"
+OTHER_CASE_REFERENCE = "11ZZ1111111"
 NI_NUMBER = "AB000000C"
 POSTCODE = "ZZ99 9ZZ"
 EMAIL_ADDRESS = "someone@example.example"
 
+CASE_GONE = "[case reference withheld]"
+EMAIL_GONE = "[email address withheld]"
+NI_GONE = "[national insurance number withheld]"
+POSTCODE_GONE = "[postcode withheld]"
 
-class WithheldValuesTest(SettingsIsolated):
-    """Mined commit text that identifies a specific case never reaches the
-    artefact - not in `d`, not in `s`, not in `b`.
+
+class RedactedValuesTest(SettingsIsolated):
+    """An identifier a rule matches is replaced in place, and the words around it
+    are kept.
 
     The break each test catches: a store committing, and a browser page
-    embedding, a case reference together with the account of proceedings written
-    beside it. The whole value goes rather than the matched span, because a commit
-    message naming a case is describing that case, so the rest of the sentence is
-    case narrative too - removing only the reference would leave the narrative
-    attached to a ticket that still identifies whose case it was."""
+    embedding, an identifier that names one specific case or person. The
+    placeholder is part of the contract - a reader has to be able to tell that
+    something was taken and what kind of thing it was, rather than reading a
+    sentence with a hole in it.
 
-    def test_a_case_reference_is_absent_from_d_s_and_b(self):
+    What this does not catch, stated here because a reader of these tests is
+    exactly who needs to know: redaction removes only the identifiers the rules
+    match. Personal names are not detected, and names have been found beside
+    descriptions of proceedings, so a redacted value can still describe an
+    identifiable person's case with the reference taken out."""
+
+    def test_a_case_reference_is_replaced_in_d_s_and_b(self):
         tickets, _, _ = run_stage(
             [
                 make_commit(
@@ -799,12 +810,14 @@ class WithheldValuesTest(SettingsIsolated):
             ]
         )
         ticket = tickets["DD-1"]
-        self.assertEqual(ticket["d"], [])
-        self.assertNotIn("s", ticket)
-        self.assertNotIn("b", ticket)
+        self.assertEqual(ticket["d"], [f"cannot open the hearing for {CASE_GONE}"])
+        self.assertEqual(ticket["s"], [f"cannot open the hearing for {CASE_GONE}"])
+        self.assertEqual(
+            ticket["b"], [f"{CASE_GONE} - the second hearing is missing from the record."]
+        )
         self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
 
-    def test_an_email_address_is_dropped(self):
+    def test_an_email_address_is_replaced(self):
         tickets, _, _ = run_stage(
             [
                 make_commit(
@@ -813,12 +826,15 @@ class WithheldValuesTest(SettingsIsolated):
                 )
             ]
         )
-        self.assertNotIn("b", tickets["DD-1"])
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"Updated the user name to {EMAIL_GONE} so the suite can sign in."],
+        )
         self.assertNotIn(EMAIL_ADDRESS, json.dumps(tickets))
-        # Only the value carrying it: the subject said nothing about a person.
+        # The subject named nobody, so it is untouched.
         self.assertEqual(tickets["DD-1"]["s"], ["widen the address field"])
 
-    def test_a_national_insurance_number_is_dropped(self):
+    def test_a_national_insurance_number_is_replaced(self):
         tickets, _, _ = run_stage(
             [
                 make_commit(
@@ -827,10 +843,12 @@ class WithheldValuesTest(SettingsIsolated):
                 )
             ]
         )
-        self.assertNotIn("b", tickets["DD-1"])
+        self.assertEqual(
+            tickets["DD-1"]["b"], [f"The record carries {NI_GONE} twice, so the import rejects it."]
+        )
         self.assertNotIn(NI_NUMBER, json.dumps(tickets))
 
-    def test_a_postcode_is_dropped(self):
+    def test_a_postcode_is_replaced(self):
         tickets, _, _ = run_stage(
             [
                 make_commit(
@@ -839,17 +857,110 @@ class WithheldValuesTest(SettingsIsolated):
                 )
             ]
         )
-        self.assertNotIn("b", tickets["DD-1"])
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"The lookup returns nothing for {POSTCODE_GONE}, so the form cannot be sent."],
+        )
         self.assertNotIn(POSTCODE, json.dumps(tickets))
 
-    def test_withholding_every_value_still_leaves_the_ticket_and_its_links(self):
-        """Evidence is dropped, not the ticket. Dates, repositories, the commit
-        count and the file -> ticket link are what a store answers "when was this
-        touched, and by whose work?" from, and none of them identifies a case."""
+    def test_every_match_in_one_value_is_replaced(self):
+        """One replacement per value would leave the second reference in place -
+        the failure mode of a `sub` written as though values held one match."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the listing order",
+                    body=(
+                        f"{CASE_REFERENCE} and {OTHER_CASE_REFERENCE} were listed "
+                        "on the same day by mistake."
+                    ),
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"{CASE_GONE} and {CASE_GONE} were listed on the same day by mistake."],
+        )
+        for reference in (CASE_REFERENCE, OTHER_CASE_REFERENCE):
+            self.assertNotIn(reference, json.dumps(tickets))
+
+    def test_matches_from_different_rules_in_one_value_are_all_replaced(self):
+        """Stopping at the first rule that fires is the obvious implementation
+        and would leave every other identifier in the same sentence."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: reproduce the sign-in failure",
+                    body=(
+                        f"Signed in as {EMAIL_ADDRESS} to check {CASE_REFERENCE} "
+                        f"at {POSTCODE} against {NI_NUMBER}."
+                    ),
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [
+                f"Signed in as {EMAIL_GONE} to check {CASE_GONE} "
+                f"at {POSTCODE_GONE} against {NI_GONE}."
+            ],
+        )
+        for identifier in (EMAIL_ADDRESS, CASE_REFERENCE, POSTCODE, NI_NUMBER):
+            self.assertNotIn(identifier, json.dumps(tickets))
+
+    def test_a_value_that_is_nothing_but_a_match_is_not_stored(self):
+        """`[case reference withheld]` on its own says nothing about the change
+        and would sit in the retrieval index as noise."""
+        tickets, _, _ = run_stage([make_commit(f"DD-1: {CASE_REFERENCE}")])
+        ticket = tickets["DD-1"]
+        self.assertEqual(ticket["d"], [])
+        self.assertNotIn("s", ticket)
+        self.assertNotIn("b", ticket)
+
+    def test_the_length_filter_reads_the_redacted_text_not_the_original(self):
+        """Redaction runs before the length and junk filters, because it changes
+        the length. This body is 14 characters and would be rejected as too short
+        if the filter ran first; redacted it is 28 and is kept. Filtering first is
+        the mistake this catches."""
+        body = f"{CASE_REFERENCE} ok"
+        self.assertLess(len(body), intent.MIN_BODY_CHARS)
+        tickets, _, _ = run_stage([make_commit(GOOD_SUBJECT, body=body)])
+        self.assertEqual(tickets["DD-1"]["b"], [f"{CASE_GONE} ok"])
+
+    def test_the_summary_reports_redactions_per_rule_and_values_emptied(self):
+        """A silent filter is indistinguishable from having no data, and an
+        estate whose commit messages carry case detail is a finding about the
+        estate - so the run says how much was replaced, under which rule, and how
+        many values were left with nothing, without printing any of it."""
+        _, _, output = run_stage(
+            [
+                make_commit(f"DD-1: {CASE_REFERENCE}"),
+                make_commit(
+                    "DD-2: widen the address field",
+                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
+                ),
+            ]
+        )
+        self.assertIn("redacted 2 identifiers", output)
+        self.assertIn("case-reference (1)", output)
+        self.assertIn("email-address (1)", output)
+        self.assertIn("2 values were left with nothing but redactions", output)
+        self.assertNotIn(CASE_REFERENCE, output)
+        self.assertNotIn(EMAIL_ADDRESS, output)
+
+    def test_a_run_that_redacted_nothing_says_so(self):
+        _, _, output = run_stage([make_commit(GOOD_SUBJECT)])
+        self.assertIn("redacted 0 identifiers", output)
+
+    def test_redaction_leaves_the_ticket_and_its_links_alone(self):
+        """Text is redacted, not tickets. Dates, repositories, the commit count
+        and the file -> ticket link are what a store answers "when was this
+        touched, and by whose work?" from, and none of them identifies a case -
+        so a ticket whose every value was emptied still has to be there."""
         tickets, index, _ = run_stage(
             [
                 make_commit(
-                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
+                    f"DD-1: {CASE_REFERENCE}",
                     date="2024-03-04T09:00:00+00:00",
                     path="src/hearing.ts",
                 ),
@@ -857,57 +968,35 @@ class WithheldValuesTest(SettingsIsolated):
             ]
         )
         self.assertEqual(tickets["DD-2"]["d"], ["widen the address field to 35 characters"])
-        withheld = tickets["DD-1"]
-        self.assertEqual(withheld["d"], [])
-        self.assertNotIn("s", withheld)
-        self.assertEqual(withheld["first"], "2024-03-04")
-        self.assertEqual(withheld["last"], "2024-03-04")
-        self.assertEqual(withheld["repos"], ["repo-a"])
-        self.assertEqual(withheld["n"], 1)
+        emptied = tickets["DD-1"]
+        self.assertEqual(emptied["d"], [])
+        self.assertEqual(emptied["first"], "2024-03-04")
+        self.assertEqual(emptied["last"], "2024-03-04")
+        self.assertEqual(emptied["repos"], ["repo-a"])
+        self.assertEqual(emptied["n"], 1)
         self.assertEqual(index["repo-a"]["src/hearing.ts"]["tickets"], {"DD-1": 1})
 
-    def test_the_summary_reports_the_withheld_count_under_each_rule(self):
-        """A silent filter is indistinguishable from having no data, and an
-        estate producing case-identifying commit messages is a finding about the
-        estate - so the run says how much went and under which rule, without
-        printing any of it."""
-        _, _, output = run_stage(
-            [
-                make_commit(f"DD-1: cannot open the hearing for {CASE_REFERENCE}"),
-                make_commit(
-                    "DD-2: widen the address field",
-                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
-                ),
-            ]
-        )
-        self.assertIn("withheld 3 values", output)
-        self.assertIn("case-reference (2)", output)
-        self.assertIn("email-address (1)", output)
-        self.assertNotIn(CASE_REFERENCE, output)
-        self.assertNotIn(EMAIL_ADDRESS, output)
 
-    def test_a_run_that_withheld_nothing_says_so(self):
-        _, _, output = run_stage([make_commit(GOOD_SUBJECT)])
-        self.assertIn("withheld 0 values", output)
-
-
-class WithholdingRulesAreConfigurableTest(SettingsIsolated):
+class RedactionRulesAreConfigurableTest(SettingsIsolated):
     """Case-reference and identifier formats differ between estates, and a
     library cannot know them all, so the rules are a setting.
 
     The break each test catches: an estate unable to describe its own identifier
     format, and - worse - an override that empties the rule set without saying so,
-    which reads exactly like an estate with nothing to withhold."""
+    which reads exactly like an estate with nothing to redact."""
 
     def test_a_pattern_added_in_config_is_honoured(self):
+        """Including its placeholder, which is derived from the rule name rather
+        than kept in a second list nobody remembers to extend."""
         config.SENSITIVE_PATTERNS = {
             **config.SENSITIVE_PATTERNS,
             "listing-reference": r"\bREF/\d{4}\b",
         }
         tickets, _, output = run_stage([make_commit("DD-1: rework the listing for REF/0000")])
-        self.assertEqual(tickets["DD-1"]["d"], [])
-        self.assertNotIn("s", tickets["DD-1"])
-        self.assertIn("listing-reference (2)", output)
+        self.assertEqual(
+            tickets["DD-1"]["d"], ["rework the listing for [listing reference withheld]"]
+        )
+        self.assertIn("listing-reference (1)", output)
 
     def test_the_environment_override_adds_to_the_defaults(self):
         with mock.patch.dict(
@@ -999,6 +1088,25 @@ class CheckEvidenceStageTest(SettingsIsolated):
         )
         self.assertEqual(code, 0)
         self.assertNotIn("DD-1", output)
+
+    def test_an_artefact_the_stage_just_built_passes_the_gate(self):
+        """End to end, because the two halves have to agree: the gate matches
+        identifier shapes, so a placeholder that happened to look like one would
+        fail every refreshed store. Real stage output, real gate."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: cannot open the hearing for {CASE_REFERENCE}",
+                    body=(
+                        f"Signed in as {EMAIL_ADDRESS} to check {POSTCODE} "
+                        f"against {NI_NUMBER} on the day."
+                    ),
+                )
+            ]
+        )
+        code, output = self._check(tickets)
+        self.assertEqual(code, 0)
+        self.assertIn("none matches a redaction rule", output)
 
     def test_a_missing_artefact_is_reported_rather_than_passed_in_silence(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -161,16 +161,17 @@ AUTOMATION_IDENTITIES = [
 
 TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
 
-# --- text that must not be mined into a committed artefact ----------------
+# --- identifiers redacted out of mined commit text ------------------------
 # Commit messages are written for colleagues, not for publication, and some of
 # them name one specific case or person. A store commits its mined text and its
-# browser page embeds it, so anything mined is republished. A value matching any
-# rule below is not stored at all - see `sensitive.py` for why the whole value
-# goes rather than the matched span, and for what this does not do.
+# browser page embeds it, so anything mined is republished. Every match below is
+# replaced in place with `[<rule name> withheld]` and the words around it are
+# kept - see `sensitive.py` for what that achieves and what it does not.
 #
-# Rules are named because a run reports which one withheld what. Identifier
-# formats differ between estates and no library can know them all, so add yours
-# with KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
+# Rule names do double duty: a run reports which one fired, and the placeholder
+# is derived from the name, so keep names readable as prose. Identifier formats
+# differ between estates and no library can know them all, so add yours with
+# KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
 #
 #   KSB_SENSITIVE_PATTERNS='{"listing-reference": "\\bREF/[0-9]{4}\\b"}'
 DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
@@ -178,7 +179,7 @@ DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
     "case-reference": r"\b\d{2}[A-Z]{2}\d{7}\b",
     "email-address": r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b",
     "national-insurance-number": r"\b[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]\b",
-    "uk-postcode": r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b",
+    "postcode": r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b",
 }
 SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 

@@ -453,10 +453,10 @@ knowledgestore check-evidence               # must pass before you commit
 node tests/explorer/estate-regression.mjs   # if the estate has one
 ```
 
-`intent` withholds mined commit text that identifies a specific case or person —
-a case reference, an email address, a National Insurance number, a UK postcode —
-dropping the whole value rather than the matched span, and reports how many went
-under each rule. **Carry that count into your report.** It is a finding about the
+`intent` redacts anything in mined commit text that identifies a specific case or
+person — a case reference, an email address, a National Insurance number, a UK
+postcode — replacing the matched span and keeping the account around it, and
+reports how many went under each rule. **Carry that count into your report.** It is a finding about the
 estate rather than a build statistic: the commit messages still hold the text,
 whatever the store now publishes.
 

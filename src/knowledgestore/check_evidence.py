@@ -1,6 +1,6 @@
-"""Gate a committed evidence artefact: does it identify a specific case?
+"""Gate a committed evidence artefact: does it still hold an identifier?
 
-The `intent` stage withholds such text as it mines, but that only helps the next
+The `intent` stage redacts them as it mines, but that only helps the next
 refresh. A store's artefact is already in version control and already embedded
 in a published page, so there has to be a way to check what is *there* - and to
 fail a build over it, which is why this is a stage of its own rather than a flag
@@ -15,9 +15,10 @@ and longer kept than the artefact - so a gate that did that would republish
 exactly what it was called to protect.
 
 A clean result is not a certificate. The rules match identifier shapes, not
-personal data in general, and personal names are deliberately not detected -
-`sensitive.py` says why. Read this as "nothing matched the rules", never as
-"this file holds no personal data".
+personal data in general, and personal names are deliberately not detected - so a
+redacted value can still describe an identifiable person's case with the
+reference taken out (`sensitive.py` sets out the limits). Read a pass as "nothing
+matched the rules", never as "this file holds no personal data".
 
 Run: knowledgestore check-evidence [artefact.json.gz ...]
 """
@@ -40,12 +41,12 @@ def check(path: Path) -> tuple[int, int]:
     checked = sum(1 for _ in sensitive.mined_values(records))
     found = sensitive.findings(records)
     if not found:
-        print(f"{path.name}: {checked:,} mined values checked, none matches a withholding rule")
+        print(f"{path.name}: {checked:,} mined values checked, none matches a redaction rule")
         return checked, 0
     # Findings go to stderr, with the advice that follows them, so a failing run
     # reads in order on one stream.
     print(
-        f"{path.name}: {len(found):,} of {checked:,} mined values match a withholding rule:",
+        f"{path.name}: {len(found):,} of {checked:,} mined values match a redaction rule:",
         file=sys.stderr,
     )
     for ticket, field, rule in found:
@@ -67,8 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     if not findings:
         return 0
     print(
-        "\nThe values themselves are deliberately not printed. Re-run"
-        "\n`knowledgestore intent` to rebuild the artefact with them withheld,"
+        "\nThe matched text is deliberately not printed. Re-run"
+        "\n`knowledgestore intent` to rebuild the artefact with these redacted,"
         "\nthen `knowledgestore explorer` so the page stops embedding them.",
         file=sys.stderr,
     )

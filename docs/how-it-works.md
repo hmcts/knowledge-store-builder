@@ -136,19 +136,24 @@ it mines and its page embeds it, so **whatever is mined is republished** — to
 everyone who can read the store, a wider audience than the repository the commit
 sits in.
 
-A mined value matching any rule in `KSB_SENSITIVE_PATTERNS` is therefore not
-stored at all: not as a description, not as a subject, not as body prose. The
-shipped rules match a case-reference shape, an email address, a National
-Insurance number and a UK postcode. An estate adds its own identifier formats,
-because no library can know them all.
+Anything in a mined value matching a rule in `KSB_SENSITIVE_PATTERNS` is
+therefore replaced before it is stored — as a description, as a subject and as
+body prose alike. The shipped rules match a case-reference shape, an email
+address, a National Insurance number and a UK postcode. An estate adds its own
+identifier formats, because no library can know them all.
 
-**The whole value is dropped, not the span that matched.** A commit message
-naming a case is describing that case rather than the architecture, so the rest
-of the sentence is case narrative too — redacting only the reference leaves the
-account of what happened attached to a ticket that still identifies whose matter
-it was. Span redaction reads as diligence while leaving the disclosure. What the
-commit *links* is unaffected: the ticket keeps its dates, repositories, commit
-count and file entries, none of which identifies anybody.
+**The matched span is replaced; the words around it are kept.** A commit message
+is usually an account of a defect that was found and fixed, and that account is
+exactly what a knowledge store exists to hold. "Page not loading for case
+`[case reference withheld]`" is useful evidence about the software; discarding it
+to remove eleven characters trades the whole record for the identifier. Each
+placeholder names what was taken, so a reader meets a stated omission rather than
+an unexplained gap.
+
+A value left with nothing but placeholders is not stored, because it no longer
+says anything about the change. What the commit *links* is unaffected either way:
+the ticket keeps its dates, repositories, commit count and file entries, none of
+which identifies anybody.
 
 Every run reports how many values were withheld and under which rule, including
 when the answer is none — a silent filter is indistinguishable from an estate
@@ -157,12 +162,15 @@ much as about the store, because the commit messages still carry that text.
 
 Two limits, both deliberate:
 
-- **Personal names are not detected.** Recognising them in commit prose is
-  unreliable in both directions, and a rule that half-works invites reliance on
-  it. Names go where they sit beside a reference the rules do match, which is a
-  shape a matcher can be sure of.
+- **Personal names are not detected, and they survive redaction.** Recognising
+  them in commit prose is unreliable in both directions, and a rule that
+  half-works invites reliance on it. So a value can keep a surname beside a
+  removed reference — the identifier goes, the name stays. That is the cost of
+  replacing spans instead of discarding values, and it is the reason a small set
+  of affected values is worth reading rather than assuming the rules covered it.
 - **This reduces exposure; it does not certify a file.** A clean result means
-  nothing matched the rules — never that a file holds no personal data.
+  nothing matched the rules — never that a file holds no personal data, and never
+  that what remains is safe to publish more widely than the store already is.
 
 Filtering as text is mined does nothing for an artefact already committed and
 already embedded in a published page, so `knowledgestore check-evidence` gates
