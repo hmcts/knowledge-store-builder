@@ -63,9 +63,17 @@ Recompress the graph, rebuild the page and check store health and source drift:
 ```bash
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
+knowledgestore check-evidence
 knowledgestore status
 knowledgestore status --drift
 ```
+
+`intent` reports how many mined values it withheld as identifying a case or a
+person, and `check-evidence` fails if any remain in the committed artefact —
+including ones a store committed before the rule existed. Read that count as a
+finding about the estate: the commit messages still carry the text, whatever the
+store now publishes. See
+[Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record).
 
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages

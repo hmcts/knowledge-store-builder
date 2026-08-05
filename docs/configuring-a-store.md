@@ -18,6 +18,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_BRIEF_REQUEST_URL` | none | Destination for “request a topic brief”; unset hides the link |
 | `KSB_E2E_REPOS` | none | Repositories whose test code should be indexed as business documentation |
 | `KSB_FEATURES_DIR` | `features/` | Feature-directory segment used to group Gherkin features |
+| `KSB_SENSITIVE_PATTERNS` | email address (the only shipped rule; estates declare their own formats) | Extra rules for mined commit text that must not be stored, as a JSON object of rule name → regex merged over the defaults: `KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'`. Anything matching a rule is replaced by a placeholder naming what was removed, and counted in the run report; a value left with only placeholders is not stored. Malformed JSON raises rather than emptying the rules — see [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record) |
 | `KSB_AUTOMATION_IDENTITIES` | `jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa` | Author or committer identities whose commit bodies are not treated as evidence. Matched as whole words against the name and the email's local part, so narrow it if a contributor shares a name with a build server — the run reports which identities it filtered. GitHub App accounts are always excluded via `[bot]` and need no entry; an empty value leaves only that rule |
 
 The full set, including tuning thresholds, is defined in
@@ -60,3 +61,4 @@ estate uses another language or layout.
 | `explorer` | `graphify-out/explorer.html` | Build the self-contained search and Q&A page |
 | `status` | report only | Report provenance, coverage, citations, freshness and optional drift |
 | `check-install-docs` | report only | Check the documented install commands against what the lock declares |
+| `check-evidence` | report only | Fail if a committed ticket-descriptions artefact holds mined text matching a withholding rule |

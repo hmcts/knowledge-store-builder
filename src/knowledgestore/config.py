@@ -19,6 +19,7 @@ ignored. `tests/test_config_and_io.py` fails if a copy reappears.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -36,6 +37,33 @@ def _env_int(name: str, default: int) -> int:
 def _env_set(name: str, default: set[str]) -> set[str]:
     value = os.environ.get(name)
     return {v.strip() for v in value.split(",") if v.strip()} if value else default
+
+
+def _env_pattern_map(name: str, default: dict[str, str]) -> dict[str, str]:
+    """A named-regex map, extended by a JSON object in the environment.
+
+    JSON rather than the comma-separated form the other list settings use,
+    because a regex contains commas: `[A-Z]{1,2}` would split into nonsense.
+
+    The override is merged over the defaults, so an estate adds its own format
+    without restating the shipped ones, and replaces a shipped rule by reusing
+    its name. Anything unusable raises: a rule set silently emptied by a stray
+    character looks exactly like an estate with nothing to withhold, and the
+    whole point of these rules is that nobody discovers the loss later.
+    """
+    raw = os.environ.get(name)
+    if not raw:
+        return dict(default)
+    try:
+        added = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{name} must be a JSON object of rule name -> regex: {error}") from error
+    if not isinstance(added, dict) or not all(
+        isinstance(rule, str) and isinstance(pattern, str) and pattern
+        for rule, pattern in added.items()
+    ):
+        raise ValueError(f"{name} must map rule names to non-empty regex strings")
+    return {**default, **added}
 
 
 # --- where the knowledge store lives -------------------------------------
@@ -132,6 +160,33 @@ AUTOMATION_IDENTITIES = [
 ]
 
 TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
+
+# --- identifiers redacted out of mined commit text ------------------------
+# Commit messages are written for colleagues, not for publication, and some of
+# them name one specific case or person. A store commits its mined text and its
+# browser page embeds it, so anything mined is republished. Every match below is
+# replaced in place with `[<rule name> withheld]` and the words around it are
+# kept - see `sensitive.py` for what that achieves and what it does not.
+#
+# Rule names do double duty: a run reports which one fired, and the placeholder
+# is derived from the name, so keep names readable as prose. Identifier formats
+# differ between estates and no library can know them all, so add yours with
+# KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
+#
+#   KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'
+# One default only, and deliberately: an email address has the same shape
+# everywhere, so it is the only identifier this library can recognise without
+# assuming a jurisdiction or a subject domain. Reference formats for cases,
+# claims, patients, accounts or citizens differ per organisation, and national
+# identifiers and postal codes differ per country - a library that shipped one
+# country's would protect that estate and quietly miss every other one, which is
+# worse than shipping none because it reads as coverage. Each estate declares its
+# own in KSB_SENSITIVE_PATTERNS, and the run names the rules in force so an
+# operator can see what is actually being applied.
+DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
+    "email-address": r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b",
+}
+SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 
 # --- explorer page -------------------------------------------------------
 EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")

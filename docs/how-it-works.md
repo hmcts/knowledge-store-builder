@@ -127,6 +127,67 @@ contributors use those addresses too; only the local part is read.
 Together this is why a store can answer *why* a file exists without any
 issue-tracker API access.
 
+### Redacting text that identifies a person or a record
+
+Commit messages are written for colleagues, not for publication. Some describe
+one particular record rather than the software — a reference to a case, a claim, an
+account, a patient, whatever the organisation's subject happens to be — sometimes
+the people involved, sometimes what happened to them. A store commits the text it
+mines and its page embeds it, so **whatever is mined is republished**, to everyone
+who can read the store: a wider audience than the repository the commit sits in.
+
+Anything in a mined value matching a rule in `KSB_SENSITIVE_PATTERNS` is
+therefore replaced before it is stored — as a description, as a subject and as
+body prose alike.
+
+**One rule ships, and only one.** An email address has the same shape everywhere,
+so it is the only identifier this library can recognise without assuming a
+jurisdiction or a subject domain. Every other format belongs to an organisation:
+reference numbers for cases, claims, accounts or patients are locally defined, and
+national identifiers and postal codes vary by country. A library that shipped one
+country's formats would protect that estate and quietly miss every other one —
+worse than shipping none, because it reads as coverage. **So each estate declares
+its own**, and the run prints the rules in force so an operator can see what is
+actually being applied rather than assuming.
+
+**The matched span is replaced; the words around it are kept.** A commit message
+is usually an account of a defect that was found and fixed, and that account is
+exactly what a knowledge store exists to hold. "Page not loading for case
+`[case reference withheld]`" is useful evidence about the software; discarding it
+to remove eleven characters trades the whole record for the identifier. Each
+placeholder names what was taken, so a reader meets a stated omission rather than
+an unexplained gap.
+
+A value left with nothing but placeholders is not stored, because it no longer
+says anything about the change. What the commit *links* is unaffected either way:
+the ticket keeps its dates, repositories, commit count and file entries, none of
+which identifies anybody.
+
+Every run reports how many values were withheld and under which rule, including
+when the answer is none — a silent filter is indistinguishable from an estate
+with nothing to withhold. A count above zero is a finding about the estate as
+much as about the store, because the commit messages still carry that text.
+
+Two limits, both deliberate:
+
+- **Personal names are not detected, and they survive redaction.** Recognising
+  them in commit prose is unreliable in both directions, and a rule that
+  half-works invites reliance on it. So a value can keep a surname beside a
+  removed reference — the identifier goes, the name stays. That is the cost of
+  replacing spans instead of discarding values, and it is the reason a small set
+  of affected values is worth reading rather than assuming the rules covered it.
+- **This reduces exposure; it does not certify a file.** A clean result means
+  nothing matched the rules — never that a file holds no personal data, and never
+  that what remains is safe to publish more widely than the store already is.
+
+Filtering as text is mined does nothing for an artefact already committed and
+already embedded in a published page, so `knowledgestore check-evidence` gates
+what is there and **exits non-zero** on a match. It names the ticket, the field
+and the rule, and never the value: a gate that printed the text would copy it
+into a build log, read more widely and kept longer than the artefact. It is a
+stage of its own rather than a flag on `status` because `status` never fails by
+design.
+
 ## The prose layer, and how it is checked
 
 Community summaries are the one layer a model writes. The pipeline constrains

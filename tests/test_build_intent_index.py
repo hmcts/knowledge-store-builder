@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import importlib
 import io
 import json
+import os
+import re
 import tempfile
 import unittest
 from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
+from knowledgestore import check_evidence  # noqa: E402
 from knowledgestore import config  # noqa: E402
 
 
@@ -54,6 +59,32 @@ def write_ndjson(directory, commits):
     ndjson = Path(directory) / "commits.ndjson"
     ndjson.write_text("\n".join(json.dumps(c) for c in commits) + "\n", encoding="utf-8")
     return ndjson
+
+
+def run_stage(commits, repo="repo-a"):
+    """Run the real stage over one repository's commits.
+
+    Returns its two committed artefacts and everything it printed: the ticket
+    records, the file -> ticket index, and the run report.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        history = root / "history" / repo
+        history.mkdir(parents=True)
+        write_ndjson(history, commits)
+        config.configure(
+            HISTORY_DIR=root / "history",
+            INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+            TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+        )
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            assert intent.main() == 0
+        return (
+            json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8")),
+            json.load(gzip.open(config.INTENT_INDEX_PATH, "rt", encoding="utf-8")),
+            printed.getvalue(),
+        )
 
 
 class CleanDescriptionTest(SettingsIsolated):
@@ -623,19 +654,7 @@ class EvidenceFieldsTest(SettingsIsolated):
 
     def _artefact(self, commits, repo="repo-a"):
         """The committed ticket-descriptions artefact, built by the real stage."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            history = root / "history" / repo
-            history.mkdir(parents=True)
-            write_ndjson(history, commits)
-            config.configure(
-                HISTORY_DIR=root / "history",
-                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
-                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
-            )
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(intent.main(), 0)
-            return json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8"))
+        return run_stage(commits, repo)[0]
 
     def test_junk_subject_discarded_by_d_is_kept_verbatim_in_s(self):
         ticket = self._artefact([make_commit("DD-1: wip")])["DD-1"]
@@ -747,6 +766,386 @@ class EvidenceFieldsTest(SettingsIsolated):
         ]
         commits = [make_commit(f"DD-1: {subject}") for subject in subjects]
         self.assertEqual(self._artefact(commits)["DD-1"]["s"], sorted(subjects))
+
+
+# Invented, and only ever invented: all-zero case references in a ZZ block, the
+# ZZ99 postcode reserved for "nowhere real", an all-zero National Insurance
+# number and an example.example address. Nothing resembling real data belongs in
+# a fixture - a test file is published as widely as the code it checks.
+CASE_REFERENCE = "00ZZ0000000"
+OTHER_CASE_REFERENCE = "11ZZ1111111"
+NI_NUMBER = "AB000000C"
+POSTCODE = "ZZ99 9ZZ"
+EMAIL_ADDRESS = "someone@example.example"
+
+# The library ships one rule - an email address, the only identifier with the same
+# shape everywhere. Every other format belongs to a jurisdiction or a subject
+# domain, so a consuming store declares it. These tests declare the same shapes an
+# estate would, which also means they exercise the configuration path rather than
+# trusting a default to be there.
+ESTATE_RULES = {
+    "case-reference": r"\b\d{2}[A-Z]{2}\d{7}\b",
+    "national-insurance-number": r"\b[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]\b",
+    "postcode": r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b",
+}
+
+CASE_GONE = "[case reference withheld]"
+EMAIL_GONE = "[email address withheld]"
+NI_GONE = "[national insurance number withheld]"
+POSTCODE_GONE = "[postcode withheld]"
+
+
+class EstateRulesDeclared(SettingsIsolated):
+    """A test case with this estate's identifier formats declared, as a consuming
+    store declares them in its settings.
+
+    Isolation still comes from SettingsIsolated.run, which restores every setting
+    afterwards; setUp here only supplies what a store would supply. Declaring them
+    rather than relying on shipped defaults is deliberate: the library ships one
+    rule, so a test that assumed four would be testing a default that no longer
+    exists instead of the mechanism that matters.
+    """
+
+    def setUp(self):
+        super().setUp()
+        config.SENSITIVE_PATTERNS = {**config.SENSITIVE_PATTERNS, **ESTATE_RULES}
+
+
+class RedactedValuesTest(EstateRulesDeclared):
+    """An identifier a rule matches is replaced in place, and the words around it
+    are kept.
+
+    The break each test catches: a store committing, and a browser page
+    embedding, an identifier that names one specific case or person. The
+    placeholder is part of the contract - a reader has to be able to tell that
+    something was taken and what kind of thing it was, rather than reading a
+    sentence with a hole in it.
+
+    What this does not catch, stated here because a reader of these tests is
+    exactly who needs to know: redaction removes only the identifiers the rules
+    match. Personal names are not detected, and names have been found beside
+    descriptions of proceedings, so a redacted value can still describe an
+    identifiable person's case with the reference taken out."""
+
+    def test_a_case_reference_is_replaced_in_d_s_and_b(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: cannot open the record for {CASE_REFERENCE}",
+                    body=f"{CASE_REFERENCE} - the second entry is missing from the export.",
+                )
+            ]
+        )
+        ticket = tickets["DD-1"]
+        self.assertEqual(ticket["d"], [f"cannot open the record for {CASE_GONE}"])
+        self.assertEqual(ticket["s"], [f"cannot open the record for {CASE_GONE}"])
+        self.assertEqual(
+            ticket["b"], [f"{CASE_GONE} - the second entry is missing from the export."]
+        )
+        self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
+
+    def test_an_email_address_is_replaced(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: widen the address field",
+                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"Updated the user name to {EMAIL_GONE} so the suite can sign in."],
+        )
+        self.assertNotIn(EMAIL_ADDRESS, json.dumps(tickets))
+        # The subject named nobody, so it is untouched.
+        self.assertEqual(tickets["DD-1"]["s"], ["widen the address field"])
+
+    def test_a_national_insurance_number_is_replaced(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the claimant import",
+                    body=f"The record carries {NI_NUMBER} twice, so the import rejects it.",
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"], [f"The record carries {NI_GONE} twice, so the import rejects it."]
+        )
+        self.assertNotIn(NI_NUMBER, json.dumps(tickets))
+
+    def test_a_postcode_is_replaced(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the address lookup",
+                    body=f"The lookup returns nothing for {POSTCODE}, so the form cannot be sent.",
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"The lookup returns nothing for {POSTCODE_GONE}, so the form cannot be sent."],
+        )
+        self.assertNotIn(POSTCODE, json.dumps(tickets))
+
+    def test_every_match_in_one_value_is_replaced(self):
+        """One replacement per value would leave the second reference in place -
+        the failure mode of a `sub` written as though values held one match."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: correct the sort order",
+                    body=(
+                        f"{CASE_REFERENCE} and {OTHER_CASE_REFERENCE} were listed "
+                        "on the same day by mistake."
+                    ),
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [f"{CASE_GONE} and {CASE_GONE} were listed on the same day by mistake."],
+        )
+        for reference in (CASE_REFERENCE, OTHER_CASE_REFERENCE):
+            self.assertNotIn(reference, json.dumps(tickets))
+
+    def test_matches_from_different_rules_in_one_value_are_all_replaced(self):
+        """Stopping at the first rule that fires is the obvious implementation
+        and would leave every other identifier in the same sentence."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    "DD-1: reproduce the sign-in failure",
+                    body=(
+                        f"Signed in as {EMAIL_ADDRESS} to check {CASE_REFERENCE} "
+                        f"at {POSTCODE} against {NI_NUMBER}."
+                    ),
+                )
+            ]
+        )
+        self.assertEqual(
+            tickets["DD-1"]["b"],
+            [
+                f"Signed in as {EMAIL_GONE} to check {CASE_GONE} "
+                f"at {POSTCODE_GONE} against {NI_GONE}."
+            ],
+        )
+        for identifier in (EMAIL_ADDRESS, CASE_REFERENCE, POSTCODE, NI_NUMBER):
+            self.assertNotIn(identifier, json.dumps(tickets))
+
+    def test_a_value_that_is_nothing_but_a_match_is_not_stored(self):
+        """`[case reference withheld]` on its own says nothing about the change
+        and would sit in the retrieval index as noise."""
+        tickets, _, _ = run_stage([make_commit(f"DD-1: {CASE_REFERENCE}")])
+        ticket = tickets["DD-1"]
+        self.assertEqual(ticket["d"], [])
+        self.assertNotIn("s", ticket)
+        self.assertNotIn("b", ticket)
+
+    def test_the_length_filter_reads_the_redacted_text_not_the_original(self):
+        """Redaction runs before the length and junk filters, because it changes
+        the length. This body is 14 characters and would be rejected as too short
+        if the filter ran first; redacted it is 28 and is kept. Filtering first is
+        the mistake this catches."""
+        body = f"{CASE_REFERENCE} ok"
+        self.assertLess(len(body), intent.MIN_BODY_CHARS)
+        tickets, _, _ = run_stage([make_commit(GOOD_SUBJECT, body=body)])
+        self.assertEqual(tickets["DD-1"]["b"], [f"{CASE_GONE} ok"])
+
+    def test_the_summary_reports_redactions_per_rule_and_values_emptied(self):
+        """A silent filter is indistinguishable from having no data, and an
+        estate whose commit messages carry case detail is a finding about the
+        estate - so the run says how much was replaced, under which rule, and how
+        many values were left with nothing, without printing any of it."""
+        _, _, output = run_stage(
+            [
+                make_commit(f"DD-1: {CASE_REFERENCE}"),
+                make_commit(
+                    "DD-2: widen the address field",
+                    body=f"Updated the user name to {EMAIL_ADDRESS} so the suite can sign in.",
+                ),
+            ]
+        )
+        self.assertIn("redacted 2 identifiers", output)
+        self.assertIn("case-reference (1)", output)
+        self.assertIn("email-address (1)", output)
+        self.assertIn("2 values were left with nothing but redactions", output)
+        self.assertNotIn(CASE_REFERENCE, output)
+        self.assertNotIn(EMAIL_ADDRESS, output)
+
+    def test_a_run_that_redacted_nothing_says_so(self):
+        _, _, output = run_stage([make_commit(GOOD_SUBJECT)])
+        self.assertIn("redacted 0 identifiers", output)
+
+    def test_redaction_leaves_the_ticket_and_its_links_alone(self):
+        """Text is redacted, not tickets. Dates, repositories, the commit count
+        and the file -> ticket link are what a store answers "when was this
+        touched, and by whose work?" from, and none of them identifies a case -
+        so a ticket whose every value was emptied still has to be there."""
+        tickets, index, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: {CASE_REFERENCE}",
+                    date="2024-03-04T09:00:00+00:00",
+                    path="src/record.ts",
+                ),
+                make_commit("DD-2: widen the address field to 35 characters"),
+            ]
+        )
+        self.assertEqual(tickets["DD-2"]["d"], ["widen the address field to 35 characters"])
+        emptied = tickets["DD-1"]
+        self.assertEqual(emptied["d"], [])
+        self.assertEqual(emptied["first"], "2024-03-04")
+        self.assertEqual(emptied["last"], "2024-03-04")
+        self.assertEqual(emptied["repos"], ["repo-a"])
+        self.assertEqual(emptied["n"], 1)
+        self.assertEqual(index["repo-a"]["src/record.ts"]["tickets"], {"DD-1": 1})
+
+
+class RedactionRulesAreConfigurableTest(SettingsIsolated):
+    """Case-reference and identifier formats differ between estates, and a
+    library cannot know them all, so the rules are a setting.
+
+    The break each test catches: an estate unable to describe its own identifier
+    format, and - worse - an override that empties the rule set without saying so,
+    which reads exactly like an estate with nothing to redact."""
+
+    def test_a_pattern_added_in_config_is_honoured(self):
+        """Including its placeholder, which is derived from the rule name rather
+        than kept in a second list nobody remembers to extend."""
+        config.SENSITIVE_PATTERNS = {
+            **config.SENSITIVE_PATTERNS,
+            "record-reference": r"\bREC/\d{4}\b",
+        }
+        tickets, _, output = run_stage([make_commit("DD-1: rework the summary for REC/0000")])
+        self.assertEqual(
+            tickets["DD-1"]["d"], ["rework the summary for [record reference withheld]"]
+        )
+        self.assertIn("record-reference (1)", output)
+
+    def test_the_environment_override_adds_to_the_defaults(self):
+        with mock.patch.dict(
+            os.environ, {"KSB_SENSITIVE_PATTERNS": '{"record-ref": "REC/[0-9]+"}'}
+        ):
+            importlib.reload(config)
+        try:
+            self.assertIn("record-ref", config.SENSITIVE_PATTERNS)
+            # the shipped default survives an override that adds to it
+            self.assertIn("email-address", config.SENSITIVE_PATTERNS)
+        finally:
+            importlib.reload(config)
+
+    def test_an_unparseable_override_raises_rather_than_emptying_the_rules(self):
+        with mock.patch.dict(os.environ, {"KSB_SENSITIVE_PATTERNS": "{not json"}):
+            with self.assertRaises(ValueError):
+                importlib.reload(config)
+        importlib.reload(config)
+        self.assertIn("email-address", config.SENSITIVE_PATTERNS)
+
+    def test_a_pattern_that_cannot_compile_fails_the_run(self):
+        commits = [make_commit(GOOD_SUBJECT)]
+        config.SENSITIVE_PATTERNS = {"unclosed-group": "([A-Z"}
+        with self.assertRaises(re.error):
+            run_stage(commits)
+
+
+class CheckEvidenceStageTest(EstateRulesDeclared):
+    """The gate over an artefact a store has *already* committed. Filtering new
+    output cannot help a store whose file is in version control and embedded in a
+    published page, so there has to be a way to check what is there.
+
+    The break each test catches: a gate that passes a file carrying a case
+    reference, or one that reports the finding by printing the value into a CI
+    log - which republishes exactly what it was called to protect."""
+
+    def _check(self, tickets):
+        """Run the real stage over a written artefact; return (exit code, output)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            artefact = Path(tmp) / "ticket-descriptions.json.gz"
+            with gzip.open(artefact, "wt", encoding="utf-8") as out:
+                json.dump(tickets, out, ensure_ascii=False)
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                code = check_evidence.main([str(artefact)])
+            return code, printed.getvalue()
+
+    def test_a_match_fails_the_gate_and_names_the_ticket_and_field(self):
+        code, output = self._check(
+            {
+                "DD-1": {
+                    "d": [],
+                    "b": [f"{CASE_REFERENCE} - the second entry is missing from the export."],
+                    "first": "2024-03-04",
+                    "last": "2024-03-04",
+                    "repos": ["repo-a"],
+                    "n": 1,
+                }
+            }
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("DD-1", output)
+        self.assertIn("field b", output)
+        self.assertIn("case-reference", output)
+
+    def test_the_gate_never_prints_the_value_it_matched(self):
+        _, output = self._check(
+            {
+                "DD-1": {
+                    "d": [f"cannot open the record for {CASE_REFERENCE}"],
+                    "s": [f"{POSTCODE} - the lookup returns nothing"],
+                    "b": [f"Signed in as {EMAIL_ADDRESS} to reproduce the failure."],
+                }
+            }
+        )
+        for identifier in (CASE_REFERENCE, POSTCODE, EMAIL_ADDRESS):
+            self.assertNotIn(identifier, output)
+        # Nor the narrative written beside it, which is the rest of the value.
+        # These words are taken from the fixture above deliberately: an assertion
+        # naming words the fixture does not contain passes without checking
+        # anything, which is how this became vacuous once the fixture was reworded.
+        for word in ("record", "lookup", "reproduce"):
+            self.assertNotIn(word, output)
+
+    def test_a_clean_artefact_passes(self):
+        code, output = self._check(
+            {
+                "DD-1": {
+                    "d": ["widen the address field to 35 characters"],
+                    "b": ["Address entry now rejects lines longer than the schema allows."],
+                }
+            }
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("DD-1", output)
+
+    def test_an_artefact_the_stage_just_built_passes_the_gate(self):
+        """End to end, because the two halves have to agree: the gate matches
+        identifier shapes, so a placeholder that happened to look like one would
+        fail every refreshed store. Real stage output, real gate."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(
+                    f"DD-1: cannot open the record for {CASE_REFERENCE}",
+                    body=(
+                        f"Signed in as {EMAIL_ADDRESS} to check {POSTCODE} "
+                        f"against {NI_NUMBER} on the day."
+                    ),
+                )
+            ]
+        )
+        code, output = self._check(tickets)
+        self.assertEqual(code, 0)
+        self.assertIn("none matches a redaction rule", output)
+
+    def test_a_missing_artefact_is_reported_rather_than_passed_in_silence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                code = check_evidence.main([str(Path(tmp) / "absent.json.gz")])
+        self.assertEqual(code, 0)
+        self.assertIn("nothing to check", printed.getvalue())
 
 
 if __name__ == "__main__":

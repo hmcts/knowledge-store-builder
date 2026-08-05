@@ -62,6 +62,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "check_install_docs",
         "check the documented install commands against what the lock file declares",
     ),
+    "check-evidence": (
+        "check_evidence",
+        "fail if committed commit-mined text identifies a specific case or person",
+    ),
 }
 
 
