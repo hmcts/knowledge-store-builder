@@ -35,6 +35,7 @@ from importlib import resources
 
 
 from . import config
+from .build_intent_index import truncate
 from . import io
 from . import kinds
 
@@ -87,6 +88,38 @@ def load_inputs() -> tuple[dict, dict, dict, dict]:
     intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
     titles = io.read_gzip_json_dict(config.TICKET_TITLES_PATH)
     return graph, labels, intent, titles
+
+
+def merge_ticket_evidence(mined: dict, tracker: dict) -> dict:
+    """Ticket evidence for the page: what the tracker says, over what commits said.
+
+    `fetch-tickets` wrote an artefact nothing read. On one estate that meant 6,569
+    real ticket titles and 5,839 descriptions sat in the repository while the page
+    still showed mined commit subjects - a guess where an answer was available.
+
+    Precedence is tracker first, because a title someone wrote about the work beats
+    a subject line written while doing it. The mined evidence is kept alongside
+    rather than replaced: it is what the commits actually said, it covers ids the
+    tracker has never heard of, and the store's honesty rule is that a reader can
+    tell which layer answered.
+
+    Comments are excluded deliberately - see config.TICKET_DETAIL_CHARS.
+
+    Keys are terse because this dictionary is embedded in the page: `d` mined
+    evidence, `t` tracker title, `x` tracker description extract.
+    """
+    merged: dict[str, dict] = {ticket: dict(record) for ticket, record in mined.items()}
+    for ticket, record in tracker.items():
+        if not isinstance(record, dict) or record.get("absent"):
+            continue
+        entry = merged.setdefault(ticket, {})
+        summary = (record.get("summary") or "").strip()
+        if summary:
+            entry["t"] = summary
+        description = (record.get("description") or "").strip()
+        if description:
+            entry["x"] = truncate(description, config.TICKET_DETAIL_CHARS)
+    return merged
 
 
 def node_kind(node: dict) -> str:
@@ -350,11 +383,17 @@ def main() -> int:
         if config.SYNONYMS_PATH.exists()
         else {}
     )
-    ticket_info = (
+    mined_tickets = (
         json.load(gzip.open(config.TICKET_DESCRIPTIONS_PATH, "rt", encoding="utf-8"))
         if config.TICKET_DESCRIPTIONS_PATH.exists()
         else {}
     )
+    tracker_tickets = (
+        json.load(gzip.open(config.TICKET_TRACKER_PATH, "rt", encoding="utf-8"))
+        if config.TICKET_TRACKER_PATH.exists()
+        else {}
+    )
+    ticket_info = merge_ticket_evidence(mined_tickets, tracker_tickets)
     # Topic briefs (GraphRAG phase 3): pre-written narratives composed at
     # build time from knowledge/topics evidence; served without any LLM.
     topics = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
