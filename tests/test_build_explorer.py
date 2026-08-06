@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import tempfile
-import json
 import unittest
 from pathlib import Path
 
@@ -365,13 +364,31 @@ class TrackerEvidenceTest(SettingsIsolated):
         )
         self.assertLessEqual(len(merged["CCT-2"]["x"]), 41)
 
-    def test_comments_never_reach_the_page(self):
+    def test_comments_are_carried_so_they_can_be_searched(self):
+        """Deliberately reversed: this test previously asserted the opposite.
+
+        Comments were held out of the page when the plan was to distribute the file
+        outside the repository, where 10.8 M characters of narrative would travel
+        with it. That distribution was dropped and the requirement became that every
+        layer of evidence is queryable. Comments are the layer that answers why a
+        change was made, and a page holding them without searching them would be the
+        worst of both.
+
+        The cost is measured: the page goes from 51 MB to about 61 MB, 3.3 MB of that
+        gzipped. Comments arrive already bounded by KSB_TRACKER_COMMENT_CHARS, so
+        there is no second cap here - one policy, applied at fetch.
+        """
         merged = explorer.merge_ticket_evidence(
-            mined={}, tracker={"CCT-3": {"summary": "s", "comments": ["a" * 500, "b" * 500]}}
+            mined={}, tracker={"CCT-3": {"summary": "s", "comments": ["first note", "second"]}}
         )
-        blob = json.dumps(merged)
-        self.assertNotIn("aaaa", blob)
-        self.assertNotIn("bbbb", blob)
+        self.assertEqual(merged["CCT-3"]["c"], ["first note", "second"])
+
+    def test_a_ticket_with_no_comments_carries_no_comment_field(self):
+        """An empty list would read as evidence found, matching the stage's rule."""
+        merged = explorer.merge_ticket_evidence(
+            mined={}, tracker={"CCT-4": {"summary": "s", "comments": []}}
+        )
+        self.assertNotIn("c", merged["CCT-4"])
 
     def test_a_ticket_known_only_to_the_tracker_still_appears(self):
         """Evidence can exist without a commit mentioning the id."""

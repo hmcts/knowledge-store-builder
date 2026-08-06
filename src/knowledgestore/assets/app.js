@@ -30,7 +30,7 @@
  * `t` and `x` come from the tracker rather than the commits: the ticket's own
  * title, and an opening extract of its description. Both are absent for a ticket
  * the tracker has never been asked about, or one it reported as absent.
- * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string,
+ * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string, c?: string[],
  *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
 
@@ -72,7 +72,7 @@ const ticketHay = TICKET_IDS.map((t) => {
   // them here a real title would display and be unfindable - the page would
   // show better evidence than it could search.
   return (info.d || []).concat(info.s || [], info.b || [],
-    info.t ? [info.t] : [], info.x ? [info.x] : []).join('\n').toLowerCase();
+    info.t ? [info.t] : [], info.x ? [info.x] : [], info.c || []).join('\n').toLowerCase();
 });
 /** One ticket's evidence runs from a six-word subject to four thousand
  * characters of body prose, and a long text matches ordinary words by sheer
@@ -185,6 +185,21 @@ function ticketLink(t) {
     + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
 }
 
+/** The tracker comments worth showing for a query: those that matched, shortest
+ * first, capped. A 122-comment thread pasted into an answer is not an answer, and
+ * the whole thread is in knowledge/intent/ticket-tracker.json.gz for anyone who
+ * wants it. With no query terms - a bare ticket lookup - the first two stand in.
+ * @param {string[]|undefined} comments @param {string[]} terms */
+function commentRows(comments, terms) {
+  if (!comments || !comments.length) return '';
+  const wanted = terms && terms.length
+    ? comments.filter((c) => terms.some((t) => c.toLowerCase().includes(t)))
+    : comments.slice(0, 2);
+  const shown = (wanted.length ? wanted : comments.slice(0, 1)).slice(0, 3);
+  return shown.map((c) => '<div class="trow"><span class="tid">comment</span> '
+    + esc(c.length > 400 ? c.slice(0, 400).replace(/\s+\S*$/, '') + '…' : c) + '</div>').join('');
+}
+
 /** @param {string} t */
 function ticketChip(t) {
   const detail = ticketDetail(t);
@@ -215,6 +230,7 @@ function ticketRows(tickets, max) {
 
 const LABEL_DESCRIPTION = 'description, from commit messages';
 const LABEL_SUBJECT = 'commit subject';
+const LABEL_TRACKER = 'from the tracker';
 const LABEL_BODY = 'commit body, as written';
 
 /** Escaped for display, with line breaks kept. Bodies are bulleted lists as
@@ -805,7 +821,11 @@ function matchingEvidence(id, terms) {
   const carrying = (texts) => (texts || []).filter((x) => carriesTerm(x, terms));
   return evidenceRows(LABEL_DESCRIPTION, carrying(info.d))
     + evidenceRows(LABEL_SUBJECT, carrying(info.s))
-    + bodyDetails(carrying(info.b));
+    + bodyDetails(carrying(info.b))
+    // The tracker's own words, after what the commits said. Comments are where
+    // somebody explains why a change was made, so a question whose words appear
+    // in one should surface it rather than stop at the commit subject.
+    + evidenceRows(LABEL_TRACKER, carrying(info.x ? [info.x] : []).concat(carrying(info.c)));
 }
 
 /** What the commits themselves said, for the tickets whose evidence carries the
@@ -844,6 +864,7 @@ function vTicket(id) {
       + ' touches <b>' + hits.length + '</b> graph entries across <b>' + repos.length + '</b> repositories.'
       + ticketMetaLine(info, Boolean(info?.t || TITLES[id])))
     + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
+    + commentRows(info?.c, [])
     + (secondDescription ? '<div class="trow"><span class="tid">also</span> ' + esc(secondDescription) + '</div>' : '')
     + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, secondDescription || '']))
     + bodyDetails(info?.b)
