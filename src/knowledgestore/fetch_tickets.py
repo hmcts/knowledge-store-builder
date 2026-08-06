@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -70,6 +71,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from . import __version__, config, io, sensitive
+from .build_intent_index import truncate
 
 
 # The projection every request asks for. Enumerations and dates, no narrative.
@@ -303,14 +305,30 @@ def _day(value: object) -> str:
 
 
 def _comments(value: object, counts: Counter[str]) -> list[str]:
+    """Every comment worth keeping, redacted and bounded.
+
+    Two rules, both measured rather than guessed - see config.TRACKER_COMMENT_CHARS
+    for the numbers. Automation and log dumps are dropped whole, because a
+    truncated stack trace is still a stack trace. What remains is capped at a word
+    boundary, which touches a small minority of comments and leaves most tickets
+    with their thread complete.
+
+    Redaction runs after truncation, so shortening a comment can never be the
+    reason an identifier survives into the artefact.
+    """
     raw = value.get("comments") if isinstance(value, dict) else None
     if not isinstance(raw, list):
         return []
+    noise = re.compile(config.TRACKER_COMMENT_NOISE) if config.TRACKER_COMMENT_NOISE else None
     kept = []
     for comment in raw:
         body = comment.get("body") if isinstance(comment, dict) else None
-        if isinstance(body, str) and body.strip():
-            kept.append(sensitive.redact(body, counts))
+        if not isinstance(body, str) or not body.strip():
+            continue
+        if noise and noise.search(body):
+            continue
+        bounded = truncate(body, config.TRACKER_COMMENT_CHARS)
+        kept.append(sensitive.redact(bounded, counts))
     return kept
 
 

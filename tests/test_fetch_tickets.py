@@ -15,6 +15,7 @@ the stage emits.
 from __future__ import annotations
 
 import json
+from collections import Counter
 import tempfile
 import unittest
 import urllib.parse
@@ -639,3 +640,87 @@ class CredentialTest(FetchTicketsTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommentVolumeTest(SettingsIsolated):
+    """Comment volume is bounded, because the interesting part is not the long tail.
+
+    Measured on the HMCTS crime estate's first live fetch: 38,681 comments holding
+    14.4 M characters, of which 778 comments - 2% - held 37% of the characters.
+    Those are stack traces and log dumps pasted into a ticket, not knowledge. A
+    further 1% read as build automation and held 12%.
+
+    Capping each comment and dropping the automated ones took the payload from
+    14.4 M to 10.0 M characters, 6.0 MB to 5.2 MB gzipped, while leaving 93% of
+    tickets with every comment they had. Limiting the *count* was measured too and
+    rejected: keeping only the first five saved a further 1.7 MB and cost 37% of
+    tickets their threads, and a ticket with eighteen comments is one where
+    something went wrong and got argued about - the resolution is at the end.
+    """
+
+    def test_a_long_comment_is_capped_at_a_word_boundary(self):
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=40)
+        issue = {"fields": {"comment": {"comments": [{"body": "word " * 100}]}}}
+        record = fetch_tickets.projected_record(issue, Counter())
+        comment = record["comments"][0]
+        self.assertLessEqual(len(comment), 41)
+        self.assertNotIn("wor…", comment)
+
+    def test_a_short_comment_is_untouched(self):
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
+        issue = {"fields": {"comment": {"comments": [{"body": "Root cause was a null URN."}]}}}
+        record = fetch_tickets.projected_record(issue, Counter())
+        self.assertEqual(record["comments"], ["Root cause was a null URN."])
+
+    def test_build_noise_is_dropped_entirely(self):
+        """A truncated log dump is still a log dump - drop, do not shorten."""
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
+        issue = {
+            "fields": {
+                "comment": {
+                    "comments": [
+                        {"body": "Jenkins build #4412 failed"},
+                        {"body": "Caused by: java.lang.NullPointerException"},
+                        {"body": "\tat uk.gov.moj.cpp.Thing.run(Thing.java:42)"},
+                        {"body": "The URN was missing from the payload, so listing rejected it."},
+                    ]
+                }
+            }
+        }
+        record = fetch_tickets.projected_record(issue, Counter())
+        self.assertEqual(
+            record["comments"], ["The URN was missing from the payload, so listing rejected it."]
+        )
+
+    def test_every_surviving_comment_is_kept_not_just_the_first_few(self):
+        """No count limit: the resolution is usually the last comment, not the first."""
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
+        bodies = [{"body": f"comment number {i}"} for i in range(30)]
+        issue = {"fields": {"comment": {"comments": bodies}}}
+        record = fetch_tickets.projected_record(issue, Counter())
+        self.assertEqual(len(record["comments"]), 30)
+        self.assertIn("comment number 29", record["comments"][-1])
+
+    def test_a_ticket_whose_every_comment_is_noise_has_no_comments_field(self):
+        """An empty list would read as evidence found, matching the stage's rule."""
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
+        issue = {
+            "fields": {
+                "summary": "s",
+                "comment": {"comments": [{"body": "Jenkins build #1 failed"}]},
+            }
+        }
+        record = fetch_tickets.projected_record(issue, Counter())
+        self.assertNotIn("comments", record)
+
+    def test_redaction_still_runs_on_a_capped_comment(self):
+        """Truncation must not be a way for an identifier to survive."""
+        config.configure(
+            TRACKER_FETCH_COMMENTS=True,
+            TRACKER_COMMENT_CHARS=2000,
+            SENSITIVE_PATTERNS={"case-reference": r"\b\d{2}[A-Z]{2}\d{7}\b"},
+        )
+        issue = {"fields": {"comment": {"comments": [{"body": "see 01AB1234567 for detail"}]}}}
+        record = fetch_tickets.projected_record(issue, Counter())
+        self.assertNotIn("01AB1234567", record["comments"][0])
+        self.assertIn("withheld", record["comments"][0])
