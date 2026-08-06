@@ -183,7 +183,29 @@ AUTOMATION_IDENTITIES = [
     if name.strip()
 ]
 
-TICKET_BROWSE_URL = os.environ.get("KSB_TICKET_BROWSE_URL", "")
+
+def _browse_url(value: str) -> str:
+    """A tracker browse URL a ticket id can be appended to.
+
+    Both consumers - the explorer page's embedded config and the brief renderer -
+    build a link by concatenating the id onto this. A URL without a trailing
+    separator therefore produced `https://tracker/browseCCT-890`: a broken link,
+    silently, in every brief and every search result. Normalising here rather than
+    at each call site means the page's embedded value is already usable, so the
+    page application needs no matching change.
+
+    A URL already ending in a separator is trusted as-is, because not every
+    tracker puts the id in a path segment: `https://tracker/issue?key=` wants the
+    id appended directly and a slash would break it.
+    """
+    value = value.strip()
+    return value + "/" if value and value[-1] not in "/=?&#" else value
+
+
+TICKET_BROWSE_URL = _browse_url(os.environ.get("KSB_TICKET_BROWSE_URL", ""))
+
+# Settings whose value is normalised however it arrives.
+_NORMALISERS = {"TICKET_BROWSE_URL": _browse_url}
 
 # --- asking the tracker what a ticket is (the `fetch-tickets` stage) ------
 # Every setting here is empty or off by default, because the stage is opt-in:
@@ -320,7 +342,12 @@ def configure(root: Path | str | None = None, **overrides) -> None:
     for name, value in overrides.items():
         if name not in module:
             raise KeyError(f"unknown setting: {name}")
-        module[name] = value
+        # A setting with a normaliser gets it here too. Environment and
+        # `configure()` are both supported entry points, so a rule applied only
+        # where the environment is read would hold for a real estate and not for
+        # a consumer configuring the library programmatically - the harder case
+        # to notice, because it fails silently in whatever the caller builds.
+        module[name] = _NORMALISERS.get(name, lambda given: given)(value)
 
 
 def _recompute_paths() -> None:
