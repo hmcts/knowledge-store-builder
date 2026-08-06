@@ -232,6 +232,25 @@ TRACKER_FETCH_DESCRIPTION = _env_bool("KSB_TRACKER_FETCH_DESCRIPTION", False)
 TRACKER_FETCH_COMMENTS = _env_bool("KSB_TRACKER_FETCH_COMMENTS", False)
 # Tickets per search request. One request per ticket turns a large estate into
 # tens of thousands of calls; batching turns the same work into hundreds.
+# Longest comment kept, in characters, cut at a word boundary. Measured on one
+# estate's first live fetch: 38,681 comments held 14.4 M characters, and 778 of
+# them - 2% - held 37% of that, being stack traces and log dumps pasted into a
+# ticket. Capping at 2,000 removed a quarter of the payload while leaving 93% of
+# tickets with every comment intact. There is deliberately no limit on the NUMBER
+# of comments: keeping only the first few was measured, saved a further 1.7 MB
+# gzipped, and cost 37% of tickets their threads - and a ticket with eighteen
+# comments is one where something went wrong and got argued about, so the
+# resolution is at the end, not the beginning.
+TRACKER_COMMENT_CHARS = _env_int("KSB_TRACKER_COMMENT_CHARS", 2000)
+# Comments matching this are dropped rather than shortened: a truncated log dump is
+# still a log dump. Override per estate - another tracker's automation says
+# different things, and dropping content is not a judgement to hard-code.
+TRACKER_COMMENT_NOISE = os.environ.get(
+    "KSB_TRACKER_COMMENT_NOISE",
+    r"(?i)\b(jenkins|build (succeeded|failed|#)|pipeline|bitbucket|pull request"
+    r"|auto-?generated|sonarqube|renovate|stack ?trace|caused by:|at (uk|java|org)\.)",
+)
+
 TRACKER_PAGE_SIZE = _env_int("KSB_TRACKER_PAGE_SIZE", 100)
 # Pause between pages. One request is in flight at a time regardless; this is
 # what keeps a first run from reading as traffic worth alerting on.

@@ -304,8 +304,12 @@ def clean_body(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
     return _flatten(_usable_blocks(body, boilerplate))
 
 
-def _truncate(text: str, limit: int) -> str:
-    """Cut to at most limit characters, at a word boundary."""
+def truncate(text: str, limit: int) -> str:
+    """Cut to at most limit characters, at a word boundary.
+
+    Public because two stages need it: the intent index bounds commit bodies, and
+    fetch-tickets bounds tracker comments. A second copy would drift.
+    """
     if len(text) <= limit:
         return text
     head = text[:limit]
@@ -334,7 +338,7 @@ def body_description(body: str, boilerplate: frozenset[str] = frozenset()) -> st
     blocks = _usable_blocks(body, boilerplate)
     if not blocks:
         return ""
-    return _truncate(" ".join(blocks[0]), BODY_DESCRIPTION_CHARS)
+    return truncate(" ".join(blocks[0]), BODY_DESCRIPTION_CHARS)
 
 
 def body_evidence(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
@@ -345,7 +349,7 @@ def body_evidence(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
     stored as evidence in its own right, so what a person said about the change
     after their first sentence is the part worth having.
     """
-    return _truncate(clean_body(body, boilerplate), BODY_EVIDENCE_CHARS)
+    return truncate(clean_body(body, boilerplate), BODY_EVIDENCE_CHARS)
 
 
 def _automated_identity(person: object) -> bool:
