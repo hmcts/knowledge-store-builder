@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 from pathlib import Path
 
@@ -318,3 +319,63 @@ class IncludeEntryPolicyTest(SettingsIsolated):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrackerEvidenceTest(SettingsIsolated):
+    """Real ticket titles and descriptions reach the page; comments do not.
+
+    Before this, `fetch-tickets` wrote an artefact nothing read: one estate held
+    12,298 fetched tickets - 6,569 with real titles and 5,839 with descriptions -
+    and the page still showed mined commit subjects. The stage delivered a file,
+    not an answer.
+
+    Comments are deliberately excluded. The same estate's 38,231 comments hold
+    10.1 M characters, and the page is the artefact people download and open
+    offline; an agent reads the committed artefact directly for those.
+    """
+
+    def test_a_tracker_summary_replaces_a_mined_commit_subject(self):
+        merged = explorer.merge_ticket_evidence(
+            mined={"CCT-1": {"d": ["fix: CCT-1 tweak the thing"]}},
+            tracker={"CCT-1": {"summary": "Postcode lookup rejects valid BFPO addresses"}},
+        )
+        self.assertEqual(merged["CCT-1"]["t"], "Postcode lookup rejects valid BFPO addresses")
+        # the mined evidence stays: it is what the commits actually said
+        self.assertEqual(merged["CCT-1"]["d"], ["fix: CCT-1 tweak the thing"])
+
+    def test_mined_evidence_survives_where_no_tracker_data_exists(self):
+        merged = explorer.merge_ticket_evidence(
+            mined={"DD-9": {"d": ["chore: DD-9 bump"]}}, tracker={}
+        )
+        self.assertEqual(merged["DD-9"]["d"], ["chore: DD-9 bump"])
+        self.assertNotIn("t", merged["DD-9"])
+
+    def test_an_absent_ticket_contributes_nothing(self):
+        """A 404 is cached as absent; it is not a title."""
+        merged = explorer.merge_ticket_evidence(
+            mined={"WIP-1": {"d": ["wip"]}},
+            tracker={"WIP-1": {"absent": True, "checked": "2026-08-06"}},
+        )
+        self.assertNotIn("t", merged["WIP-1"])
+
+    def test_the_description_is_capped_for_the_page(self):
+        config.configure(TICKET_DETAIL_CHARS=40)
+        merged = explorer.merge_ticket_evidence(
+            mined={}, tracker={"CCT-2": {"summary": "s", "description": "word " * 100}}
+        )
+        self.assertLessEqual(len(merged["CCT-2"]["x"]), 41)
+
+    def test_comments_never_reach_the_page(self):
+        merged = explorer.merge_ticket_evidence(
+            mined={}, tracker={"CCT-3": {"summary": "s", "comments": ["a" * 500, "b" * 500]}}
+        )
+        blob = json.dumps(merged)
+        self.assertNotIn("aaaa", blob)
+        self.assertNotIn("bbbb", blob)
+
+    def test_a_ticket_known_only_to_the_tracker_still_appears(self):
+        """Evidence can exist without a commit mentioning the id."""
+        merged = explorer.merge_ticket_evidence(
+            mined={}, tracker={"GPE-7": {"summary": "Welsh translation missing on the plea page"}}
+        )
+        self.assertEqual(merged["GPE-7"]["t"], "Welsh translation missing on the plea page")

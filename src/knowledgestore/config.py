@@ -289,6 +289,14 @@ EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
 BRIEF_REQUEST_URL = os.environ.get("KSB_BRIEF_REQUEST_URL", "")
 # Minimum connection count for a code entry to be indexed in the explorer.
 # Business entries (features, scenarios, tickets) are always indexed.
+# How much of a tracker description the page carries, in characters. The page is
+# the artefact people download and open offline, so it takes an opening extract,
+# not the whole text - the same split the intent index makes between a body's
+# description and its evidence. The full description and every comment stay in
+# knowledge/intent/ticket-tracker.json.gz for an agent to read: on one estate that
+# is 10.1 M characters of comments, which has no business inline in a 49 MB page.
+TICKET_DETAIL_CHARS = _env_int("KSB_TICKET_DETAIL_CHARS", 300)
+
 MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
 # Repositories whose test code IS the business documentation (E2E suites),
 # so their test files are indexed rather than filtered out as scaffolding.

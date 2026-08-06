@@ -27,8 +27,11 @@
  * A ticket's record in the committed ticket artefact: `d` the curated
  * description, `s` the commit subjects as written, `b` the body prose. `s` and
  * `b` are absent when the commits offered no such evidence.
- * @typedef {{d: string[], s?: string[], b?: string[], first: string, last: string,
- *            repos: string[], n: number}} TicketInfo
+ * `t` and `x` come from the tracker rather than the commits: the ticket's own
+ * title, and an opening extract of its description. Both are absent for a ticket
+ * the tracker has never been asked about, or one it reported as absent.
+ * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string,
+ *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
 
 /** @type {Record<string, string>} */
@@ -65,7 +68,11 @@ const TICKET_IDS = Object.keys(TICKET_INFO).sort(cmpId);
 /** @type {string[]} */
 const ticketHay = TICKET_IDS.map((t) => {
   const info = TICKET_INFO[t];
-  return (info.d || []).concat(info.s || [], info.b || []).join('\n').toLowerCase();
+  // `t` and `x` are the tracker's own title and description extract. Without
+  // them here a real title would display and be unfindable - the page would
+  // show better evidence than it could search.
+  return (info.d || []).concat(info.s || [], info.b || [],
+    info.t ? [info.t] : [], info.x ? [info.x] : []).join('\n').toLowerCase();
 });
 /** One ticket's evidence runs from a six-word subject to four thousand
  * characters of body prose, and a long text matches ordinary words by sheer
@@ -134,7 +141,9 @@ function pushGroup(map, key, value) {
  * otherwise the description mined from commit messages.
  * @param {string} t @returns {string} */
 function ticketDetail(t) {
-  return TITLES[t] || TICKET_INFO[t]?.d?.[0] || '';
+  // Tracker first: fetched from the tracker itself, so fresher than a CSV
+  // somebody exported by hand, and both beat a commit subject.
+  return TICKET_INFO[t]?.t || TITLES[t] || TICKET_INFO[t]?.d?.[0] || '';
 }
 
 /** Date-range suffix for a ticket, marking commit-message provenance when
@@ -192,7 +201,7 @@ function ticketRows(tickets, max) {
     const detail = ticketDetail(t);
     if (!detail) continue;
     html += '<div class="trow"><span class="tid">' + ticketLink(t) + '</span> ' + esc(detail)
-      + ticketDates(TICKET_INFO[t], Boolean(TITLES[t])) + '</div>';
+      + ticketDates(TICKET_INFO[t], Boolean(TICKET_INFO[t]?.t || TITLES[t])) + '</div>';
     if (++shown === max) break;
   }
   return html;
@@ -833,7 +842,8 @@ function vTicket(id) {
   out.innerHTML =
     answer('<b>' + ticketLink(id) + '</b>' + (detail ? ' — “' + esc(detail) + '”' : '')
       + ' touches <b>' + hits.length + '</b> graph entries across <b>' + repos.length + '</b> repositories.'
-      + ticketMetaLine(info, Boolean(TITLES[id])))
+      + ticketMetaLine(info, Boolean(info?.t || TITLES[id])))
+    + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
     + (secondDescription ? '<div class="trow"><span class="tid">also</span> ' + esc(secondDescription) + '</div>' : '')
     + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, secondDescription || '']))
     + bodyDetails(info?.b)
