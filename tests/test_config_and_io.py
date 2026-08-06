@@ -158,3 +158,41 @@ class NoImportTimeCopiesTest(SettingsIsolated):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TicketBrowseUrlTest(SettingsIsolated):
+    """A consumer-supplied tracker URL gets a usable separator.
+
+    The setting is estate configuration, and both consumers - the explorer page's
+    embedded config and the brief renderer - build a link by concatenating the
+    ticket id onto it. A URL without a trailing separator therefore produced
+    `https://tracker/browseCCT-890`: a broken link, silently, in every brief and
+    every search result. Normalising here rather than at each call site means the
+    page's embedded value is already correct, so app.js needs no change.
+    """
+
+    def test_a_missing_trailing_slash_is_added(self):
+        config.configure(TICKET_BROWSE_URL="https://tracker/browse")
+        self.assertEqual(config.TICKET_BROWSE_URL, "https://tracker/browse/")
+
+    def test_an_existing_trailing_slash_is_left_alone(self):
+        config.configure(TICKET_BROWSE_URL="https://tracker/browse/")
+        self.assertEqual(config.TICKET_BROWSE_URL, "https://tracker/browse/")
+
+    def test_a_query_style_url_is_not_given_a_slash(self):
+        """Not every tracker puts the id in a path segment.
+
+        `https://tracker/issue?key=` wants the id appended directly; adding a
+        slash would break it, so a URL already ending in a separator is trusted.
+        """
+        for url in (
+            "https://tracker/issue?key=",
+            "https://tracker/i?a=1&key=",
+            "https://tracker/x#",
+        ):
+            config.configure(TICKET_BROWSE_URL=url)
+            self.assertEqual(config.TICKET_BROWSE_URL, url)
+
+    def test_unset_stays_empty_so_linking_stays_off(self):
+        config.configure(TICKET_BROWSE_URL="")
+        self.assertEqual(config.TICKET_BROWSE_URL, "")

@@ -190,10 +190,98 @@ def extract() -> int:
 # paragraphs). Deliberately tiny: briefs are written to this subset. -------
 
 
+# A ticket id as this estate's commit messages carry them: a project prefix and a
+# number. Bounded so it cannot match inside a longer word or a URL path segment.
+_TICKET = re.compile(r"(?<![A-Za-z0-9/-])([A-Z][A-Z0-9]{1,9}-\d{1,6})(?![A-Za-z0-9-])")
+
+
+def _repositories() -> frozenset[str]:
+    """The estate's own repository names, for linking prose to source.
+
+    Read from the repository list rather than matched by shape. `cp-commons` and
+    `cp-admin` look exactly like repositories and are module directories inside
+    `cp-crime-portal`; linking anything hyphenated would send readers to 404s.
+    """
+    path = config.REPOSITORIES_CONFIG
+    if not path.exists():
+        return frozenset()
+    names = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Entries carry the clone target and branch: `name.git|main`, sometimes
+        # `org/name.git|main`. Parsing only on "/" left the suffix attached, so
+        # every name failed to match and the linking silently did nothing - the
+        # unit tests used bare names and passed anyway.
+        entry = line.split("|")[0].strip().split("/")[-1]
+        names.add(entry[:-4] if entry.endswith(".git") else entry)
+    return frozenset(names)
+
+
+def _outside_tags(markup: str, transform) -> str:
+    """Apply `transform` to the text between tags, never inside one.
+
+    Linking has to run after the code-span and bold passes, so by this point the
+    string holds markup. Rewriting blindly would corrupt an `href` this function
+    itself inserted moments earlier - turning a tracker URL into one pointing at
+    another link - so tag interiors are skipped.
+    """
+    return "".join(
+        part if part.startswith("<") and part.endswith(">") else transform(part)
+        for part in re.split(r"(<[^>]*>)", markup)
+    )
+
+
+def _link_identifiers(markup: str) -> str:
+    """Turn ticket ids and repository names in rendered prose into links.
+
+    Briefs and deep dives are the answers people read, and their identifiers were
+    unclickable: one estate's Welsh-language brief cited 16 ticket ids and rendered
+    no anchors at all. The constrained markdown subset excludes link syntax on
+    purpose - an author should not be hand-writing URLs into prose - so this is
+    the renderer's job, where the tracker URL and the organisation are already
+    configuration. Both are opt-in: unset, the prose stays as it was.
+    """
+    if config.TICKET_BROWSE_URL:
+        base = html.escape(config.TICKET_BROWSE_URL, quote=True)
+        markup = _outside_tags(
+            markup,
+            lambda s: _TICKET.sub(
+                lambda m: (
+                    f'<a href="{base}{m.group(1)}" target="_blank" rel="noopener">{m.group(1)}</a>'
+                ),
+                s,
+            ),
+        )
+    repositories = _repositories()
+    if config.GITHUB_ORG and repositories:
+        org = html.escape(config.GITHUB_ORG, quote=True)
+        # Longest first, so a repository whose name contains another's is not
+        # half-linked from the inside out.
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9/-])("
+            + "|".join(re.escape(name) for name in sorted(repositories, key=len, reverse=True))
+            + r")(?![A-Za-z0-9-])"
+        )
+        markup = _outside_tags(
+            markup,
+            lambda s: pattern.sub(
+                lambda m: (
+                    f'<a href="https://github.com/{org}/{m.group(1)}" target="_blank"'
+                    f' rel="noopener">{m.group(1)}</a>'
+                ),
+                s,
+            ),
+        )
+    return markup
+
+
 def _inline(text: str) -> str:
     escaped = html.escape(text, quote=False)
     escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
-    return re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    return _link_identifiers(escaped)
 
 
 def _table(rows: list[str]) -> str:

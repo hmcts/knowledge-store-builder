@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -241,3 +242,102 @@ class MergeTest(SettingsIsolated):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProseLinkingTest(SettingsIsolated):
+    """Ticket ids and repository names in brief prose become links.
+
+    Briefs and deep dives are the answers people actually read, and every
+    identifier in them was unclickable: one estate's Welsh-language brief cited
+    16 ticket ids and rendered zero anchors. The constrained markdown subset
+    excludes link syntax on purpose - an author should not be hand-writing URLs -
+    so the linking belongs in the renderer, where the tracker URL and the
+    organisation are already configuration.
+    """
+
+    def _store(self, stack, repositories="", **settings):
+        root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        (root / "config").mkdir(parents=True)
+        (root / "config" / "repositories.txt").write_text(repositories, encoding="utf-8")
+        config.configure(root=str(root), **settings)
+        return root
+
+    def test_ticket_ids_become_tracker_links(self):
+        with contextlib.ExitStack() as stack:
+            self._store(stack, TICKET_BROWSE_URL="https://tracker/browse/")
+            html = briefs.markdown_to_html("Ticket CCT-890 changed the flow.")
+        self.assertIn('<a href="https://tracker/browse/CCT-890"', html)
+        self.assertIn(">CCT-890</a>", html)
+
+    def test_ticket_ids_stay_plain_with_no_tracker_configured(self):
+        with contextlib.ExitStack() as stack:
+            self._store(stack, TICKET_BROWSE_URL="")
+            html = briefs.markdown_to_html("Ticket CCT-890 changed the flow.")
+        self.assertNotIn("<a href", html)
+        self.assertIn("CCT-890", html)
+
+    def test_known_repository_names_link_to_the_organisation(self):
+        with contextlib.ExitStack() as stack:
+            self._store(stack, repositories="cpp-context-sjp\ncpp-ui-hearing\n", GITHUB_ORG="hmcts")
+            html = briefs.markdown_to_html("Handled in `cpp-context-sjp` today.")
+        self.assertIn('<a href="https://github.com/hmcts/cpp-context-sjp"', html)
+
+    def test_only_real_repositories_are_linked(self):
+        """`cp-commons` looks like a repository and is a module inside one.
+
+        Linking anything hyphenated would send readers to 404s, so the renderer
+        links only names the estate's own repository list contains.
+        """
+        with contextlib.ExitStack() as stack:
+            self._store(stack, repositories="cp-crime-portal\n", GITHUB_ORG="hmcts")
+            html = briefs.markdown_to_html("The `cp-commons` module of `cp-crime-portal`.")
+        self.assertIn('href="https://github.com/hmcts/cp-crime-portal"', html)
+        self.assertNotIn("github.com/hmcts/cp-commons", html)
+
+    def test_repository_list_entries_carry_a_git_suffix_and_branch(self):
+        """The real file stores `name.git|main`, not a bare name.
+
+        Written because the first implementation split only on "/" and produced
+        `cpp-context-sjp.git|main`, which matches nothing. Every unit test used
+        idealised bare names, so the feature passed its tests and did nothing at
+        all on the estate it was built for.
+        """
+        with contextlib.ExitStack() as stack:
+            self._store(
+                stack,
+                repositories="cpp-context-sjp.git|main\nhmcts/cpp-ui-hearing.git|develop\n",
+                GITHUB_ORG="hmcts",
+            )
+            html = briefs.markdown_to_html("`cpp-context-sjp` and `cpp-ui-hearing`.")
+        self.assertIn("github.com/hmcts/cpp-context-sjp", html)
+        self.assertIn("github.com/hmcts/cpp-ui-hearing", html)
+        self.assertNotIn(".git", html)
+
+    def test_an_identifier_is_never_linked_twice(self):
+        """A second pass must not rewrite an href the first pass inserted."""
+        with contextlib.ExitStack() as stack:
+            self._store(
+                stack,
+                repositories="cpp-context-sjp\n",
+                GITHUB_ORG="hmcts",
+                TICKET_BROWSE_URL="https://tracker/browse/",
+            )
+            html = briefs.markdown_to_html("CCT-890 in `cpp-context-sjp`.")
+        self.assertEqual(html.count("<a href"), 2)
+        self.assertNotIn("browse/https", html)
+        self.assertNotIn("github.com/hmcts/https", html)
+
+    def test_table_cells_are_linked_too(self):
+        """Where it lives and Change history tables are where these live."""
+        with contextlib.ExitStack() as stack:
+            self._store(
+                stack,
+                repositories="cpp-context-sjp\n",
+                GITHUB_ORG="hmcts",
+                TICKET_BROWSE_URL="https://tracker/browse/",
+            )
+            html = briefs.markdown_to_html(
+                "| repo | ticket |\n|---|---|\n| `cpp-context-sjp` | CCT-890 |\n"
+            )
+        self.assertIn("github.com/hmcts/cpp-context-sjp", html)
+        self.assertIn("tracker/browse/CCT-890", html)
