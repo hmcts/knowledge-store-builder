@@ -185,19 +185,31 @@ function ticketLink(t) {
     + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
 }
 
-/** The tracker comments worth showing for a query: those that matched, shortest
- * first, capped. A 122-comment thread pasted into an answer is not an answer, and
- * the whole thread is in knowledge/intent/ticket-tracker.json.gz for anyone who
- * wants it. With no query terms - a bare ticket lookup - the first two stand in.
+/** The tracker comments worth showing for a query: those carrying the question's
+ * words, at most three. A 122-comment thread pasted into an answer is not an answer,
+ * and the whole thread is in knowledge/intent/ticket-tracker.json.gz for anyone who
+ * wants it. With no query terms - a bare ticket lookup - the opening two stand in.
  * @param {string[]|undefined} comments @param {string[]} terms */
 function commentRows(comments, terms) {
-  if (!comments || !comments.length) return '';
-  const wanted = terms && terms.length
+  if (!comments?.length) return '';
+  const wanted = terms?.length
     ? comments.filter((c) => terms.some((t) => c.toLowerCase().includes(t)))
     : comments.slice(0, 2);
   const shown = (wanted.length ? wanted : comments.slice(0, 1)).slice(0, 3);
   return shown.map((c) => '<div class="trow"><span class="tid">comment</span> '
-    + esc(c.length > 400 ? c.slice(0, 400).replace(/\s+\S*$/, '') + '…' : c) + '</div>').join('');
+    + esc(clipWords(c, 400)) + '</div>').join('');
+}
+
+/** Cut to at most limit characters, at a word boundary, without a regex.
+ * `/\s+\S*$/` reads naturally and backtracks super-linearly on a long tail of
+ * whitespace, which Sonar rightly flags: this runs over comment text nobody
+ * controls. lastIndexOf is linear and says the same thing.
+ * @param {string} text @param {number} limit */
+function clipWords(text, limit) {
+  if (text.length <= limit) return text;
+  const head = text.slice(0, limit);
+  const cut = head.lastIndexOf(' ');
+  return (cut > 0 ? head.slice(0, cut) : head).trimEnd() + '…';
 }
 
 /** @param {string} t */
