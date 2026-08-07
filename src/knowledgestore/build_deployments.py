@@ -66,17 +66,27 @@ def _parse(text: str) -> dict[str, str] | None:
     return deploy_values.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
 
 
-def discover(repo_dir: Path) -> dict[tuple[str, str], dict[str, str]]:
-    """(environment, service) -> flattened configuration, for one deployment clone."""
+def discover(repo_dir: Path) -> tuple[dict[tuple[str, str], dict[str, str]], list[str]]:
+    """(environment, service) -> flattened configuration, and what would not parse.
+
+    The unparsed list is returned rather than logged away because a file this
+    stage cannot read is a service whose configuration is simply missing from
+    every answer, with nothing on the page to say so. Stripping the template can
+    leave YAML that no longer parses - a `{% for %}` block around a list, most
+    often - and silently dropping those would understate the estate by however
+    many they are. Measured on one estate: 5 of 718.
+    """
     root = _glob_root(config.DEPLOY_VALUES_GLOB)
     found: dict[tuple[str, str], dict[str, str]] = {}
+    unparsed: list[str] = []
     for path in sorted(repo_dir.glob(config.DEPLOY_VALUES_GLOB)):
         rel = path.relative_to(repo_dir).as_posix()
         flat = _parse(path.read_text(encoding="utf-8", errors="replace"))
         if flat is None:
+            unparsed.append(rel)
             continue
         found[(environment_of(rel, root), service_of(path.name))] = flat
-    return found
+    return found, unparsed
 
 
 def _norm(value: str) -> str:
@@ -235,13 +245,15 @@ def main() -> int:
     environments: set[str] = set()
     added_nodes = added_edges = joined = 0
     unmatched: set[str] = set()
+    unreadable: list[str] = []
 
     for deploy_repo in sorted(config.DEPLOY_REPOS):
         repo_dir = config.REPOSITORIES_DIR / deploy_repo
         if not repo_dir.is_dir():
             print(f"  {deploy_repo}: no clone under {config.REPOSITORIES_DIR} - skipped")
             continue
-        found = discover(repo_dir)
+        found, unparsed = discover(repo_dir)
+        unreadable.extend(unparsed)
         matched = match_services({service for _, service in found}, known_repos)
         unmatched |= {service for _, service in found} - set(matched)
         root = _glob_root(config.DEPLOY_VALUES_GLOB)
@@ -284,6 +296,12 @@ def main() -> int:
         print(f"  {len(unmatched)} service(s) matched no repository: {shown}")
         print("    a falling match rate means a rename broke the join - check before")
         print("    trusting a deployment answer")
+    if unreadable:
+        # Said out loud rather than counted silently: each of these is a service
+        # whose configuration is absent from every answer, and nothing on the page
+        # would show the gap.
+        shown = ", ".join(unreadable[:5])
+        print(f"  {len(unreadable)} values file(s) did not parse and carry no evidence: {shown}")
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
     return 0
 

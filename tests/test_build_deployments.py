@@ -38,7 +38,7 @@ class Discovery(SettingsIsolated, unittest.TestCase):
             tmp = Path(raw)
             repo = _deploy_repo(tmp)
             config.configure(root=tmp)
-            found = deployments.discover(repo)
+            found, _ = deployments.discover(repo)
         keys = set(found)
         self.assertIn((config.DEPLOY_BASE_ENV, "progression-service"), keys)
         self.assertIn(("prd", "progression-service"), keys)
@@ -49,7 +49,7 @@ class Discovery(SettingsIsolated, unittest.TestCase):
             tmp = Path(raw)
             repo = _deploy_repo(tmp)
             config.configure(root=tmp)
-            found = deployments.discover(repo)
+            found, _ = deployments.discover(repo)
         from knowledgestore import deploy_values
 
         self.assertEqual(
@@ -61,7 +61,7 @@ class Discovery(SettingsIsolated, unittest.TestCase):
             tmp = Path(raw)
             repo = _deploy_repo(tmp)
             config.configure(root=tmp)
-            found = deployments.discover(repo)
+            found, _ = deployments.discover(repo)
         self.assertEqual(
             found[(config.DEPLOY_BASE_ENV, "progression-service")]["resources.limits.cpu"], "1"
         )
