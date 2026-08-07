@@ -320,6 +320,10 @@ DEPLOY_BASE_ENV = os.environ.get("KSB_DEPLOY_BASE_ENV", "_base")
 # not the whole file, which stays readable in the clone.
 DEPLOY_MAX_KEYS = _env_int("KSB_DEPLOY_MAX_KEYS", 60)
 DEPLOY_VALUE_CHARS = _env_int("KSB_DEPLOY_VALUE_CHARS", 200)
+# What reaches the browser. The graph keeps the whole configuration for an agent
+# to read; the page carries a capped summary, the same trade the ticket detail
+# makes - a values file runs to hundreds of keys and the page is a download.
+DEPLOY_PAGE_KEYS = _env_int("KSB_DEPLOY_PAGE_KEYS", 12)
 
 # --- BDD specifications --------------------------------------------------
 # Gherkin (.feature) files are read wherever they appear in a repository. This
