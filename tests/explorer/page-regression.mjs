@@ -141,8 +141,16 @@ check('where is PaymentService used?', 'where is it used',
   ['directly connected to', 'Used from']);
 check('walk me through the payment journey', 'user journey',
   ['scripted business features']);
+// DEMO-1 has both a tracker summary and a mined description. The tracker's
+// words take the headline - that is the precedence rule - but the mined
+// description is separate evidence and must still appear, under a label naming
+// where it came from. Asserting only the headline let a build ship that dropped
+// every mined description the moment a tracker title existed.
 check('DEMO-1', 'ticket lookup',
-  ['DEMO-1', 'graph entries']);
+  ['DEMO-1', 'graph entries',
+   'Show a formatted address on the payment confirmation',   // tracker: headline
+   'description, from commit messages',                      // provenance named
+   'Add address formatting to the payment confirmation screen']);  // mined: kept
 // business-first composition: prose leads, code sits behind the disclosure
 check('how are addresses handled?', 'topic brief',
   ['Addresses in the demo estate', 'Pre-written topic brief']);
@@ -203,6 +211,51 @@ for (const [name, ok] of [
     failures++;
     console.error(`FAIL  DEMO-2 lookup: ${name}`);
     console.error(`      html: ${ticketHtml.slice(0, 300)}`);
+  }
+}
+
+// --- evidence conservation ------------------------------------------------
+// The guarantee people actually rely on is that evidence the artefact carries
+// REACHES THE READER. That cannot be tested a layer below where it breaks: a
+// unit test asserted merge_ticket_evidence kept the mined descriptions, it did
+// keep them, the assertion passed - and the page then declined to draw them,
+// because the tracker title had taken the slot the description used to hold.
+//
+// So this asserts the property directly, over every ticket the page carries,
+// rather than naming one string in one answer. A future field that arrives and
+// displaces another is caught here without anyone remembering to add a case.
+//
+// Two limits are deliberate policy, encoded rather than assumed:
+//   - a bare lookup shows the first two comments only; a 122-comment thread is
+//     not an answer, and the full thread is in the committed artefact.
+//   - a commit subject that merely repeats a shown description is suppressed
+//     by extraSubjects, which a leading-words match satisfies anyway.
+const TICKETS = JSON.parse(jsonBlocks.tickets);
+const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+// Build-time caps clip long text, so match a leading run of words: it survives
+// every cap the build applies while still being specific to the one field.
+const head = (s) => norm(s).split(' ').slice(0, 6).join(' ');
+
+for (const [id, info] of Object.entries(TICKETS)) {
+  api.q.value = id;
+  api.runAsk();
+  const shownText = norm(strip(api.out.innerHTML));
+  const required = [
+    ...(info.d || []).map((t) => ['mined description', t]),
+    ...(info.s || []).map((t) => ['commit subject', t]),
+    ...(info.b || []).map((t) => ['commit body', t]),
+    ...(info.x ? [['tracker description', info.x]] : []),
+    ...(info.c || []).slice(0, 2).map((t) => ['tracker comment', t]),
+  ];
+  const missing = required
+    .filter(([, text]) => text && !shownText.includes(head(text)))
+    .map(([field, text]) => `${field} never reaches the page: "${text.slice(0, 70)}"`);
+  if (missing.length) {
+    failures++;
+    console.error(`FAIL  ${id}: evidence carried by the artefact but not shown`);
+    for (const m of missing) console.error(`      ${m}`);
+  } else {
+    console.log(`ok    ${id}: every field of its evidence reaches the page`);
   }
 }
 
