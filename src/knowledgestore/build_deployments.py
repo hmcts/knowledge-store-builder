@@ -12,10 +12,11 @@ the clone, write nodes and edges back, report what joined and what did not.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
-from . import config, deploy_values
+from . import config, deploy_values, io
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -118,3 +119,174 @@ def match_services(services: set[str], repos: set[str]) -> dict[str, str]:
         if candidates:
             matched[service] = candidates[0]
     return matched
+
+
+def _strip_layer(graph: dict) -> None:
+    """Idempotence by reconstruction: drop everything this stage added before."""
+    ours = {n["id"] for n in graph["nodes"] if n.get("_origin") == FORMAT}
+    graph["nodes"] = [n for n in graph["nodes"] if n.get("_origin") != FORMAT]
+    graph["links"] = [
+        e for e in graph["links"] if e["source"] not in ours and e["target"] not in ours
+    ]
+
+
+def _environment_node(environment: str, deploy_repo: str) -> dict:
+    return {
+        "id": f"deploy::env:{environment}",
+        "label": environment,
+        "norm_label": environment.lower(),
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": deploy_repo,
+        "_origin": FORMAT,
+        "local_id": f"env:{environment}",
+        "metadata": {"kind": "environment"},
+    }
+
+
+def _deployment_node(
+    environment: str, service: str, deploy_repo: str, rel: str, flat: dict[str, str]
+) -> dict:
+    return {
+        "id": f"{deploy_repo}::deploy:{environment}:{service}",
+        "label": f"{service} ({environment})",
+        "norm_label": f"{service} ({environment})".lower(),
+        "file_type": "concept",
+        "source_file": rel,
+        "source_location": None,
+        "repo": deploy_repo,
+        "_origin": FORMAT,
+        "local_id": f"deploy:{environment}:{service}",
+        "metadata": {
+            "kind": "deployment",
+            "service": service,
+            "environment": environment,
+            "config": flat,
+        },
+    }
+
+
+def _edge(source: str, target: str, relation: str, rel: str | None) -> dict:
+    return {
+        "source": source,
+        "target": target,
+        "relation": relation,
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "source_file": rel,
+        "source_location": None,
+        "weight": 1.0,
+    }
+
+
+def _source_file(root: str, environment: str, service: str) -> str:
+    """The values file a node cites, rebuilt from its (environment, service) key.
+
+    The base layer sits directly under the glob root with no environment segment,
+    so a path assembled as `root/<environment>/<service>` names a file that is not
+    there. `status` counts an unopenable citation as dangling, and a reader sent to
+    a path that does not exist stops trusting the citations that are good.
+
+    The filename comes from the glob rather than a fixed suffix, so an estate that
+    points `KSB_DEPLOY_VALUES_GLOB` at a different naming convention still cites
+    the file it actually read.
+    """
+    name = Path(config.DEPLOY_VALUES_GLOB).name.replace("*", service, 1)
+    segments = (root, "" if environment == config.DEPLOY_BASE_ENV else environment, name)
+    return "/".join(segment for segment in segments if segment)
+
+
+def _representatives(graph: dict) -> dict[str, str]:
+    """repo -> one deterministic node id, the lowest in that repository.
+
+    `min` over the ids, so the answer does not depend on node order. This stage's
+    own nodes are excluded as well as stripped beforehand: without that, a second
+    run could pick a deployment node as a repository's representative and chain
+    deployment nodes to each other.
+    """
+    best: dict[str, str] = {}
+    for node in graph["nodes"]:
+        repo = node.get("repo")
+        if not repo or node.get("_origin") == FORMAT:
+            continue
+        if repo not in best or node["id"] < best[repo]:
+            best[repo] = node["id"]
+    return best
+
+
+def main() -> int:
+    if not config.GRAPH_PATH.exists():
+        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    if not config.DEPLOY_REPOS:
+        print(
+            "Deployments: no repository named, nothing to do.\n"
+            "  Set KSB_DEPLOY_REPOS to the clone holding this estate's deployment\n"
+            "  configuration; most estates have none and this stage stays off."
+        )
+        return 0
+
+    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    _strip_layer(graph)
+    reps = _representatives(graph)
+    known_repos = set(reps)
+
+    environments: set[str] = set()
+    added_nodes = added_edges = joined = 0
+    unmatched: set[str] = set()
+
+    for deploy_repo in sorted(config.DEPLOY_REPOS):
+        repo_dir = config.REPOSITORIES_DIR / deploy_repo
+        if not repo_dir.is_dir():
+            print(f"  {deploy_repo}: no clone under {config.REPOSITORIES_DIR} - skipped")
+            continue
+        found = discover(repo_dir)
+        matched = match_services({service for _, service in found}, known_repos)
+        unmatched |= {service for _, service in found} - set(matched)
+        root = _glob_root(config.DEPLOY_VALUES_GLOB)
+        for (environment, service), flat in sorted(found.items()):
+            rel = _source_file(root, environment, service)
+            node = _deployment_node(environment, service, deploy_repo, rel, flat)
+            graph["nodes"].append(node)
+            added_nodes += 1
+            if environment not in environments:
+                graph["nodes"].append(_environment_node(environment, deploy_repo))
+                environments.add(environment)
+                added_nodes += 1
+            graph["links"].append(
+                _edge(node["id"], f"deploy::env:{environment}", "deployed_in", rel)
+            )
+            added_edges += 1
+            target = reps.get(matched.get(service, ""))
+            if target:
+                graph["links"].append(_edge(node["id"], target, "deploys", rel))
+                added_edges += 1
+                joined += 1
+
+    serialised = json.dumps(graph, ensure_ascii=False)
+    config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
+    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:
+        out.write(serialised)
+
+    total = added_nodes - len(environments)
+    print(
+        f"Deployments: {total} service/environment pairs across "
+        f"{len(environments)} environments, {added_edges} edges added"
+    )
+    if total:
+        rate = joined / total * 100
+        print(f"  joined to a repository in the graph: {joined} of {total} ({rate:.0f}%)")
+    else:
+        print("  nothing found")
+    if unmatched:
+        shown = ", ".join(sorted(unmatched)[:10])
+        print(f"  {len(unmatched)} service(s) matched no repository: {shown}")
+        print("    a falling match rate means a rename broke the join - check before")
+        print("    trusting a deployment answer")
+    print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

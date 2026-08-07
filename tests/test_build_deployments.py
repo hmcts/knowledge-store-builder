@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -124,6 +125,111 @@ class Matching(unittest.TestCase):
         # Ambiguity resolves deterministically to the shortest, then alphabetical
         # name - never to whichever the filesystem listed first.
         self.assertEqual(matched["hearing-service"], "cpp-context-hearing")
+
+
+def _graph(tmp: Path) -> None:
+    """A graph holding one real service node, so the join has something to hit."""
+    (tmp / "graphify-out").mkdir(parents=True, exist_ok=True)
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "cpp-context-progression::CaseAggregate",
+                "label": "CaseAggregate",
+                "repo": "cpp-context-progression",
+                "source_file": "src/main/java/CaseAggregate.java",
+            }
+        ],
+        "links": [],
+    }
+    (tmp / "graphify-out" / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+
+
+class Layer(SettingsIsolated, unittest.TestCase):
+    def test_the_stage_does_nothing_until_a_repository_is_named(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp)
+            self.assertEqual(deployments.main(), 0)
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+        self.assertEqual([n for n in graph["nodes"] if n.get("_origin") == "deployments"], [])
+
+    def test_a_node_per_service_and_environment_with_an_edge_to_the_service_repo(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            self.assertEqual(deployments.main(), 0)
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+        added = [n for n in graph["nodes"] if n.get("_origin") == "deployments"]
+        kinds = {n["metadata"]["kind"] for n in added}
+        self.assertEqual(kinds, {"deployment", "environment"})
+        labels = {n["label"] for n in added if n["metadata"]["kind"] == "deployment"}
+        self.assertIn("progression-service (prd)", labels)
+        targets = {e["target"] for e in graph["links"]}
+        self.assertIn("cpp-context-progression::CaseAggregate", targets)
+
+    def test_the_configuration_travels_on_the_node_so_it_can_be_quoted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+        node = next(n for n in graph["nodes"] if n.get("label") == "progression-service (prd)")
+        self.assertEqual(node["metadata"]["config"]["resources.limits.cpu"], "4")
+        self.assertEqual(node["metadata"]["environment"], "prd")
+
+    def test_every_node_cites_a_file_that_exists_including_the_base_layer(self):
+        # A citation nobody can open is worse than none: `status` counts it as
+        # dangling, and a reader sent to a path that is not there stops trusting
+        # the citations that are good. The base layer has no environment segment,
+        # so a path built as root/<environment>/<service> is wrong for it.
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            repo = _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+            cited = {
+                n["source_file"]
+                for n in graph["nodes"]
+                if n.get("_origin") == "deployments" and n.get("source_file")
+            }
+            missing = sorted(rel for rel in cited if not (repo / rel).is_file())
+        # The assertIn keeps this from passing vacuously on an empty citation set.
+        self.assertIn("ansible/group_vars/progression-service_values.yaml.j2", cited)
+        self.assertEqual(missing, [])
+
+    def test_running_twice_leaves_the_graph_the_same_size(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            first = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+            deployments.main()
+            second = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+        self.assertEqual(len(first["nodes"]), len(second["nodes"]))
+        self.assertEqual(len(first["links"]), len(second["links"]))
+
+
+class Stage(unittest.TestCase):
+    def test_the_stage_is_registered_between_packages_and_summaries(self):
+        from knowledgestore import cli
+
+        names = list(cli.STAGES)
+        self.assertIn("deployments", names)
+        self.assertLess(names.index("packages"), names.index("deployments"))
+        self.assertLess(names.index("deployments"), names.index("summaries"))
 
 
 if __name__ == "__main__":

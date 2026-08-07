@@ -506,6 +506,8 @@ class CliTest(SettingsIsolated):
                 "fetch-tickets",
                 "gherkin",
                 "packages",
+                # before clustering, so deployment nodes join communities
+                "deployments",
                 "summaries",
                 "semantic",
                 "topics",
