@@ -140,7 +140,35 @@ def _strip_layer(graph: dict) -> None:
     ]
 
 
-def _environment_node(environment: str, deploy_repo: str) -> dict:
+class Communities:
+    """One community per environment, allocated above whatever clustering produced.
+
+    Deployment nodes arrive after the graph has been clustered, so nothing else
+    would place them: they would carry no community, sit outside the "what these
+    areas do" layer, and render with a blank area on the page. `gherkin` has the
+    same problem and answers it the same way, by minting ids above the maximum
+    and labelling them.
+
+    Environment is the right grain. A community per service would be hundreds of
+    areas holding one node each, which says nothing; a single community for
+    everything deployed would put production and development in one area, which
+    is the confusion this whole stage exists to avoid.
+    """
+
+    def __init__(self, graph: dict, labels: dict[str, str]) -> None:
+        self.labels = labels
+        self.max_community = max((n.get("community") or 0 for n in graph["nodes"]), default=0)
+        self.by_environment: dict[str, int] = {}
+
+    def for_environment(self, environment: str) -> int:
+        if environment not in self.by_environment:
+            self.max_community += 1
+            self.by_environment[environment] = self.max_community
+            self.labels[str(self.max_community)] = f"Deployments: {environment}"
+        return self.by_environment[environment]
+
+
+def _environment_node(environment: str, deploy_repo: str, community: int, name: str) -> dict:
     return {
         "id": f"deploy::env:{environment}",
         "label": environment,
@@ -151,12 +179,20 @@ def _environment_node(environment: str, deploy_repo: str) -> dict:
         "repo": deploy_repo,
         "_origin": FORMAT,
         "local_id": f"env:{environment}",
+        "community": community,
+        "community_name": name,
         "metadata": {"kind": "environment"},
     }
 
 
 def _deployment_node(
-    environment: str, service: str, deploy_repo: str, rel: str, flat: dict[str, str]
+    environment: str,
+    service: str,
+    deploy_repo: str,
+    rel: str,
+    flat: dict[str, str],
+    community: int,
+    name: str,
 ) -> dict:
     return {
         "id": f"{deploy_repo}::deploy:{environment}:{service}",
@@ -168,6 +204,8 @@ def _deployment_node(
         "repo": deploy_repo,
         "_origin": FORMAT,
         "local_id": f"deploy:{environment}:{service}",
+        "community": community,
+        "community_name": name,
         "metadata": {
             "kind": "deployment",
             "service": service,
@@ -237,7 +275,13 @@ class _Tally:
         self.unreadable: list[str] = []
 
 
-def _add_repo_layer(graph: dict, deploy_repo: str, reps: dict[str, str], tally: _Tally) -> None:
+def _add_repo_layer(
+    graph: dict,
+    deploy_repo: str,
+    reps: dict[str, str],
+    tally: _Tally,
+    communities: Communities,
+) -> None:
     """Write one deployment clone's nodes and edges into the graph."""
     found, unparsed = discover(config.REPOSITORIES_DIR / deploy_repo)
     tally.unreadable.extend(unparsed)
@@ -248,11 +292,13 @@ def _add_repo_layer(graph: dict, deploy_repo: str, reps: dict[str, str], tally: 
 
     for (environment, service), flat in sorted(found.items()):
         rel = _source_file(root, environment, service)
-        node = _deployment_node(environment, service, deploy_repo, rel, flat)
+        cid = communities.for_environment(environment)
+        name = communities.labels[str(cid)]
+        node = _deployment_node(environment, service, deploy_repo, rel, flat, cid, name)
         graph["nodes"].append(node)
         tally.pairs += 1
         if environment not in tally.environments:
-            graph["nodes"].append(_environment_node(environment, deploy_repo))
+            graph["nodes"].append(_environment_node(environment, deploy_repo, cid, name))
             tally.environments.add(environment)
         graph["links"].append(_edge(node["id"], f"deploy::env:{environment}", "deployed_in", rel))
         tally.edges += 1
@@ -308,17 +354,30 @@ def main() -> int:
     _strip_layer(graph)
     reps = _representatives(graph)
 
+    # Community labels live beside the graph, so the page can name an area. Read
+    # what clustering wrote, add one entry per environment, write it back - the
+    # same contract `gherkin` follows for its business-feature communities.
+    labels: dict[str, str] = (
+        json.loads(config.LABELS_PATH.read_text(encoding="utf-8"))
+        if config.LABELS_PATH.exists()
+        else {}
+    )
+    communities = Communities(graph, labels)
+
     tally = _Tally()
     for deploy_repo in sorted(config.DEPLOY_REPOS):
         if not (config.REPOSITORIES_DIR / deploy_repo).is_dir():
             print(f"  {deploy_repo}: no clone under {config.REPOSITORIES_DIR} - skipped")
             continue
-        _add_repo_layer(graph, deploy_repo, reps, tally)
+        _add_repo_layer(graph, deploy_repo, reps, tally, communities)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:
         out.write(serialised)
+    config.LABELS_PATH.write_text(  # NOSONAR(S2083)
+        json.dumps(labels, ensure_ascii=False), encoding="utf-8"
+    )
 
     _report(tally, graph)
     return 0
