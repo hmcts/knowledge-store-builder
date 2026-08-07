@@ -33,11 +33,16 @@ jobs:
       - name: Unit tests, default install
         run: python3 -m unittest discover -s tests -v
 
+      # Pinned rather than resolved from the `deploy` extra's `>=6`, so CI installs
+      # the same PyYAML every run and a new release cannot change what this job
+      # proves. The extra itself stays a range, because that is what a consumer
+      # installs; `test_the_deploy_extra_declares_pyyaml` keeps the two honest.
+      #
       # A block scalar, because `--only-binary :all:` carries a colon-space that
       # YAML would otherwise read as a nested mapping.
       - name: Install the optional extras
         run: |
-          pip install --only-binary :all: -e '.[deploy]'
+          pip install --only-binary :all: 'PyYAML==6.0.3'
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and

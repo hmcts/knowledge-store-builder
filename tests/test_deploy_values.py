@@ -71,6 +71,26 @@ class Settings(unittest.TestCase):
         self.assertGreater(config.DEPLOY_MAX_KEYS, 0)
         self.assertGreater(config.DEPLOY_VALUE_CHARS, 0)
 
+    def test_the_deploy_extra_declares_pyyaml(self):
+        """CI pins PyYAML directly, so nothing else would notice the extra changing.
+
+        The pin exists because a resolved-at-install dependency makes a CI run
+        prove something different each time. The cost is that the pin and the
+        extra can drift apart silently - CI would keep installing PyYAML and
+        passing while the extra named something else, or nothing.
+        """
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        text = (root / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r"^deploy\s*=\s*\[(.*?)\]", text, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(declared, "pyproject.toml declares no `deploy` extra")
+        self.assertIn("PyYAML", declared.group(1))
+
+        workflow = (root / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+        self.assertIn("PyYAML==", workflow, "CI must pin the version it installs")
+
 
 if __name__ == "__main__":
     unittest.main()
