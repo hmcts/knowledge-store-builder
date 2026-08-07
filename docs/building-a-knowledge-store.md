@@ -94,6 +94,49 @@ means an LLM and real time; a code-only sweep silently skips them. If you run
 extraction without a model available, use the code-only mode consciously and
 record which repositories were skipped, rather than discovering it later.
 
+### Deployment configuration (the `deployments` stage, opt-in)
+
+An estate whose deployment configuration lives in a repository can carry it as
+evidence: which services reach which environment, and what each is configured
+with. Name the clone in `KSB_DEPLOY_REPOS`; unset, the stage does nothing,
+because most estates have no such repository. It needs PyYAML, which is not a
+runtime dependency of this library — `pip install
+'hmcts-knowledge-store-builder[deploy]'`.
+
+**The unit is (service, environment), never service alone.** On the estate this
+was built against, the same repository declares 96 services in `prd` and 72 in
+`dev`, with 42 in production absent from development. A node per service would
+have merged those into one answer true of neither, and it would have looked
+perfectly plausible.
+
+Three things it cannot promise, all worth saying to whoever asks:
+
+- **It is declared desired state, not live cluster state.** Even a store built
+  minutes ago answers "what the repository declares at this commit", never "what
+  is running". Those are different claims, and conflating them during an incident
+  is how somebody acts on configuration a hotfix superseded.
+- **Templated values do not resolve.** Roughly nine in ten values files on that
+  estate carry Jinja markers, so "does this service set resource limits" is
+  answerable and "what is its replica count" often is not. The key survives
+  carrying a placeholder, so *set from a variable* stays distinguishable from
+  *unset* — never quote a placeholder as though it were a value.
+- **The join is by name, and names drift.** The stage reports the match rate and
+  names what did not match.
+
+That last point has a trap worth stating plainly, because it cost a rewrite here.
+**A missing join is visible and a wrong join is not.** A service joined to the
+wrong repository is counted as a success, so it *raises* the match rate — the one
+signal you have reads as reassurance while production configuration hangs off
+unrelated code. An early version of this stage matched on any normalised
+substring and sent `id-service` to `cpp-video`, because `id` is inside `cppvideo`.
+Matching now requires a whole hyphen-delimited segment, falling back to substring
+only for stems long enough that coincidence is implausible. If a match rate ever
+looks surprisingly good, suspect the matcher before believing it.
+
+The whole configuration stays in the graph for an agent to read; the explorer
+page carries a capped summary per deployment (`KSB_DEPLOY_PAGE_KEYS`), searchable
+by key or value, on the same trade the ticket detail makes.
+
 ## 4. Architecture-as-code earns its place
 
 If a repository in your organisation contains an architecture model, ingest it
