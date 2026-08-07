@@ -135,7 +135,15 @@ INTENT = {
 # and spans several lines, because that is what real bodies do.
 TICKET_DESCRIPTIONS = {
     "DEMO-1": {
-        "d": ["Add address formatting to the payment confirmation screen"],
+        # d[0] deliberately says something NO subject says. A mined description is
+        # curated across commits, so on a real estate it routinely carries the one
+        # sentence explaining why - and if it is dropped, no other field puts that
+        # text back. A description that merely repeats a subject cannot detect the
+        # loss: extraSubjects re-renders the same words and the page looks intact.
+        "d": [
+            "Reverted the shared upgrade that broke production, added a local pipe copy",
+            "Add address formatting to the payment confirmation screen",
+        ],
         "s": [
             "Add address formatting to the payment confirmation screen",
             "wip",
@@ -144,6 +152,18 @@ TICKET_DESCRIPTIONS = {
         "last": "2024-02-01",
         "repos": ["demo-app-a", "demo-e2e"],
         "n": 3,
+    },
+    # A ticket whose title came from a hand-exported CSV rather than the tracker,
+    # and which no graph node carries - both real shapes. The CSV title is the
+    # OTHER source that can take the headline, so without this the precedence
+    # rule was only ever exercised through one of its two inputs.
+    "DEMO-3": {
+        "d": ["reworked the retry backoff after the incident"],
+        "s": ["bumped the retry ceiling to five attempts", "tidy"],
+        "first": "2024-04-01",
+        "last": "2024-04-03",
+        "repos": ["demo-core"],
+        "n": 2,
     },
     "DEMO-2": {
         # a quote, an apostrophe and an event handler, because a description
@@ -186,6 +206,8 @@ TICKET_TRACKER = {
         "type": "Story",
     },
 }
+# Real tracker titles imported from a CSV export, as `ticket-titles` writes them.
+TICKET_TITLES = {"DEMO-3": "Retry the receipt email when the gateway times out"}
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}
 
 BRIEF = """# Addresses in the demo estate
@@ -259,6 +281,7 @@ def main() -> int:
     io.write_gzip_json(config.INTENT_INDEX_PATH, INTENT)
     io.write_gzip_json(config.TICKET_DESCRIPTIONS_PATH, TICKET_DESCRIPTIONS)
     io.write_gzip_json(config.TICKET_TRACKER_PATH, TICKET_TRACKER)
+    io.write_gzip_json(config.TICKET_TITLES_PATH, TICKET_TITLES)
     io.write_gzip_json(config.SYNONYMS_PATH, SYNONYMS)
     (config.TOPICS_DOCS_DIR / "addresses.md").write_text(BRIEF, encoding="utf-8")
     (STORE / "config").mkdir(exist_ok=True)
