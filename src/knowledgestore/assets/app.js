@@ -869,7 +869,14 @@ function vTicket(id) {
   const repos = [...new Set(hits.map((i) => DATA[i][1]).filter(Boolean))];
   const detail = ticketDetail(id);
   const info = TICKET_INFO[id];
-  const secondDescription = info?.d?.[1];
+  // Every mined description the headline is not already carrying. This was
+  // `d[1]` alone, which was right only while the headline was always `d[0]`.
+  // Once the tracker's own title took precedence, `d[0]` became evidence that
+  // nothing rendered: on one estate that silently dropped the description
+  // saying a production revert had added a local copy of the address pipe,
+  // from an answer that still presented itself as the commit evidence.
+  const detailKey = normText(detail);
+  const descriptions = (info?.d || []).filter((x) => normText(x) !== detailKey);
   const shown = hits.slice(0, 30).filter((i) => DATA[i][4] !== 'ticket');
   out.innerHTML =
     answer('<b>' + ticketLink(id) + '</b>' + (detail ? ' — “' + esc(detail) + '”' : '')
@@ -877,8 +884,8 @@ function vTicket(id) {
       + ticketMetaLine(info, Boolean(info?.t || TITLES[id])))
     + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
     + commentRows(info?.c, [])
-    + (secondDescription ? '<div class="trow"><span class="tid">also</span> ' + esc(secondDescription) + '</div>' : '')
-    + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, secondDescription || '']))
+    + evidenceRows(LABEL_DESCRIPTION, descriptions)
+    + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, ...descriptions]))
     + bodyDetails(info?.b)
     + summariesFor(hits, 2)
     + featureCards(hits, 4)

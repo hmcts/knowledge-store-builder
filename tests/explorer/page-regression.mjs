@@ -141,8 +141,16 @@ check('where is PaymentService used?', 'where is it used',
   ['directly connected to', 'Used from']);
 check('walk me through the payment journey', 'user journey',
   ['scripted business features']);
+// DEMO-1 has both a tracker summary and a mined description. The tracker's
+// words take the headline - that is the precedence rule - but the mined
+// description is separate evidence and must still appear, under a label naming
+// where it came from. Asserting only the headline let a build ship that dropped
+// every mined description the moment a tracker title existed.
 check('DEMO-1', 'ticket lookup',
-  ['DEMO-1', 'graph entries']);
+  ['DEMO-1', 'graph entries',
+   'Show a formatted address on the payment confirmation',   // tracker: headline
+   'description, from commit messages',                      // provenance named
+   'Add address formatting to the payment confirmation screen']);  // mined: kept
 // business-first composition: prose leads, code sits behind the disclosure
 check('how are addresses handled?', 'topic brief',
   ['Addresses in the demo estate', 'Pre-written topic brief']);

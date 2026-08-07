@@ -166,6 +166,26 @@ TICKET_DESCRIPTIONS = {
         "n": 2,
     },
 }
+# What the tracker itself said, as `fetch-tickets` writes it. DEMO-1 carries a
+# tracker summary AND mined descriptions, because that combination is where the
+# precedence rule bites: the tracker title takes the headline, and the
+# descriptions the commits yielded must still reach the page rather than be
+# displaced by it. Without a ticket of this shape the page could drop mined
+# evidence on the floor with every test in this suite still green - which is
+# exactly what happened once the tracker gained precedence.
+TICKET_TRACKER = {
+    "DEMO-1": {
+        "summary": "Show a formatted address on the payment confirmation",
+        "description": "Acceptance criteria: the confirmation screen shows the "
+        "billing address on one line.",
+        "comments": ["Agreed in refinement to reuse the existing pipe."],
+        "status": "Done",
+        "resolution": "Done",
+        "created": "2024-01-02",
+        "resolved": "2024-02-02",
+        "type": "Story",
+    },
+}
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}
 
 BRIEF = """# Addresses in the demo estate
@@ -238,6 +258,7 @@ def main() -> int:
     io.write_json(config.SUMMARIES_PATH, SUMMARIES)
     io.write_gzip_json(config.INTENT_INDEX_PATH, INTENT)
     io.write_gzip_json(config.TICKET_DESCRIPTIONS_PATH, TICKET_DESCRIPTIONS)
+    io.write_gzip_json(config.TICKET_TRACKER_PATH, TICKET_TRACKER)
     io.write_gzip_json(config.SYNONYMS_PATH, SYNONYMS)
     (config.TOPICS_DOCS_DIR / "addresses.md").write_text(BRIEF, encoding="utf-8")
     (STORE / "config").mkdir(exist_ok=True)
