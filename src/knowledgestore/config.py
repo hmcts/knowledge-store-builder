@@ -304,6 +304,23 @@ MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
 # treated this way.
 E2E_REPOS = _env_set("KSB_E2E_REPOS", set())
 
+# --- deployment evidence (the `deployments` stage) ------------------------
+# Off until an estate names the repository that holds its deployment config,
+# because most estates have no such repository and the stage would find
+# nothing. The glob is relative to that clone; the path segment between the
+# glob root and the file names the environment, so
+# `ansible/group_vars/prd/foo_values.yaml.j2` is service `foo` in `prd`, and a
+# file directly under `group_vars/` is the environment-independent base layer.
+DEPLOY_REPOS = _env_set("KSB_DEPLOY_REPOS", set())
+DEPLOY_VALUES_GLOB = os.environ.get(
+    "KSB_DEPLOY_VALUES_GLOB", "ansible/group_vars/**/*_values.yaml.j2"
+)
+DEPLOY_BASE_ENV = os.environ.get("KSB_DEPLOY_BASE_ENV", "_base")
+# A values file runs to hundreds of keys; the page and the prose want the shape,
+# not the whole file, which stays readable in the clone.
+DEPLOY_MAX_KEYS = _env_int("KSB_DEPLOY_MAX_KEYS", 60)
+DEPLOY_VALUE_CHARS = _env_int("KSB_DEPLOY_VALUE_CHARS", 200)
+
 # --- BDD specifications --------------------------------------------------
 # Gherkin (.feature) files are read wherever they appear in a repository. This
 # is the directory whose next path segment names the feature's area, used to

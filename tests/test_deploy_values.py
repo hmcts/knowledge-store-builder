@@ -51,5 +51,20 @@ class Flatten(unittest.TestCase):
         self.assertEqual(len(flat["note"]), 20)
 
 
+class Settings(unittest.TestCase):
+    def test_the_stage_is_off_until_a_repository_is_named(self):
+        from knowledgestore import config
+
+        self.assertEqual(config.DEPLOY_REPOS, set())
+
+    def test_the_defaults_describe_an_ansible_group_vars_layout(self):
+        from knowledgestore import config
+
+        self.assertTrue(config.DEPLOY_VALUES_GLOB.endswith("_values.yaml.j2"))
+        self.assertEqual(config.DEPLOY_BASE_ENV, "_base")
+        self.assertGreater(config.DEPLOY_MAX_KEYS, 0)
+        self.assertGreater(config.DEPLOY_VALUE_CHARS, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
