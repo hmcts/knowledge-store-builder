@@ -19,8 +19,14 @@
 
 /**
  * One searchable graph entry:
- * [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets, communityId]
- * @typedef {[string, string, string, string, string, number, string[], string[], number]} Entry
+ * [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets,
+ *  communityId, deployConfig]
+ *
+ * `deployConfig` is a capped run of `key=value` pairs for a deployment node, and
+ * the empty string for every other entry - the whole configuration stays in the
+ * committed graph, where an agent reads it.
+ * @typedef {[string, string, string, string, string, number, string[], string[], number,
+ *            string]} Entry
  */
 
 /**
@@ -52,7 +58,8 @@ const EDGE_FLAT = JSON.parse(getEl('edges').textContent || '[]');
 const N = DATA.length;
 const labelLower = DATA.map((e) => e[0].toLowerCase());
 const hay = DATA.map(
-  (e) => (e[0] + ' ' + e[1] + ' ' + e[2] + ' ' + e[3] + ' ' + e[7].join(' ')).toLowerCase()
+  (e) => (e[0] + ' ' + e[1] + ' ' + e[2] + ' ' + e[3] + ' ' + e[7].join(' ')
+    + ' ' + (e[9] || '')).toLowerCase()
 );
 /** Ticket ids in a stable order, with one lowercased evidence haystack each -
  * the ticket's description, its commit subjects and its body prose together.
@@ -316,6 +323,9 @@ function card(e) {
         : '')
     + (e[7].length
         ? '<div class="row tickets"><b>tickets:</b> ' + e[7].map(ticketChip).join('') + '</div>'
+        : '')
+    + (e[9]
+        ? '<div class="row"><b>deployed with:</b> ' + esc(e[9]) + '</div>'
         : '')
     + '</div>'
   );

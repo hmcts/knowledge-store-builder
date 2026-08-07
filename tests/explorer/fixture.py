@@ -22,7 +22,7 @@ from knowledgestore import config, io  # noqa: E402
 STORE = ROOT / ".fixture-store"
 
 
-def node(nid, label, repo, source_file, community, kind=None, file_type="code"):
+def node(nid, label, repo, source_file, community, kind=None, file_type="code", metadata=None):
     return {
         "id": nid,
         "label": label,
@@ -30,7 +30,7 @@ def node(nid, label, repo, source_file, community, kind=None, file_type="code"):
         "source_file": source_file,
         "community": community,
         "file_type": file_type,
-        "metadata": {"kind": kind} if kind else {},
+        "metadata": {"kind": kind, **(metadata or {})} if kind else dict(metadata or {}),
     }
 
 
@@ -83,6 +83,33 @@ GRAPH = {
             file_type="concept",
         ),
         node("jira::DEMO-1", "DEMO-1", "", None, 4, kind="jira_ticket", file_type="concept"),
+        # deployment evidence, exactly as build_deployments writes it: one node
+        # per (service, environment) carrying the flattened configuration, and
+        # the environment it names. Two edges each and nothing links back, so
+        # this layer only reaches the page because include_entry exempts it.
+        node(
+            "demo-deploy::deploy:prd:pay-service",
+            "pay-service (prd)",
+            "demo-deploy",
+            "ansible/group_vars/prd/pay-service_values.yaml.j2",
+            3,
+            kind="deployment",
+            file_type="concept",
+            metadata={
+                "service": "pay-service",
+                "environment": "prd",
+                "config": {"replicas": "4", "resources.limits.cpu": "2"},
+            },
+        ),
+        node(
+            "deploy::env:prd",
+            "prd",
+            "demo-deploy",
+            None,
+            3,
+            kind="environment",
+            file_type="concept",
+        ),
     ],
     "links": [
         {"source": "app-a::pipe", "target": "app-a::form"},
@@ -93,6 +120,8 @@ GRAPH = {
         {"source": "e2e::feature", "target": "core::pay"},
         {"source": "jira::DEMO-1", "target": "e2e::feature"},
         {"source": "jira::DEMO-1", "target": "app-a::pipe"},
+        {"source": "demo-deploy::deploy:prd:pay-service", "target": "deploy::env:prd"},
+        {"source": "demo-deploy::deploy:prd:pay-service", "target": "core::pay"},
     ],
 }
 
