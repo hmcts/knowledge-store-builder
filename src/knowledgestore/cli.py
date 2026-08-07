@@ -41,6 +41,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_package_edges",
         "add cross-repository package nodes and import edges (npm layer)",
     ),
+    "deployments": (
+        "build_deployments",
+        "add per-environment deployment config and join it to services (opt-in)",
+    ),
     "summaries": (
         "build_community_summaries",
         "extract community digests, or merge written summaries back in",

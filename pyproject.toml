@@ -27,6 +27,9 @@ dependencies = []
 [project.optional-dependencies]
 # Only the semantic index needs a model. Everything else works without it.
 semantic = ["fastembed>=0.4", "numpy>=1.24"]
+# Only the deployments stage parses YAML. It stays optional so the default
+# install keeps its empty runtime dependency list.
+deploy = ["PyYAML>=6"]
 # Lint, format and type-check tooling, pinned to what CI runs.
 dev = ["ruff==0.16.0", "pyright==1.1.411"]
 

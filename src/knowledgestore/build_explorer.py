@@ -142,6 +142,16 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
     """Explorer inclusion policy - see config.MIN_ENTRY_DEGREE comment above."""
     if not node.get("label"):
         return False  # structural nodes (e.g. Java package hierarchy) carry no label
+    if (node.get("metadata") or {}).get("kind") in ("deployment", "environment"):
+        # Deployment evidence is deliberately sparse in the graph: a service in an
+        # environment links to that environment and to the code it deploys, and
+        # nothing links back. Degree-gating it would hide the entire layer, which
+        # is the same mistake the package exemption below records.
+        #
+        # Ahead of is_noise, not after it, because environments are named "prd",
+        # "dev", "aat" - three letters, exactly what the minified-symbol filter
+        # exists to drop. Every environment node on a real estate would go with it.
+        return True
     if is_noise(node, kind):
         return False
     if kind in ("feature", "scenario", "ticket"):
@@ -164,6 +174,21 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
     if is_test and node.get("repo") not in E2E_REPOS:
         return False  # backend test scaffolding
     return degree >= config.MIN_ENTRY_DEGREE
+
+
+def deployment_summary(metadata: dict) -> str:
+    """`key=value` pairs for a deployment node, capped and sorted.
+
+    Sorted before capping so two builds of the same graph produce the same page.
+    Empty for anything that is not a deployment: the tenth element then costs an
+    ordinary entry the four bytes of `, ""`, about 3% of the data block and
+    nothing at all once the page is gzipped, which is how it is committed.
+    """
+    if (metadata or {}).get("kind") != "deployment":
+        return ""
+    config_map = metadata.get("config") or {}
+    pairs = [f"{key}={config_map[key]}" for key in sorted(config_map)]
+    return " ".join(pairs[: config.DEPLOY_PAGE_KEYS])
 
 
 def is_noise(node: dict, kind: str) -> bool:
@@ -212,6 +237,7 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
             entry_connections(node_id, adjacency, degree, nodes),
             node_tickets(node, kind, intent),
             node.get("community", -1),
+            deployment_summary(node.get("metadata") or {}),
         ]
         for node_id, node, kind in kept
     ]

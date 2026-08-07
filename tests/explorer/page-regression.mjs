@@ -69,7 +69,13 @@ for (const id of ['data', 'edges', 'titles', 'summaries', 'synonyms', 'tickets',
 }
 globalThis.document = {
   getElementById: (id) => (elements[id] ??= makeEl()),
-  querySelectorAll: () => [],
+  // The kind filters, which search mode reads before it will show anything. A
+  // stub answering nothing leaves every kind unticked, so every entry is
+  // filtered out and a search assertion passes or fails for the wrong reason.
+  querySelectorAll: (sel) => (sel === '.k'
+    ? ['code', 'concept', 'feature', 'scenario', 'ticket']
+      .map((value) => ({ value, checked: true, addEventListener() {} }))
+    : []),
 };
 globalThis.Option = function Option() {};
 
@@ -97,6 +103,33 @@ const absentFrom = (haystack, wanted, label) =>
 /** @param {string} haystack @param {string[]} unwanted @param {string} label */
 const presentIn = (haystack, unwanted, label) =>
   unwanted.filter((s) => haystack.includes(s)).map((s) => `${label} must not contain: "${s}"`);
+
+/** Drive one query through search mode and assert on the rendered cards.
+ *
+ * Search mode, not Ask: `check` below calls `runAsk`, which composes prose from
+ * the graph and never renders a result card, so nothing it asserts can prove a
+ * card field reaches the reader.
+ * @param {string} query
+ * @param {string[]} wantSubstrings substrings of the visible card text
+ * @param {string[]} forbidden substrings that must NOT appear in it
+ */
+function checkSearch(query, wantSubstrings, forbidden = []) {
+  api.q.value = query;
+  api.runSearch();
+  const text = strip(api.out.innerHTML);
+  const problems = [
+    ...absentFrom(text, wantSubstrings, 'results'),
+    ...presentIn(text, forbidden, 'results'),
+  ];
+  if (problems.length) {
+    failures++;
+    console.error(`FAIL  search: ${query}`);
+    for (const p of problems) console.error(`      ${p}`);
+    console.error(`      results: ${text.slice(0, 200)}`);
+  } else {
+    console.log(`ok    search: ${query}  ->  ${api.meta.textContent}`);
+  }
+}
 
 /** Drive one question and assert on the answer.
  * @param {string} question
@@ -188,6 +221,17 @@ check('why does the payment flow use postalCode?', 'business intent',
 check('which settlement reference is logged?', 'commit evidence',
   ['DEMO-2', 'commit subject', 'Log the settlement reference'], [],
   { meta: ['no evidence for: settlement'], text: ['No evidence in this estate'] });
+
+// Deployment evidence must be findable by its configuration, not only by its
+// name: "which services set two CPUs in prd" is the question this layer exists
+// for, and a key nobody can search for is a key the page does not carry.
+checkSearch('replicas', ['pay-service (prd)', 'replicas=4'], ['AddressPipe']);
+checkSearch('pay-service', ['pay-service (prd)', 'resources.limits.cpu=2']);
+// The environment node is the other half of the layer, and environments are
+// named "prd", "dev", "aat" - three letters, which the minified-symbol filter
+// reads as junk. Assert on the connection line, which only its own card draws:
+// the deployment card also contains "prd", so matching that would prove nothing.
+checkSearch('prd', ['connects to: pay-service (prd)']);
 
 // A commit body is user-authored text of up to four thousand characters: the
 // page must escape it rather than interpret it, keep the line breaks a

@@ -96,6 +96,64 @@ class BuildIndexTest(SettingsIsolated):
         self.assertEqual(entries[0][7], ["CRC-12016"])
 
 
+class DeploymentEntriesTest(SettingsIsolated):
+    """Deployment evidence has to survive the degree gate and reach the entry."""
+
+    def test_a_deployment_node_is_indexed_however_isolated(self):
+        deployment = node("d", "progression-service (prd)", file_type="concept")
+        deployment["metadata"] = {"kind": "deployment"}
+        # two edges only - below MIN_ENTRY_DEGREE, and it must still be included
+        self.assertTrue(explorer.include_entry(deployment, "concept", 2))
+
+    def test_an_environment_node_is_indexed_however_isolated(self):
+        environment = node("e", "prd", file_type="concept")
+        environment["metadata"] = {"kind": "environment"}
+        self.assertTrue(explorer.include_entry(environment, "concept", 1))
+
+    def test_ordinary_concepts_still_face_the_degree_gate(self):
+        self.assertFalse(explorer.include_entry(node("c", "SomeHelper"), "concept", 2))
+
+    def test_the_config_summary_is_capped_and_sorted_before_capping(self):
+        config_map = {f"k{i}": str(i) for i in range(50)}
+        summary = explorer.deployment_summary({"kind": "deployment", "config": config_map})
+        self.assertEqual(len(summary.split(" ")), config.DEPLOY_PAGE_KEYS)
+        # sorted, then capped: an insertion-ordered cap would start k0 k1 k2, and
+        # would churn the committed page whenever the values file was re-ordered
+        self.assertTrue(summary.startswith("k0=0 k1=1 k10=10"), summary)
+
+    def test_a_non_deployment_node_contributes_no_summary(self):
+        self.assertEqual(explorer.deployment_summary({"kind": "package"}), "")
+        self.assertEqual(explorer.deployment_summary({}), "")
+
+    def test_the_summary_travels_on_the_entry_so_the_page_can_search_it(self):
+        deployment = node("d", "pay-service (prd)", file_type="concept", source_file=None)
+        deployment["metadata"] = {
+            "kind": "deployment",
+            "service": "pay-service",
+            "environment": "prd",
+            "config": {"replicas": "4", "resources.limits.cpu": "2"},
+        }
+        graph = {
+            "nodes": [
+                deployment,  # no edges at all, so the exemption is what indexes it
+                node("n1", "AddressPipe"),
+                node("n2", "AddressForm"),
+                node("n3", "AddressStore"),
+                node("n4", "AddressApi"),
+            ],
+            "links": [
+                {"source": "n1", "target": "n2"},
+                {"source": "n1", "target": "n3"},
+                {"source": "n1", "target": "n4"},
+            ],
+        }
+        entries, _ = explorer.build_index(graph, {}, {})
+        by_label = {entry[0]: entry for entry in entries}
+        self.assertEqual(by_label["pay-service (prd)"][9], "replicas=4 resources.limits.cpu=2")
+        # every other entry pays one JSON string for the field and nothing more
+        self.assertEqual(by_label["AddressPipe"][9], "")
+
+
 class NodeTicketsTest(SettingsIsolated):
     def test_feature_tickets_come_from_metadata(self):
         feature = node("a", "F", kind="gherkin_feature")
