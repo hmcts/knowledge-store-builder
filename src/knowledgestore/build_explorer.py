@@ -119,6 +119,14 @@ def merge_ticket_evidence(mined: dict, tracker: dict) -> dict:
         description = (record.get("description") or "").strip()
         if description:
             entry["x"] = truncate(description, config.TICKET_DETAIL_CHARS)
+        # Comments carried whole, so the page can search them. They arrive already
+        # bounded by KSB_TRACKER_COMMENT_CHARS, so a second cap here would be a
+        # second policy to keep in step. This is the layer that answers *why* a
+        # change was made, and holding it in the page without searching it would be
+        # the worst of both - weight with no reach.
+        comments = [c for c in (record.get("comments") or []) if isinstance(c, str) and c.strip()]
+        if comments:
+            entry["c"] = comments
     return merged
 
 
