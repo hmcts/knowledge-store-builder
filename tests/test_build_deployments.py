@@ -68,6 +68,43 @@ class Discovery(SettingsIsolated, unittest.TestCase):
 
 
 class Matching(unittest.TestCase):
+    """The join is by name, and a wrong join is worse than a missing one.
+
+    A missed join shows up in the match-rate report and can be chased. A wrong
+    join is counted as a success, inflates the rate, and attaches production
+    configuration to unrelated code. These cases are the ones a bare
+    normalised-substring rule got wrong.
+    """
+
+    REPOS = {
+        "cpp-context-progression",
+        "cpp-context-idam",
+        "cpp-video",
+        "cpp-context-scheduling",
+        "cpp-context-defence",
+        "cpp-context-hearing",
+        "cpp-context-hearing-d",
+        "cpp-context-unifiedsearch-query",
+        "cpp-ui-home",
+    }
+
+    def test_a_two_letter_stem_matches_nothing_rather_than_something_wrong(self):
+        # `id` is inside `cppvideo`, and `sc` inside `cppcontextscheduling`. A
+        # substring rule joined both, confidently and wrongly.
+        self.assertEqual(deployments.match_services({"id-service"}, self.REPOS), {})
+        self.assertEqual(deployments.match_services({"sc-service"}, self.REPOS), {})
+
+    def test_a_whole_segment_match_beats_a_longer_coincidence(self):
+        matched = deployments.match_services({"idam-service"}, self.REPOS)
+        self.assertEqual(matched["idam-service"], "cpp-context-idam")
+
+    def test_a_long_stem_may_still_match_across_segment_boundaries(self):
+        # `unifiedsearchquery` is no single segment of
+        # `cpp-context-unifiedsearch-query`, and is far too long to be a
+        # coincidence - this is what the substring fallback exists for.
+        matched = deployments.match_services({"unifiedsearchquery-service"}, self.REPOS)
+        self.assertEqual(matched["unifiedsearchquery-service"], "cpp-context-unifiedsearch-query")
+
     def test_a_service_matches_the_repository_that_holds_it(self):
         matched = deployments.match_services(
             {"progression-service", "defence-service"},

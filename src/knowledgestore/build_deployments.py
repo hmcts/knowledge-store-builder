@@ -82,23 +82,39 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+# Below this length a stem matches almost any repository name by accident, and the
+# accident is invisible: a wrong join counts as a join, so it inflates the match
+# rate rather than showing up as a gap. Measured on a realistic repository set, a
+# bare substring rule sent `id-service` to `cpp-video` and `sc-service` to
+# `cpp-context-scheduling`, both confidently and both wrong.
+MIN_SUBSTRING_STEM = 4
+
+
 def match_services(services: set[str], repos: set[str]) -> dict[str, str]:
     """service name -> the repository that holds it, where one clearly does.
 
     A deployed service is named for what it is (`progression-service`); the
-    repository is named for where it sits (`cpp-context-progression`). Matching
-    on the normalised stem finds the join without a hand-maintained table, and
-    an ambiguous match resolves to the shortest then alphabetically first name
-    so two runs agree.
+    repository is named for where it sits (`cpp-context-progression`). The join is
+    by name, so it has to be conservative in a specific way: a *missed* join shows
+    up in the match-rate report and can be chased, whereas a *wrong* join is
+    counted as a success and silently attaches production configuration to
+    unrelated code.
+
+    So a whole hyphen-delimited segment of the repository name must equal the
+    stem. Only when no repository matches that way does a substring match apply,
+    and then only for a stem long enough that the coincidence is implausible.
+    Ambiguity resolves to the shortest then alphabetically first name so two runs
+    agree; that is determinism, which is necessary but is not correctness, which
+    is why the segment rule comes first.
     """
     matched: dict[str, str] = {}
     for service in sorted(services):
         stem = _norm(_VALUES_SUFFIX.sub("", service).removesuffix("-service"))
         if not stem:
             continue
-        candidates = sorted(
-            (r for r in repos if stem and stem in _norm(r)), key=lambda r: (len(r), r)
-        )
+        exact = [r for r in repos if stem in {_norm(part) for part in r.split("-")}]
+        loose = [r for r in repos if stem in _norm(r)] if len(stem) >= MIN_SUBSTRING_STEM else []
+        candidates = sorted(exact or loose, key=lambda r: (len(r), r))
         if candidates:
             matched[service] = candidates[0]
     return matched
