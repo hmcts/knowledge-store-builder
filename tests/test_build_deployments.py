@@ -251,6 +251,44 @@ class Layer(SettingsIsolated, unittest.TestCase):
         self.assertIn("ansible/group_vars/progression-service_values.yaml.j2", cited)
         self.assertEqual(missing, [])
 
+    def test_every_added_node_lands_in_a_named_environment_community(self):
+        """Nodes added after clustering must place themselves, or they have no area.
+
+        The page shows a community per entry, and prose is written per community.
+        A deployment node with neither would be searchable but would sit outside
+        the layer that explains what an area of the estate does.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+            labels = json.loads((tmp / "graphify-out" / ".graphify_labels.json").read_text())
+        added = [n for n in graph["nodes"] if n.get("_origin") == "deployments"]
+        self.assertTrue(added)
+        for node in added:
+            self.assertIsNotNone(node.get("community"), node["label"])
+            self.assertTrue(node.get("community_name"), node["label"])
+            self.assertEqual(labels[str(node["community"])], node["community_name"])
+
+    def test_each_environment_is_its_own_area_not_one_lump(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            graph = json.loads((tmp / "graphify-out" / "graph.json").read_text())
+        added = [n for n in graph["nodes"] if n.get("_origin") == "deployments"]
+        by_env = {n["metadata"].get("environment") or n["label"]: n["community"] for n in added}
+        # prd, dev and the base layer must not share a community: merging them is
+        # precisely the confusion this stage exists to avoid.
+        self.assertEqual(len(set(by_env.values())), len(set(by_env)))
+        names = {n["community_name"] for n in added}
+        self.assertTrue(all(x.startswith("Deployments: ") for x in names), names)
+
     def test_running_twice_leaves_the_graph_the_same_size(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
