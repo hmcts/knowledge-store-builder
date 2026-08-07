@@ -27,7 +27,19 @@ jobs:
       - name: Install the package
         run: pip install -e .
 
-      - name: Unit tests
+      # The default install declares no runtime dependencies, and this run proves
+      # it: every test that needs an optional extra skips rather than fails, so a
+      # dependency creeping into the core surfaces here as a failure.
+      - name: Unit tests, default install
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Install the optional extras
+        run: pip install -e '.[deploy]'
+
+      # And again with the extras present, so the stages behind them are actually
+      # exercised. Without this the deployments stage would be skipped in CI and
+      # green would mean nothing about it.
+      - name: Unit tests, with extras
         run: python3 -m unittest discover -s tests -v
 
       - uses: actions/setup-node@v7

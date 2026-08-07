@@ -12,6 +12,18 @@ from settings_isolation import SettingsIsolated
 from knowledgestore import build_deployments as deployments
 from knowledgestore import config
 
+try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
+    import yaml  # noqa: F401
+
+    HAS_YAML = True
+except ImportError:  # pragma: no cover - the default-install CI job takes this path
+    HAS_YAML = False
+
+# Skipping rather than failing is the point: CI runs this suite twice, once on the
+# default install and once with the extras, so a dependency creeping into the core
+# shows up as the first run failing rather than as nobody noticing.
+needs_yaml = unittest.skipUnless(HAS_YAML, "needs the `deploy` extra (PyYAML)")
+
 
 def _deploy_repo(tmp: Path) -> Path:
     """One base layer and two environments, as a real ansible layout."""
@@ -32,6 +44,7 @@ def _deploy_repo(tmp: Path) -> Path:
     return repo
 
 
+@needs_yaml
 class Discovery(SettingsIsolated, unittest.TestCase):
     def test_the_environment_comes_from_the_path_and_the_base_layer_is_named(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -127,6 +140,35 @@ class Matching(unittest.TestCase):
         self.assertEqual(matched["hearing-service"], "cpp-context-hearing")
 
 
+class MissingDependency(unittest.TestCase):
+    """Without the extra, the stage must say what to install, not raise a traceback.
+
+    This path is what a first-time user hits, and it runs in the default-install
+    CI job where PyYAML genuinely is absent. Patching the import here means the
+    message is checked in both jobs rather than only the one.
+    """
+
+    def test_the_error_names_the_install_command(self):
+        import builtins
+
+        real = builtins.__import__
+
+        def without_yaml(name, *args, **kwargs):
+            if name == "yaml":
+                raise ImportError("no yaml")
+            return real(name, *args, **kwargs)
+
+        builtins.__import__ = without_yaml
+        try:
+            with self.assertRaises(SystemExit) as caught:
+                deployments._parse("a: 1")
+        finally:
+            builtins.__import__ = real
+        message = str(caught.exception)
+        self.assertIn("PyYAML", message)
+        self.assertIn("[deploy]", message)
+
+
 def _graph(tmp: Path) -> None:
     """A graph holding one real service node, so the join has something to hit."""
     (tmp / "graphify-out").mkdir(parents=True, exist_ok=True)
@@ -147,6 +189,7 @@ def _graph(tmp: Path) -> None:
     (tmp / "graphify-out" / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
 
 
+@needs_yaml
 class Layer(SettingsIsolated, unittest.TestCase):
     def test_the_stage_does_nothing_until_a_repository_is_named(self):
         with tempfile.TemporaryDirectory() as raw:
