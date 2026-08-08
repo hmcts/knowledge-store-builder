@@ -223,6 +223,13 @@ __marimo__/
 # IDE
 /.idea/
 
+# macOS metadata. The Finder writes .DS_Store into any directory it displays, and
+# a copy onto a non-native filesystem leaves ._ resource forks beside each file.
+# Neither belongs in a repository, and this one has no macOS section at all - the
+# base template it started from is the Python one.
+.DS_Store
+._*
+
 # This repository is the pipeline, never a store. A stage run from the repository
 # root - or a test mid-refactor - drops these here, and one was committed by a
 # `git add -A`, which is what this guards against.
