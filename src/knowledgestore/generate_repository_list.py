@@ -86,6 +86,30 @@ class Filters:
         return any(name.startswith(prefix) for prefix in self.prefixes)
 
 
+def _apply_rule(filters: Filters, kind: str, value: str, line_number: int) -> bool:
+    """Record one rule. False when the kind is unknown, so the caller can locate it.
+
+    Every selecting rule is tracked in `origins` so that one selecting nothing can
+    be named back to the operator. `exclude` is not: one legitimately outlives the
+    repository it excluded.
+    """
+    if kind == "prefix":
+        filters.prefixes.append(value)
+    elif kind == "repo":
+        filters.includes.add(value)
+    elif kind == "fetch":
+        filters.fetch_only.add(value)
+    elif kind == "team":
+        filters.teams.append(value)
+    elif kind == "exclude":
+        filters.excludes.add(value)
+        return True
+    else:
+        return False
+    filters.origins.append((line_number, f"{kind} {value}"))
+    return True
+
+
 def read_filters(path: Path) -> Filters:
     filters = Filters()
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -96,21 +120,7 @@ def read_filters(path: Path) -> Filters:
         if len(parts) != 2:
             raise ValueError(f"Invalid filter at {path}:{line_number}: {raw}")
         kind, value = parts
-        if kind == "prefix":
-            filters.prefixes.append(value)
-            filters.origins.append((line_number, f"prefix {value}"))
-        elif kind == "repo":
-            filters.includes.add(value)
-            filters.origins.append((line_number, f"repo {value}"))
-        elif kind == "fetch":
-            filters.fetch_only.add(value)
-            filters.origins.append((line_number, f"fetch {value}"))
-        elif kind == "exclude":
-            filters.excludes.add(value)
-        elif kind == "team":
-            filters.teams.append(value)
-            filters.origins.append((line_number, f"team {value}"))
-        else:
+        if not _apply_rule(filters, kind, value, line_number):
             raise ValueError(f"Unknown filter kind at {path}:{line_number}: {kind}")
     overlap = filters.fetch_only & filters.includes
     if overlap:

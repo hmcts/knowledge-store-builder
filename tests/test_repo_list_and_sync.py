@@ -392,7 +392,7 @@ class UnmatchedRuleWarningTest(SettingsIsolated):
         problems = repo_list.unmatched_rules(
             filters, repo_list.discover(filters, runner=runner), runner=runner
         )
-        self.assertEqual([(2, "repo does-not-exist")], problems)
+        self.assertEqual(problems, [(2, "repo does-not-exist")])
 
     def test_a_trailing_comment_makes_the_rule_unmatchable_and_is_reported(self):
         # the exact shape that cost three repositories
@@ -401,14 +401,14 @@ class UnmatchedRuleWarningTest(SettingsIsolated):
         problems = repo_list.unmatched_rules(
             filters, repo_list.discover(filters, runner=runner), runner=runner
         )
-        self.assertEqual(1, len(problems))
+        self.assertEqual(len(problems), 1)
         self.assertIn("# the important one", problems[0][1])
 
     def test_rules_that_did_match_are_not_reported(self):
         filters, path = self._filters("prefix svc-\nrepo other\nteam platform\n")
         runner = self._runner(["svc-a", "other", "owned"], {"platform": ["owned"]})
         selected = repo_list.discover(filters, runner=runner)
-        self.assertEqual([], repo_list.unmatched_rules(filters, selected, runner=runner))
+        self.assertEqual(repo_list.unmatched_rules(filters, selected, runner=runner), [])
 
     def test_empty_team_is_reported(self):
         filters, path = self._filters("prefix svc-\nteam ghost-team\n")
@@ -440,15 +440,15 @@ class UnmatchedRuleWarningTest(SettingsIsolated):
             finally:
                 config.configure(root=str(old_root))
 
-        self.assertEqual(0, lenient, "a warning must not break an interactive run")
-        self.assertEqual(1, strict, "--strict must fail when a rule selected nothing")
+        self.assertEqual(lenient, 0, "a warning must not break an interactive run")
+        self.assertEqual(strict, 1, "--strict must fail when a rule selected nothing")
 
     def test_a_stale_exclude_is_not_reported(self):
         # excludes legitimately outlive the repository they excluded
         filters, path = self._filters("prefix svc-\nexclude long-gone\n")
         runner = self._runner(["svc-a"])
         selected = repo_list.discover(filters, runner=runner)
-        self.assertEqual([], repo_list.unmatched_rules(filters, selected, runner=runner))
+        self.assertEqual(repo_list.unmatched_rules(filters, selected, runner=runner), [])
 
 
 class ExportHistoryRootTest(SettingsIsolated):
