@@ -887,7 +887,12 @@ class FetchOnlyRuleReportingTest(SettingsIsolated):
         selected = repo_list.discover(filters, runner=runner)
         self.assertEqual(repo_list.unmatched_rules(filters, selected, runner=runner), [])
 
-    def test_fetch_rules_alone_are_not_an_estate(self):
+    # Named to avoid being exactly 40 characters. The secret scanner's Lob
+    # detector matches `test_` followed by 35 word characters - the shape of a Lob
+    # test key - and reports it as a verified secret, failing the build. Three
+    # pre-existing names in this file have the same length and will do the same to
+    # whoever next edits their lines; raised as #97.
+    def test_fetch_alone_does_not_define_an_estate(self):
         # A store whose only rules are `fetch` has nothing to extract. Better to
         # say so than to build an empty graph and leave someone wondering.
         with self.assertRaises(ValueError) as caught:
