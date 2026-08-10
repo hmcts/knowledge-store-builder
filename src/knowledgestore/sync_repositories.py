@@ -1,5 +1,11 @@
 """Clone or update every configured source repository into repositories/.
 
+Repositories selected by a `fetch` rule are handled too, but into external/ and
+never into repositories/. The graph extraction pass walks repositories/, so that
+split is what makes "cloned but never extracted" true by construction instead of
+by convention. Nothing else about them differs - they are cloned, updated and
+recorded the same way.
+
 Full clones are deliberate: the history export diffs every commit, so all
 historical blobs are needed locally anyway. A partial clone
 (--filter=blob:none) would lazily re-fetch them one commit at a time during
@@ -61,6 +67,37 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
     return int(git("rev-list", "--all", "--count").strip())
 
 
+def _sync_external() -> tuple[dict[str, dict], list[tuple[str, str]]]:
+    """Sync the `fetch` repositories into external/, away from the extraction pass.
+
+    Absent configuration is normal: most estates have no fetch-only repositories,
+    and `discover` only writes the file once a `fetch` rule exists.
+    """
+    from . import provenance
+
+    if not config.EXTERNAL_CONFIG.is_file():
+        return {}, []
+    repos = list(read_repository_config(config.EXTERNAL_CONFIG))
+    if not repos:
+        return {}, []
+    config.EXTERNAL_DIR.mkdir(parents=True, exist_ok=True)
+    entries: dict[str, dict] = {}
+    failures: list[tuple[str, str]] = []
+    for repo in repos:
+        print(f"\nSynchronising {repo.name} (fetch-only, not extracted)")
+        try:
+            count = sync_repository(repo, config.EXTERNAL_DIR)
+        except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
+            print(f"{repo.name}: FAILED - {error}", file=sys.stderr)
+            failures.append((repo.name, str(error)))
+            continue
+        print(f"{repo.name}: {count} commits available")
+        entries[repo.name] = provenance.head_info(
+            config.EXTERNAL_DIR / repo.name, repo.default_branch
+        )
+    return entries, failures
+
+
 def main() -> int:
     from . import provenance
 
@@ -87,8 +124,12 @@ def main() -> int:
         entries[repo.name] = provenance.head_info(
             config.REPOSITORIES_DIR / repo.name, repo.default_branch
         )
-    provenance.write(entries)
+    external, external_failures = _sync_external()
+    failures.extend(external_failures)
+    provenance.write(entries, external)
     print(f"\nProvenance recorded for {len(entries)} repositories -> {config.PROVENANCE_PATH}")
+    if external:
+        print(f"Plus {len(external)} fetched but never extracted -> {config.EXTERNAL_DIR}")
     if failures:
         total = len(entries) + len(failures)
         print(f"\n{len(failures)} of {total} repositories failed to sync:")

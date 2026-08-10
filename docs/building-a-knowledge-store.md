@@ -64,6 +64,36 @@ a broadened prefix will make it ingest itself), and the pipeline library. Put
 the reason in the filter file next to the rule; that file is the only place
 anybody looks.
 
+**Some sources belong on disk but not in the graph** — use `fetch`, not `repo`.
+A `fetch <name>` rule clones a repository and never extracts it: `discover` writes
+it to `config/repositories-external.txt` rather than the estate manifest, and
+`sync` puts it under `external/` rather than `repositories/`. The extraction pass
+walks `repositories/`, so it cannot reach a fetch-only source by construction
+rather than by anybody remembering not to.
+
+Reach for it when a repository is worth having locally but is the wrong thing to
+ingest whole:
+
+- **A source a bespoke script takes selectively.** The clearest case is a
+  hand-written knowledge base describing the same estate the store extracts.
+  Ingesting it puts a second, prose description of the estate inside the graph,
+  and the prose one goes stale silently. A script that takes only the parts
+  extraction cannot produce needs the clone; the graph must not have it.
+- **A repository held back behind a review** — a secrets finding, a licence
+  question — that you still want fetched and watched.
+
+The rule earns its place because the alternative gives no signal either way.
+Listed as `repo`, such a repository is extracted on the next refresh alongside
+whatever the bespoke script contributes, and the graph ends up describing the same
+estate twice. The run completes normally, so there is nothing for a reviewer to
+notice at the time and nothing to look up later. Before the rule existed the usual
+workaround was a clone kept outside the store by hand: it met the same need, but it
+drifted, and it was easy for someone new to be unaware of.
+
+A name cannot be both `repo` and `fetch`; `discover` rejects the file rather than
+guess. `fetch` beats a `prefix` that would have matched, and `exclude` beats
+both.
+
 **Watch for negative knowledge.** "This repository does not exist", "this
 component is a module inside that repository, not a deployment", "this project
 was abandoned before it was built" — these save real time. If your

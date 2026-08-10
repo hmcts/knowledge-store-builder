@@ -1,12 +1,24 @@
 """Discover the estate's repositories from GitHub into config/repositories.txt.
 
 Discovery is driven by config/repository-filters.txt - reviewable include
-prefixes, explicit includes and explicit excludes (no regex, no fuzzy
-search). The full organisation repository list is fetched via the GitHub
+prefixes, explicit includes, explicit excludes and fetch-only rules (no regex,
+no fuzzy search). The full organisation repository list is fetched via the GitHub
 CLI (`gh`, authenticated) and filtered locally; archived repositories are
 always excluded. Output format:
 
     name|clone-url|default-branch
+
+A `fetch` rule means clone it, but do not extract it. Those repositories are
+written to config/repositories-external.txt instead, and the sync stage puts them
+under external/ rather than repositories/. That separation is the whole mechanism:
+the graph extraction pass walks repositories/, so a fetch-only repository is
+unreachable from it by construction rather than by anyone remembering.
+
+It exists for sources a store needs on disk but should not ingest whole - one whose
+content a bespoke script takes selectively, or one held back behind a review.
+Before this rule the choice was to ingest a repository or to have no supported way
+to obtain it, so estates met the need with clones kept by hand, which drifted and
+were easy to be unaware of.
 
 Run:
 
@@ -34,12 +46,29 @@ HEADER_TEMPLATE = (
     "\n"
 )
 
+EXTERNAL_HEADER_TEMPLATE = (
+    "# Generated from the {org} organisation repository listing\n"
+    "# `fetch` rules in config/repository-filters.txt: cloned, not extracted.\n"
+    "#\n"
+    "# These are not part of the estate. They are synced to external/ rather than\n"
+    "# repositories/, which is what keeps them outside the graph extraction pass.\n"
+    "# If a script cannot find one of these, point the script at external/ rather\n"
+    "# than moving the entry into config/repositories.txt - moving it puts the\n"
+    "# repository into the graph, which is the thing the rule is here to avoid.\n"
+    "# Format: name|clone-url|default-branch\n"
+    "\n"
+)
+
 
 @dataclass
 class Filters:
     prefixes: list[str] = field(default_factory=list)
     includes: set[str] = field(default_factory=set)
     excludes: set[str] = field(default_factory=set)
+    # Fetched, never extracted. Selected from the org listing exactly like an
+    # explicit include - the clone URL and default branch are needed - but routed
+    # to a separate manifest and a separate directory.
+    fetch_only: set[str] = field(default_factory=set)
     # GitHub team slugs: every non-archived repository the team has is part
     # of the estate. The rule for estates defined by ownership rather than
     # naming - teams without conventions, and infrastructure estates.
@@ -53,9 +82,33 @@ class Filters:
     def matches(self, name: str) -> bool:
         if name in self.excludes:
             return False
-        if name in self.includes:
+        if name in self.includes or name in self.fetch_only:
             return True
         return any(name.startswith(prefix) for prefix in self.prefixes)
+
+
+def _apply_rule(filters: Filters, kind: str, value: str, line_number: int) -> bool:
+    """Record one rule. False when the kind is unknown, so the caller can locate it.
+
+    Every selecting rule is tracked in `origins` so that one selecting nothing can
+    be named back to the operator. `exclude` is not: one legitimately outlives the
+    repository it excluded.
+    """
+    if kind == "prefix":
+        filters.prefixes.append(value)
+    elif kind == "repo":
+        filters.includes.add(value)
+    elif kind == "fetch":
+        filters.fetch_only.add(value)
+    elif kind == "team":
+        filters.teams.append(value)
+    elif kind == "exclude":
+        filters.excludes.add(value)
+        return True
+    else:
+        return False
+    filters.origins.append((line_number, f"{kind} {value}"))
+    return True
 
 
 def read_filters(path: Path) -> Filters:
@@ -68,19 +121,15 @@ def read_filters(path: Path) -> Filters:
         if len(parts) != 2:
             raise ValueError(f"Invalid filter at {path}:{line_number}: {raw}")
         kind, value = parts
-        if kind == "prefix":
-            filters.prefixes.append(value)
-            filters.origins.append((line_number, f"prefix {value}"))
-        elif kind == "repo":
-            filters.includes.add(value)
-            filters.origins.append((line_number, f"repo {value}"))
-        elif kind == "exclude":
-            filters.excludes.add(value)
-        elif kind == "team":
-            filters.teams.append(value)
-            filters.origins.append((line_number, f"team {value}"))
-        else:
+        if not _apply_rule(filters, kind, value, line_number):
             raise ValueError(f"Unknown filter kind at {path}:{line_number}: {kind}")
+    overlap = filters.fetch_only & filters.includes
+    if overlap:
+        raise ValueError(
+            f"{path}: {', '.join(sorted(overlap))} is both `repo` and `fetch`. "
+            "A repository is either part of the estate or fetched without being "
+            "extracted; it cannot be both."
+        )
     if not filters.prefixes and not filters.includes and not filters.teams:
         raise ValueError(f"No include rules in {path}")
     return filters
@@ -156,7 +205,11 @@ def unmatched_rules(filters: Filters, selected: list[dict], runner=run_gh) -> li
         kind, _, value = rule.partition(" ")
         if kind == "prefix":
             matched = any(n.startswith(value) for n in names)
-        elif kind == "repo":
+        elif kind in ("repo", "fetch"):
+            # `fetch` is checked here for the same reason `repo` is: it names one
+            # repository exactly, so a rename or a typo makes it match nothing and
+            # say nothing. `selected` still holds fetch-only repositories at the
+            # point this runs - the split into the two manifests happens after.
             matched = value in names
         elif kind == "team":
             matched = team_contributed(value)
@@ -204,13 +257,13 @@ def discover(filters: Filters, runner=run_gh) -> list[dict]:
     return sorted(selected.values(), key=lambda r: r["name"])
 
 
-def render_config(repositories: list[dict]) -> str:
+def render_config(repositories: list[dict], header: str = HEADER_TEMPLATE) -> str:
     """Render discovered repositories as the config file content."""
     lines = [
         f"{r['name']}|git@github.com:{config.GITHUB_ORG}/{r['name']}.git|{r['defaultBranch']}"
         for r in repositories
     ]
-    return HEADER_TEMPLATE.format(org=config.GITHUB_ORG) + "\n".join(lines) + "\n"
+    return header.format(org=config.GITHUB_ORG) + "\n".join(lines) + "\n"
 
 
 def main(argv: list[str] | None = None, runner=run_gh) -> int:
@@ -248,14 +301,28 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
     filters = read_filters(config.FILTERS_PATH)
     repositories = discover(filters, runner=runner)
     problems = unmatched_rules(filters, repositories, runner=runner)
+    # A `fetch` rule wins over a prefix that would otherwise have included the
+    # repository, for the same reason `exclude` does: the specific rule is the
+    # deliberate one, and getting the precedence backwards would ingest a
+    # repository the operator had asked to keep out of the graph.
+    estate = [r for r in repositories if r["name"] not in filters.fetch_only]
+    external = [r for r in repositories if r["name"] in filters.fetch_only]
+
     config.REPOSITORIES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    config.REPOSITORIES_CONFIG.write_text(render_config(repositories), encoding="utf-8")
+    config.REPOSITORIES_CONFIG.write_text(render_config(estate), encoding="utf-8")
     print(f"Generated {config.REPOSITORIES_CONFIG}")
+    # Written even when empty, so that removing the last `fetch` rule clears the
+    # file rather than leaving a stale one for `sync` to act on.
+    config.EXTERNAL_CONFIG.write_text(
+        render_config(external, EXTERNAL_HEADER_TEMPLATE), encoding="utf-8"
+    )
+    if external:
+        print(f"Generated {config.EXTERNAL_CONFIG} ({len(external)} fetched but never extracted)")
     _report_unmatched(problems)
     print(
-        f"Repositories selected: {len(repositories)} "
+        f"Repositories selected: {len(estate)} "
         f"({len(filters.prefixes)} prefixes, {len(filters.includes)} explicit, "
-        f"{len(filters.excludes)} excluded)"
+        f"{len(filters.excludes)} excluded, {len(external)} fetch-only)"
     )
     # --strict is for CI, where a rule selecting nothing is a config defect.
     # Interactively it stays a warning, so a half-edited filter file still
