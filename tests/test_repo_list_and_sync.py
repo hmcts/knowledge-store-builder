@@ -718,15 +718,19 @@ class FetchOnlyRuleTest(SettingsIsolated):
         repository would land in the estate manifest and be extracted wholesale -
         the exact outcome the rule exists to prevent.
         """
+
         def fake_runner(args):
-            return ('{"name":"svc-a","defaultBranch":"main"}\n'
-                    '{"name":"svc-notes","defaultBranch":"main"}\n')
+            return (
+                '{"name":"svc-a","defaultBranch":"main"}\n'
+                '{"name":"svc-notes","defaultBranch":"main"}\n'
+            )
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "config").mkdir()
             (root / "config" / "repository-filters.txt").write_text(
-                "prefix svc-\nfetch svc-notes\n", encoding="utf-8")
+                "prefix svc-\nfetch svc-notes\n", encoding="utf-8"
+            )
             config.configure(root=root, GITHUB_ORG="myorg")
             buffer = io.StringIO()
             with redirect_stdout(buffer):
@@ -753,7 +757,8 @@ class FetchOnlyRuleTest(SettingsIsolated):
             stale = root / "config" / "repositories-external.txt"
             stale.write_text("old-thing|git@example.com:o/old-thing.git|main\n", encoding="utf-8")
             (root / "config" / "repository-filters.txt").write_text(
-                "prefix svc-\n", encoding="utf-8")
+                "prefix svc-\n", encoding="utf-8"
+            )
             config.configure(root=root, GITHUB_ORG="myorg")
             with redirect_stdout(io.StringIO()):
                 repo_list.main([], runner=fake_runner)
@@ -768,9 +773,11 @@ class SyncExternalTest(SettingsIsolated):
 
         (root / "config").mkdir()
         (root / "config" / "repositories.txt").write_text(
-            "repo-a|git@example.com:o/repo-a.git|main\n", encoding="utf-8")
+            "repo-a|git@example.com:o/repo-a.git|main\n", encoding="utf-8"
+        )
         (root / "config" / "repositories-external.txt").write_text(
-            "outside-thing|git@example.com:o/outside-thing.git|main\n", encoding="utf-8")
+            "outside-thing|git@example.com:o/outside-thing.git|main\n", encoding="utf-8"
+        )
         config.configure(root=root)
 
         self.where: dict[str, Path] = {}
@@ -783,7 +790,10 @@ class SyncExternalTest(SettingsIsolated):
         sync.sync_repository = fake_sync
         self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
         provenance.head_info = lambda repo_dir, branch, run=None: {
-            "sha": "a" * 40, "branch": branch, "committed": "2026-07-01T00:00:00+00:00"}
+            "sha": "a" * 40,
+            "branch": branch,
+            "committed": "2026-07-01T00:00:00+00:00",
+        }
         return provenance
 
     def test_external_repositories_land_outside_the_extraction_directory(self):
@@ -798,13 +808,20 @@ class SyncExternalTest(SettingsIsolated):
 
         self.assertEqual(code, 0)
         self.assertEqual(self.where["repo-a"], repositories_dir)
-        self.assertEqual(self.where["outside-thing"], external_dir,
-                         "a fetch-only repo must not be cloned into repositories/")
+        self.assertEqual(
+            self.where["outside-thing"],
+            external_dir,
+            "a fetch-only repo must not be cloned into repositories/",
+        )
         self.assertNotEqual(repositories_dir, external_dir)
-        self.assertEqual(set(recorded), {"repo-a"},
-                         "the estate count must not include fetch-only sources")
-        self.assertEqual(set(external), {"outside-thing"},
-                         "but its commit is still recorded, so a finding can cite it")
+        self.assertEqual(
+            set(recorded), {"repo-a"}, "the estate count must not include fetch-only sources"
+        )
+        self.assertEqual(
+            set(external),
+            {"outside-thing"},
+            "but its commit is still recorded, so a finding can cite it",
+        )
 
     def test_no_external_config_is_normal_and_silent(self):
         with tempfile.TemporaryDirectory() as tmp:

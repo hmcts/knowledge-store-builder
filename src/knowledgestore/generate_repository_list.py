@@ -52,7 +52,7 @@ EXTERNAL_HEADER_TEMPLATE = (
     "#\n"
     "# These are not part of the estate. They are synced to external/ instead of\n"
     "# repositories/ so the graph extraction pass cannot reach them. Do not move an\n"
-    "# entry into config/repositories.txt to \"fix\" a script that cannot find it -\n"
+    '# entry into config/repositories.txt to "fix" a script that cannot find it -\n'
     "# that ingests the repository, which is what the rule exists to prevent.\n"
     "# Format: name|clone-url|default-branch\n"
     "\n"
@@ -299,10 +299,10 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
     # Written even when empty, so that removing the last `fetch` rule clears the
     # file rather than leaving a stale one for `sync` to act on.
     config.EXTERNAL_CONFIG.write_text(
-        render_config(external, EXTERNAL_HEADER_TEMPLATE), encoding="utf-8")
+        render_config(external, EXTERNAL_HEADER_TEMPLATE), encoding="utf-8"
+    )
     if external:
-        print(f"Generated {config.EXTERNAL_CONFIG} "
-              f"({len(external)} fetched but never extracted)")
+        print(f"Generated {config.EXTERNAL_CONFIG} ({len(external)} fetched but never extracted)")
     _report_unmatched(problems)
     print(
         f"Repositories selected: {len(estate)} "
