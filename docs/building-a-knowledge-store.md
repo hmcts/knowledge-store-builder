@@ -64,6 +64,35 @@ a broadened prefix will make it ingest itself), and the pipeline library. Put
 the reason in the filter file next to the rule; that file is the only place
 anybody looks.
 
+**Some sources belong on disk but not in the graph** — use `fetch`, not `repo`.
+A `fetch <name>` rule clones a repository and never extracts it: `discover` writes
+it to `config/repositories-external.txt` rather than the estate manifest, and
+`sync` puts it under `external/` rather than `repositories/`. The extraction pass
+walks `repositories/`, so it cannot reach a fetch-only source by construction
+rather than by anybody remembering not to.
+
+Reach for it when a repository is worth having locally but is the wrong thing to
+ingest whole:
+
+- **A source a bespoke script takes selectively.** The clearest case is a
+  hand-written knowledge base describing the same estate the store extracts.
+  Ingesting it puts a second, prose description of the estate inside the graph,
+  and the prose one goes stale silently. A script that takes only the parts
+  extraction cannot produce needs the clone; the graph must not have it.
+- **A repository held back behind a review** — a secrets finding, a licence
+  question — that you still want fetched and watched.
+
+The failure this prevents is quiet. Listed as `repo`, such a repository is
+cloned into `repositories/`, extracted wholesale on the next refresh, and the
+bespoke script then adds its own nodes on top. Nothing in the run fails, the
+graph now holds two descriptions of one estate, and whoever did it has no way to
+notice. Before the rule existed, estates worked around this with a manual clone
+outside the store — which drifted, and which a newcomer had no way to know about.
+
+A name cannot be both `repo` and `fetch`; `discover` rejects the file rather than
+guess. `fetch` beats a `prefix` that would have matched, and `exclude` beats
+both.
+
 **Watch for negative knowledge.** "This repository does not exist", "this
 component is a module inside that repository, not a deployment", "this project
 was abandoned before it was built" — these save real time. If your

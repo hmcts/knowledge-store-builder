@@ -96,10 +96,17 @@ GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
 REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
+# Repositories fetched but never extracted (`fetch` rules). A separate file, not a
+# column, so that nothing which reads the estate manifest can mistake one of these
+# for part of the estate.
+EXTERNAL_CONFIG = ROOT / "config" / "repositories-external.txt"
 TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
 
 # --- working directories (regenerable; do not commit) --------------------
 REPOSITORIES_DIR = ROOT / "repositories"
+# Deliberately NOT under repositories/: the graph extraction pass walks that
+# directory, and a fetch-only repository must be unreachable from it.
+EXTERNAL_DIR = ROOT / "external"
 HISTORY_DIR = ROOT / "knowledge" / "git-history"
 
 # --- generated datasets (commit these) -----------------------------------
@@ -405,8 +412,10 @@ def _recompute_paths() -> None:
     module.update(
         FILTERS_PATH=root / "config" / "repository-filters.txt",
         REPOSITORIES_CONFIG=root / "config" / "repositories.txt",
+        EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
         REPOSITORIES_DIR=root / "repositories",
+        EXTERNAL_DIR=root / "external",
         HISTORY_DIR=root / "knowledge" / "git-history",
         MANIFEST_PATH=root / "knowledge" / "repository-manifest.md",
         CONTEXT_PATH=root / "knowledge_context.md",
