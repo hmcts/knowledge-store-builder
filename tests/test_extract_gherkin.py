@@ -15,7 +15,7 @@ FEATURE = """@regression @DD-123
 Feature: Amend defendant address
 
   Background: signed in
-    Given user signs in to common platform
+    Given user signs in to the service
 
   Scenario: Amend address for a person defendant
     When user updates defendant details "name", "dob", "address"

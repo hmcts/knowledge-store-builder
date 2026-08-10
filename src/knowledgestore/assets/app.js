@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Crime UI Estate Explorer - page application.
+ * Knowledge store explorer - page application.
  *
  * Inlined into graphify-out/explorer.html by scripts/build_explorer.py.
  * The page embeds JSON blocks this script reads at startup:

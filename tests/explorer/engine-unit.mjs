@@ -30,7 +30,7 @@ const DIVES = {
 };
 const TOPICS = {
   'welsh-language': {
-    title: 'Welsh language in Common Platform',
+    title: 'Welsh language support',
     keywords: ['welsh', 'cymraeg', 'bilingual'],
     html: '<h2>Welsh language</h2><p>Headline verdict...</p>',
     source: 'docs/topics/welsh-language.md',

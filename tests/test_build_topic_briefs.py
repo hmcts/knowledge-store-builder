@@ -57,42 +57,42 @@ class DossierTest(SettingsIsolated):
                 {
                     "id": "n1",
                     "label": "WelshTranslationService",
-                    "repo": "cpp-ui-alpha",
+                    "repo": "svc-ui-alpha",
                     "source_file": "src/welsh.ts",
                     "metadata": {"kind": "class"},
                 },
                 {
                     "id": "n2",
                     "label": "renderer",
-                    "repo": "cpp-ui-alpha",
+                    "repo": "svc-ui-alpha",
                     "source_file": "src/welsh-toggle.ts",
                     "metadata": {"kind": "function"},
                 },
                 {
                     "id": "n3",
                     "label": "Publish Welsh notice",
-                    "repo": "cpp-ui-alpha",
+                    "repo": "svc-ui-alpha",
                     "source_file": "features/welsh.feature",
                     "metadata": {"kind": "gherkin_feature"},
                 },
                 {
                     "id": "t1",
                     "label": "DD-100",
-                    "repo": "cpp-ui-alpha",
+                    "repo": "svc-ui-alpha",
                     "source_file": None,
                     "metadata": {"kind": "jira_ticket"},
                 },
                 {
                     "id": "t2",
                     "label": "DD-200",
-                    "repo": "cpp-ui-beta",
+                    "repo": "svc-ui-beta",
                     "source_file": None,
                     "metadata": {"kind": "jira_ticket"},
                 },
                 {
                     "id": "n4",
                     "label": "PaymentService",
-                    "repo": "cpp-ui-beta",
+                    "repo": "svc-ui-beta",
                     "source_file": "src/pay.ts",
                     "metadata": {"kind": "class"},
                 },
@@ -112,22 +112,22 @@ class DossierTest(SettingsIsolated):
                 "d": ["Add Welsh translation for SJP notices"],
                 "first": "2021-01-01",
                 "last": "2021-06-01",
-                "repos": ["cpp-ui-alpha"],
+                "repos": ["svc-ui-alpha"],
                 "n": 4,
             },
             "DD-200": {
                 "d": ["Fix payment retries"],
                 "first": "2021-01-01",
                 "last": "2021-01-02",
-                "repos": ["cpp-ui-beta"],
+                "repos": ["svc-ui-beta"],
                 "n": 1,
             },
         }
 
     def test_dossier_gathers_only_matching_evidence(self):
         dossier = briefs.topic_dossier(self.topic, self.graph, self.summaries, self.descriptions)
-        self.assertEqual(list(dossier["nodes_by_repo"]), ["cpp-ui-alpha"])
-        self.assertEqual(len(dossier["nodes_by_repo"]["cpp-ui-alpha"]), 2)
+        self.assertEqual(list(dossier["nodes_by_repo"]), ["svc-ui-alpha"])
+        self.assertEqual(len(dossier["nodes_by_repo"]["svc-ui-alpha"]), 2)
         self.assertEqual(dossier["business_features"], ["Publish Welsh notice"])
         self.assertEqual(dossier["ticket_nodes"], ["DD-100"])
         self.assertEqual([t["ticket"] for t in dossier["described_tickets"]], ["DD-100"])
@@ -136,7 +136,7 @@ class DossierTest(SettingsIsolated):
     def test_source_file_match_counts(self):
         # "welsh" appears only in the source path for the renderer node
         dossier = briefs.topic_dossier(self.topic, self.graph, self.summaries, self.descriptions)
-        joined = " ".join(dossier["nodes_by_repo"]["cpp-ui-alpha"])
+        joined = " ".join(dossier["nodes_by_repo"]["svc-ui-alpha"])
         self.assertIn("welsh-toggle.ts", joined)
 
 
@@ -265,52 +265,52 @@ class ProseLinkingTest(SettingsIsolated):
     def test_ticket_ids_become_tracker_links(self):
         with contextlib.ExitStack() as stack:
             self._store(stack, TICKET_BROWSE_URL="https://tracker/browse/")
-            html = briefs.markdown_to_html("Ticket CCT-890 changed the flow.")
-        self.assertIn('<a href="https://tracker/browse/CCT-890"', html)
-        self.assertIn(">CCT-890</a>", html)
+            html = briefs.markdown_to_html("Ticket ABC-890 changed the flow.")
+        self.assertIn('<a href="https://tracker/browse/ABC-890"', html)
+        self.assertIn(">ABC-890</a>", html)
 
     def test_ticket_ids_stay_plain_with_no_tracker_configured(self):
         with contextlib.ExitStack() as stack:
             self._store(stack, TICKET_BROWSE_URL="")
-            html = briefs.markdown_to_html("Ticket CCT-890 changed the flow.")
+            html = briefs.markdown_to_html("Ticket ABC-890 changed the flow.")
         self.assertNotIn("<a href", html)
-        self.assertIn("CCT-890", html)
+        self.assertIn("ABC-890", html)
 
     def test_known_repository_names_link_to_the_organisation(self):
         with contextlib.ExitStack() as stack:
-            self._store(stack, repositories="cpp-context-sjp\ncpp-ui-hearing\n", GITHUB_ORG="hmcts")
-            html = briefs.markdown_to_html("Handled in `cpp-context-sjp` today.")
-        self.assertIn('<a href="https://github.com/hmcts/cpp-context-sjp"', html)
+            self._store(stack, repositories="svc-context-sjp\nsvc-ui-hearing\n", GITHUB_ORG="hmcts")
+            html = briefs.markdown_to_html("Handled in `svc-context-sjp` today.")
+        self.assertIn('<a href="https://github.com/hmcts/svc-context-sjp"', html)
 
     def test_only_real_repositories_are_linked(self):
-        """`cp-commons` looks like a repository and is a module inside one.
+        """`app-commons` looks like a repository and is a module inside one.
 
         Linking anything hyphenated would send readers to 404s, so the renderer
         links only names the estate's own repository list contains.
         """
         with contextlib.ExitStack() as stack:
-            self._store(stack, repositories="cp-crime-portal\n", GITHUB_ORG="hmcts")
-            html = briefs.markdown_to_html("The `cp-commons` module of `cp-crime-portal`.")
-        self.assertIn('href="https://github.com/hmcts/cp-crime-portal"', html)
-        self.assertNotIn("github.com/hmcts/cp-commons", html)
+            self._store(stack, repositories="svc-legacy-portal\n", GITHUB_ORG="hmcts")
+            html = briefs.markdown_to_html("The `app-commons` module of `svc-legacy-portal`.")
+        self.assertIn('href="https://github.com/hmcts/svc-legacy-portal"', html)
+        self.assertNotIn("github.com/hmcts/app-commons", html)
 
     def test_repository_list_entries_carry_a_git_suffix_and_branch(self):
         """The real file stores `name.git|main`, not a bare name.
 
         Written because the first implementation split only on "/" and produced
-        `cpp-context-sjp.git|main`, which matches nothing. Every unit test used
+        `svc-context-sjp.git|main`, which matches nothing. Every unit test used
         idealised bare names, so the feature passed its tests and did nothing at
         all on the estate it was built for.
         """
         with contextlib.ExitStack() as stack:
             self._store(
                 stack,
-                repositories="cpp-context-sjp.git|main\nhmcts/cpp-ui-hearing.git|develop\n",
+                repositories="svc-context-sjp.git|main\nhmcts/svc-ui-hearing.git|develop\n",
                 GITHUB_ORG="hmcts",
             )
-            html = briefs.markdown_to_html("`cpp-context-sjp` and `cpp-ui-hearing`.")
-        self.assertIn("github.com/hmcts/cpp-context-sjp", html)
-        self.assertIn("github.com/hmcts/cpp-ui-hearing", html)
+            html = briefs.markdown_to_html("`svc-context-sjp` and `svc-ui-hearing`.")
+        self.assertIn("github.com/hmcts/svc-context-sjp", html)
+        self.assertIn("github.com/hmcts/svc-ui-hearing", html)
         self.assertNotIn(".git", html)
 
     def test_an_identifier_is_never_linked_twice(self):
@@ -318,11 +318,11 @@ class ProseLinkingTest(SettingsIsolated):
         with contextlib.ExitStack() as stack:
             self._store(
                 stack,
-                repositories="cpp-context-sjp\n",
+                repositories="svc-context-sjp\n",
                 GITHUB_ORG="hmcts",
                 TICKET_BROWSE_URL="https://tracker/browse/",
             )
-            html = briefs.markdown_to_html("CCT-890 in `cpp-context-sjp`.")
+            html = briefs.markdown_to_html("ABC-890 in `svc-context-sjp`.")
         self.assertEqual(html.count("<a href"), 2)
         self.assertNotIn("browse/https", html)
         self.assertNotIn("github.com/hmcts/https", html)
@@ -332,12 +332,12 @@ class ProseLinkingTest(SettingsIsolated):
         with contextlib.ExitStack() as stack:
             self._store(
                 stack,
-                repositories="cpp-context-sjp\n",
+                repositories="svc-context-sjp\n",
                 GITHUB_ORG="hmcts",
                 TICKET_BROWSE_URL="https://tracker/browse/",
             )
             html = briefs.markdown_to_html(
-                "| repo | ticket |\n|---|---|\n| `cpp-context-sjp` | CCT-890 |\n"
+                "| repo | ticket |\n|---|---|\n| `svc-context-sjp` | ABC-890 |\n"
             )
-        self.assertIn("github.com/hmcts/cpp-context-sjp", html)
-        self.assertIn("tracker/browse/CCT-890", html)
+        self.assertIn("github.com/hmcts/svc-context-sjp", html)
+        self.assertIn("tracker/browse/ABC-890", html)

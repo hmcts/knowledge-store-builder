@@ -645,7 +645,7 @@ if __name__ == "__main__":
 class CommentVolumeTest(SettingsIsolated):
     """Comment volume is bounded, because the interesting part is not the long tail.
 
-    Measured on the HMCTS crime estate's first live fetch: 38,681 comments holding
+    Measured on one estate's first live fetch: 38,681 comments holding
     14.4 M characters, of which 778 comments - 2% - held 37% of the characters.
     Those are stack traces and log dumps pasted into a ticket, not knowledge. A
     further 1% read as build automation and held 12%.
@@ -681,7 +681,7 @@ class CommentVolumeTest(SettingsIsolated):
                     "comments": [
                         {"body": "Jenkins build #4412 failed"},
                         {"body": "Caused by: java.lang.NullPointerException"},
-                        {"body": "\tat uk.gov.moj.cpp.Thing.run(Thing.java:42)"},
+                        {"body": "\tat org.example.platform.Thing.run(Thing.java:42)"},
                         {"body": "The URN was missing from the payload, so listing rejected it."},
                     ]
                 }

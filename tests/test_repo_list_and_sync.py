@@ -29,16 +29,16 @@ class FiltersTest(SettingsIsolated):
 
     def test_prefix_repo_and_exclude_rules(self):
         filters = self._filters(
-            "# comment\nprefix cpp-context-\nrepo odd-one\nexclude cpp-context-skip\n"
+            "# comment\nprefix svc-context-\nrepo odd-one\nexclude svc-context-skip\n"
         )
-        self.assertTrue(filters.matches("cpp-context-hearing"))
+        self.assertTrue(filters.matches("svc-context-hearing"))
         self.assertTrue(filters.matches("odd-one"))
-        self.assertFalse(filters.matches("cpp-context-skip"))  # exclude wins
+        self.assertFalse(filters.matches("svc-context-skip"))  # exclude wins
         self.assertFalse(filters.matches("unrelated"))
 
     def test_rejects_unknown_kind_and_empty_rules(self):
         with self.assertRaises(ValueError):
-            self._filters("wildcard cpp-*\n")
+            self._filters("wildcard svc-*\n")
         with self.assertRaises(ValueError):
             self._filters("# only comments\n")
 
@@ -50,14 +50,14 @@ class DiscoverTest(SettingsIsolated):
         def fake_runner(args):
             calls.append(args)
             return (
-                '{"name":"cpp-context-b","defaultBranch":"main"}\n'
-                '{"name":"cpp-context-a","defaultBranch":"master"}\n'
+                '{"name":"svc-context-b","defaultBranch":"main"}\n'
+                '{"name":"svc-context-a","defaultBranch":"master"}\n'
                 '{"name":"infra-thing","defaultBranch":"main"}\n'
             )
 
-        filters = repo_list.Filters(prefixes=["cpp-context-"])
+        filters = repo_list.Filters(prefixes=["svc-context-"])
         repos = repo_list.discover(filters, runner=fake_runner)
-        self.assertEqual([r["name"] for r in repos], ["cpp-context-a", "cpp-context-b"])
+        self.assertEqual([r["name"] for r in repos], ["svc-context-a", "svc-context-b"])
         self.assertIn("--paginate", calls[0])
 
     def test_render_config_pipe_format(self):

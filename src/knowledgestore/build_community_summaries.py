@@ -379,7 +379,7 @@ def remap(
 
 # A token is treated as a claim about code only if it is shaped like one. This is
 # structural rather than a blocklist, because ordinary prose is full of
-# capitalised words - "Welsh", "Angular", "Common Platform" - that are not claims
+# capitalised words - "Welsh", "Angular", "Service Manual" - that are not claims
 # about code, and a blocklist of them would never be complete. Requiring an
 # internal case change, a separator, a file extension or a ticket shape excludes
 # English capitalisation and all-caps acronyms without naming any of them.
