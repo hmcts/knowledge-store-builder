@@ -198,9 +198,9 @@ _TICKET = re.compile(r"(?<![A-Za-z0-9/-])([A-Z][A-Z0-9]{1,9}-\d{1,6})(?![A-Za-z0
 def _repositories() -> frozenset[str]:
     """The estate's own repository names, for linking prose to source.
 
-    Read from the repository list rather than matched by shape. `cp-commons` and
-    `cp-admin` look exactly like repositories and are module directories inside
-    `cp-crime-portal`; linking anything hyphenated would send readers to 404s.
+    Read from the repository list rather than matched by shape. Names like
+    `app-commons` and `app-admin` look exactly like repositories while being module
+    directories inside one; linking anything hyphenated would send readers to 404s.
     """
     path = config.REPOSITORIES_CONFIG
     if not path.exists():

@@ -91,53 +91,53 @@ class Matching(unittest.TestCase):
     """
 
     REPOS = {
-        "cpp-context-progression",
-        "cpp-context-idam",
-        "cpp-video",
-        "cpp-context-scheduling",
-        "cpp-context-defence",
-        "cpp-context-hearing",
-        "cpp-context-hearing-d",
-        "cpp-context-unifiedsearch-query",
-        "cpp-ui-home",
+        "svc-context-progression",
+        "svc-context-idam",
+        "svc-video",
+        "svc-context-scheduling",
+        "svc-context-defence",
+        "svc-context-hearing",
+        "svc-context-hearing-d",
+        "svc-context-unifiedsearch-query",
+        "svc-ui-home",
     }
 
     def test_a_two_letter_stem_matches_nothing_rather_than_something_wrong(self):
-        # `id` is inside `cppvideo`, and `sc` inside `cppcontextscheduling`. A
+        # `id` is inside `svcvideo`, and `sc` inside `svccontextscheduling`. A
         # substring rule joined both, confidently and wrongly.
         self.assertEqual(deployments.match_services({"id-service"}, self.REPOS), {})
         self.assertEqual(deployments.match_services({"sc-service"}, self.REPOS), {})
 
     def test_a_whole_segment_match_beats_a_longer_coincidence(self):
         matched = deployments.match_services({"idam-service"}, self.REPOS)
-        self.assertEqual(matched["idam-service"], "cpp-context-idam")
+        self.assertEqual(matched["idam-service"], "svc-context-idam")
 
     def test_a_long_stem_may_still_match_across_segment_boundaries(self):
         # `unifiedsearchquery` is no single segment of
-        # `cpp-context-unifiedsearch-query`, and is far too long to be a
+        # `svc-context-unifiedsearch-query`, and is far too long to be a
         # coincidence - this is what the substring fallback exists for.
         matched = deployments.match_services({"unifiedsearchquery-service"}, self.REPOS)
-        self.assertEqual(matched["unifiedsearchquery-service"], "cpp-context-unifiedsearch-query")
+        self.assertEqual(matched["unifiedsearchquery-service"], "svc-context-unifiedsearch-query")
 
     def test_a_service_matches_the_repository_that_holds_it(self):
         matched = deployments.match_services(
             {"progression-service", "defence-service"},
-            {"cpp-context-progression", "cpp-context-defence", "cpp-ui-home"},
+            {"svc-context-progression", "svc-context-defence", "svc-ui-home"},
         )
-        self.assertEqual(matched["progression-service"], "cpp-context-progression")
-        self.assertEqual(matched["defence-service"], "cpp-context-defence")
+        self.assertEqual(matched["progression-service"], "svc-context-progression")
+        self.assertEqual(matched["defence-service"], "svc-context-defence")
 
     def test_an_unmatched_service_is_absent_rather_than_guessed(self):
-        matched = deployments.match_services({"artemis"}, {"cpp-context-progression"})
+        matched = deployments.match_services({"artemis"}, {"svc-context-progression"})
         self.assertNotIn("artemis", matched)
 
     def test_matching_never_returns_a_repository_twice_for_one_service(self):
         matched = deployments.match_services(
-            {"hearing-service"}, {"cpp-context-hearing", "cpp-context-hearing-d"}
+            {"hearing-service"}, {"svc-context-hearing", "svc-context-hearing-d"}
         )
         # Ambiguity resolves deterministically to the shortest, then alphabetical
         # name - never to whichever the filesystem listed first.
-        self.assertEqual(matched["hearing-service"], "cpp-context-hearing")
+        self.assertEqual(matched["hearing-service"], "svc-context-hearing")
 
 
 class MissingDependency(unittest.TestCase):
@@ -178,9 +178,9 @@ def _graph(tmp: Path) -> None:
         "graph": {},
         "nodes": [
             {
-                "id": "cpp-context-progression::CaseAggregate",
+                "id": "svc-context-progression::CaseAggregate",
                 "label": "CaseAggregate",
-                "repo": "cpp-context-progression",
+                "repo": "svc-context-progression",
                 "source_file": "src/main/java/CaseAggregate.java",
             }
         ],
@@ -215,7 +215,7 @@ class Layer(SettingsIsolated, unittest.TestCase):
         labels = {n["label"] for n in added if n["metadata"]["kind"] == "deployment"}
         self.assertIn("progression-service (prd)", labels)
         targets = {e["target"] for e in graph["links"]}
-        self.assertIn("cpp-context-progression::CaseAggregate", targets)
+        self.assertIn("svc-context-progression::CaseAggregate", targets)
 
     def test_the_configuration_travels_on_the_node_so_it_can_be_quoted(self):
         with tempfile.TemporaryDirectory() as raw:

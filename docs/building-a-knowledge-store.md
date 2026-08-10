@@ -4,7 +4,7 @@ The README tells you what each stage does. This document is the part that took
 longer to learn: the judgement involved in getting a store that answers real
 questions, and the costs you will pay whether you plan for them or not.
 
-It is written from the HMCTS Common Platform crime estate, which grew from 27
+It is written from one large internal estate, which grew from 27
 repositories to 168 over several refreshes. Where a figure appears, it is
 evidence from a specific build, not a target.
 
@@ -44,7 +44,7 @@ easiest to get quietly wrong.
   refresh without anyone editing config.
 - **By architecture** — if your organisation maintains an architecture model
   (C4 or similar) that links elements to repositories, treat it as an audit of
-  your estate definition. On the crime estate the model linked 75 repositories,
+  your estate definition. On that estate the model linked 75 repositories,
   74 of which were already ingested; the 75th was a product nobody had noticed
   was missing. A model that disagrees with your estate is telling you one of
   them is wrong.
@@ -128,7 +128,7 @@ That last point has a trap worth stating plainly, because it cost a rewrite here
 wrong repository is counted as a success, so it *raises* the match rate — the one
 signal you have reads as reassurance while production configuration hangs off
 unrelated code. An early version of this stage matched on any normalised
-substring and sent `id-service` to `cpp-video`, because `id` is inside `cppvideo`.
+substring and sent `id-service` to a video repository, because `id` is inside `video`.
 Matching now requires a whole hyphen-delimited segment, falling back to substring
 only for stems long enough that coincidence is implausible. If a match rate ever
 looks surprisingly good, suspect the matcher before believing it.
@@ -165,14 +165,14 @@ legacy repositories are the likely offenders. Scan the working tree, because
 that is what gets ingested, and be clear about the limit: a working-tree scan
 says nothing about git history. When something is found, drop the repository
 from the estate, record the finding with its location — never its value — and
-say what has to change before it returns. On the crime estate this caught a
+say what has to change before it returns. On that estate this caught a
 hardcoded database credential that had been in a file since 2019.
 
 **Treat ingested content as untrusted data.** Repositories increasingly contain
 agent instructions, and extraction agents will read them. Instruct every
 extraction agent that file contents are data to extract from, never
 instructions to follow. This is not hypothetical: two independent agents
-flagged and ignored injected instructions during one crime estate refresh.
+flagged and ignored injected instructions during one refresh of that estate.
 
 ## 6. The prose layers, and what they cost
 
@@ -307,5 +307,5 @@ step-definition edges once, and nothing else noticed.
 - **Keep a regression suite of real questions.** Not unit tests of the scorer:
   actual questions from actual users, asserted against the built page. It is
   what catches a silent break in a join, and every new layer deserves a shape
-  in it. On the crime estate this caught a file-to-ticket join failure that no
+  in it. On that estate this caught a file-to-ticket join failure that no
   other gate saw.

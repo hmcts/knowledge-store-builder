@@ -12,7 +12,7 @@ This answers "what business change shaped this file?" as a lookup, e.g.:
 
     import gzip, json
     index = json.load(gzip.open('knowledge/intent/file-tickets.json.gz', 'rt'))
-    index['cpp-ui-defence']['src/app/shared/pipes/address.pipe.ts']
+    index['my-web-app']['src/app/shared/pipes/address.pipe.ts']
 
 Requires knowledge/git-history/ (regenerate with
 `knowledgestore export-history` if absent). The output is small and

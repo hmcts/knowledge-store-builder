@@ -96,8 +96,9 @@ def _norm(value: str) -> str:
 # Below this length a stem matches almost any repository name by accident, and the
 # accident is invisible: a wrong join counts as a join, so it inflates the match
 # rate rather than showing up as a gap. Measured on a realistic repository set, a
-# bare substring rule sent `id-service` to `cpp-video` and `sc-service` to
-# `cpp-context-scheduling`, both confidently and both wrong.
+# bare substring rule sent `id-service` to a video repository (`id` sits inside
+# `video`) and `sc-service` to a scheduling one (`scheduling` starts with `sc`),
+# both confidently and both wrong.
 MIN_SUBSTRING_STEM = 4
 
 
@@ -105,7 +106,7 @@ def match_services(services: set[str], repos: set[str]) -> dict[str, str]:
     """service name -> the repository that holds it, where one clearly does.
 
     A deployed service is named for what it is (`progression-service`); the
-    repository is named for where it sits (`cpp-context-progression`). The join is
+    repository is named for where it sits (`context-progression`). The join is
     by name, so it has to be conservative in a specific way: a *missed* join shows
     up in the match-rate report and can be chased, whereas a *wrong* join is
     counted as a success and silently attaches production configuration to

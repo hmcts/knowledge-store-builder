@@ -6,7 +6,7 @@ passes all of them. These checks measure grounding instead — whether the prose
 cites anything the evidence does not contain.
 
 The hard part is not detection, it is false positives. Ordinary prose is full of
-capitalised words ("Welsh", "Angular", "Common Platform") that are not claims
+capitalised words ("Welsh", "Angular", "Service Manual") that are not claims
 about code. The rule used here is structural rather than a blocklist: a token is
 treated as an identifier only if it has an internal case change, an underscore,
 two or more hyphens, a file extension, or a ticket shape. Prose capitalisation
@@ -37,9 +37,9 @@ class IdentifierExtractionTest(SettingsIsolated):
         self.assertIn("CaseAggregate", summaries.prose_identifiers("Dominated by CaseAggregate."))
 
     def test_snake_case_and_repo_names_are_identifiers(self):
-        found = summaries.prose_identifiers("cpp-context-progression holds speak_welsh")
-        self.assertIn("cpp-context-progression", found)
-        self.assertIn("speak_welsh", found)
+        found = summaries.prose_identifiers("svc-context-progression holds case_status")
+        self.assertIn("svc-context-progression", found)
+        self.assertIn("case_status", found)
 
     def test_file_names_and_ticket_ids_are_identifiers(self):
         found = summaries.prose_identifiers("pom.xml changed under CCT-1234")
@@ -57,12 +57,12 @@ class IdentifierExtractionTest(SettingsIsolated):
             )
 
     def test_hyphenated_code_names_are_still_identifiers(self):
-        found = summaries.prose_identifiers("Defined in cpp-context-progression and svc-crime-api")
-        self.assertIn("cpp-context-progression", found)
+        found = summaries.prose_identifiers("Defined in svc-context-progression and svc-case-api")
+        self.assertIn("svc-context-progression", found)
 
     def test_ordinary_capitalised_prose_is_not_an_identifier(self):
         # the false-positive case that would make the checker useless
-        text = "Welsh language handling in the Common Platform, an Angular UI using JSON."
+        text = "Welsh language handling in the Service Manual, an Angular UI using JSON."
         self.assertEqual(summaries.prose_identifiers(text), set())
 
     def test_sentence_start_and_acronyms_are_not_identifiers(self):
@@ -109,8 +109,8 @@ class VerifyTest(SettingsIsolated):
         # the failure this whole check exists for: plausible, well-formed,
         # correctly-lengthed prose that names code the evidence does not contain
         self.write(
-            [self.digest("1", "CaseAggregate", "cpp-context-progression", ["CaseAggregate"])],
-            {"1": "Case progression logic in cpp-context-progression, built on HearingAggregate."},
+            [self.digest("1", "CaseAggregate", "svc-context-progression", ["CaseAggregate"])],
+            {"1": "Case progression logic in svc-context-progression, built on HearingAggregate."},
         )
         code, output = self.run_verify()
         self.assertEqual(code, 0, "reporting is not failing, unless --strict")
@@ -119,8 +119,8 @@ class VerifyTest(SettingsIsolated):
 
     def test_a_summary_citing_only_evidence_is_not_reported(self):
         self.write(
-            [self.digest("1", "CaseAggregate", "cpp-context-progression", ["CaseAggregate"])],
-            {"1": "Case progression logic in cpp-context-progression, around CaseAggregate."},
+            [self.digest("1", "CaseAggregate", "svc-context-progression", ["CaseAggregate"])],
+            {"1": "Case progression logic in svc-context-progression, around CaseAggregate."},
         )
         code, output = self.run_verify()
         self.assertEqual(code, 0)
@@ -129,8 +129,8 @@ class VerifyTest(SettingsIsolated):
     def test_identifiers_from_source_paths_count_as_evidence(self):
         # a digest cites src/CaseAggregate.java; prose may name the file
         self.write(
-            [self.digest("1", "CaseAggregate", "cpp-context-progression", ["CaseAggregate"])],
-            {"1": "Progression logic in cpp-context-progression, see CaseAggregate.java."},
+            [self.digest("1", "CaseAggregate", "svc-context-progression", ["CaseAggregate"])],
+            {"1": "Progression logic in svc-context-progression, see CaseAggregate.java."},
         )
         _, output = self.run_verify()
         self.assertNotIn("CaseAggregate.java", output)
