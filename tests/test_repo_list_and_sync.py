@@ -415,8 +415,8 @@ class UnmatchedRuleWarningTest(SettingsIsolated):
         runner = self._runner(["svc-a"], {"ghost-team": []})
         selected = repo_list.discover(filters, runner=runner)
         self.assertEqual(
-            [(2, "team ghost-team")],
             repo_list.unmatched_rules(filters, selected, runner=runner),
+            [(2, "team ghost-team")],
         )
 
     def test_strict_turns_an_unmatched_rule_into_a_non_zero_exit(self):
