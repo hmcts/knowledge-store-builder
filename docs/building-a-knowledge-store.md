@@ -82,12 +82,13 @@ ingest whole:
 - **A repository held back behind a review** — a secrets finding, a licence
   question — that you still want fetched and watched.
 
-The failure this prevents is quiet. Listed as `repo`, such a repository is
-cloned into `repositories/`, extracted wholesale on the next refresh, and the
-bespoke script then adds its own nodes on top. Nothing in the run fails, the
-graph now holds two descriptions of one estate, and whoever did it has no way to
-notice. Before the rule existed, estates worked around this with a manual clone
-outside the store — which drifted, and which a newcomer had no way to know about.
+The rule earns its place because the alternative gives no signal either way.
+Listed as `repo`, such a repository is extracted on the next refresh alongside
+whatever the bespoke script contributes, and the graph ends up describing the same
+estate twice. The run completes normally, so there is nothing for a reviewer to
+notice at the time and nothing to look up later. Before the rule existed the usual
+workaround was a clone kept outside the store by hand: it met the same need, but it
+drifted, and it was easy for someone new to be unaware of.
 
 A name cannot be both `repo` and `fetch`; `discover` rejects the file rather than
 guess. `fetch` beats a `prefix` that would have matched, and `exclude` beats

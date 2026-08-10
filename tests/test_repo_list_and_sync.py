@@ -678,11 +678,10 @@ if __name__ == "__main__":
 class FetchOnlyRuleTest(SettingsIsolated):
     """`fetch` means clone it, never extract it.
 
-    The rule exists because the alternative was worse in a specific way: an estate
-    that needed a repository on disk but not in the graph had no supported way to
-    say so, so it kept a manual clone that drifted and that a newcomer had no way
-    to know about. Ingesting it instead puts a second description of the estate
-    inside the graph, which then disagrees with the first.
+    The rule exists because an estate that needed a repository on disk but not in
+    the graph had no supported way to say so, and met the need with a clone kept by
+    hand, which drifted and was easy to be unaware of. Ingesting it instead leaves
+    the graph describing the same estate twice, from two sources that then diverge.
 
     The guarantee is structural rather than procedural - a fetch-only repository is
     written to a different manifest and cloned to a different directory, and the
@@ -715,8 +714,8 @@ class FetchOnlyRuleTest(SettingsIsolated):
         """The one that matters: a prefix must not drag a fetch-only repo in.
 
         `prefix svc-` matches `svc-notes`, so without fetch taking precedence the
-        repository would land in the estate manifest and be extracted wholesale -
-        the exact outcome the rule exists to prevent.
+        repository would land in the estate manifest and be extracted - the outcome
+        the rule exists to avoid.
         """
 
         def fake_runner(args):

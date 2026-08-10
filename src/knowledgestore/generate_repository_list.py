@@ -8,17 +8,17 @@ always excluded. Output format:
 
     name|clone-url|default-branch
 
-A `fetch` rule means **clone it, never extract it**. Those repositories are
+A `fetch` rule means clone it, but do not extract it. Those repositories are
 written to config/repositories-external.txt instead, and the sync stage puts them
 under external/ rather than repositories/. That separation is the whole mechanism:
 the graph extraction pass walks repositories/, so a fetch-only repository is
 unreachable from it by construction rather than by anyone remembering.
 
-It exists for sources a store needs on disk but must not ingest wholesale - one
-whose content a bespoke script takes selectively, or one held back behind a
-review. Before this rule the only options were to ingest a repository or to have
-no supported way to obtain it, and estates were working around that with manual
-clones that drifted and that a newcomer had no way to know about.
+It exists for sources a store needs on disk but should not ingest whole - one whose
+content a bespoke script takes selectively, or one held back behind a review.
+Before this rule the choice was to ingest a repository or to have no supported way
+to obtain it, so estates met the need with clones kept by hand, which drifted and
+were easy to be unaware of.
 
 Run:
 
@@ -48,12 +48,13 @@ HEADER_TEMPLATE = (
 
 EXTERNAL_HEADER_TEMPLATE = (
     "# Generated from the {org} organisation repository listing\n"
-    "# `fetch` rules in config/repository-filters.txt: cloned, NEVER extracted.\n"
+    "# `fetch` rules in config/repository-filters.txt: cloned, not extracted.\n"
     "#\n"
-    "# These are not part of the estate. They are synced to external/ instead of\n"
-    "# repositories/ so the graph extraction pass cannot reach them. Do not move an\n"
-    '# entry into config/repositories.txt to "fix" a script that cannot find it -\n'
-    "# that ingests the repository, which is what the rule exists to prevent.\n"
+    "# These are not part of the estate. They are synced to external/ rather than\n"
+    "# repositories/, which is what keeps them outside the graph extraction pass.\n"
+    "# If a script cannot find one of these, point the script at external/ rather\n"
+    "# than moving the entry into config/repositories.txt - moving it puts the\n"
+    "# repository into the graph, which is the thing the rule is here to avoid.\n"
     "# Format: name|clone-url|default-branch\n"
     "\n"
 )
@@ -298,8 +299,8 @@ def main(argv: list[str] | None = None, runner=run_gh) -> int:
     problems = unmatched_rules(filters, repositories, runner=runner)
     # A `fetch` rule wins over a prefix that would otherwise have included the
     # repository, for the same reason `exclude` does: the specific rule is the
-    # deliberate one, and the cost of getting this backwards is a wholesale
-    # ingestion nobody asked for.
+    # deliberate one, and getting the precedence backwards would ingest a
+    # repository the operator had asked to keep out of the graph.
     estate = [r for r in repositories if r["name"] not in filters.fetch_only]
     external = [r for r in repositories if r["name"] in filters.fetch_only]
 
