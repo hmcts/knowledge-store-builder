@@ -205,7 +205,11 @@ def unmatched_rules(filters: Filters, selected: list[dict], runner=run_gh) -> li
         kind, _, value = rule.partition(" ")
         if kind == "prefix":
             matched = any(n.startswith(value) for n in names)
-        elif kind == "repo":
+        elif kind in ("repo", "fetch"):
+            # `fetch` is checked here for the same reason `repo` is: it names one
+            # repository exactly, so a rename or a typo makes it match nothing and
+            # say nothing. `selected` still holds fetch-only repositories at the
+            # point this runs - the split into the two manifests happens after.
             matched = value in names
         elif kind == "team":
             matched = team_contributed(value)

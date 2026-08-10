@@ -832,3 +832,153 @@ class SyncExternalTest(SettingsIsolated):
                 code = sync.main()
             self.assertEqual(code, 0)
             self.assertEqual(provenance.read_external(), {})
+
+
+class FetchOnlyRuleReportingTest(SettingsIsolated):
+    """What `unmatched_rules` and the include check make of a `fetch` rule.
+
+    These pin decisions that are easy to reverse by accident while editing the rule
+    dispatch, and that nothing else would notice.
+    """
+
+    def _filters(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "repository-filters.txt"
+            path.write_text(text, encoding="utf-8")
+            return repo_list.read_filters(path)
+
+    @staticmethod
+    def _runner(names):
+        import json
+
+        def fake_gh(arguments):
+            return "\n".join(json.dumps({"name": n, "defaultBranch": "main"}) for n in names)
+
+        return fake_gh
+
+    def test_a_fetch_rule_that_selects_nothing_is_reported(self):
+        # A `fetch` naming a repository that does not exist is as much a config
+        # defect as a `repo` that names one - it is tracked in `origins` for that
+        # reason, and --strict has to be able to fail on it.
+        filters = self._filters("prefix svc-\nfetch gone-from-the-org\n")
+        runner = self._runner(["svc-a"])
+        selected = repo_list.discover(filters, runner=runner)
+        problems = repo_list.unmatched_rules(filters, selected, runner=runner)
+        self.assertEqual(problems, [(2, "fetch gone-from-the-org")])
+
+    def test_an_exclude_is_not_tracked_as_a_selecting_rule(self):
+        """An exclude legitimately outlives what it excluded, so it is not tracked.
+
+        Asserted on `origins` rather than on the reported problems. Two independent
+        things currently keep a stale exclusion from being reported - the dispatch
+        not tracking it, and `unmatched_rules` skipping the kind - so an
+        outcome-only assertion passes even when one of them is removed. Mutation
+        testing showed exactly that: dropping the early return changed no test
+        result. This pins the mechanism the docstring in `Filters` describes.
+        """
+        filters = self._filters("prefix svc-\nexclude retired-years-ago\n")
+        self.assertEqual(
+            [rule for _, rule in filters.origins],
+            ["prefix svc-"],
+            "an exclude must not be recorded as a rule that has to select something",
+        )
+        # And the outcome it exists for, which is what an operator sees.
+        runner = self._runner(["svc-a"])
+        selected = repo_list.discover(filters, runner=runner)
+        self.assertEqual(repo_list.unmatched_rules(filters, selected, runner=runner), [])
+
+    def test_fetch_rules_alone_are_not_an_estate(self):
+        # A store whose only rules are `fetch` has nothing to extract. Better to
+        # say so than to build an empty graph and leave someone wondering.
+        with self.assertRaises(ValueError) as caught:
+            self._filters("fetch outside-thing\n")
+        self.assertIn("No include rules", str(caught.exception))
+
+    def test_a_team_owned_repository_can_still_be_fetch_only(self):
+        """Team rules never consult `matches()`, so only the partition catches this.
+
+        `discover` walks a team's own listing and filters it by `excludes` alone -
+        a fetch-only name is invisible to that loop. The split in `main()` is the
+        one thing keeping such a repository out of the estate manifest.
+        """
+        import json
+
+        def fake_runner(arguments):
+            joined = " ".join(arguments)
+            names = ["svc-a", "team-notes"] if "/teams/" in joined else []
+            return "\n".join(json.dumps({"name": n, "defaultBranch": "main"}) for n in names)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            (root / "config" / "repository-filters.txt").write_text(
+                "team platform-team\nfetch team-notes\n", encoding="utf-8"
+            )
+            config.configure(root=root, GITHUB_ORG="myorg")
+            with redirect_stdout(io.StringIO()):
+                code = repo_list.main([], runner=fake_runner)
+            estate = (root / "config" / "repositories.txt").read_text(encoding="utf-8")
+            external = (root / "config" / "repositories-external.txt").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertIn("svc-a|", estate)
+        self.assertNotIn("team-notes", estate, "team ownership must not override `fetch`")
+        self.assertIn("team-notes|", external)
+
+
+class SyncExternalFailureTest(SettingsIsolated):
+    """A fetch-only repository failing to sync must not cost the estate.
+
+    The estate loop learned this the hard way - one unreachable remote used to
+    abort the run and discard the provenance of everything already synced. The
+    external loop is a second copy of that shape, so it needs the same guarantee
+    held down rather than assumed from the first.
+    """
+
+    def _setup(self, root, failing):
+        from knowledgestore import provenance
+
+        (root / "config").mkdir()
+        (root / "config" / "repositories.txt").write_text(
+            "repo-a|git@example.com:o/repo-a.git|main\n", encoding="utf-8"
+        )
+        (root / "config" / "repositories-external.txt").write_text(
+            "outside-a|git@example.com:o/outside-a.git|main\n"
+            "outside-b|git@example.com:o/outside-b.git|main\n",
+            encoding="utf-8",
+        )
+        config.configure(root=root)
+
+        self.attempted = []
+
+        def fake_sync(repo, repositories_dir, run=None):
+            self.attempted.append(repo.name)
+            if repo.name in failing:
+                raise subprocess.CalledProcessError(1, ["git", "fetch"])
+            return 5
+
+        self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
+        sync.sync_repository = fake_sync
+        self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
+        provenance.head_info = lambda repo_dir, branch, run=None: {
+            "sha": "a" * 40,
+            "branch": branch,
+            "committed": "2026-07-01T00:00:00+00:00",
+        }
+        return provenance
+
+    def test_one_failing_external_repository_does_not_stop_the_others(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provenance = self._setup(root, failing={"outside-a"})
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = sync.main()
+            recorded, external = provenance.read(), provenance.read_external()
+            output = buffer.getvalue()
+
+        self.assertEqual(self.attempted, ["repo-a", "outside-a", "outside-b"])
+        self.assertEqual(set(recorded), {"repo-a"}, "the estate keeps its provenance")
+        self.assertEqual(set(external), {"outside-b"}, "the one that worked keeps its record")
+        self.assertIn("outside-a", output, "the failure is named")
+        self.assertEqual(code, 1, "a partial sync must not report success")
