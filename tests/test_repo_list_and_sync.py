@@ -742,7 +742,8 @@ class FetchOnlyRuleTest(SettingsIsolated):
         self.assertNotIn("svc-notes", estate, "a fetch-only repo must never reach the estate")
         self.assertIn("svc-notes|", external)
         self.assertNotIn("svc-a", external)
-        self.assertIn("NEVER extracted", external, "the file says what it is")
+        self.assertIn("not extracted", external, "the file says what it is")
+        self.assertIn("not part of the estate", external, "and what it is not")
 
     def test_the_external_manifest_is_cleared_when_the_last_rule_goes(self):
         # Otherwise removing a `fetch` rule leaves a stale file that `sync` acts
