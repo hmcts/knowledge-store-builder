@@ -692,6 +692,32 @@ class CommentVolumeTest(SettingsIsolated):
             record["comments"], ["The URN was missing from the payload, so listing rejected it."]
         )
 
+    def test_a_stack_frame_is_noise_whatever_its_package_root(self):
+        """Every common Java/Scala package root must be recognised as a stack
+        frame, not just the ones the estate that wrote the default happened to
+        use. A root missing from the alternation lets that vendor's or
+        in-house code's traces survive into the record as if they were
+        narrative - see issue #95, which found `com.` missing."""
+        config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
+        for root in ("uk", "com", "net", "io", "java", "org"):
+            with self.subTest(root=root):
+                issue = {
+                    "fields": {
+                        "comment": {
+                            "comments": [
+                                {"body": f"\tat {root}.example.widget.Thing.run(Thing.java:42)"},
+                                {"body": "The URN was missing, so listing rejected it."},
+                            ]
+                        }
+                    }
+                }
+                record = fetch_tickets.projected_record(issue, Counter())
+                self.assertEqual(
+                    record["comments"],
+                    ["The URN was missing, so listing rejected it."],
+                    f"a stack frame rooted at {root!r} was not dropped as noise",
+                )
+
     def test_every_surviving_comment_is_kept_not_just_the_first_few(self):
         """No count limit: the resolution is usually the last comment, not the first."""
         config.configure(TRACKER_FETCH_COMMENTS=True, TRACKER_COMMENT_CHARS=2000)
