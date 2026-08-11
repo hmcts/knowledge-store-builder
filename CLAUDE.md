@@ -16,6 +16,22 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 - **Gates are blocking on purpose:** ruff, `ruff format`, pyright, the scorer
   unit tests and the page regression. Do not make one non-blocking to land a
   change.
+- **Take a multi-step change through to the end.** Most work here is a sequence
+  with an obvious next step — change, test, format, lint, commit, PR — so run the
+  sequence rather than stopping between steps for permission to continue. Working
+  that way raises the bar on self-checking rather than lowering it, because nobody
+  is reviewing in between:
+  - Run the gates the way CI does. `ruff check` and `ruff format --check` are
+    different commands, and passing one is not passing the other.
+  - Chain the push on the checks, in the same command. Verifying separately and
+    pushing separately is not a gate.
+  - Mutation-test a new gate: remove the behaviour it describes, confirm it fails,
+    and confirm only it fails. A gate that cannot fail is decoration.
+  - Assert that an automated edit matched. A find-and-replace that silently matches
+    nothing looks exactly like success.
+
+  Stop and ask when the next step is a decision rather than a step: a release, an
+  output change consumers will see, or anything that rewrites published history.
 
 ## Testing
 
