@@ -251,11 +251,15 @@ TRACKER_FETCH_COMMENTS = _env_bool("KSB_TRACKER_FETCH_COMMENTS", False)
 TRACKER_COMMENT_CHARS = _env_int("KSB_TRACKER_COMMENT_CHARS", 2000)
 # Comments matching this are dropped rather than shortened: a truncated log dump is
 # still a log dump. Override per estate - another tracker's automation says
-# different things, and dropping content is not a judgement to hard-code.
+# different things, and dropping content is not a judgement to hard-code. The
+# stack-frame branch's package-root list is a starting point, not a closed set:
+# it covers common Java/Scala roots, but an estate with other vendor or in-house
+# roots inherits a filter with a hole in it, and a miss here is silent - the
+# frame just reads as narrative. Extend the list for your estate.
 TRACKER_COMMENT_NOISE = os.environ.get(
     "KSB_TRACKER_COMMENT_NOISE",
     r"(?i)\b(jenkins|build (succeeded|failed|#)|pipeline|bitbucket|pull request"
-    r"|auto-?generated|sonarqube|renovate|stack ?trace|caused by:|at (uk|java|org)\.)",
+    r"|auto-?generated|sonarqube|renovate|stack ?trace|caused by:|at (uk|com|net|io|java|org)\.)",
 )
 
 TRACKER_PAGE_SIZE = _env_int("KSB_TRACKER_PAGE_SIZE", 100)
