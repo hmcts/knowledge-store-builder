@@ -1,0 +1,9 @@
+# Findings retired individually, by fingerprint. See hmcts/secrets-scanner#47.
+#
+# A fingerprint is SHA-256(detector name + matched text). It carries no location,
+# so one entry covers every commit that quotes the same string. The fingerprint of
+# any unallowlisted finding is printed by the failing run - copy it from there.
+#
+# Only add an entry you have confirmed is not a credential.
+
+e36cba747a9c3e178a5a42241bb2742abc6e3d29aaad762ccc6408bd97e2726e  A test method name quoted in a commit message, read by the Lob detector as a key. Commit messages are immutable, and having no path they cannot be covered by trufflehog_exclude_detectors_in.
