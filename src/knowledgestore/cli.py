@@ -12,6 +12,14 @@ import sys
 
 from . import config
 
+# Stages that build their own argument parser, and so document themselves better
+# than this module can. Everything else has --help answered centrally, in main().
+# A stage belongs here only once it genuinely parses arguments; listing one that
+# does not would hand --help back to a stage that ignores it and runs instead.
+SELF_PARSING = frozenset(
+    {"discover", "export-history", "fetch-tickets", "summaries", "status", "check-evidence"}
+)
+
 # name -> (module attribute, one-line help). Order is the pipeline run order.
 STAGES: dict[str, tuple[str, str]] = {
     "discover": (
@@ -120,6 +128,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown stage: {stage or '(none)'}\n", file=sys.stderr)
         print(usage(), file=sys.stderr)
         return 1
+
+    # Asking a subcommand what it does must never be the thing that does it.
+    # Most stages parse no arguments at all, so an unhandled --help fell through
+    # to the stage's default action - and for `sync` that fetches and resets every
+    # repository in the estate, which is the opposite of what someone probing an
+    # unfamiliar subcommand expects. Handled here rather than in each stage so a
+    # stage added later inherits it instead of having to remember.
+    if any(arg in ("-h", "--help") for arg in rest[1:]) and stage not in SELF_PARSING:
+        print(f"knowledgestore {stage}\n\n  {STAGES[stage][1]}\n")
+        print("This stage takes no arguments of its own.")
+        print("Run `knowledgestore` for the full stage list, and see config.py for settings.")
+        return 0
 
     module_name = STAGES[stage][0]
     module = __import__(f"{__package__}.{module_name}", fromlist=["main"])
