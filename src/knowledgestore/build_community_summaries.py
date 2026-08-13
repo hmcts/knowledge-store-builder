@@ -51,6 +51,25 @@ MIN_SUMMARY_LEN = 60
 MAX_SUMMARY_LEN = 700
 
 
+def _derived_label(nodes: list[dict], repos: Counter) -> str:
+    """Name a community from evidence already in its digest.
+
+    Only communities graphify clustered appear in the labels file, so anything a
+    store adds through its own extractor arrives unnamed and falls back to an
+    ordinal. `Community 40862` gives the summary author nothing to check an
+    inference against and the reader nothing to hold on to.
+
+    Derived from the dominant repository and the highest-degree node — both drawn
+    from the graph, so the name stays checkable rather than invented. Returns ""
+    when there is neither, because an ordinal is more honest than a wrong name.
+    """
+    top = next((n["label"] for n in nodes if n.get("label")), "")
+    repo = next((r for r, _ in repos.most_common() if r), "")
+    if top and repo:
+        return f"{repo}: {top}"
+    return top or repo
+
+
 def community_digest(
     community: int, nodes: list[dict], labels: dict, intent: dict, degree: dict
 ) -> dict:
@@ -66,7 +85,9 @@ def community_digest(
             tickets.update(dict(list(entry["tickets"].items())[:3]))
     return {
         "id": community,
-        "label": labels.get(str(community), f"Community {community}"),
+        "label": (
+            labels.get(str(community)) or _derived_label(nodes, repos) or f"Community {community}"
+        ),
         "size": len(nodes),
         "repositories": [r for r, _ in repos.most_common(4) if r],
         "top_nodes": [
