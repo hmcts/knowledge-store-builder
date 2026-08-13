@@ -17,7 +17,15 @@ from . import config
 # A stage belongs here only once it genuinely parses arguments; listing one that
 # does not would hand --help back to a stage that ignores it and runs instead.
 SELF_PARSING = frozenset(
-    {"discover", "export-history", "fetch-tickets", "summaries", "status", "check-evidence"}
+    {
+        "discover",
+        "export-history",
+        "fetch-tickets",
+        "summaries",
+        "status",
+        "check-evidence",
+        "check-corpus",
+    }
 )
 
 # name -> (module attribute, one-line help). Order is the pipeline run order.
@@ -77,6 +85,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "check-install-docs": (
         "check_install_docs",
         "check the documented install commands against what the lock file declares",
+    ),
+    "check-corpus": (
+        "check_corpus_config",
+        "report harness configuration the corpus carries (run after sync)",
     ),
     "check-evidence": (
         "check_evidence",
