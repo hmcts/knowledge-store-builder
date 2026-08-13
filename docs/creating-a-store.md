@@ -155,9 +155,14 @@ Raise graphify's size limit before working with a large estate:
 export GRAPHIFY_MAX_GRAPH_BYTES=4GB
 ```
 
-**Extract from inside each clone, never from the store root.** Running `graphify .`
-at the top of the store looks equivalent and is not, for two reasons that only
-show up together:
+**Extract from inside each clone, never from the store root.** graphify's own skill
+will tell you to run `graphify .` over the whole tree — follow the sequence here
+instead. Two instructions describe this step and the one shipped with the tool is
+the one that prints at you, so it tends to win by default; on a tree of
+repositories it is the wrong one.
+
+Running `graphify .` at the top of the store looks equivalent and is not, for
+three reasons that only show up together:
 
 - `repositories/` is in `.gitignore` (see *Publish the store* below), and graphify's
   detection honours `.gitignore`. From the store root it therefore finds the store's
@@ -167,6 +172,12 @@ show up together:
 - A single pass over a large corpus gives no per-repository progress, so a slow
   repository and a hung one are indistinguishable. One operator saw eight minutes
   at full CPU with no output and no way to tell which repository to blame.
+- **It skips `merge-graphs`, which is what keeps node ids distinct between
+  repositories.** `merge-graphs` prefixes each input graph with a unique repository
+  tag; a single root-level pass has nothing to prefix, so declarations that share a
+  path convention — `infrastructure/variables.tf` in every repository, or an import
+  common to every service — collapse into one node and acquire edges belonging to
+  all of them. Nothing errors, and the fused graph is confidently wrong.
 
 Extract each repository from inside its clone, without clustering, then merge
 all per-repository graphs in one operation:
