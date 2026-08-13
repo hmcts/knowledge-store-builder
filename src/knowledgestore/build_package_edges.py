@@ -44,7 +44,11 @@ TERRAFORM_SUFFIX = ".tf"
 _TF_SOURCE = re.compile(
     r"""source\s*=\s*"
         (?:git::)?
-        (?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)
+        # The scheme is optional in Terraform: its GitHub detector accepts a bare
+        # `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made
+        # 5 shared modules invisible on a 361-repository estate (#125). The opening
+        # quote anchors this, so `notgithub.com/...` cannot match.
+        (?:https://|git@|ssh://git@)?github\.com[/:]
         (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
         (?:\.git)?(?:[?/][^"]*)?"
     """,
