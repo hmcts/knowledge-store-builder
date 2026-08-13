@@ -31,7 +31,7 @@ semantic = ["fastembed>=0.4", "numpy>=1.24"]
 # install keeps its empty runtime dependency list.
 deploy = ["PyYAML>=6"]
 # Lint, format and type-check tooling, pinned to what CI runs.
-dev = ["ruff==0.16.0", "pyright==1.1.411"]
+dev = ["ruff==0.16.2", "pyright==1.1.411"]
 
 [project.scripts]
 knowledgestore = "knowledgestore.cli:main"
