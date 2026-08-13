@@ -171,23 +171,34 @@ def _module_node(repo_name: str, in_estate: bool) -> dict:
     }
 
 
+def _own_terraform_files(clone):
+    """This repository's own .tf files.
+
+    .terraform is Terraform's download cache: it holds copies of the upstream
+    modules, whose sources would otherwise read as this repository's dependencies.
+    Measured at zero files on the estate this was built against, so a guard rather
+    than a fix - but a cache committed once would quietly invent reuse.
+    """
+    for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
+        if ".terraform" not in path.parts:
+            yield path
+
+
+def _read_text(path) -> str:
+    """File contents, or "" if it cannot be read. One unreadable file is not worth
+    abandoning an estate scan for."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
     """(consumer repo, provider repo) -> the files declaring it, sorted."""
     found: dict[tuple[str, str], set[str]] = {}
     for clone in clones:
-        for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
-            # .terraform is Terraform's own download cache: it holds copies of the
-            # upstream modules, whose sources would be read as this repository's
-            # dependencies. Measured at zero on the estate this was built against,
-            # so this is a guard rather than a fix - but a cache that appears once
-            # would quietly invent reuse.
-            if ".terraform" in path.parts:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for provider in terraform_references(text):
+        for path in _own_terraform_files(clone):
+            for provider in terraform_references(_read_text(path)):
                 if provider == clone.name:
                     continue  # a repository referencing itself is not reuse
                 found.setdefault((clone.name, provider), set()).add(str(path.relative_to(clone)))
@@ -234,7 +245,7 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
         print(
             f"  ({capped} further declaring files not carried as edges, {MAX_EVIDENCE_FILES} per pair)"
         )
-    providers = {provider for _, provider in references}
+    providers = {pair[1] for pair in references}
     return len(providers), len(references), edges, len(providers - estate)
 
 
