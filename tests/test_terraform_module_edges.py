@@ -154,5 +154,35 @@ class EveryConsumerIsRepresentedTest(SettingsIsolated):
             self.assertEqual(providers, {"real-dep"})
 
 
+class EstateMembershipTest(SettingsIsolated):
+    """A referenced module is not automatically a repository the estate holds.
+
+    On a real estate 3 of 33 referenced modules were not synced repositories.
+    Naming one in a node's `repo` adds it to every per-repository aggregate - the
+    community digests count it, and `deepdive` would offer a dossier on a single
+    synthetic node - so the store would claim to hold something it has never seen.
+    The reference itself is kept, because depending on something the estate does
+    not hold is a finding rather than noise.
+    """
+
+    def test_a_provider_inside_the_estate_keeps_its_repo(self):
+        node = packages._module_node("cnp-module-key-vault", in_estate=True)
+        self.assertEqual(node["repo"], "cnp-module-key-vault")
+        self.assertTrue(node["metadata"]["provider_in_estate"])
+
+    def test_a_provider_outside_the_estate_claims_no_repository(self):
+        node = packages._module_node("aks-module-genesis", in_estate=False)
+        self.assertEqual(node["repo"], "", "the store would claim a repository it has not synced")
+        self.assertFalse(node["metadata"]["provider_in_estate"])
+
+    def test_the_reference_is_still_recorded_either_way(self):
+        """Dropping it would lose the dependency evidence, which is the point."""
+        for in_estate in (True, False):
+            with self.subTest(in_estate=in_estate):
+                node = packages._module_node("some-module", in_estate=in_estate)
+                self.assertEqual(node["label"], "some-module")
+                self.assertEqual(node["metadata"]["provider_repo"], "some-module")
+
+
 if __name__ == "__main__":
     unittest.main()

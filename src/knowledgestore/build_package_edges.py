@@ -142,8 +142,17 @@ def terraform_references(text: str) -> set[str]:
     return {m.group("repo") for m in _TF_SOURCE.finditer(text)}
 
 
-def _module_node(repo_name: str) -> dict:
-    """A referenced module, keyed on the repository that provides it."""
+def _module_node(repo_name: str, in_estate: bool) -> dict:
+    """A referenced module, identified by the repository that provides it.
+
+    `repo` is set only when that repository is actually in the estate. A module can
+    be referenced from outside it - on one estate 3 of 33 were - and naming a
+    repository the store has never synced in `repo` would add it to every per-repository
+    aggregate: digests would count it, and `deepdive` would offer a dossier on a
+    single synthetic node. The reference is kept because a dependency on something
+    the estate does not hold is a finding in its own right; the claim to hold it is
+    what is dropped.
+    """
     return {
         "id": f"{repo_name}::module",
         "label": repo_name,
@@ -151,23 +160,15 @@ def _module_node(repo_name: str) -> dict:
         "file_type": "concept",
         "source_file": None,
         "source_location": None,
-        "repo": repo_name,
+        "repo": repo_name if in_estate else "",
         "_origin": FORMAT,
         "local_id": "module",
-        "metadata": {"kind": "terraform_module"},
+        "metadata": {
+            "kind": "terraform_module",
+            "provider_repo": repo_name,
+            "provider_in_estate": in_estate,
+        },
     }
-
-
-def _repo_anchor(graph_reps: dict, repo: str) -> str | None:
-    """A stable node in a repository, to hang a repository-level edge from.
-
-    Distinct from `_anchor_under`, which finds the provider-side anchor beneath a
-    package's directory. A Terraform reference is a fact about the consuming
-    repository rather than about one directory in it, so the whole repository is
-    the right granularity.
-    """
-    candidates = [node_id for (node_repo, _), node_id in graph_reps.items() if node_repo == repo]
-    return min(candidates) if candidates else None
 
 
 def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
@@ -193,7 +194,7 @@ def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
     return {pair: sorted(files) for pair, files in found.items()}
 
 
-def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int]:
+def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
     """Module nodes and consumer edges from Terraform sources.
 
     Returns (modules, consumer pairs, edges). The evidence cap is per
@@ -203,7 +204,14 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int]:
     that lost 290 of 388 relationships, and alphabetically, so the survivors
     looked like a complete answer.
     """
-    reps = _representatives(graph)
+    # One pass over the representatives, not one per pair: a large graph has
+    # hundreds of thousands of them and there are hundreds of pairs.
+    anchors: dict[str, str] = {}
+    for (node_repo, _), node_id in _representatives(graph).items():
+        current = anchors.get(node_repo)
+        if current is None or node_id < current:
+            anchors[node_repo] = node_id
+    estate = {clone.name for clone in clones}
     existing = {n["id"] for n in graph["nodes"]}
     references = _module_references(clones)
 
@@ -212,9 +220,9 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int]:
     for (consumer_repo, provider), files in sorted(references.items()):
         node_id = f"{provider}::module"
         if node_id not in existing:
-            graph["nodes"].append(_module_node(provider))
+            graph["nodes"].append(_module_node(provider, provider in estate))
             existing.add(node_id)
-        anchor = _repo_anchor(reps, consumer_repo)
+        anchor = anchors.get(consumer_repo)
         if not anchor:
             continue
         if len(files) > MAX_EVIDENCE_FILES:
@@ -227,7 +235,7 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int]:
             f"  ({capped} further declaring files not carried as edges, {MAX_EVIDENCE_FILES} per pair)"
         )
     providers = {provider for _, provider in references}
-    return len(providers), len(references), edges
+    return len(providers), len(references), edges, len(providers - estate)
 
 
 def _package_node(name: str, provider_repo: str, manifest_rel: str) -> dict:
@@ -329,7 +337,7 @@ def main() -> int:
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
-    module_count, module_pairs, module_edges = _add_module_layer(graph, clones)
+    module_count, module_pairs, module_edges, module_external = _add_module_layer(graph, clones)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -345,6 +353,11 @@ def main() -> int:
         f"Terraform modules: {module_count} referenced across repositories, "
         f"{module_pairs} consumer relationships, {module_edges} edges added"
     )
+    if module_external:
+        print(
+            f"  ({module_external} of them are not repositories this estate holds - "
+            "recorded as references, not as estate members)"
+        )
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
     return 0
 
