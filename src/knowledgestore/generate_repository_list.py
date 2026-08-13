@@ -1,8 +1,8 @@
 """Discover the estate's repositories from GitHub into config/repositories.txt.
 
 Discovery is driven by config/repository-filters.txt - reviewable include
-prefixes, explicit includes, explicit excludes and fetch-only rules (no regex,
-no fuzzy search). The full organisation repository list is fetched via the GitHub
+prefixes, name globs, explicit includes, explicit excludes and fetch-only rules
+(no regex, no fuzzy search). The full organisation repository list is fetched via the GitHub
 CLI (`gh`, authenticated) and filtered locally; archived repositories are
 always excluded. Output format:
 
@@ -27,6 +27,7 @@ Run:
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import shutil
 import argparse
@@ -63,6 +64,13 @@ EXTERNAL_HEADER_TEMPLATE = (
 @dataclass
 class Filters:
     prefixes: list[str] = field(default_factory=list)
+    # Shell-style globs. `prefix cpp-` is the common case of `match cpp-*`, and
+    # `prefix` stays because every existing filter file uses it; the glob covers
+    # the conventions a prefix cannot express - the distinguishing part at the
+    # end, as in `{product}-shared-infrastructure`. Deliberately one rule rather
+    # than adding `suffix` alongside: three ways to write one selection makes a
+    # filter file nobody can read at a glance.
+    globs: list[str] = field(default_factory=list)
     includes: set[str] = field(default_factory=set)
     excludes: set[str] = field(default_factory=set)
     # Fetched, never extracted. Selected from the org listing exactly like an
@@ -84,7 +92,9 @@ class Filters:
             return False
         if name in self.includes or name in self.fetch_only:
             return True
-        return any(name.startswith(prefix) for prefix in self.prefixes)
+        if any(name.startswith(prefix) for prefix in self.prefixes):
+            return True
+        return any(fnmatch.fnmatchcase(name, glob) for glob in self.globs)
 
 
 def _apply_rule(filters: Filters, kind: str, value: str, line_number: int) -> bool:
@@ -96,6 +106,18 @@ def _apply_rule(filters: Filters, kind: str, value: str, line_number: int) -> bo
     """
     if kind == "prefix":
         filters.prefixes.append(value)
+    elif kind == "match":
+        # A glob of nothing but wildcards selects the whole organisation from one
+        # character, and the resulting estate looks every bit as deliberate as one
+        # that was chosen. Refuse it rather than let it through, in the same spirit
+        # as rejecting an unknown kind.
+        if not value.strip("*?"):
+            raise ValueError(
+                f"Filter at line {line_number} is `match {value}`, which selects every "
+                "repository in the organisation. Name something concrete, for example "
+                "`match *-shared-infrastructure`."
+            )
+        filters.globs.append(value)
     elif kind == "repo":
         filters.includes.add(value)
     elif kind == "fetch":
@@ -130,7 +152,7 @@ def read_filters(path: Path) -> Filters:
             "A repository is either part of the estate or fetched without being "
             "extracted; it cannot be both."
         )
-    if not filters.prefixes and not filters.includes and not filters.teams:
+    if not filters.prefixes and not filters.globs and not filters.includes and not filters.teams:
         raise ValueError(f"No include rules in {path}")
     return filters
 
@@ -205,6 +227,8 @@ def unmatched_rules(filters: Filters, selected: list[dict], runner=run_gh) -> li
         kind, _, value = rule.partition(" ")
         if kind == "prefix":
             matched = any(n.startswith(value) for n in names)
+        elif kind == "match":
+            matched = any(fnmatch.fnmatchcase(n, value) for n in names)
         elif kind in ("repo", "fetch"):
             # `fetch` is checked here for the same reason `repo` is: it names one
             # repository exactly, so a rename or a typo makes it match nothing and
@@ -214,7 +238,15 @@ def unmatched_rules(filters: Filters, selected: list[dict], runner=run_gh) -> li
         elif kind == "team":
             matched = team_contributed(value)
         else:
-            continue
+            # `origins` only ever holds kinds `_apply_rule` accepted, so an unknown
+            # one here means a rule was added there and not wired in below. That
+            # once happened to `fetch`: it recorded fine and reported nothing, so
+            # a rule selecting nothing was silent - exactly what this function is
+            # for. Failing loudly makes the omission impossible to ship.
+            raise AssertionError(
+                f"Rule kind {kind!r} is recorded but has no unmatched-rule check. "
+                "Add one here, or a rule that selects nothing will say nothing."
+            )
         if not matched:
             problems.append((line_number, rule))
     return problems
