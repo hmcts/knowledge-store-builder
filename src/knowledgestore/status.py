@@ -60,6 +60,22 @@ def layer_coverage() -> dict:
     }
 
 
+def intent_coverage(recorded: dict) -> dict:
+    """How much of the estate the intent index actually covers.
+
+    A layer can cover a fraction of the estate while every other line of this
+    report reads green, and nothing said so: an operator saw "914/914 summaries"
+    and "361 repositories recorded", and had to open file-tickets.json.gz by hand
+    to discover the intent index held 108 of those 361. A store's most dangerous
+    output is a confident negative, and "no tickets touched this file" from an
+    unmined repository is exactly that - indistinguishable, in the answer, from a
+    file no ticket ever touched.
+    """
+    index = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
+    mined = {repo for repo, files in index.items() if files}
+    return {"mined": len(mined), "estate": len(recorded)}
+
+
 def corpus_citations(root: Path) -> dict:
     corpus = io.read_json_dict(root / "graphify-out" / "graph-knowledge-corpus.json")
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
@@ -196,13 +212,29 @@ def main(argv=None) -> int:
         f"{cov['topics_configured']} topics configured"
     )
 
+    intent = intent_coverage(recorded)
+    if intent["estate"]:
+        share = 100 * intent["mined"] // intent["estate"]
+        line = f"Intent index: {intent['mined']}/{intent['estate']} repositories mined ({share}%)"
+        # Partial coverage is normal - history export is expensive and some
+        # estates mine a subset deliberately. Silence about it is not: an answer
+        # of "no tickets" from an unmined repository looks identical to one from
+        # a repository with no tickets.
+        print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
+    elif intent["mined"]:
+        print(f"Intent index: {intent['mined']} repositories mined")
+
     cites = corpus_citations(config.ROOT)
     if cites["dangling"]:
         print(f"Dangling corpus citations ({len(cites['dangling'])}):")
         for path in cites["dangling"][:10]:
             print(f"  - {path}")
-    else:
+    elif cites["checked"]:
         print(f"Corpus citations: {cites['checked']} checked, none dangling")
+    else:
+        # "0 checked, none dangling" paired a measurement of nothing with a clean
+        # verdict, and read as a pass. Nothing checked is not the same as nothing wrong.
+        print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
     fresh = artefact_freshness()
     if fresh.get("explorer_stale"):
