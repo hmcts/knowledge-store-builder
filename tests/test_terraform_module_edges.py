@@ -54,6 +54,34 @@ class TerraformReferenceTest(SettingsIsolated):
             {"mod"},
         )
 
+    def test_the_scheme_less_form_is_recognised(self):
+        """Terraform's GitHub detector accepts a bare host and rewrites it to
+        HTTPS. Requiring a scheme made 5 shared modules invisible on a real
+        estate - no node, no edges, nothing (#125)."""
+        for source, want in (
+            (
+                'source = "github.com/hmcts/ccd-module-elastic-search.git?ref=main"',
+                {"ccd-module-elastic-search"},
+            ),
+            (
+                'source = "github.com/hmcts/terraform-module-vnet-peering?ref=main"',
+                {"terraform-module-vnet-peering"},
+            ),
+            ('source = "github.com/org/mod"', {"mod"}),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(packages.terraform_references(source), want)
+
+    def test_a_lookalike_host_does_not_match(self):
+        """Making the scheme optional must not widen which hosts count."""
+        for source in (
+            'source = "notgithub.com/org/mod"',
+            'source = "mygithub.com/org/mod"',
+            'source = "raw.githubusercontent.com/org/mod"',
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(packages.terraform_references(source), set())
+
     def test_ssh_form_is_recognised(self):
         self.assertEqual(
             packages.terraform_references('source = "ssh://git@github.com/org/mod"'),
