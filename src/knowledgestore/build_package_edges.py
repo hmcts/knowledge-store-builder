@@ -158,13 +158,30 @@ def _module_node(repo_name: str) -> dict:
     }
 
 
-def _add_module_layer(graph: dict, clones: list) -> tuple[int, int]:
-    """Module nodes and consumer edges from Terraform sources. (modules, edges)."""
-    reps = _representatives(graph)
-    existing = {n["id"] for n in graph["nodes"]}
-    seen: dict[str, set[str]] = {}
+def _repo_anchor(graph_reps: dict, repo: str) -> str | None:
+    """A stable node in a repository, to hang a repository-level edge from.
+
+    Distinct from `_anchor_under`, which finds the provider-side anchor beneath a
+    package's directory. A Terraform reference is a fact about the consuming
+    repository rather than about one directory in it, so the whole repository is
+    the right granularity.
+    """
+    candidates = [node_id for (node_repo, _), node_id in graph_reps.items() if node_repo == repo]
+    return min(candidates) if candidates else None
+
+
+def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
+    """(consumer repo, provider repo) -> the files declaring it, sorted."""
+    found: dict[tuple[str, str], set[str]] = {}
     for clone in clones:
         for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
+            # .terraform is Terraform's own download cache: it holds copies of the
+            # upstream modules, whose sources would be read as this repository's
+            # dependencies. Measured at zero on the estate this was built against,
+            # so this is a guard rather than a fix - but a cache that appears once
+            # would quietly invent reuse.
+            if ".terraform" in path.parts:
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -172,23 +189,45 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int]:
             for provider in terraform_references(text):
                 if provider == clone.name:
                     continue  # a repository referencing itself is not reuse
-                rel = str(path.relative_to(clone))
-                seen.setdefault(provider, set()).add(f"{clone.name}|{rel}")
+                found.setdefault((clone.name, provider), set()).add(str(path.relative_to(clone)))
+    return {pair: sorted(files) for pair, files in found.items()}
+
+
+def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int]:
+    """Module nodes and consumer edges from Terraform sources.
+
+    Returns (modules, consumer pairs, edges). The evidence cap is per
+    (consumer, provider) pair, which is what MAX_EVIDENCE_FILES means everywhere
+    else in this module. Capping per provider instead drops whole consuming
+    repositories rather than surplus evidence for one: on a 361-repository estate
+    that lost 290 of 388 relationships, and alphabetically, so the survivors
+    looked like a complete answer.
+    """
+    reps = _representatives(graph)
+    existing = {n["id"] for n in graph["nodes"]}
+    references = _module_references(clones)
 
     edges = 0
-    for provider, consumers in sorted(seen.items()):
+    capped = 0
+    for (consumer_repo, provider), files in sorted(references.items()):
         node_id = f"{provider}::module"
         if node_id not in existing:
             graph["nodes"].append(_module_node(provider))
             existing.add(node_id)
-        for entry in sorted(consumers)[:MAX_EVIDENCE_FILES]:
-            consumer_repo, _, rel = entry.partition("|")
-            anchor = _anchor_under(reps, consumer_repo, "")
-            if not anchor:
-                continue
+        anchor = _repo_anchor(reps, consumer_repo)
+        if not anchor:
+            continue
+        if len(files) > MAX_EVIDENCE_FILES:
+            capped += len(files) - MAX_EVIDENCE_FILES
+        for rel in files[:MAX_EVIDENCE_FILES]:
             graph["links"].append(_edge(anchor, node_id, "USES_MODULE", rel))
             edges += 1
-    return len(seen), edges
+    if capped:
+        print(
+            f"  ({capped} further declaring files not carried as edges, {MAX_EVIDENCE_FILES} per pair)"
+        )
+    providers = {provider for _, provider in references}
+    return len(providers), len(references), edges
 
 
 def _package_node(name: str, provider_repo: str, manifest_rel: str) -> dict:
@@ -290,7 +329,7 @@ def main() -> int:
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
-    module_count, module_edges = _add_module_layer(graph, clones)
+    module_count, module_pairs, module_edges = _add_module_layer(graph, clones)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -304,7 +343,7 @@ def main() -> int:
     )
     print(
         f"Terraform modules: {module_count} referenced across repositories, "
-        f"{module_edges} edges added"
+        f"{module_pairs} consumer relationships, {module_edges} edges added"
     )
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
     return 0

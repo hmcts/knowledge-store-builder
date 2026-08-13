@@ -20,6 +20,7 @@ repository to link to, and inventing one would be a guess presented as evidence.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_package_edges as packages  # noqa: E402
@@ -83,6 +84,74 @@ class TerraformReferenceTest(SettingsIsolated):
             'module "b" {\n  source = "git::https://github.com/org/two.git?ref=v1"\n}\n'
         )
         self.assertEqual(packages.terraform_references(text), {"one", "two"})
+
+
+class EveryConsumerIsRepresentedTest(SettingsIsolated):
+    """The evidence cap must drop surplus evidence, never whole repositories.
+
+    Applied per provider instead of per (consumer, provider) pair, it dropped 290
+    of 388 relationships on a real estate - and alphabetically, so the 98 that
+    survived looked like a complete answer. That is the failure this file exists
+    to prevent, and it is why the assertion is on the set of consumers rather
+    than on a count.
+    """
+
+    def _tree(self, root, layout):
+        for rel, text in layout.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        for repo in {root / rel.split("/")[0] for rel in layout}:
+            (repo / ".git").mkdir(parents=True, exist_ok=True)
+        return sorted(d for d in root.iterdir() if (d / ".git").is_dir())
+
+    def test_no_consuming_repository_is_dropped(self):
+        import tempfile
+
+        shared = 'source = "git@github.com:org/shared-module"\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # More consumers than MAX_EVIDENCE_FILES, deliberately, and named so
+            # that alphabetical truncation would keep only the first few.
+            layout = {f"repo-{i:02d}/main.tf": shared for i in range(12)}
+            clones = self._tree(root, layout)
+            refs = packages._module_references(clones)
+            consumers = {consumer for consumer, provider in refs if provider == "shared-module"}
+            self.assertEqual(
+                len(consumers),
+                12,
+                "a consuming repository was dropped, so the estate would look less "
+                "coupled than it is",
+            )
+
+    def test_surplus_evidence_within_one_pair_is_what_gets_capped(self):
+        import tempfile
+
+        shared = 'source = "git@github.com:org/shared-module"\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            layout = {f"one-repo/f{i:02d}.tf": shared for i in range(9)}
+            clones = self._tree(root, layout)
+            refs = packages._module_references(clones)
+            self.assertEqual(list(refs), [("one-repo", "shared-module")])
+            self.assertEqual(len(refs[("one-repo", "shared-module")]), 9, "all files recorded")
+
+    def test_terraform_download_cache_is_ignored(self):
+        """.terraform holds copies of upstream modules; their sources are not this
+        repository's dependencies."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clones = self._tree(
+                root,
+                {
+                    "app/main.tf": 'source = "git@github.com:org/real-dep"\n',
+                    "app/.terraform/modules/x/main.tf": 'source = "git@github.com:org/not-ours"\n',
+                },
+            )
+            providers = {provider for _, provider in packages._module_references(clones)}
+            self.assertEqual(providers, {"real-dep"})
 
 
 if __name__ == "__main__":
