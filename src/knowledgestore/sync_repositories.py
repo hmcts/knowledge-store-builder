@@ -124,6 +124,13 @@ def main() -> int:
         entries[repo.name] = provenance.head_info(
             config.REPOSITORIES_DIR / repo.name, repo.default_branch
         )
+        # Written as we go, not once at the end. A sync that is interrupted -
+        # Ctrl-C, a lost connection, or simply run in stages across a session -
+        # used to leave no provenance at all rather than a partial record, and
+        # `status`, the manifest and the explorer all read it. A truthful partial
+        # record is recoverable; nothing is silently wrong. The file is small and
+        # this loop is dominated by network and git, so the cost does not signify.
+        provenance.write(entries, provenance.read_external())
     external, external_failures = _sync_external()
     failures.extend(external_failures)
     provenance.write(entries, external)
