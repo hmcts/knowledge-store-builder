@@ -260,6 +260,13 @@ Rules to give each subagent, verbatim in spirit:
   schema or contract content. If tests dominate, say it is test coverage.
 - Write the output as one JSON object `{"<id>": "<summary>"}` covering every
   digest id in the batch, and nothing else.
+- **Anything else you write must carry your batch in its name.** A helper script,
+  a scratch file, any intermediate output: `scratchpad/gen-<batch>.py`, never a
+  bare `scratchpad/gen.py`. You are one of several agents writing to one
+  filesystem at the same time, and only the output path you were given is unique
+  to you. Two agents that pick the same helper path overwrite each other, and the
+  one that loses then runs the other's script — producing another batch's work
+  under its own name. Both writes succeed, so nothing reports an error.
 
 **Verify grounding, not only coverage.** A subagent given 45 digests returns 45
 summaries: right length, ids matching, merge accepted, coverage green — and any
