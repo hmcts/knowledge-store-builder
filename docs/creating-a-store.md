@@ -155,6 +155,19 @@ Raise graphify's size limit before working with a large estate:
 export GRAPHIFY_MAX_GRAPH_BYTES=4GB
 ```
 
+**Extract from inside each clone, never from the store root.** Running `graphify .`
+at the top of the store looks equivalent and is not, for two reasons that only
+show up together:
+
+- `repositories/` is in `.gitignore` (see *Publish the store* below), and graphify's
+  detection honours `.gitignore`. From the store root it therefore finds the store's
+  own handful of files and **builds a graph from almost nothing — successfully**.
+  There is no error, and the finished store looks like a thin estate rather than a
+  failed build.
+- A single pass over a large corpus gives no per-repository progress, so a slow
+  repository and a hung one are indistinguishable. One operator saw eight minutes
+  at full CPU with no output and no way to tell which repository to blame.
+
 Extract each repository from inside its clone, without clustering, then merge
 all per-repository graphs in one operation:
 
@@ -265,6 +278,11 @@ repositories/
 knowledge/git-history/
 graphify-out/graph.json
 ```
+
+Ignoring `repositories/` is why the graph must be built from inside each clone
+rather than from the store root: extraction honours `.gitignore`, so a root-level
+build sees an ignored corpus as an absent one and succeeds against what is left.
+See *Build the graph* above.
 
 Commit `config/`, `knowledge_context.md`, generated content under `knowledge/`
 apart from `knowledge/git-history/`, authored material under `docs/`, and the
