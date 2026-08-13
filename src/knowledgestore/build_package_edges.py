@@ -23,12 +23,33 @@ Re-running replaces the layer wholesale (idempotent by reconstruction).
 from __future__ import annotations
 
 import json
+import re
 
 from . import config, io
 
 FORMAT = "packages"
 MANIFEST = "package.json"
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
+
+# Terraform module reuse. An infrastructure estate's shared dependencies are
+# declared here rather than in a language manifest, so an estate can be built
+# almost entirely from shared modules and still report "0 shared packages".
+#
+# Unlike an npm package, the reference names the providing repository outright,
+# so no manifest lookup is needed - the edge is repository to repository.
+# Both forms are in use and neither dominates by design: on one estate the
+# scp-style `git@` form outnumbered `git::https://` five to one, so handling only
+# the documented form would have missed most of the reuse.
+TERRAFORM_SUFFIX = ".tf"
+_TF_SOURCE = re.compile(
+    r"""source\s*=\s*"
+        (?:git::)?
+        (?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)
+        (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
+        (?:\.git)?(?:[?/][^"]*)?"
+    """,
+    re.VERBOSE,
+)
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
 
@@ -110,6 +131,64 @@ def _strip_layer(graph: dict) -> None:
         for e in graph["links"]
         if e["source"] not in package_ids and e["target"] not in package_ids
     ]
+
+
+def terraform_references(text: str) -> set[str]:
+    """Repository names a Terraform file declares as module sources.
+
+    Deliberately only GitHub-hosted sources. A registry or local path reference
+    names no repository, so reporting one would be a guess.
+    """
+    return {m.group("repo") for m in _TF_SOURCE.finditer(text)}
+
+
+def _module_node(repo_name: str) -> dict:
+    """A referenced module, keyed on the repository that provides it."""
+    return {
+        "id": f"{repo_name}::module",
+        "label": repo_name,
+        "norm_label": repo_name.lower(),
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": repo_name,
+        "_origin": FORMAT,
+        "local_id": "module",
+        "metadata": {"kind": "terraform_module"},
+    }
+
+
+def _add_module_layer(graph: dict, clones: list) -> tuple[int, int]:
+    """Module nodes and consumer edges from Terraform sources. (modules, edges)."""
+    reps = _representatives(graph)
+    existing = {n["id"] for n in graph["nodes"]}
+    seen: dict[str, set[str]] = {}
+    for clone in clones:
+        for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for provider in terraform_references(text):
+                if provider == clone.name:
+                    continue  # a repository referencing itself is not reuse
+                rel = str(path.relative_to(clone))
+                seen.setdefault(provider, set()).add(f"{clone.name}|{rel}")
+
+    edges = 0
+    for provider, consumers in sorted(seen.items()):
+        node_id = f"{provider}::module"
+        if node_id not in existing:
+            graph["nodes"].append(_module_node(provider))
+            existing.add(node_id)
+        for entry in sorted(consumers)[:MAX_EVIDENCE_FILES]:
+            consumer_repo, _, rel = entry.partition("|")
+            anchor = _anchor_under(reps, consumer_repo, "")
+            if not anchor:
+                continue
+            graph["links"].append(_edge(anchor, node_id, "USES_MODULE", rel))
+            edges += 1
+    return len(seen), edges
 
 
 def _package_node(name: str, provider_repo: str, manifest_rel: str) -> dict:
@@ -211,6 +290,7 @@ def main() -> int:
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
+    module_count, module_edges = _add_module_layer(graph, clones)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -221,6 +301,10 @@ def main() -> int:
         f"Packages: {package_count} shared across repositories "
         f"({len(providers)} named in total), {consumer_pairs} consumer relationships, "
         f"{edges} edges added"
+    )
+    print(
+        f"Terraform modules: {module_count} referenced across repositories, "
+        f"{module_edges} edges added"
     )
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
     return 0
