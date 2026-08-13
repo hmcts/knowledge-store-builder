@@ -115,6 +115,18 @@ def extract() -> int:
     for node in graph["nodes"]:
         members[node.get("community", -1)].append(node)
 
+    if graph["nodes"] and not any(n.get("repo") for n in graph["nodes"]):
+        # Without it every digest still looks well-formed - the right count, top
+        # nodes populated - and simply has no repositories, no tickets and no
+        # label. That reads as a thin estate rather than a broken precondition,
+        # so it is said once, loudly, rather than left to be inferred.
+        print(
+            f"WARNING: no node in {config.GRAPH_PATH} carries a `repo` attribute. "
+            "Digests will have empty `repositories` and no tickets, and any summary "
+            "written from them will be guesswork. Rebuild the graph before authoring.",
+            file=sys.stderr,
+        )
+
     digests = [
         community_digest(community, nodes, labels, intent, degree)
         for community, nodes in sorted(members.items(), key=lambda kv: -len(kv[1]))

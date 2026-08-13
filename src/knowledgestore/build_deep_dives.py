@@ -183,6 +183,20 @@ def summary_coverage(graph: dict, repo: str, summaries: dict) -> dict:
 def extract(repo: str) -> int:
     graph = io.load_graph(config.GRAPH_PATH)  # NOTE: the full graph
     if not any(n.get("repo") == repo for n in graph["nodes"]):
+        # Two very different causes, and the wrong one sends people looking in the
+        # wrong place. If NO node carries a repository attribute, the graph was
+        # built without one and every per-repository feature is affected - not
+        # just this repository. Saying "is it in the estate?" then sends an
+        # operator to check a manifest that is perfectly correct.
+        if not any(n.get("repo") for n in graph["nodes"]):
+            print(
+                f"No node in {config.GRAPH_PATH} carries a `repo` attribute, so no "
+                "per-repository query can work - this is not specific to "
+                f"'{repo}'. Community digests will also come out without "
+                "repositories. Rebuild the graph with the extraction that sets it.",
+                file=sys.stderr,
+            )
+            return 1
         print(
             f"No nodes for repository '{repo}' - is it in the estate, "
             f"and is the graph decompressed?",
