@@ -23,12 +23,33 @@ Re-running replaces the layer wholesale (idempotent by reconstruction).
 from __future__ import annotations
 
 import json
+import re
 
 from . import config, io
 
 FORMAT = "packages"
 MANIFEST = "package.json"
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
+
+# Terraform module reuse. An infrastructure estate's shared dependencies are
+# declared here rather than in a language manifest, so an estate can be built
+# almost entirely from shared modules and still report "0 shared packages".
+#
+# Unlike an npm package, the reference names the providing repository outright,
+# so no manifest lookup is needed - the edge is repository to repository.
+# Both forms are in use and neither dominates by design: on one estate the
+# scp-style `git@` form outnumbered `git::https://` five to one, so handling only
+# the documented form would have missed most of the reuse.
+TERRAFORM_SUFFIX = ".tf"
+_TF_SOURCE = re.compile(
+    r"""source\s*=\s*"
+        (?:git::)?
+        (?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)
+        (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
+        (?:\.git)?(?:[?/][^"]*)?"
+    """,
+    re.VERBOSE,
+)
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
 
@@ -110,6 +131,122 @@ def _strip_layer(graph: dict) -> None:
         for e in graph["links"]
         if e["source"] not in package_ids and e["target"] not in package_ids
     ]
+
+
+def terraform_references(text: str) -> set[str]:
+    """Repository names a Terraform file declares as module sources.
+
+    Deliberately only GitHub-hosted sources. A registry or local path reference
+    names no repository, so reporting one would be a guess.
+    """
+    return {m.group("repo") for m in _TF_SOURCE.finditer(text)}
+
+
+def _module_node(repo_name: str, in_estate: bool) -> dict:
+    """A referenced module, identified by the repository that provides it.
+
+    `repo` is set only when that repository is actually in the estate. A module can
+    be referenced from outside it - on one estate 3 of 33 were - and naming a
+    repository the store has never synced in `repo` would add it to every per-repository
+    aggregate: digests would count it, and `deepdive` would offer a dossier on a
+    single synthetic node. The reference is kept because a dependency on something
+    the estate does not hold is a finding in its own right; the claim to hold it is
+    what is dropped.
+    """
+    return {
+        "id": f"{repo_name}::module",
+        "label": repo_name,
+        "norm_label": repo_name.lower(),
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": repo_name if in_estate else "",
+        "_origin": FORMAT,
+        "local_id": "module",
+        "metadata": {
+            "kind": "terraform_module",
+            "provider_repo": repo_name,
+            "provider_in_estate": in_estate,
+        },
+    }
+
+
+def _own_terraform_files(clone):
+    """This repository's own .tf files.
+
+    .terraform is Terraform's download cache: it holds copies of the upstream
+    modules, whose sources would otherwise read as this repository's dependencies.
+    Measured at zero files on the estate this was built against, so a guard rather
+    than a fix - but a cache committed once would quietly invent reuse.
+    """
+    for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
+        if ".terraform" not in path.parts:
+            yield path
+
+
+def _read_text(path) -> str:
+    """File contents, or "" if it cannot be read. One unreadable file is not worth
+    abandoning an estate scan for."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
+    """(consumer repo, provider repo) -> the files declaring it, sorted."""
+    found: dict[tuple[str, str], set[str]] = {}
+    for clone in clones:
+        for path in _own_terraform_files(clone):
+            for provider in terraform_references(_read_text(path)):
+                if provider == clone.name:
+                    continue  # a repository referencing itself is not reuse
+                found.setdefault((clone.name, provider), set()).add(str(path.relative_to(clone)))
+    return {pair: sorted(files) for pair, files in found.items()}
+
+
+def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
+    """Module nodes and consumer edges from Terraform sources.
+
+    Returns (modules, consumer pairs, edges). The evidence cap is per
+    (consumer, provider) pair, which is what MAX_EVIDENCE_FILES means everywhere
+    else in this module. Capping per provider instead drops whole consuming
+    repositories rather than surplus evidence for one: on a 361-repository estate
+    that lost 290 of 388 relationships, and alphabetically, so the survivors
+    looked like a complete answer.
+    """
+    # One pass over the representatives, not one per pair: a large graph has
+    # hundreds of thousands of them and there are hundreds of pairs.
+    anchors: dict[str, str] = {}
+    for (node_repo, _), node_id in _representatives(graph).items():
+        current = anchors.get(node_repo)
+        if current is None or node_id < current:
+            anchors[node_repo] = node_id
+    estate = {clone.name for clone in clones}
+    existing = {n["id"] for n in graph["nodes"]}
+    references = _module_references(clones)
+
+    edges = 0
+    capped = 0
+    for (consumer_repo, provider), files in sorted(references.items()):
+        node_id = f"{provider}::module"
+        if node_id not in existing:
+            graph["nodes"].append(_module_node(provider, provider in estate))
+            existing.add(node_id)
+        anchor = anchors.get(consumer_repo)
+        if not anchor:
+            continue
+        if len(files) > MAX_EVIDENCE_FILES:
+            capped += len(files) - MAX_EVIDENCE_FILES
+        for rel in files[:MAX_EVIDENCE_FILES]:
+            graph["links"].append(_edge(anchor, node_id, "USES_MODULE", rel))
+            edges += 1
+    if capped:
+        print(
+            f"  ({capped} further declaring files not carried as edges, {MAX_EVIDENCE_FILES} per pair)"
+        )
+    providers = {pair[1] for pair in references}
+    return len(providers), len(references), edges, len(providers - estate)
 
 
 def _package_node(name: str, provider_repo: str, manifest_rel: str) -> dict:
@@ -211,6 +348,7 @@ def main() -> int:
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
+    module_count, module_pairs, module_edges, module_external = _add_module_layer(graph, clones)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -222,6 +360,15 @@ def main() -> int:
         f"({len(providers)} named in total), {consumer_pairs} consumer relationships, "
         f"{edges} edges added"
     )
+    print(
+        f"Terraform modules: {module_count} referenced across repositories, "
+        f"{module_pairs} consumer relationships, {module_edges} edges added"
+    )
+    if module_external:
+        print(
+            f"  ({module_external} of them are not repositories this estate holds - "
+            "recorded as references, not as estate members)"
+        )
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
     return 0
 
