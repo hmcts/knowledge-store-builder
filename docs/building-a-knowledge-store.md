@@ -35,9 +35,18 @@ easiest to get quietly wrong.
 
 **Three ways to select repositories, in ascending order of reliability:**
 
-- **By naming convention** (`prefix service-`) — cheap and stable where a
+- **By naming convention** (`prefix service-`, or `match *-shared-infrastructure`
+  where the distinguishing part sits at the end) — cheap and stable where a
   convention is enforced. It silently misses anything renamed or predating the
   convention, so pair it with explicit `repo` lines for the strays.
+
+  `prefix cpp-` and `match cpp-*` are the same selection: use `prefix` for the
+  common case, `match` where a prefix cannot reach. There is deliberately no
+  `suffix` rule, because a glob already covers it — and one estate needed **55
+  explicit `repo` lines** for a `{product}-shared-infrastructure` convention
+  before this existed. A glob of nothing but wildcards (`match *`) is refused: it
+  would select a whole organisation from one character, and the result would look
+  every bit as deliberate as an estate somebody chose.
 - **By ownership** (`team <slug>`) — the right tool when a team's repositories
   follow no convention at all, which is normal for newer or exploratory teams.
   It also tracks reality: repositories the team acquires appear at the next
