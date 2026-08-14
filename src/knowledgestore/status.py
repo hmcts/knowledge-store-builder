@@ -209,6 +209,65 @@ def _report_drift(recorded: dict) -> None:
     # explained why, so nothing more to print here.
 
 
+# One reporter per check, rather than one main() that accretes a block per
+# check. main() is then the running order, which is the thing worth reading at
+# a glance - and each report is reachable from a test without driving the CLI.
+def _report_unsynced(recorded: dict) -> None:
+    external_recorded = provenance.read_external()
+    for manifest, have, label in (
+        (config.REPOSITORIES_CONFIG, recorded, "repositories"),
+        (config.EXTERNAL_CONFIG, external_recorded, "fetch-only repositories"),
+    ):
+        pending = unsynced(manifest, have)
+        if pending:
+            shown = ", ".join(pending[:5]) + (
+                f" and {len(pending) - 5} more" if len(pending) > 5 else ""
+            )
+            print(
+                f"Declared but never synced: {len(pending)} of {len(have) + len(pending)} "
+                f"{label} - {shown}. Run `knowledgestore sync`."
+            )
+
+
+def _report_intent(recorded: dict) -> None:
+    intent = intent_coverage(recorded)
+    if intent["estate"]:
+        share = 100 * intent["mined"] // intent["estate"]
+        line = f"Intent index: {intent['mined']}/{intent['estate']} repositories mined ({share}%)"
+        # Partial coverage is normal - history export is expensive and some
+        # estates mine a subset deliberately. Silence about it is not: an answer
+        # of "no tickets" from an unmined repository looks identical to one from
+        # a repository with no tickets.
+        print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
+    elif intent["mined"]:
+        print(f"Intent index: {intent['mined']} repositories mined")
+
+
+def _report_citations() -> None:
+    cites = corpus_citations(config.ROOT)
+    if cites["dangling"]:
+        print(f"Dangling corpus citations ({len(cites['dangling'])}):")
+        for path in cites["dangling"][:10]:
+            print(f"  - {path}")
+    elif cites["checked"]:
+        print(f"Corpus citations: {cites['checked']} checked, none dangling")
+    else:
+        # "0 checked, none dangling" paired a measurement of nothing with a clean
+        # verdict, and read as a pass. Nothing checked is not the same as nothing wrong.
+        print("Corpus citations: none checked - no committed prose cites the corpus yet")
+
+
+def _report_freshness() -> None:
+    fresh = artefact_freshness()
+    if fresh.get("explorer_stale"):
+        print(
+            "Explorer page is OLDER than a layer it embeds - "
+            "run `knowledgestore explorer` and commit the rebuilt page"
+        )
+    elif fresh:
+        print("Explorer page is newer than every embedded layer")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -235,53 +294,13 @@ def main(argv=None) -> int:
         f"{cov['topics_configured']} topics configured"
     )
 
-    external_recorded = provenance.read_external()
-    for manifest, have, label in (
-        (config.REPOSITORIES_CONFIG, recorded, "repositories"),
-        (config.EXTERNAL_CONFIG, external_recorded, "fetch-only repositories"),
-    ):
-        pending = unsynced(manifest, have)
-        if pending:
-            shown = ", ".join(pending[:5]) + (
-                f" and {len(pending) - 5} more" if len(pending) > 5 else ""
-            )
-            print(
-                f"Declared but never synced: {len(pending)} of {len(have) + len(pending)} "
-                f"{label} - {shown}. Run `knowledgestore sync`."
-            )
+    _report_unsynced(recorded)
 
-    intent = intent_coverage(recorded)
-    if intent["estate"]:
-        share = 100 * intent["mined"] // intent["estate"]
-        line = f"Intent index: {intent['mined']}/{intent['estate']} repositories mined ({share}%)"
-        # Partial coverage is normal - history export is expensive and some
-        # estates mine a subset deliberately. Silence about it is not: an answer
-        # of "no tickets" from an unmined repository looks identical to one from
-        # a repository with no tickets.
-        print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
-    elif intent["mined"]:
-        print(f"Intent index: {intent['mined']} repositories mined")
+    _report_intent(recorded)
 
-    cites = corpus_citations(config.ROOT)
-    if cites["dangling"]:
-        print(f"Dangling corpus citations ({len(cites['dangling'])}):")
-        for path in cites["dangling"][:10]:
-            print(f"  - {path}")
-    elif cites["checked"]:
-        print(f"Corpus citations: {cites['checked']} checked, none dangling")
-    else:
-        # "0 checked, none dangling" paired a measurement of nothing with a clean
-        # verdict, and read as a pass. Nothing checked is not the same as nothing wrong.
-        print("Corpus citations: none checked - no committed prose cites the corpus yet")
+    _report_citations()
 
-    fresh = artefact_freshness()
-    if fresh.get("explorer_stale"):
-        print(
-            "Explorer page is OLDER than a layer it embeds - "
-            "run `knowledgestore explorer` and commit the rebuilt page"
-        )
-    elif fresh:
-        print("Explorer page is newer than every embedded layer")
+    _report_freshness()
 
     if arguments.drift:
         _report_drift(recorded)
