@@ -30,6 +30,10 @@ semantic = ["fastembed>=0.4", "numpy>=1.24"]
 # Only the deployments stage parses YAML. It stays optional so the default
 # install keeps its empty runtime dependency list.
 deploy = ["PyYAML>=6"]
+# Only the convert stage reads Office formats. Optional because an estate with
+# no Office documents should not carry the dependency, and one with them should
+# make the choice deliberately.
+documents = ["markitdown>=0.0.1"]
 # Lint, format and type-check tooling, pinned to what CI runs.
 dev = ["ruff==0.16.2", "pyright==1.1.411"]
 
