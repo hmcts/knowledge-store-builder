@@ -28,6 +28,7 @@ wrong answer first time:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -159,6 +160,42 @@ class DocumentedIgnorePlacementTest(unittest.TestCase):
             2,
             "if graphify now honours the ignore file for a relative target, the "
             "documented sharp edge is fixed and the guide should say so",
+        )
+
+
+@needs_graphify
+class ExtractionCacheRetainsContentTest(unittest.TestCase):
+    """Extracted content outlives the graph it was extracted into.
+
+    `docs/building-a-knowledge-store.md` tells operators to exclude
+    secret-bearing files *before* extraction, on the grounds that filtering them
+    out of the published graph afterwards does not reach the extraction cache.
+    That is a claim about a third-party package's on-disk behaviour, so it is
+    asserted here rather than described - if graphify stops caching, or caches
+    without the content, the advice needs rewriting rather than keeping.
+    """
+
+    def test_the_cache_holds_the_extracted_content_after_a_build(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        (root / "src").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "src" / "secret_shaped.py").write_text(
+            "def connect():\n    return 'value-from-the-file'\n", encoding="utf-8"
+        )
+
+        from graphify.extract import collect_files, extract
+
+        extract(collect_files(root), cache_root=root)
+
+        cached = list((root / "graphify-out" / "cache").rglob("*.json"))
+        self.assertTrue(cached, "no extraction cache was written; the guide's premise is stale")
+        payloads = [json.loads(path.read_text(encoding="utf-8")) for path in cached]
+        self.assertTrue(
+            any(isinstance(p, dict) and p.get("nodes") for p in payloads),
+            "the cache exists but holds no extracted nodes - filtering the graph would "
+            "then be sufficient, and the guide should say so",
         )
 
 

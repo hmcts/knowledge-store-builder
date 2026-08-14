@@ -34,6 +34,13 @@ def run_git(arguments: list[str]) -> str:
     return completed.stdout
 
 
+# The clean that ends every sync, named so a test can run the real thing rather
+# than a copy of it. Its two consequences are opposite and both documented: a
+# repository-root .graphifyignore is destroyed, and graphify-out/ - alone - is
+# preserved, which is why anything extracted once is durable.
+CLEAN_ARGS = ("clean", "-fd", "-e", "graphify-out")
+
+
 def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git) -> int:
     """Clone (if absent) then hard-sync one repository to its remote default
     branch. Returns the repository's total commit count."""
@@ -69,7 +76,7 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
     git("reset", "--hard", f"origin/{repo.default_branch}")
     # -e graphify-out: the per-repo graph lives untracked inside the clone;
     # cleaning it forces a full (expensive) re-extraction on every sync.
-    git("clean", "-fd", "-e", "graphify-out")
+    git(*CLEAN_ARGS)
     return int(git("rev-list", "--all", "--count").strip())
 
 

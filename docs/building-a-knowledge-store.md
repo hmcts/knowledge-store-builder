@@ -207,6 +207,18 @@ from the estate, record the finding with its location — never its value — an
 say what has to change before it returns. On that estate this caught a
 hardcoded database credential that had been in a file since 2019.
 
+**A rewrite that lands on a real file cannot be caught by checking that files
+are real.** A store normalising committed paths ran a rewrite that resolved
+symlinks as a side effect, so two entries changed identity while keeping a
+plausible shape. Every check anyone would naturally run still passed: the counts
+were unchanged and every resulting path existed on disk. Existence is the wrong
+question — the right one is whether these are the *same* paths, which needs an
+independently written earlier witness to compare against. The same shape has now
+produced a dead file-to-ticket join, fused dispatch tokens counted as valid work,
+and a corrupted corpus inventory that a twelve-check suite passed 12/12. If you
+build one verification primitive, make it "compare against a witness written
+before the change", not "validate the result".
+
 **An idempotency check must cover everything the step is responsible for, not
 only what it originally wrote.** A store repairing a graph attribute guarded its
 repair with "if the node already has the right value, skip" — measured against a
@@ -253,6 +265,35 @@ namespacing. Extract per repository and the exclusion has to live inside the
 cloned corpus, where the next `sync` may remove it. There is no comfortable
 answer yet; know which trade you are making rather than discovering it in the
 graph.
+
+**Exclusion is also the one thing a store loses by moving to the per-repository
+route, and it loses it silently.** That route does no vendor skipping, so
+committed dependency bundles come straight back into the graph: on one estate
+6,116 nodes of vendored package-manager releases returned from **two files**,
+**35.8% of the whole AST layer**. Nothing announces it, because the result looks
+like a graph working hard rather than a graph full of a package manager — the
+god nodes are named `c()` and `push()`. Exclude vendored trees *before*
+extraction rather than filtering after it, which also keeps the corpus inventory
+from claiming the estate covers a package manager. The same argument applies with more force to anything secret-bearing — a
+Terraform state file holds resolved secret values — and there "filter it out
+afterwards" is not merely untidy, it does not work. **Extract a file once and
+its derived content persists in two places later filtering never touches:**
+
+- `graphify-out/cache/ast/<version>/<sha256>.json`, the extraction cache, keyed
+  by content hash. Removing nodes from the published graph does not invalidate
+  it, and the next build replays from it.
+- each clone's own `graphify-out/graph.json` — and this is the sharp one,
+  because `sync` ends with `git clean -fd -e graphify-out`, making
+  `graphify-out/` **the one directory in a clone that sync deliberately
+  preserves**. The exemption exists for a good reason (cleaning it forces a full
+  re-extraction), but its effect is that anything extracted once is durable by
+  design.
+
+So exclude before extraction, not after. Note also that vendored code is not
+reliably *under* a vendored directory: one estate's exclusion appeared to work —
+`.yarn/` and `node_modules/` residue went to zero — while 1,914 nodes came from
+`.pnp.cjs`, a generated loader sitting at the repository root, which every
+directory-shaped pattern missed and which reads as authored code.
 
 **A `.graphifyignore` inside a cloned repository does not survive `sync`.** The
 sync stage ends with `git clean -fd -e graphify-out`, which deletes untracked
