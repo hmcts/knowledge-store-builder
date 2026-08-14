@@ -499,6 +499,7 @@ class CliTest(SettingsIsolated):
             [
                 "discover",
                 "sync",
+                "convert",
                 "export-history",
                 "context",
                 "intent",

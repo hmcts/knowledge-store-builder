@@ -35,6 +35,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "list the estate's repositories from GitHub into config/repositories.txt",
     ),
     "sync": ("sync_repositories", "clone or update every configured repository into repositories/"),
+    "convert": (
+        "convert_documents",
+        "convert Office documents to Markdown so extraction can read them",
+    ),
     "export-history": ("export_git_history", "export per-repository commit history datasets"),
     "context": (
         "build_knowledge_context",
