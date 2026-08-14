@@ -76,6 +76,29 @@ def intent_coverage(recorded: dict) -> dict:
     return {"mined": len(mined), "estate": len(recorded)}
 
 
+def unsynced(manifest: Path, recorded: dict) -> list[str]:
+    """Repositories a manifest declares that provenance does not record.
+
+    A manifest is intent; provenance is what actually reached disk. Nothing
+    compared them, so a repository could be declared, committed, and never
+    cloned - which is exactly what happened to a fetch-only entry added in the
+    same commit as its neighbour. `sync` was not re-run, `sync` had nothing to
+    complain about, and every later run reported success over an estate one
+    repository short of its own configuration.
+
+    Absent manifest means nothing declared, which is normal for `external`.
+    """
+    if not manifest.is_file():
+        return []
+    from .export_git_history import read_repository_config
+
+    try:
+        declared = [repo.name for repo in read_repository_config(manifest)]
+    except (OSError, ValueError):
+        return []
+    return sorted(name for name in declared if name not in recorded)
+
+
 def corpus_citations(root: Path) -> dict:
     corpus = io.read_json_dict(root / "graphify-out" / "graph-knowledge-corpus.json")
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
@@ -211,6 +234,21 @@ def main(argv=None) -> int:
         f"Topic briefs: {cov['briefs_written']} written, "
         f"{cov['topics_configured']} topics configured"
     )
+
+    external_recorded = provenance.read_external()
+    for manifest, have, label in (
+        (config.REPOSITORIES_CONFIG, recorded, "repositories"),
+        (config.EXTERNAL_CONFIG, external_recorded, "fetch-only repositories"),
+    ):
+        pending = unsynced(manifest, have)
+        if pending:
+            shown = ", ".join(pending[:5]) + (
+                f" and {len(pending) - 5} more" if len(pending) > 5 else ""
+            )
+            print(
+                f"Declared but never synced: {len(pending)} of {len(have) + len(pending)} "
+                f"{label} - {shown}. Run `knowledgestore sync`."
+            )
 
     intent = intent_coverage(recorded)
     if intent["estate"]:
