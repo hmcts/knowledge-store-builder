@@ -64,6 +64,14 @@ class MissingExtractorTest(SettingsIsolated):
         by_extra = {g["extra"]: g["files"] for g in gaps}
         self.assertEqual(by_extra, {"terraform": 1, "sql": 2})
 
+    def test_symlinks_are_not_counted_twice(self):
+        """A symlink's target is almost always already in the corpus, so counting
+        both reports one file as two. On a real estate that turned 260 into 320."""
+        self._without("tree_sitter_hcl")
+        root = self._corpus(["a/real.tf"])
+        (root / "a" / "link.tf").symlink_to(root / "a" / "real.tf")
+        self.assertEqual(status.missing_extractors(root)[0]["files"], 1)
+
     def test_git_metadata_is_not_counted(self):
         """A corpus clone's own history is not estate content."""
         self._without("tree_sitter_sql")

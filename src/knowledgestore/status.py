@@ -107,7 +107,14 @@ def missing_extractors(corpus: Path) -> list[dict]:
             continue
         count = 0
         for suffix in suffixes:
-            count += sum(1 for _ in corpus.rglob(f"*.{suffix}") if ".git" not in _.parts)
+            count += sum(
+                1
+                for path in corpus.rglob(f"*.{suffix}")
+                # Regular files only. A symlink's target is almost always already
+                # in the corpus, so counting both reports one file as two - it
+                # inflated a real estate's Terraform count from 260 to 320.
+                if ".git" not in path.parts and path.is_file() and not path.is_symlink()
+            )
         if count:
             missing.append({"files": count, "extra": extra, "suffixes": suffixes})
     return missing
