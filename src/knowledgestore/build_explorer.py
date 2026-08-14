@@ -207,6 +207,27 @@ def node_tickets(node: dict, kind: str, intent: dict) -> list[str]:
     return list(entry["tickets"].keys())[:MAX_TICKETS] if entry else []
 
 
+def join_by_layer(kept: list, entries: list, intent: dict) -> dict:
+    """Per-layer `(joined, candidates)`, counted only in indexed repositories.
+
+    The restriction is the same both-sides-populated condition the whole-graph
+    check has, and without it this cries wolf: a layer whose repository is not
+    mined at all joins zero legitimately - 2,115 `meta-arch` nodes on one estate -
+    and that is sparsity rather than a key mismatch.
+    """
+    counts: dict[str, list[int]] = {}
+    for (_, node, kind), entry in zip(kept, entries, strict=True):
+        if kind in (kinds.FEATURE, kinds.SCENARIO, kinds.TICKET):
+            continue
+        if not node.get("source_file") or (node.get("repo") or "") not in intent:
+            continue
+        layer = counts.setdefault(node.get("_origin") or "semantic", [0, 0])
+        layer[1] += 1
+        if entry[7]:
+            layer[0] += 1
+    return {name: (joined, total) for name, (joined, total) in counts.items()}
+
+
 def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
     """Return (entries, edge index pairs) restricted to non-noise nodes."""
     # The join in node_tickets is keyed on `repo`, so without it every lookup
@@ -249,6 +270,17 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
         ]
         for node_id, node, kind in kept
     ]
+    # Cardinality, not existence. Shape, schema and freshness all pass on a join
+    # that matches nothing - only counting the matches says otherwise, and on one
+    # store this produced zero across 70,655 nodes with the build still green.
+    io.report_join_cardinality(
+        joined=sum(1 for entry in entries if entry[7]),
+        candidates=sum(
+            1 for _, node, kind in kept if kind not in (kinds.FEATURE, kinds.SCENARIO, kinds.TICKET)
+        ),
+        index_size=len(intent),
+        by_layer=join_by_layer(kept, entries, intent),
+    )
     return entries, kept_edges(kept, adjacency, index_of)
 
 
