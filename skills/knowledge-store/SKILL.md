@@ -119,7 +119,14 @@ repository, degree ranking, community sizes.
 
 ### Interpretation rules
 
-- Every node carries `repo`. **Always say which repository a finding is in.**
+- **Always say which repository a finding is in.** Usually that is the node's
+  `repo` attribute — but check rather than assume it is there. A store whose
+  graph was built by concatenating per-repository extractions instead of going
+  through `merge-graphs` may carry the repository under another name, or not at
+  all, and every consumer that reads `repo` then silently attributes findings to
+  nothing. One store carried it as `repository` on all of its nodes and `repo` on
+  none. Confirm with `graphify-out/graph.json` before relying on it, and fall
+  back to the leading path component of `source_file`.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.

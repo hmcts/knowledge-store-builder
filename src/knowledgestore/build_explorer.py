@@ -209,6 +209,14 @@ def node_tickets(node: dict, kind: str, intent: dict) -> list[str]:
 
 def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
     """Return (entries, edge index pairs) restricted to non-noise nodes."""
+    # The join in node_tickets is keyed on `repo`, so without it every lookup
+    # misses and the page ships with no ticket evidence at all - which reads as
+    # an estate whose files no ticket ever touched.
+    io.warn_if_no_repo_attribute(
+        graph["nodes"],
+        "The file-to-ticket join is keyed on it, so the page will show no ticket "
+        "evidence for any file, and every repository column will be blank.",
+    )
     nodes = {n["id"]: n for n in graph["nodes"]}
     adjacency: dict[str, set] = defaultdict(set)
     degree: dict[str, int] = defaultdict(int)

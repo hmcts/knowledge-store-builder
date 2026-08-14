@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import gzip
 import json
+import sys
 from io import TextIOWrapper
 from pathlib import Path
 
@@ -88,6 +89,37 @@ def load_graph(path: Path) -> dict:
     """The estate graph (node-link JSON). Raises if absent - callers treat a
     missing graph as a hard error with their own message."""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:
+    """Warn, once and loudly, when no node carries `repo`. True when none does.
+
+    Nine modules read this attribute, almost all as `.get("repo", "")`, so a
+    graph built without it degrades silently rather than failing: digests get one
+    repository called "", per-repository bundles come out empty, and the
+    file-to-ticket join matches nothing. Every one of those looks like a thin
+    estate rather than a broken precondition.
+
+    It goes missing on a real route, not a hypothetical one. `merge-graphs`
+    stamps the attribute; a store that extracts per repository and concatenates
+    instead has to reimplement that, and one such store set `repository` on all
+    70,655 of its nodes and `repo` on none. The bypass is the same root as the
+    node-id collisions in issue #115 - whatever skips `merge-graphs` inherits
+    responsibility for what `merge-graphs` did, and reimplementation drifts.
+
+    `consequence` says what this particular caller will produce anyway, because
+    "attribute missing" alone does not tell an operator what they are about to
+    ship.
+    """
+    if not nodes or any(node.get("repo") for node in nodes):
+        return False
+    print(
+        f"WARNING: no node carries a `repo` attribute. {consequence} "
+        "A graph built by concatenating per-repository extractions must stamp it "
+        "the way `merge-graphs` does.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def load_labels(path: Path) -> dict:
