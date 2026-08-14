@@ -53,6 +53,18 @@ E2E_REPOS = config.E2E_REPOS
 PACKAGE = "knowledgestore"
 
 
+def status_layers() -> tuple[str, ...]:
+    """The committed layers this page embeds, as store-relative paths.
+
+    Shared with `status` so the page records digests for exactly what `status`
+    later re-hashes; two lists that could drift would make a mismatch mean
+    nothing.
+    """
+    from .status import EMBEDDED_LAYERS
+
+    return EMBEDDED_LAYERS
+
+
 def latest_synced(recorded: dict[str, dict]) -> str:
     """Return the YYYY-MM-DD date of the chronologically latest committed entry.
 
@@ -517,6 +529,14 @@ def main() -> int:
     # Sonar S2083 misfires here: config.EXPLORER_PATH is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
     config.EXPLORER_PATH.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
+    # Record what this page was built from, by content. Commit dates cannot
+    # answer that question - the ordinary workflow commits a regenerated layer
+    # and the page together, so their dates match whether or not the page was
+    # rebuilt - and `status` compares these digests instead.
+    io.write_json(
+        config.EXPLORER_INPUTS_PATH,
+        io.layer_digests([config.ROOT / layer for layer in status_layers()], config.ROOT),
+    )
     # Bytes as well as megabytes: a change to the page's own code or to what it
     # embeds moves the size by kilobytes, which one decimal place of a megabyte
     # cannot show, and the growth is what a store's clone cost is measured in.
