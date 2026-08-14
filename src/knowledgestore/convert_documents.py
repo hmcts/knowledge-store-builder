@@ -102,7 +102,7 @@ def convert(source: Path, converter) -> bool:
     return True
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     try:
         from markitdown import MarkItDown
     except ImportError:
