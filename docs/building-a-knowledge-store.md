@@ -257,6 +257,18 @@ cloned corpus, where the next `sync` may remove it. There is no comfortable
 answer yet; know which trade you are making rather than discovering it in the
 graph.
 
+**Exclusion is also the one thing a store loses by moving to the per-repository
+route, and it loses it silently.** That route does no vendor skipping, so
+committed dependency bundles come straight back into the graph: on one estate
+6,116 nodes of vendored package-manager releases returned from **two files**,
+**35.8% of the whole AST layer**. Nothing announces it, because the result looks
+like a graph working hard rather than a graph full of a package manager — the
+god nodes are named `c()` and `push()`. Exclude vendored trees *before*
+extraction rather than filtering after it, which also keeps the corpus inventory
+from claiming the estate covers a package manager. The same argument applies
+with more force to state files such as `.tfstate`: they hold resolved secret
+values, so filtering them out after extraction is already too late.
+
 One further trap: pass extraction an **absolute** path. Given a relative one,
 `.graphifyignore` is silently not applied — the scan simply returns everything,
 with no error.
