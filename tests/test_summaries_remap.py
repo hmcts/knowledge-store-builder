@@ -13,7 +13,9 @@ an empty remap, and a stale snapshot silently dropped everything.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
+import io
 import json
 import sys
 import tempfile
@@ -324,6 +326,139 @@ class RemapCliTest(RemapTest):
 
     def test_an_unknown_sub_command_fails_rather_than_silently_doing_nothing(self):
         self.assertEqual(summaries.main(["remapp"]), 1)
+
+
+class RemapRefusalTest(unittest.TestCase):
+    """The refusals, tested apart from how they are reported.
+
+    Each of these produces a plausible-looking 0% retention rather than an
+    error, which is why they are refusals. Extracting them from `remap` is only
+    worth anything if the reason is checkable without a store on disk, a graph
+    file, or captured stdout - so these call the function directly and assert on
+    the returned message.
+    """
+
+    OK = dict(
+        summaries={"1": "prose"},
+        nodes=[{"id": "a", "community": 1}],
+        new_community={"a": "1"},
+        old_members={"1": ["a"]},
+        floor=1,
+        coverage=0.5,
+    )
+
+    def _refusal(self, **overrides):
+        return summaries._remap_refusal(**{**self.OK, **overrides})
+
+    def test_a_healthy_remap_is_not_refused(self):
+        self.assertIsNone(self._refusal())
+
+    def test_it_returns_the_reason_rather_than_printing_it(self):
+        """The point of the extraction: reason and reporting are separable."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            message = self._refusal(floor=99)
+        self.assertEqual(out.getvalue(), "", "the caller decides where a refusal is printed")
+        self.assertIn("99", message)
+
+    def test_too_few_summaries_names_the_count_and_the_floor(self):
+        message = self._refusal(floor=10)
+        self.assertIn("only 1 summaries", message)
+        self.assertIn("floor 10", message)
+
+    def test_an_unclustered_graph_is_refused_with_its_coverage(self):
+        message = self._refusal(
+            nodes=[{"id": "a", "community": 1}, {"id": "b"}, {"id": "c"}, {"id": "d"}],
+            coverage=0.5,
+        )
+        self.assertIn("1 of 4", message)
+        self.assertIn("25.0%", message)
+
+    def test_coverage_counts_nodes_not_distinct_ids(self):
+        """A merged graph repeats ids; collapsing them understates coverage
+        enough to refuse a healthy graph."""
+        repeated = [{"id": "a", "community": 1} for _ in range(4)]
+        self.assertIsNone(self._refusal(nodes=repeated, coverage=0.9))
+
+    def test_an_empty_graph_does_not_divide_by_zero(self):
+        """Isolated from the snapshot guard, which an empty graph trips first
+        whenever the snapshot is not also empty."""
+        self.assertIsNone(self._refusal(nodes=[], new_community={}, old_members={}, coverage=0.9))
+
+    def test_an_empty_graph_against_a_real_snapshot_is_the_wrong_snapshot(self):
+        """Not a coverage failure - there is nothing to have coverage of. The
+        useful thing to say is that these two files do not belong together."""
+        self.assertIn("wrong snapshot", self._refusal(nodes=[], new_community={}, coverage=0.9))
+
+    def test_a_snapshot_sharing_no_node_ids_is_refused_as_the_wrong_snapshot(self):
+        message = self._refusal(old_members={"1": ["nowhere"]})
+        self.assertIn("wrong snapshot", message)
+
+    def test_an_empty_snapshot_is_not_treated_as_the_wrong_one(self):
+        """Nothing to intersect is not evidence of a mismatch."""
+        self.assertIsNone(self._refusal(old_members={}))
+
+
+class ClaimTargetsTest(unittest.TestCase):
+    """Pass 1: each summary's best new cluster, and the three ways one is lost."""
+
+    def _claim(self, summaries_in, old_members, new_community, bar=0.6):
+        return summaries._claim_targets(summaries_in, old_members, new_community, bar)
+
+    def test_a_dominant_target_is_claimed_with_its_share(self):
+        claims, displaced, below, gone = self._claim(
+            {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9", "c": "8"}
+        )
+        self.assertEqual(claims, {"1": ("9", 2 / 3)})
+        self.assertEqual((displaced, below, gone), ({}, [], []))
+
+    def test_a_share_below_the_bar_is_displaced_with_the_target_it_missed(self):
+        claims, displaced, below, gone = self._claim(
+            {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "8", "c": "7"}
+        )
+        self.assertEqual(claims, {})
+        self.assertEqual(below, ["1"])
+        self.assertEqual(displaced["1"]["reason"], "below-bar")
+        self.assertEqual(
+            displaced["1"]["best_target"],
+            "9",
+            "the near miss is the raw material for a backfill, so it must be recorded",
+        )
+
+    def test_a_summary_with_no_snapshot_entry_is_members_gone(self):
+        _, displaced, _, gone = self._claim({"1": "prose"}, {}, {"a": "9"})
+        self.assertEqual(gone, ["1"])
+        self.assertEqual(displaced["1"]["reason"], "members-gone")
+        self.assertIsNone(displaced["1"]["best_target"])
+
+    def test_members_that_no_longer_carry_a_community_are_members_gone(self):
+        """A distinct branch from an absent snapshot entry: the members are
+        known, but none of them landed anywhere in the new graph."""
+        _, displaced, _, gone = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
+        self.assertEqual(gone, ["1"])
+        self.assertEqual(displaced["1"]["reason"], "members-gone")
+
+    def test_the_share_is_measured_against_the_old_cluster_only(self):
+        """This is #127 in one assertion. The share divides by the old
+        membership, so it reports how much of the OLD cluster stayed together
+        and says nothing about how much of the NEW cluster it now describes -
+        here, one member of a cluster of ten. Pinning it so a fix has to change
+        the test deliberately rather than by accident.
+        """
+        claims, _, _, _ = self._claim(
+            {"1": "prose"},
+            {"1": ["a"]},
+            {"a": "9", **{f"other{i}": "9" for i in range(9)}},
+        )
+        self.assertEqual(claims["1"], ("9", 1.0), "1.0 despite describing a tenth of the cluster")
+
+    def test_ordering_is_deterministic_for_a_stable_tiebreak(self):
+        claims, _, _, _ = self._claim(
+            {"10": "a", "9": "b", "2": "c"},
+            {"10": ["x"], "9": ["y"], "2": ["z"]},
+            {"x": "1", "y": "2", "z": "3"},
+        )
+        self.assertEqual(list(claims), ["2", "9", "10"])
 
 
 if __name__ == "__main__":
