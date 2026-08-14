@@ -161,35 +161,60 @@ def extractable_suffixes() -> set[str] | None:
 
 
 def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
-    """Symlinked corpus files that extraction will emit twice.
+    """Symlinked corpus files, split by what extraction will actually do to them.
 
-    graphify's CLI records `source_file` from the path it walked, not from the
-    link target, so a symlink and its target become two sets of nodes with the
-    same content under different paths. On an estate asked about duplication that
-    is a wrong answer rather than a noisy one - a shared parent resource appears
-    once per directory that links to it.
+    Extraction records the path it walked, not the link target, and that has two
+    different consequences which a single count conflates:
 
-    Latent until the relevant extractor is installed: a suffix nothing can parse
-    yields nothing, twice. The check is therefore most useful between installing
-    an extra and rebuilding, rather than at rebuild time.
+    - **duplication** - the target is collected too, so the same content becomes
+      two sets of nodes under two paths. It inflates counts and, where anything
+      consolidates by label, manufactures a hub that does not exist.
+    - **misattribution** - the target is not collected, so nothing is duplicated,
+      but the graph asserts the content lives at a path that is a link and knows
+      nothing about the real file. Quieter, and worse to answer questions from:
+      "where is this declared?" returns the link, and asking about the real file
+      returns nothing at all.
 
-    `suffixes` defaults to graphify's own table and is a parameter so that
-    scanning can be tested without the optional dependency present.
+    On one estate a flat count reported 13 and implied 13 problems, when the
+    honest report was 2 nodes duplicated and 57 misattributed - the misattribution
+    being the larger effect, and not the one the check is named after.
+
+    This is a **prediction from the corpus, not a measurement of a built graph**,
+    because `status` must stay cheap enough to run before a rebuild and so must
+    not load the graph. A target can exist on disk and still never reach the
+    graph - excluded by a filter, or dropped by an extractor - which would turn a
+    predicted duplication into a real misattribution. The exact split needs the
+    node counts per `source_file`.
     """
     if suffixes is None:
         suffixes = extractable_suffixes()
     if suffixes is None:
         return {"checked": False}
-    if not corpus.is_dir():
-        return {"checked": True, "files": 0, "by_repo": {}}
-    by_repo: dict[str, int] = {}
-    for path in corpus.rglob("*"):
+    found: dict = {"checked": True, "duplicating": {}, "misattributing": {}, "broken": {}}
+    # Every exit goes through the same finaliser below. An earlier revision
+    # returned here directly and omitted the totals, so the reporter raised
+    # KeyError on any store without a corpus on disk.
+    root = corpus.resolve() if corpus.is_dir() else None
+    for path in corpus.rglob("*") if root else ():
         if ".git" in path.parts or not path.is_symlink():
             continue
-        if path.suffix.lower() in suffixes:
-            repo = path.relative_to(corpus).parts[0]
-            by_repo[repo] = by_repo.get(repo, 0) + 1
-    return {"checked": True, "files": sum(by_repo.values()), "by_repo": by_repo}
+        if path.suffix.lower() not in suffixes:
+            continue
+        repo = path.relative_to(corpus).parts[0]
+        try:
+            target = path.resolve(strict=True)
+        except (OSError, RuntimeError):
+            # A broken link yields nothing rather than a duplicate, but it is
+            # still a corpus defect and must not be counted as either outcome.
+            found["broken"][repo] = found["broken"].get(repo, 0) + 1
+            continue
+        collected = target.is_relative_to(root) and target.suffix.lower() in suffixes
+        bucket = "duplicating" if collected else "misattributing"
+        found[bucket][repo] = found[bucket].get(repo, 0) + 1
+    for key in ("duplicating", "misattributing", "broken"):
+        found[f"{key}_files"] = sum(found[key].values())
+    found["files"] = found["duplicating_files"] + found["misattributing_files"]
+    return found
 
 
 def corpus_citations(root: Path) -> dict:
@@ -354,20 +379,36 @@ def _report_symlinks() -> None:
             "types it would extract - and therefore which symlinks would be "
             "extracted twice - cannot be determined."
         )
-    elif links["files"]:
-        by_repo = sorted(links["by_repo"].items())
-        # One repository needs no per-repository breakdown - "60 in repo-a (60)"
-        # repeats itself. Several do, and then the total is what is missing.
-        where = (
-            by_repo[0][0]
-            if len(by_repo) == 1
-            else ", ".join(f"{repo} ({n})" for repo, n in by_repo)
-        )
+        return
+
+    def where(by_repo: dict) -> str:
+        # One repository needs no breakdown - "60 in repo-a (60)" repeats itself.
+        pairs = sorted(by_repo.items())
+        return pairs[0][0] if len(pairs) == 1 else ", ".join(f"{r} ({n})" for r, n in pairs)
+
+    if links["duplicating_files"]:
         print(
-            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
-            "path it walked, not the link target, so each is emitted twice under two paths "
-            "- which reads as duplication rather than as one file. Exclude them before a "
-            "rebuild."
+            f"Symlinked source files, target also extracted: {links['duplicating_files']} in "
+            f"{where(links['duplicating'])}. The same content is emitted twice under two "
+            "paths, which inflates counts and can manufacture a hub that does not exist."
+        )
+    if links["misattributing_files"]:
+        print(
+            f"Symlinked source files, target outside the corpus: "
+            f"{links['misattributing_files']} in {where(links['misattributing'])}. Nothing is "
+            "duplicated, but the content is recorded at a path that is a link and the real "
+            "file is absent - so asking about it returns nothing."
+        )
+    if links["broken_files"]:
+        print(
+            f"Broken symlinks: {links['broken_files']} in {where(links['broken'])}. "
+            "They resolve to nothing and contribute nothing."
+        )
+    if links["files"] or links["broken_files"]:
+        print(
+            "  Predicted from the corpus, not measured from a graph: a target can exist on "
+            "disk and still never reach the graph - excluded by a filter, or dropped by an "
+            "extractor - which turns a predicted duplication into a real misattribution."
         )
 
 

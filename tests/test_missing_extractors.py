@@ -125,7 +125,7 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         found = status.duplicating_symlinks(root, self.SUFFIXES)
         self.assertTrue(found["checked"])
         self.assertEqual(found["files"], 1)
-        self.assertEqual(found["by_repo"], {"repo-a": 1})
+        self.assertEqual(found["duplicating"], {"repo-a": 1})
 
     def _reported(self, by_repo: dict) -> str:
         """The symlink report for a given scan result.
@@ -137,13 +137,62 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         self.addCleanup(setattr, status, "duplicating_symlinks", status.duplicating_symlinks)
         status.duplicating_symlinks = lambda *a, **k: {
             "checked": True,
+            "duplicating": by_repo,
+            "misattributing": {},
+            "broken": {},
+            "duplicating_files": sum(by_repo.values()),
+            "misattributing_files": 0,
+            "broken_files": 0,
             "files": sum(by_repo.values()),
-            "by_repo": by_repo,
         }
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             status._report_symlinks()
         return out.getvalue()
+
+    def test_a_missing_corpus_still_reports_totals(self):
+        """Every exit must carry the totals the reporter reads. An earlier
+        revision returned early without them and raised KeyError on any store
+        with no corpus on disk - which the suite caught only with graphify
+        installed, since without it the check never gets this far."""
+        found = status.duplicating_symlinks(Path("/does/not/exist"), self.SUFFIXES)
+        for key in ("files", "duplicating_files", "misattributing_files", "broken_files"):
+            self.assertEqual(found[key], 0, key)
+
+    def test_a_target_inside_the_corpus_is_predicted_to_duplicate(self):
+        root = self._corpus("repo-a/main.tf", {"repo-a/stacks/main.tf": "repo-a/main.tf"})
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["duplicating"], {"repo-a": 1})
+        self.assertEqual(found["misattributing"], {})
+
+    def test_a_target_outside_the_corpus_is_misattribution_not_duplication(self):
+        """Nothing is duplicated, and that is the quieter, worse case: the graph
+        records content at a path that is a link, and the real file is absent."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        outside = Path(tmp.name) / "elsewhere.tf"
+        outside.write_text("x", encoding="utf-8")
+        root = self._corpus("repo-a/main.tf", {})
+        (root / "repo-a" / "linked.tf").symlink_to(outside)
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["misattributing"], {"repo-a": 1})
+        self.assertEqual(found["duplicating"], {})
+
+    def test_a_non_extractable_target_is_misattribution(self):
+        """The link has an extractable suffix, the target does not, so only the
+        link is read - the content is attributed to a path that is not the file."""
+        root = self._corpus(
+            "repo-a/notes.unknownext", {"repo-a/main.tf": "repo-a/notes.unknownext"}
+        )
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["misattributing"], {"repo-a": 1})
+
+    def test_a_broken_symlink_is_neither_outcome(self):
+        root = self._corpus("repo-a/main.tf", {})
+        (root / "repo-a" / "dangling.tf").symlink_to(root / "repo-a" / "gone.tf")
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["broken"], {"repo-a": 1})
+        self.assertEqual((found["duplicating"], found["misattributing"]), ({}, {}))
 
     def test_one_repository_is_reported_without_repeating_its_count(self):
         """A released version printed "60 in cpp-terraform-azurerm-idam (60)"."""
