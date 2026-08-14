@@ -63,29 +63,33 @@ def _is_executable_config(path: Path) -> bool:
     return isinstance(data, dict) and any(key in data for key in EXECUTABLE_KEYS)
 
 
+def _is_config_dir(path: Path) -> bool:
+    """A directory a harness loads wholesale, rather than one an agent opens."""
+    return any(str(path).endswith(name) for name in CONFIG_DIRS)
+
+
+def _classify(path: Path, rel: str, found: dict) -> None:
+    """Record one corpus path under whichever category it belongs to, if any."""
+    if path.is_dir():
+        if _is_config_dir(path):
+            found["config_dirs"].append(rel)
+    elif path.name in INSTRUCTION_FILES:
+        found["instructions"].setdefault(path.name, []).append(rel)
+    elif _is_executable_config(path):
+        found["executable"].append(rel)
+
+
 def scan(roots: list[Path]) -> dict:
     """Instruction files, config directories and executable settings under `roots`."""
-    instructions: dict[str, list[str]] = {}
-    config_dirs: list[str] = []
-    executable: list[str] = []
-
+    found: dict = {"instructions": {}, "config_dirs": [], "executable": []}
     for root in roots:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*")):
             if ".git" in path.parts:
                 continue
-            rel = str(path.relative_to(root.parent))
-            if path.is_dir():
-                if any(str(path).endswith(d) for d in CONFIG_DIRS):
-                    config_dirs.append(rel)
-                continue
-            if path.name in INSTRUCTION_FILES:
-                instructions.setdefault(path.name, []).append(rel)
-            if _is_executable_config(path):
-                executable.append(rel)
-
-    return {"instructions": instructions, "config_dirs": config_dirs, "executable": executable}
+            _classify(path, str(path.relative_to(root.parent)), found)
+    return found
 
 
 def main(argv: list[str] | None = None) -> int:
