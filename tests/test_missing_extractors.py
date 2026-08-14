@@ -127,7 +127,7 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         self.assertEqual(found["files"], 1)
         self.assertEqual(found["duplicating"], {"repo-a": 1})
 
-    def _reported(self, by_repo: dict) -> str:
+    def _reported(self, by_repo: dict, **extra) -> str:
         """The symlink report for a given scan result.
 
         Stubs the scan: the defect being pinned is in how the result is worded,
@@ -144,6 +144,10 @@ class DuplicatingSymlinkTest(SettingsIsolated):
             "misattributing_files": 0,
             "broken_files": 0,
             "files": sum(by_repo.values()),
+            "excluded": 0,
+            "targets": 0,
+            "exclusion_checked": True,
+            **extra,
         }
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -222,6 +226,39 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         """With more than one, the breakdown is the whole point."""
         text = self._reported({"repo-a": 40, "repo-b": 20})
         self.assertIn("60 in repo-a (40), repo-b (20).", text)
+
+    def test_an_excluded_symlink_is_not_reported_as_exposed(self):
+        """The check must be able to see its own mitigation.
+
+        Reported by an operator who had excluded all 60 and verified it in the
+        graph, and still got the identical message telling them to exclude them
+        before a rebuild. That is the inverse of a silent zero: a permanent
+        non-zero that has stopped carrying information, and it reads as
+        outstanding work forever.
+        """
+        root = self._corpus("repo-a/main.tf", {"repo-a/stacks/main.tf": "repo-a/main.tf"})
+        (root / "repo-a" / ".graphifyignore").write_text("stacks/\n", encoding="utf-8")
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        if not found["exclusion_checked"]:
+            self.skipTest("graphify's ignore helpers are unavailable")
+        self.assertEqual(found["excluded"], 1)
+        self.assertEqual(found["duplicating"], {})
+
+    def test_a_clean_estate_says_so_rather_than_going_quiet(self):
+        """Silence cannot be told apart from a check that stopped running."""
+        text = self._reported({}, excluded=60, files=0, duplicating_files=0)
+        self.assertIn("60 excluded", text)
+        self.assertIn("none exposed", text)
+
+    def test_unreadable_exclusions_are_admitted_not_assumed_absent(self):
+        text = self._reported({"repo-a": 1}, exclusion_checked=False)
+        self.assertIn("could not be read", text)
+
+    def test_the_report_names_distinct_targets_not_just_links(self):
+        """60 links to 12 targets is 12 files repeated six times, not 60 files
+        duplicated once - a different and more alarming shape."""
+        text = self._reported({"repo-a": 60}, targets=12)
+        self.assertIn("12 distinct target", text)
 
     def test_the_target_itself_is_not_counted(self):
         """Only the link duplicates; the real file was always going to be read."""

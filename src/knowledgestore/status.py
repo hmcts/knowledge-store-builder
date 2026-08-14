@@ -7,9 +7,11 @@ check reads the small tracked extract, not graph.json.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from . import config, io, provenance
@@ -160,6 +162,30 @@ def extractable_suffixes() -> set[str] | None:
     return {str(suffix).lower() for suffix in _DISPATCH}
 
 
+def _ignore_matcher(repo_root: Path):
+    """A predicate saying whether extraction would skip a path under `repo_root`.
+
+    Uses graphify's own `_load_graphifyignore` / `_is_ignored` - the same pair
+    `collect_files` uses - so this agrees with the extractor by construction
+    rather than by parallel reasoning about pattern syntax. Both names are
+    private; when they cannot be imported the caller is told it could not check
+    rather than being told nothing is excluded.
+
+    Anchored at the repository root, which is what per-repository extraction
+    scans. A `.graphifyignore` above that level is read only when the store root
+    is itself the scan root - see the placement table in the guide.
+    """
+    try:
+        from graphify.detect import _is_ignored, _load_graphifyignore
+    except (ImportError, AttributeError):
+        return None
+    patterns = _load_graphifyignore(repo_root)
+    if not patterns:
+        return lambda path: False
+    cache: dict = {}
+    return lambda path: bool(_is_ignored(path, repo_root, patterns, _cache=cache))
+
+
 def _symlink_outcome(path: Path, root: Path, suffixes: set[str]) -> str | None:
     """Which outcome this path produces, or None when it is not a candidate.
 
@@ -177,6 +203,50 @@ def _symlink_outcome(path: Path, root: Path, suffixes: set[str]) -> str | None:
         return "broken"
     collected = target.is_relative_to(root) and target.suffix.lower() in suffixes
     return "duplicating" if collected else "misattributing"
+
+
+def _classify_symlinks(corpus: Path, suffixes: set[str]) -> dict:
+    """Tally each symlink by outcome, skipping those already excluded."""
+    found: dict = {
+        "checked": True,
+        "duplicating": {},
+        "misattributing": {},
+        "broken": {},
+        "excluded": 0,
+        "targets": 0,
+        "exclusion_checked": True,
+    }
+    if not corpus.is_dir():
+        return found
+    # Walk from the resolved root so every path is in the same form as the
+    # anchors graphify's ignore loader returns. Mixing the two silently matches
+    # nothing - on macOS /var against /private/var was enough to report a
+    # correctly excluded symlink as exposed.
+    root = corpus.resolve()
+    matchers: dict[str, Callable[[Path], bool] | None] = {}
+    targets: set[Path] = set()
+    for path in sorted(root.rglob("*")):
+        outcome = _symlink_outcome(path, root, suffixes)
+        if not outcome:
+            continue
+        repo = path.relative_to(root).parts[0]
+        if repo not in matchers:
+            matchers[repo] = _ignore_matcher(root / repo)
+        ignored = matchers[repo]
+        if ignored is None:
+            found["exclusion_checked"] = False
+        elif ignored(path):
+            # Already mitigated. Counting it as exposed gives an operator who has
+            # done the work the same message as one who has not, and the
+            # instruction then reads as outstanding work forever.
+            found["excluded"] += 1
+            continue
+        if outcome != "broken":
+            with contextlib.suppress(OSError, RuntimeError):
+                targets.add(path.resolve(strict=True))
+        found[outcome][repo] = found[outcome].get(repo, 0) + 1
+    found["targets"] = len(targets)
+    return found
 
 
 def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
@@ -218,16 +288,7 @@ def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict
         suffixes = extractable_suffixes()
     if suffixes is None:
         return {"checked": False}
-    found: dict = {"checked": True, "duplicating": {}, "misattributing": {}, "broken": {}}
-    if corpus.is_dir():
-        root = corpus.resolve()
-        for path in corpus.rglob("*"):
-            outcome = _symlink_outcome(path, root, suffixes)
-            if outcome:
-                repo = path.relative_to(corpus).parts[0]
-                found[outcome][repo] = found[outcome].get(repo, 0) + 1
-    # Every exit reaches this. An earlier revision returned early for a corpus
-    # that is not on disk and omitted the totals, so the reporter raised KeyError.
+    found = _classify_symlinks(corpus, suffixes)
     for key in ("duplicating", "misattributing", "broken"):
         found[f"{key}_files"] = sum(found[key].values())
     found["files"] = found["duplicating_files"] + found["misattributing_files"]
@@ -388,6 +449,30 @@ def _report_missing_extractors() -> None:
         )
 
 
+def _report_symlink_context(links: dict) -> None:
+    """Exclusions already in force, and the limits of the prediction."""
+    if links["excluded"] and not links["files"]:
+        # Saying nothing here would be worse than it looks: an operator who has
+        # mitigated cannot tell a working exclusion from a check that stopped
+        # running. The number is the evidence that it is still being enforced.
+        print(
+            f"Symlinked source files: {links['excluded']} excluded by .graphifyignore, "
+            "none exposed."
+        )
+    elif links["excluded"]:
+        print(f"  ({links['excluded']} further symlink(s) already excluded by .graphifyignore.)")
+    if not links["exclusion_checked"]:
+        print(
+            "  Exclusions could not be read, so an already-excluded symlink is counted here "
+            "as exposed."
+        )
+    if links["files"] or links["broken_files"]:
+        print(
+            "  Predicted from the corpus, not measured from a graph, and which outcome you "
+            "get depends on cache state rather than on anything in the corpus."
+        )
+
+
 def _report_symlinks() -> None:
     links = duplicating_symlinks(config.REPOSITORIES_DIR)
     if not links["checked"]:
@@ -404,12 +489,17 @@ def _report_symlinks() -> None:
         return pairs[0][0] if len(pairs) == 1 else ", ".join(f"{r} ({n})" for r, n in pairs)
 
     if links["duplicating_files"]:
+        # Several links usually share one target, so the count of links overstates
+        # the files at risk and understates how badly each is repeated: on one
+        # estate 60 links resolved to 12 targets - not 60 files duplicated once,
+        # but 12 files appearing six times each.
+        spread = f" resolving to {links['targets']} distinct target(s)" if links["targets"] else ""
         print(
             f"Symlinked source files, target inside the corpus: {links['duplicating_files']} "
-            f"in {where(links['duplicating'])}. On a cold build the content is emitted twice "
-            "under two paths; on any rebuild with a warm cache the two collide and the LINK "
-            "wins, so the real file vanishes from the graph and its content is filed under "
-            "the link. Exclude them either way."
+            f"in {where(links['duplicating'])}{spread}. On a cold build the content is emitted "
+            "twice under two paths; on any rebuild with a warm cache the two collide and the "
+            "LINK wins, so the real file vanishes from the graph and its content is filed "
+            "under the link. Exclude them either way."
         )
     if links["misattributing_files"]:
         print(
@@ -423,11 +513,7 @@ def _report_symlinks() -> None:
             f"Broken symlinks: {links['broken_files']} in {where(links['broken'])}. "
             "They resolve to nothing and contribute nothing."
         )
-    if links["files"] or links["broken_files"]:
-        print(
-            "  Predicted from the corpus, not measured from a graph, and which outcome you "
-            "get depends on cache state rather than on anything in the corpus."
-        )
+    _report_symlink_context(links)
 
 
 def _report_citations() -> None:
