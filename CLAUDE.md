@@ -313,3 +313,51 @@ releases can no longer desync the lockfile.
   repeated on the command line to satisfy them.
 - YAML trap: `run: pip install --only-binary :all: -r x.txt` fails to parse,
   because `: ` ends a plain scalar. Use a block scalar (`run: |`).
+
+## Working with the other knowledge-store sessions
+
+Three sessions share this work: a **library** session owning `knowledge-store-builder`
+and anything upstream, and one **estate** session per store. The library session
+leads and decides where they disagree.
+
+The point of the split is that estate sessions see what the library session
+structurally cannot — every estate is unusual in its own way, and the maintainer's
+own store is the least representative of them. Consultation exists to move that
+knowledge, not to gate work.
+
+**Decide by blast radius, not by confidence.** Nobody who worked around a library
+gap felt uncertain at the time; they felt unblocked. So the test is what the action
+touches and whether it can be undone, not how sure you are.
+
+**Act freely, no consultation.** Anything inside your own estate that you can undo:
+analysis, measurement, refreshes, local scripts, drafts, branches and PRs in your
+own repository. Autonomy is the default and most work lives here.
+
+**Proceed and notify, without waiting.** A finding, a defect, a measurement that
+contradicts something the library session said. Send it and carry on — these are
+never blocking. Include the command that produced any number, so it can be re-run
+rather than believed. If you worked around something because you were blocked, say
+so at the time; the workaround is fine, the silence is not.
+
+**Ask before acting.** Four categories, and only these:
+
+- **Leaving your estate** — publishing to a public or third-party repository, filing
+  upstream, or moving code between repositories of different visibility.
+- **Irreversible** — deleting an issue, rewriting history, force-pushing, re-cloning
+  a corpus, or anything that discards a built artefact.
+- **Shared contract** — a change to the library, to a documented route, or to a
+  policy another estate follows.
+- **Cost not already agreed** — a large rebuild, a release, or anything that spends
+  someone else's hours.
+
+**Never idle while waiting.** Do the reversible part, stage the rest, and say what
+is staged. A question should cost the questioner nothing.
+
+**Disagreement.** If you think the library session is wrong, say so with evidence —
+it has been wrong repeatedly and the corrections came from estate sessions with
+measurements. It decides after hearing the argument, and a decision made on evidence
+beats one made on seniority. Where it genuinely cannot decide, it escalates rather
+than guessing.
+
+**Anything about disclosure, credentials or publishing outside the organisation is
+the owner's decision.** Neither a peer nor the library session can authorise it.
