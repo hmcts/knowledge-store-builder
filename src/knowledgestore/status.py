@@ -99,6 +99,99 @@ def unsynced(manifest: Path, recorded: dict) -> list[str]:
     return sorted(name for name in declared if name not in recorded)
 
 
+# Content types graphify parses only when an optional extra is installed, and the
+# import that proves it is present. Without it the files are read as nothing: the
+# build succeeds, the graph is short, and no stage says why. Measured on one
+# estate, installing the extras took genuine estate content from ~4,400 nodes to
+# ~11,000 - and on another, 320 .tf files contributed exactly 0 nodes to a store
+# that had been shipped and queried for weeks.
+OPTIONAL_EXTRACTORS = (
+    (("tf", "tfvars", "hcl"), "tree_sitter_hcl", "terraform"),
+    (("sql",), "tree_sitter_sql", "sql"),
+)
+
+
+def _extractor_installed(module: str) -> bool:
+    from importlib.util import find_spec
+
+    try:
+        return find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def missing_extractors(corpus: Path) -> list[dict]:
+    """Content types present in the corpus that nothing installed can parse."""
+    if not corpus.is_dir():
+        return []
+    missing = []
+    for suffixes, module, extra in OPTIONAL_EXTRACTORS:
+        if _extractor_installed(module):
+            continue
+        count = 0
+        for suffix in suffixes:
+            count += sum(
+                1
+                for path in corpus.rglob(f"*.{suffix}")
+                # Regular files only. A symlink's target is almost always already
+                # in the corpus, so counting both reports one file as two - it
+                # inflated a real estate's Terraform count from 260 to 320.
+                if ".git" not in path.parts and path.is_file() and not path.is_symlink()
+            )
+        if count:
+            missing.append({"files": count, "extra": extra, "suffixes": suffixes})
+    return missing
+
+
+def extractable_suffixes() -> set[str] | None:
+    """Suffixes graphify dispatches an extractor for, from its own table.
+
+    Returns None when the table cannot be read - most often because graphify is
+    simply not installed, since it is this library's optional dependency rather
+    than a required one. The caller must report that as "cannot check" rather
+    than "nothing found": a hand-written suffix list is exactly the enumeration
+    this codebase has been caught by twice, and silently measuring nothing is
+    worse than not measuring.
+    """
+    try:
+        from graphify.extract import _DISPATCH
+    except (ImportError, AttributeError):
+        return None
+    return {str(suffix).lower() for suffix in _DISPATCH}
+
+
+def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
+    """Symlinked corpus files that extraction will emit twice.
+
+    graphify's CLI records `source_file` from the path it walked, not from the
+    link target, so a symlink and its target become two sets of nodes with the
+    same content under different paths. On an estate asked about duplication that
+    is a wrong answer rather than a noisy one - a shared parent resource appears
+    once per directory that links to it.
+
+    Latent until the relevant extractor is installed: a suffix nothing can parse
+    yields nothing, twice. The check is therefore most useful between installing
+    an extra and rebuilding, rather than at rebuild time.
+
+    `suffixes` defaults to graphify's own table and is a parameter so that
+    scanning can be tested without the optional dependency present.
+    """
+    if suffixes is None:
+        suffixes = extractable_suffixes()
+    if suffixes is None:
+        return {"checked": False}
+    if not corpus.is_dir():
+        return {"checked": True, "files": 0, "by_repo": {}}
+    by_repo: dict[str, int] = {}
+    for path in corpus.rglob("*"):
+        if ".git" in path.parts or not path.is_symlink():
+            continue
+        if path.suffix.lower() in suffixes:
+            repo = path.relative_to(corpus).parts[0]
+            by_repo[repo] = by_repo.get(repo, 0) + 1
+    return {"checked": True, "files": sum(by_repo.values()), "by_repo": by_repo}
+
+
 def corpus_citations(root: Path) -> dict:
     corpus = io.read_json_dict(root / "graphify-out" / "graph-knowledge-corpus.json")
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
@@ -243,6 +336,34 @@ def _report_intent(recorded: dict) -> None:
         print(f"Intent index: {intent['mined']} repositories mined")
 
 
+def _report_missing_extractors() -> None:
+    for gap in missing_extractors(config.REPOSITORIES_DIR):
+        kinds = ", ".join(f".{s}" for s in gap["suffixes"])
+        print(
+            f"Extractor missing: {gap['files']} {kinds} file(s) in the corpus and nothing "
+            f"installed can parse them - they contribute nothing to the graph. "
+            f"Install with `pip install 'graphifyy[{gap['extra']}]'` and rebuild."
+        )
+
+
+def _report_symlinks() -> None:
+    links = duplicating_symlinks(config.REPOSITORIES_DIR)
+    if not links["checked"]:
+        print(
+            "Symlink check skipped: graphify is not installed, so the set of file "
+            "types it would extract - and therefore which symlinks would be "
+            "extracted twice - cannot be determined."
+        )
+    elif links["files"]:
+        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
+        print(
+            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
+            "path it walked, not the link target, so each is emitted twice under two paths "
+            "- which reads as duplication rather than as one file. Exclude them before a "
+            "rebuild."
+        )
+
+
 def _report_citations() -> None:
     cites = corpus_citations(config.ROOT)
     if cites["dangling"]:
@@ -294,9 +415,15 @@ def main(argv=None) -> int:
         f"{cov['topics_configured']} topics configured"
     )
 
+    # Estate completeness first (what is declared but absent), then what was
+    # mined from it, then what cannot be parsed or would be counted twice.
     _report_unsynced(recorded)
 
     _report_intent(recorded)
+
+    _report_missing_extractors()
+
+    _report_symlinks()
 
     _report_citations()
 
