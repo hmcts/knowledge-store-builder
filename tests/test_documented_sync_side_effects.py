@@ -59,8 +59,9 @@ class CleanSideEffectsTest(unittest.TestCase):
         (repo / "graphify-out" / "graph.json").write_text("{}", encoding="utf-8")
         (repo / "src" / "scratch.py").write_text("x = 1\n", encoding="utf-8")
 
-        # The exact invocation sync ends with.
-        sync.run_git(["-C", str(repo), "clean", "-fd", "-e", "graphify-out"])
+        # The invocation sync ends with, taken from sync rather than copied -
+        # a copy would keep passing after sync stopped using these flags.
+        sync.run_git(["-C", str(repo), *sync.CLEAN_ARGS])
         return repo
 
     def test_a_repository_root_graphifyignore_does_not_survive(self):
