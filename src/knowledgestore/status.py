@@ -76,6 +76,43 @@ def intent_coverage(recorded: dict) -> dict:
     return {"mined": len(mined), "estate": len(recorded)}
 
 
+# Content types graphify parses only when an optional extra is installed, and the
+# import that proves it is present. Without it the files are read as nothing: the
+# build succeeds, the graph is short, and no stage says why. Measured on one
+# estate, installing the extras took genuine estate content from ~4,400 nodes to
+# ~11,000 - and on another, 320 .tf files contributed exactly 0 nodes to a store
+# that had been shipped and queried for weeks.
+OPTIONAL_EXTRACTORS = (
+    (("tf", "tfvars", "hcl"), "tree_sitter_hcl", "terraform"),
+    (("sql",), "tree_sitter_sql", "sql"),
+)
+
+
+def _extractor_installed(module: str) -> bool:
+    from importlib.util import find_spec
+
+    try:
+        return find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def missing_extractors(corpus: Path) -> list[dict]:
+    """Content types present in the corpus that nothing installed can parse."""
+    if not corpus.is_dir():
+        return []
+    missing = []
+    for suffixes, module, extra in OPTIONAL_EXTRACTORS:
+        if _extractor_installed(module):
+            continue
+        count = 0
+        for suffix in suffixes:
+            count += sum(1 for _ in corpus.rglob(f"*.{suffix}") if ".git" not in _.parts)
+        if count:
+            missing.append({"files": count, "extra": extra, "suffixes": suffixes})
+    return missing
+
+
 def corpus_citations(root: Path) -> dict:
     corpus = io.read_json_dict(root / "graphify-out" / "graph-knowledge-corpus.json")
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
@@ -223,6 +260,14 @@ def main(argv=None) -> int:
         print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
     elif intent["mined"]:
         print(f"Intent index: {intent['mined']} repositories mined")
+
+    for gap in missing_extractors(config.REPOSITORIES_DIR):
+        kinds = ", ".join(f".{s}" for s in gap["suffixes"])
+        print(
+            f"Extractor missing: {gap['files']} {kinds} file(s) in the corpus and nothing "
+            f"installed can parse them - they contribute nothing to the graph. "
+            f"Install with `pip install 'graphifyy[{gap['extra']}]'` and rebuild."
+        )
 
     cites = corpus_citations(config.ROOT)
     if cites["dangling"]:
