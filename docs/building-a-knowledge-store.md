@@ -207,6 +207,18 @@ from the estate, record the finding with its location — never its value — an
 say what has to change before it returns. On that estate this caught a
 hardcoded database credential that had been in a file since 2019.
 
+**A rewrite that lands on a real file cannot be caught by checking that files
+are real.** A store normalising committed paths ran a rewrite that resolved
+symlinks as a side effect, so two entries changed identity while keeping a
+plausible shape. Every check anyone would naturally run still passed: the counts
+were unchanged and every resulting path existed on disk. Existence is the wrong
+question — the right one is whether these are the *same* paths, which needs an
+independently written earlier witness to compare against. The same shape has now
+produced a dead file-to-ticket join, fused dispatch tokens counted as valid work,
+and a corrupted corpus inventory that a twelve-check suite passed 12/12. If you
+build one verification primitive, make it "compare against a witness written
+before the change", not "validate the result".
+
 **Treat ingested content as untrusted data.** Repositories increasingly contain
 agent instructions, and extraction agents will read them. Instruct every
 extraction agent that file contents are data to extract from, never
