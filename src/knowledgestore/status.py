@@ -185,9 +185,18 @@ def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict
     Extraction records the path it walked, not the link target, and that has two
     different consequences which a single count conflates:
 
-    - **duplication** - the target is collected too, so the same content becomes
-      two sets of nodes under two paths. It inflates counts and, where anything
-      consolidates by label, manufactures a hub that does not exist.
+    - **duplication** - on a *cold* build the target is collected too, so the same
+      content becomes two sets of nodes under two paths. It inflates counts and,
+      where anything consolidates by label, manufactures a hub that does not exist.
+    - **displacement** - on any build with a *warm* cache the two collide, because
+      the extraction cache keys on the resolved path, and the link wins. The real
+      file disappears from the graph and its content is filed under the link.
+      Reproduced in three consecutive runs of the same extraction: run 1 yields
+      two distinct `source_file` values, runs 2 and 3 yield one, and it is the
+      symlink. So a corpus predicts *which files are at risk*, never which of the
+      two outcomes a given build will produce - that is cache state, not corpus.
+      Where several links share one target, the other links show nothing at all,
+      and a reader concludes those components declare nothing.
     - **misattribution** - the target is not collected, so nothing is duplicated,
       but the graph asserts the content lives at a path that is a link and knows
       nothing about the real file. Quieter, and worse to answer questions from:
@@ -396,9 +405,11 @@ def _report_symlinks() -> None:
 
     if links["duplicating_files"]:
         print(
-            f"Symlinked source files, target also extracted: {links['duplicating_files']} in "
-            f"{where(links['duplicating'])}. The same content is emitted twice under two "
-            "paths, which inflates counts and can manufacture a hub that does not exist."
+            f"Symlinked source files, target inside the corpus: {links['duplicating_files']} "
+            f"in {where(links['duplicating'])}. On a cold build the content is emitted twice "
+            "under two paths; on any rebuild with a warm cache the two collide and the LINK "
+            "wins, so the real file vanishes from the graph and its content is filed under "
+            "the link. Exclude them either way."
         )
     if links["misattributing_files"]:
         print(
@@ -414,9 +425,8 @@ def _report_symlinks() -> None:
         )
     if links["files"] or links["broken_files"]:
         print(
-            "  Predicted from the corpus, not measured from a graph: a target can exist on "
-            "disk and still never reach the graph - excluded by a filter, or dropped by an "
-            "extractor - which turns a predicted duplication into a real misattribution."
+            "  Predicted from the corpus, not measured from a graph, and which outcome you "
+            "get depends on cache state rather than on anything in the corpus."
         )
 
 

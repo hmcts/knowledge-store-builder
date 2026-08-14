@@ -194,6 +194,24 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         self.assertEqual(found["broken"], {"repo-a": 1})
         self.assertEqual((found["duplicating"], found["misattributing"]), ({}, {}))
 
+    def test_the_report_names_both_outcomes_not_only_duplication(self):
+        """Which outcome a build gets is cache state, not corpus.
+
+        Reproduced by running one extraction three times: run 1 emits two
+        distinct `source_file` values, runs 2 and 3 emit one - the symlink -
+        because the extraction cache keys on the resolved path and the link
+        wins. Reporting only duplication would be wrong for every rebuild
+        after the first, which is most of them.
+        """
+        text = self._reported({"repo-a": 7})
+        self.assertIn("cold build", text)
+        self.assertIn("LINK wins", text)
+        self.assertIn(
+            "real file vanishes",
+            text,
+            "the displacement outcome is the quieter one and must be named",
+        )
+
     def test_one_repository_is_reported_without_repeating_its_count(self):
         """A released version printed "60 in cpp-terraform-azurerm-idam (60)"."""
         text = self._reported({"repo-a": 60})
