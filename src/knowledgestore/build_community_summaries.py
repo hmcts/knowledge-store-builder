@@ -209,6 +209,21 @@ DEFAULT_FLOOR = 10
 # those few surviving communities still share node ids with the snapshot.
 DEFAULT_COVERAGE = 0.5
 
+# How much of the NEW cluster a carried summary must describe. The carry bar
+# above measures recall - how much of the old cluster stayed together - and says
+# nothing about how much of what a reader now sees the prose covers. Measured on
+# a real refresh: of 5,405 carried summaries, one describes a cluster that grew
+# from 37 members to 458 with every old member retained. Recall 1.00, clearing a
+# 60% bar comfortably; precision 0.08. Not stale and not unsupported -
+# confidently describing a small corner of something much larger.
+#
+# Deliberately low. On that estate 93.5% of carried summaries already sit at 80%
+# precision or better, so this rejects the unambiguous cases only and leaves the
+# judgement calls carried. Re-authoring costs real money, so the default errs
+# towards keeping prose and reporting the distribution; --precision tightens it
+# once an operator has looked at their own numbers.
+DEFAULT_PRECISION = 0.2
+
 
 def _membership(graph: dict) -> dict[str, list[str]]:
     members: dict[str, list[str]] = {}
@@ -291,17 +306,21 @@ def _claim_targets(
     old_members: dict,
     new_community: dict,
     bar: float,
-) -> tuple[dict, dict, list, list]:
+    precision: float = 0.0,
+) -> tuple[dict, dict, list, list, list]:
     """Each summary's best new cluster, and what fell out on the way.
 
-    Returns the surviving claims plus the three ways a summary is lost: its
-    members gone from the graph entirely, or its best overlap short of `bar`.
-    Sorted for a deterministic tiebreak.
+    Returns the surviving claims plus the ways a summary is lost: its members
+    gone from the graph entirely, its best overlap short of `bar` (recall), or
+    the target cluster so much larger that the prose describes a corner of it
+    (`precision`). Sorted for a deterministic tiebreak.
     """
-    claims: dict[str, tuple[str, float]] = {}
+    sizes = Counter(new_community.values())
+    claims: dict[str, tuple[str, float, float]] = {}
     displaced: dict[str, dict] = {}
     below_bar: list[str] = []
     members_gone: list[str] = []
+    below_precision: list[str] = []
     for old_id in sorted(summaries, key=lambda k: (len(k), k)):
         members = old_members.get(str(old_id))
         if not members:
@@ -334,14 +353,48 @@ def _claim_targets(
                 "prose": summaries[old_id],
             }
             continue
-        claims[old_id] = (target, share_of_old)
-    return claims, displaced, below_bar, members_gone
+        share_of_new = count / sizes[target] if sizes[target] else 0.0
+        if share_of_new < precision:
+            below_precision.append(old_id)
+            displaced[old_id] = {
+                "reason": "below-precision",
+                "best_target": target,
+                "share": round(share_of_old, 3),
+                "precision": round(share_of_new, 3),
+                "prose": summaries[old_id],
+            }
+            continue
+        claims[old_id] = (target, share_of_old, share_of_new)
+    return claims, displaced, below_bar, members_gone, below_precision
+
+
+def _report_precision(carried: dict) -> None:
+    """The distribution of how much of its cluster each carried summary describes.
+
+    Reported rather than gated beyond the floor, because where to draw the line
+    is an estate's judgement and re-authoring costs real money. What the operator
+    needs is the shape: on one refresh 93.5% of carried summaries described 80%
+    or more of their cluster, which says the recall bar is mostly right - and 51
+    landed on a cluster more than twice their old size, which is where the prose
+    quietly stops describing what a reader sees.
+    """
+    if not carried:
+        return
+    values = [entry.get("precision", 1.0) for entry in carried.values()]
+    bands = [(0.8, "80%+"), (0.5, "50-80%"), (0.2, "20-50%"), (0.0, "under 20%")]
+    counts = []
+    for lower, label in bands:
+        upper = next((b[0] for b in bands if b[0] > lower), 1.01)
+        n = sum(1 for v in values if lower <= v < upper)
+        counts.append(f"{n} at {label}")
+    print(f"Carried prose describes its new cluster: {', '.join(counts)}")
 
 
 def remap(
     bar: float = DEFAULT_BAR,
     floor: int = DEFAULT_FLOOR,
     coverage: float = DEFAULT_COVERAGE,
+    precision: float = DEFAULT_PRECISION,
 ) -> int:
     """Carry committed summaries onto new community ids after a re-cluster.
 
@@ -368,8 +421,8 @@ def remap(
         print(refusal, file=sys.stderr)
         return 1
 
-    claims, displaced, below_bar, members_gone = _claim_targets(
-        summaries, old_members, new_community, bar
+    claims, displaced, below_bar, members_gone, below_precision = _claim_targets(
+        summaries, old_members, new_community, bar, precision
     )
 
     # Pass 2: a contested new cluster keeps the summary whose old cluster
@@ -390,18 +443,22 @@ def remap(
     # measurement is what makes this greedy loop correct, not an assumption that
     # optimal matching is too complex - do not "upgrade" it without repeating
     # the measurement and finding a different answer.
-    by_target: dict[str, list[tuple[str, float]]] = {}
-    for old_id, (target, share_of_old) in claims.items():
-        by_target.setdefault(target, []).append((old_id, share_of_old))
+    by_target: dict[str, list[tuple[str, float, float]]] = {}
+    for old_id, (target, share_of_old, share_of_new) in claims.items():
+        by_target.setdefault(target, []).append((old_id, share_of_old, share_of_new))
     remapped: dict[str, str] = {}
     carried: dict[str, dict] = {}
     collisions: list[str] = []
     for target, claimants in by_target.items():
         claimants.sort(key=lambda c: (-c[1], (len(c[0]), c[0])))
-        winner, winner_share = claimants[0]
+        winner, winner_share, winner_precision = claimants[0]
         remapped[target] = summaries[winner]
-        carried[target] = {"from": winner, "share": round(winner_share, 3)}
-        for loser, loser_share in claimants[1:]:
+        carried[target] = {
+            "from": winner,
+            "share": round(winner_share, 3),
+            "precision": round(winner_precision, 3),
+        }
+        for loser, loser_share, _ in claimants[1:]:
             collisions.append(loser)
             displaced[loser] = {
                 "reason": "collision",
@@ -420,8 +477,10 @@ def remap(
     print(
         f"Dropped: {len(below_bar)} below {int(bar * 100)}% overlap, "
         f"{len(members_gone)} whose members are gone, "
-        f"{len(collisions)} merged-cluster collisions"
+        f"{len(collisions)} merged-cluster collisions, "
+        f"{len(below_precision)} describing under {int(precision * 100)}% of their new cluster"
     )
+    _report_precision(carried)
     # The report is the spool: displaced prose is raw material for the
     # backfill (revise against the new digest, never trust unverified), and
     # the carried map is what lets `verify` split its flag rate by
@@ -705,8 +764,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
         parser.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
         parser.add_argument("--coverage", type=float, default=DEFAULT_COVERAGE)
+        parser.add_argument("--precision", type=float, default=DEFAULT_PRECISION)
         options = parser.parse_args(arguments[1:])
-        return remap(bar=options.bar, floor=options.floor, coverage=options.coverage)
+        return remap(
+            bar=options.bar,
+            floor=options.floor,
+            coverage=options.coverage,
+            precision=options.precision,
+        )
     print(__doc__)
     return 1
 

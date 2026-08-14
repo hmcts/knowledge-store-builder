@@ -117,6 +117,27 @@ class RemapTest(SettingsIsolated):
         self.assertEqual(result.get("42"), "the seven-of-ten cluster")
         self.assertNotIn("7", result)
 
+    def test_the_default_precision_floor_drops_a_ballooned_cluster(self):
+        """Drives `remap()` with no precision argument, so the shipped default
+        is what is under test.
+
+        Every other precision test passes the floor explicitly, so all of them
+        pass with the default set to zero - the value that actually ships,
+        protecting nothing. Same gap as an unwired check: the behaviour was
+        covered and the configuration was not.
+        """
+        old = {"154": [f"n{i}" for i in range(37)]}
+        new = {"9": [f"n{i}" for i in range(37)] + [f"grew{i}" for i in range(421)]}
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"154": "describes 37 members"} | self.many(30))
+        self.assertEqual(summaries.remap(), 0)
+        self.assertNotIn(
+            "9",
+            self.read_summaries(),
+            "recall is 1.00 here, so only a precision floor can drop it",
+        )
+
     def test_the_same_summary_is_dropped_at_a_higher_bar(self):
         # the issue's defining case: 7/10 carries at 0.6 and does not at 0.8
         old = {"7": [f"n{i}" for i in range(10)]}
@@ -198,7 +219,11 @@ class RemapTest(SettingsIsolated):
         )
         self.assertEqual(summaries.remap(), 0)
         report = json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(report["carried"]["77"], {"from": "1", "share": 1.0})
+        self.assertEqual(
+            report["carried"]["77"],
+            {"from": "1", "share": 1.0, "precision": 1.0},
+            "the carried record now says how much of its new cluster the prose describes",
+        )
         self.assertEqual(report["carried"]["88"]["from"], "3")
         displaced = report["displaced"]
         self.assertEqual(displaced["2"]["reason"], "collision")
@@ -402,18 +427,19 @@ class RemapRefusalTest(unittest.TestCase):
 class ClaimTargetsTest(unittest.TestCase):
     """Pass 1: each summary's best new cluster, and the three ways one is lost."""
 
-    def _claim(self, summaries_in, old_members, new_community, bar=0.6):
-        return summaries._claim_targets(summaries_in, old_members, new_community, bar)
+    def _claim(self, summaries_in, old_members, new_community, bar=0.6, precision=0.0):
+        """Returns (claims, displaced, below_bar, members_gone, below_precision)."""
+        return summaries._claim_targets(summaries_in, old_members, new_community, bar, precision)
 
     def test_a_dominant_target_is_claimed_with_its_share(self):
-        claims, displaced, below, gone = self._claim(
+        claims, displaced, below, gone, _ = self._claim(
             {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9", "c": "8"}
         )
-        self.assertEqual(claims, {"1": ("9", 2 / 3)})
+        self.assertEqual(claims, {"1": ("9", 2 / 3, 1.0)})
         self.assertEqual((displaced, below, gone), ({}, [], []))
 
     def test_a_share_below_the_bar_is_displaced_with_the_target_it_missed(self):
-        claims, displaced, below, gone = self._claim(
+        claims, displaced, below, gone, _ = self._claim(
             {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "8", "c": "7"}
         )
         self.assertEqual(claims, {})
@@ -426,7 +452,7 @@ class ClaimTargetsTest(unittest.TestCase):
         )
 
     def test_a_summary_with_no_snapshot_entry_is_members_gone(self):
-        _, displaced, _, gone = self._claim({"1": "prose"}, {}, {"a": "9"})
+        _, displaced, _, gone, _ = self._claim({"1": "prose"}, {}, {"a": "9"})
         self.assertEqual(gone, ["1"])
         self.assertEqual(displaced["1"]["reason"], "members-gone")
         self.assertIsNone(displaced["1"]["best_target"])
@@ -434,7 +460,7 @@ class ClaimTargetsTest(unittest.TestCase):
     def test_members_that_no_longer_carry_a_community_are_members_gone(self):
         """A distinct branch from an absent snapshot entry: the members are
         known, but none of them landed anywhere in the new graph."""
-        _, displaced, _, gone = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
+        _, displaced, _, gone, _ = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
         self.assertEqual(gone, ["1"])
         self.assertEqual(displaced["1"]["reason"], "members-gone")
 
@@ -445,15 +471,66 @@ class ClaimTargetsTest(unittest.TestCase):
         here, one member of a cluster of ten. Pinning it so a fix has to change
         the test deliberately rather than by accident.
         """
-        claims, _, _, _ = self._claim(
+        claims, _, _, _, _ = self._claim(
             {"1": "prose"},
             {"1": ["a"]},
             {"a": "9", **{f"other{i}": "9" for i in range(9)}},
         )
-        self.assertEqual(claims["1"], ("9", 1.0), "1.0 despite describing a tenth of the cluster")
+        self.assertEqual(
+            claims["1"][:2], ("9", 1.0), "recall 1.0 despite describing a tenth of the cluster"
+        )
+        self.assertAlmostEqual(claims["1"][2], 0.1, msg="precision is the half that sees it")
+
+    def test_prose_describing_a_corner_of_its_new_cluster_is_dropped(self):
+        """Community 154 from a real refresh, reproduced.
+
+        37 members grew to 458 with every old member retained: recall 1.00,
+        clearing a 60% bar comfortably, precision 0.08. Not stale and not
+        unsupported - confidently describing a small corner of something much
+        larger, which a reader cannot detect.
+        """
+        old = {"154": [f"m{i}" for i in range(37)]}
+        new = {
+            **{f"m{i}": "9" for i in range(37)},
+            **{f"other{i}": "9" for i in range(421)},
+        }
+        claims, displaced, _, _, below_precision = self._claim(
+            {"154": "prose"}, old, new, bar=0.6, precision=0.2
+        )
+        self.assertEqual(claims, {})
+        self.assertEqual(below_precision, ["154"])
+        self.assertEqual(displaced["154"]["reason"], "below-precision")
+        self.assertAlmostEqual(displaced["154"]["precision"], 0.081, places=3)
+        self.assertEqual(
+            displaced["154"]["share"],
+            1.0,
+            "recall stays perfect - which is exactly why the recall bar cannot see this",
+        )
+
+    def test_the_same_summary_is_carried_when_no_precision_floor_is_asked_for(self):
+        """The previous behaviour, pinned: without a floor this is carried."""
+        old = {"154": [f"m{i}" for i in range(37)]}
+        new = {
+            **{f"m{i}": "9" for i in range(37)},
+            **{f"other{i}": "9" for i in range(421)},
+        }
+        claims, _, _, _, _ = self._claim({"154": "prose"}, old, new, bar=0.6, precision=0.0)
+        self.assertIn("154", claims)
+
+    def test_prose_describing_most_of_its_cluster_survives_the_floor(self):
+        """The floor is deliberately low: 93.5% of one estate's carried
+        summaries already sit at 80% precision or better, and re-authoring
+        costs real money, so judgement calls are carried rather than dropped."""
+        old = {"1": ["a", "b", "c"]}
+        new = {"a": "9", "b": "9", "c": "9", "d": "9"}
+        claims, _, _, _, below_precision = self._claim(
+            {"1": "prose"}, old, new, bar=0.6, precision=0.2
+        )
+        self.assertIn("1", claims)
+        self.assertEqual(below_precision, [])
 
     def test_ordering_is_deterministic_for_a_stable_tiebreak(self):
-        claims, _, _, _ = self._claim(
+        claims, _, _, _, _ = self._claim(
             {"10": "a", "9": "b", "2": "c"},
             {"10": ["x"], "9": ["y"], "2": ["z"]},
             {"x": "1", "y": "2", "z": "3"},
