@@ -348,13 +348,22 @@ and strands committed summaries, which must then be remapped by membership
 overlap (carry a summary only where the new cluster holds a convincing
 majority — 60% works — and drop it otherwise rather than misattach prose).
 
-**That bar measures recall, not fit.** It asks how much of the *old* cluster
+**That bar measures recall, and a precision floor now measures fit.** It asks how much of the *old* cluster
 landed together, and nothing about how much of the *new* cluster those members
 constitute. A summary can therefore clear the bar and still describe a small
 corner of the cluster it lands on — most of that cluster being newly arrived
 members the prose has never seen. Retention is a coverage number, not a
 correctness one: treat carried prose as owed a re-read, and split `verify`'s
 flag rate by carried-versus-authored rather than reading the headline.
+
+`remap` now also drops a summary whose target cluster grew so much that the
+prose describes a corner of it (`--precision`, default 20%). Measured on one
+refresh: a community of 37 members grew to 458 with *every* old member
+retained — recall 1.00, clearing a 60% bar comfortably, precision 0.08. The
+default is deliberately low, because on that estate 93.5% of carried summaries
+already described 80% or more of their cluster and re-authoring costs real
+money; the run prints the whole distribution so an operator can tighten it
+against their own numbers rather than a guess.
 
 **The damage scales with what you add, not with the act of re-clustering:**
 
