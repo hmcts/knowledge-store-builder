@@ -47,7 +47,7 @@ repository, from inside each one, then merge:
 ```bash
 while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
   case "$repo" in ''|\#*) continue;; esac
-  ( cd "repositories/$repo" && graphify update . --no-cluster )
+  ( cd "repositories/$repo" && graphify update . )
 done < config/repositories.txt
 
 graphify merge-graphs repositories/*/graphify-out/graph.json \
