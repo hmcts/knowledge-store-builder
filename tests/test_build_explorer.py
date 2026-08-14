@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -372,6 +374,185 @@ class IncludeEntryPolicyTest(SettingsIsolated):
         plain = node("a", "SomeClass")
         self.assertFalse(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE - 1))
         self.assertTrue(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE))
+
+
+class RepoAttributeGuardTest(unittest.TestCase):
+    """A graph without `repo` must not ship a page that silently lost its tickets.
+
+    The join in `node_tickets` is keyed on the attribute, so its absence does not
+    raise - it matches nothing, and the page reads as an estate whose files no
+    ticket ever touched. That is the store's most dangerous output: a confident
+    negative. Reported from a store that carried the value as `repository` on all
+    70,655 of its nodes and `repo` on none.
+    """
+
+    GRAPH = {"links": [], "nodes": [{"id": "a", "label": "a.py", "source_file": "a.py"}]}
+
+    def _build(self, nodes) -> str:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            explorer.build_index({**self.GRAPH, "nodes": nodes}, {}, {})
+        return err.getvalue()
+
+    def test_a_graph_with_no_repo_attribute_is_reported(self):
+        text = self._build(self.GRAPH["nodes"])
+        self.assertIn("`repo`", text)
+        self.assertIn(
+            "no ticket evidence",
+            text,
+            "naming the attribute is not enough - say what the page will ship",
+        )
+
+    def test_a_graph_that_carries_it_is_not_nagged_about(self):
+        nodes = [{**self.GRAPH["nodes"][0], "repo": "repo-a"}]
+        self.assertEqual(self._build(nodes), "")
+
+    def test_a_partially_stamped_graph_is_not_reported(self):
+        """Some nodes legitimately lack it; only a total absence is the defect."""
+        nodes = [{**self.GRAPH["nodes"][0], "repo": "repo-a"}, {"id": "b", "label": "b"}]
+        self.assertEqual(self._build(nodes), "")
+
+
+class JoinCardinalityTest(unittest.TestCase):
+    """A join that matches nothing must not pass as a sparse estate.
+
+    Shape, schema and freshness checks all pass on a dead join: the graph is
+    valid, the index is valid, every count is healthy. Only the cardinality of
+    the join says otherwise, and nothing measured it - on one store the
+    file-to-ticket join produced ZERO matches across 70,655 nodes and 108
+    repositories of mined tickets, with the build green and a 12-check
+    regression suite passing.
+
+    The cause is that the two documented build routes disagree about
+    `source_file`: the index is keyed on repo-relative paths, and the
+    single-root route emits `repositories/<repo>/<path>`.
+    """
+
+    INDEX = {"repo-a": {f"f{i}.py": {"tickets": {"T-1": 1}} for i in range(6)}}
+
+    def _graph(self, prefix: str) -> dict:
+        nodes = [
+            {
+                "id": f"n{i}",
+                "label": f"ServiceComponent{i}",
+                "repo": "repo-a",
+                "source_file": f"{prefix}f{i}.py",
+            }
+            for i in range(6)
+        ]
+        links = [
+            {"source": f"n{i}", "target": f"n{j}"} for i in range(6) for j in range(6) if i != j
+        ]
+        return {"nodes": nodes, "links": links}
+
+    def _build(self, prefix: str):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            entries, _ = explorer.build_index(self._graph(prefix), {}, self.INDEX)
+        return entries, err.getvalue()
+
+    def test_a_dead_join_is_reported(self):
+        entries, text = self._build("repositories/repo-a/")
+        self.assertEqual(sum(1 for e in entries if e[7]), 0)
+        self.assertIn("matched nothing", text)
+        self.assertIn(
+            "repositories/",
+            text,
+            "naming the likely cause is what makes this actionable rather than alarming",
+        )
+        self.assertIn(
+            "different spaces",
+            text,
+            "the evidence shape - both sides populated, intersection empty - names the "
+            "whole class; the prefix names only this instance",
+        )
+
+    def test_the_same_graph_joined_correctly_is_silent(self):
+        """Identical node count and identical entries - only the join differs."""
+        entries, text = self._build("")
+        self.assertEqual(sum(1 for e in entries if e[7]), 6)
+        self.assertEqual(text, "")
+
+    def test_a_working_join_reports_its_rate(self):
+        """A partial join is the quieter failure: one estate fixed the AST half
+        and left the semantic half skipping every record, and 5,692 of 72,370
+        reads as a working join on a sparse estate. The rate is a measurement,
+        not a verdict - no threshold is asserted."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            explorer.build_index(self._graph(""), {}, self.INDEX)
+        self.assertIn("6 of 6", out.getvalue())
+        self.assertIn("100.0%", out.getvalue())
+
+    def test_a_dead_join_reports_no_rate(self):
+        """Zero goes to stderr as a warning, not to stdout as a statistic."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            explorer.build_index(self._graph("repositories/repo-a/"), {}, self.INDEX)
+        self.assertNotIn("carry ticket evidence", out.getvalue())
+
+    def _layered(self, semantic_prefix: str, semantic_repo: str = "repo-a") -> tuple[str, str]:
+        """An AST layer that joins and a semantic layer that may not."""
+        nodes = [
+            {
+                "id": f"a{i}",
+                "label": f"AstComponent{i}",
+                "repo": "repo-a",
+                "source_file": f"f{i}.py",
+                "_origin": "ast",
+            }
+            for i in range(6)
+        ]
+        nodes += [
+            {
+                "id": f"s{i}",
+                "label": f"SemComponent{i}",
+                "repo": semantic_repo,
+                "source_file": f"{semantic_prefix}f{i}.py",
+            }
+            for i in range(6)
+        ]
+        ids = [n["id"] for n in nodes]
+        graph = {
+            "nodes": nodes,
+            "links": [{"source": x, "target": y} for x in ids for y in ids if x != y],
+        }
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            explorer.build_index(graph, {}, self.INDEX)
+        return out.getvalue(), err.getvalue()
+
+    def test_one_layer_keyed_differently_is_reported_though_the_whole_is_not_zero(self):
+        """The half-dead case a composite count structurally cannot show.
+
+        One estate converted its AST layer and left the semantic layer skipping
+        every record: 5,692 of 72,370 is never zero and reads as a working join
+        on a sparse estate. Per layer it was 0 of 46,602.
+        """
+        out, err = self._layered("/absolute/gone/")
+        self.assertIn("semantic layer", err)
+        self.assertIn("0 of 6", err)
+        self.assertIn("50.0%", out, "the composite stays non-zero, which is the whole point")
+
+    def test_layers_that_all_join_are_not_reported(self):
+        out, err = self._layered("")
+        self.assertEqual(err, "")
+        self.assertIn("12 of 12", out)
+
+    def test_a_layer_whose_repository_is_not_mined_is_not_reported(self):
+        """Sparsity, not a key mismatch - and the false positive this check
+        produced on the maintainer's own estate before the restriction was
+        added: 2,115 `meta-arch` nodes joining zero because their repository is
+        not in the index at all."""
+        out, err = self._layered("", semantic_repo="unmined-repo")
+        self.assertEqual(err, "", "a layer with nothing to join against must not be accused")
+
+    def test_an_estate_with_no_intent_index_is_not_reported(self):
+        """Nothing to join is not a broken join."""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            explorer.build_index(self._graph(""), {}, {})
+        self.assertEqual(err.getvalue(), "")
 
 
 if __name__ == "__main__":

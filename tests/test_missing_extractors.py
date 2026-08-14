@@ -16,6 +16,8 @@ for the import rather than for a declared dependency of our own.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -123,7 +125,158 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         found = status.duplicating_symlinks(root, self.SUFFIXES)
         self.assertTrue(found["checked"])
         self.assertEqual(found["files"], 1)
-        self.assertEqual(found["by_repo"], {"repo-a": 1})
+        self.assertEqual(found["duplicating"], {"repo-a": 1})
+
+    def _reported(self, by_repo: dict, **extra) -> str:
+        """The symlink report for a given scan result.
+
+        Stubs the scan: the defect being pinned is in how the result is worded,
+        and driving the real scan would tie a formatting test to whether an
+        optional dependency happens to be installed.
+        """
+        self.addCleanup(setattr, status, "duplicating_symlinks", status.duplicating_symlinks)
+        status.duplicating_symlinks = lambda *a, **k: {
+            "checked": True,
+            "duplicating": by_repo,
+            "misattributing": {},
+            "broken": {},
+            "duplicating_files": sum(by_repo.values()),
+            "misattributing_files": 0,
+            "broken_files": 0,
+            "files": sum(by_repo.values()),
+            "excluded": 0,
+            "targets": 0,
+            "exclusion_checked": True,
+            **extra,
+        }
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status._report_symlinks()
+        return out.getvalue()
+
+    def test_a_missing_corpus_still_reports_totals(self):
+        """Every exit must carry the totals the reporter reads. An earlier
+        revision returned early without them and raised KeyError on any store
+        with no corpus on disk - which the suite caught only with graphify
+        installed, since without it the check never gets this far."""
+        found = status.duplicating_symlinks(Path("/does/not/exist"), self.SUFFIXES)
+        for key in ("files", "duplicating_files", "misattributing_files", "broken_files"):
+            self.assertEqual(found[key], 0, key)
+
+    def test_a_target_inside_the_corpus_is_predicted_to_duplicate(self):
+        root = self._corpus("repo-a/main.tf", {"repo-a/stacks/main.tf": "repo-a/main.tf"})
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["duplicating"], {"repo-a": 1})
+        self.assertEqual(found["misattributing"], {})
+
+    def test_a_target_outside_the_corpus_is_misattribution_not_duplication(self):
+        """Nothing is duplicated, and that is the quieter, worse case: the graph
+        records content at a path that is a link, and the real file is absent."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        outside = Path(tmp.name) / "elsewhere.tf"
+        outside.write_text("x", encoding="utf-8")
+        root = self._corpus("repo-a/main.tf", {})
+        (root / "repo-a" / "linked.tf").symlink_to(outside)
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["misattributing"], {"repo-a": 1})
+        self.assertEqual(found["duplicating"], {})
+
+    def test_a_non_extractable_target_is_misattribution(self):
+        """The link has an extractable suffix, the target does not, so only the
+        link is read - the content is attributed to a path that is not the file."""
+        root = self._corpus(
+            "repo-a/notes.unknownext", {"repo-a/main.tf": "repo-a/notes.unknownext"}
+        )
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["misattributing"], {"repo-a": 1})
+
+    def test_a_broken_symlink_is_neither_outcome(self):
+        root = self._corpus("repo-a/main.tf", {})
+        (root / "repo-a" / "dangling.tf").symlink_to(root / "repo-a" / "gone.tf")
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["broken"], {"repo-a": 1})
+        self.assertEqual((found["duplicating"], found["misattributing"]), ({}, {}))
+
+    def test_the_report_names_both_outcomes_not_only_duplication(self):
+        """Which outcome a build gets is cache state, not corpus.
+
+        Reproduced by running one extraction three times: run 1 emits two
+        distinct `source_file` values, runs 2 and 3 emit one - the symlink -
+        because the extraction cache keys on the resolved path and the link
+        wins. Reporting only duplication would be wrong for every rebuild
+        after the first, which is most of them.
+        """
+        text = self._reported({"repo-a": 7})
+        self.assertIn("cold build", text)
+        self.assertIn("LINK wins", text)
+        self.assertIn(
+            "real file vanishes",
+            text,
+            "the displacement outcome is the quieter one and must be named",
+        )
+
+    def test_one_repository_is_reported_without_repeating_its_count(self):
+        """A released version printed "60 in cpp-terraform-azurerm-idam (60)"."""
+        text = self._reported({"repo-a": 60})
+        self.assertIn("60 in repo-a.", text)
+        self.assertNotIn("(60)", text, "the per-repository count repeats the total")
+
+    def test_several_repositories_keep_their_per_repository_counts(self):
+        """With more than one, the breakdown is the whole point."""
+        text = self._reported({"repo-a": 40, "repo-b": 20})
+        self.assertIn("60 in repo-a (40), repo-b (20).", text)
+
+    def test_an_excluded_symlink_is_not_reported_as_exposed(self):
+        """The check must be able to see its own mitigation.
+
+        Reported by an operator who had excluded all 60 and verified it in the
+        graph, and still got the identical message telling them to exclude them
+        before a rebuild. That is the inverse of a silent zero: a permanent
+        non-zero that has stopped carrying information, and it reads as
+        outstanding work forever.
+        """
+        root = self._corpus("repo-a/main.tf", {"repo-a/stacks/main.tf": "repo-a/main.tf"})
+        (root / "repo-a" / ".graphifyignore").write_text("stacks/\n", encoding="utf-8")
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        if not found["exclusion_checked"]:
+            self.skipTest("graphify's ignore helpers are unavailable")
+        self.assertEqual(found["excluded"], 1)
+        self.assertEqual(found["duplicating"], {})
+
+    def test_a_clean_estate_says_so_rather_than_going_quiet(self):
+        """Silence cannot be told apart from a check that stopped running."""
+        text = self._reported({}, excluded=60, files=0, duplicating_files=0)
+        self.assertIn("60 excluded", text)
+        self.assertIn("none exposed", text)
+
+    def test_unreadable_exclusions_are_admitted_not_assumed_absent(self):
+        text = self._reported({"repo-a": 1}, exclusion_checked=False)
+        self.assertIn("could not be read", text)
+
+    def test_links_sharing_a_target_are_counted_once_as_a_target(self):
+        """Drives the real classification, not the stubbed reporter.
+
+        The count of links overstates the files at risk and understates how
+        badly each is repeated: several links usually share one target.
+        """
+        root = self._corpus(
+            "repo-a/main.tf",
+            {
+                "repo-a/one/main.tf": "repo-a/main.tf",
+                "repo-a/two/main.tf": "repo-a/main.tf",
+                "repo-a/three/main.tf": "repo-a/main.tf",
+            },
+        )
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["duplicating"], {"repo-a": 3})
+        self.assertEqual(found["targets"], 1, "three links, one file actually at risk")
+
+    def test_the_report_names_distinct_targets_not_just_links(self):
+        """60 links to 12 targets is 12 files repeated six times, not 60 files
+        duplicated once - a different and more alarming shape."""
+        text = self._reported({"repo-a": 60}, targets=12)
+        self.assertIn("12 distinct target", text)
 
     def test_the_target_itself_is_not_counted(self):
         """Only the link duplicates; the real file was always going to be read."""

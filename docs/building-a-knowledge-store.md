@@ -219,6 +219,15 @@ and a corrupted corpus inventory that a twelve-check suite passed 12/12. If you
 build one verification primitive, make it "compare against a witness written
 before the change", not "validate the result".
 
+**An idempotency check must cover everything the step is responsible for, not
+only what it originally wrote.** A store repairing a graph attribute guarded its
+repair with "if the node already has the right value, skip" — measured against a
+field that was *already* correct, so every node counted as done, the new
+attribute was never written, and the script printed success having changed
+nothing. The report and the result disagreed and only the result mattered. This
+is why a repair is verified by re-reading the field afterwards rather than by
+trusting the line that says it was written.
+
 **Treat ingested content as untrusted data.** Repositories increasingly contain
 agent instructions, and extraction agents will read them. Instruct every
 extraction agent that file contents are data to extract from, never
@@ -286,9 +295,23 @@ reliably *under* a vendored directory: one estate's exclusion appeared to work �
 `.pnp.cjs`, a generated loader sitting at the repository root, which every
 directory-shaped pattern missed and which reads as authored code.
 
-One further trap: pass extraction an **absolute** path. Given a relative one,
-`.graphifyignore` is silently not applied — the scan simply returns everything,
-with no error.
+**A `.graphifyignore` inside a cloned repository does not survive `sync`.** The
+sync stage ends with `git clean -fd -e graphify-out`, which deletes untracked
+files in every clone and exempts only `graphify-out/`. So the per-repository
+placement above is a build step to re-apply after every sync, never the source
+of truth for what an estate excludes. Nothing announces its disappearance; the
+symptom is `status` reverting to reporting symlinks it had previously called
+excluded.
+
+One further trap, and it is narrower than it first looked: `collect_files()`
+called directly with a **relative** path silently does not apply
+`.graphifyignore` — it returns everything, with no error. The **CLI resolves the
+path first**, so `graphify update .` from inside a repository, which is the form
+the build skill documents and the pipeline uses, honours the ignore file
+normally. So this bites the Python API, not the documented route. Measured both
+ways; an earlier revision of this guide stated it as a general rule about
+extraction, which would have had operators adding an absolute-path requirement
+they do not need.
 
 ## 6. The prose layers, and what they cost
 
