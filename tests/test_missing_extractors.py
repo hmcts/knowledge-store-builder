@@ -98,6 +98,13 @@ class DuplicatingSymlinkTest(SettingsIsolated):
     the two paths. The pipeline does not do that. Test the invocation that ships.
     """
 
+    # Scanning is tested against an explicit set. graphify is this library's
+    # optional dependency, so binding these tests to its real table would make
+    # them pass or fail on whether an unrelated package happens to be installed
+    # - which is exactly how they first went green locally and red in CI's
+    # default-install job.
+    SUFFIXES = {".tf", ".py"}
+
     def _corpus(self, real: str, links: dict[str, str]) -> Path:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -113,7 +120,7 @@ class DuplicatingSymlinkTest(SettingsIsolated):
 
     def test_it_counts_symlinked_extractable_files_by_repository(self):
         root = self._corpus("repo-a/main.tf", {"repo-a/env/live/main.tf": "repo-a/main.tf"})
-        found = status.duplicating_symlinks(root)
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
         self.assertTrue(found["checked"])
         self.assertEqual(found["files"], 1)
         self.assertEqual(found["by_repo"], {"repo-a": 1})
@@ -121,13 +128,20 @@ class DuplicatingSymlinkTest(SettingsIsolated):
     def test_the_target_itself_is_not_counted(self):
         """Only the link duplicates; the real file was always going to be read."""
         root = self._corpus("repo-a/main.tf", {})
-        self.assertEqual(status.duplicating_symlinks(root)["files"], 0)
+        self.assertEqual(status.duplicating_symlinks(root, self.SUFFIXES)["files"], 0)
 
     def test_a_symlink_nothing_extracts_is_ignored(self):
         root = self._corpus(
             "repo-a/notes.unknownext", {"repo-a/copy.unknownext": "repo-a/notes.unknownext"}
         )
-        self.assertEqual(status.duplicating_symlinks(root)["files"], 0)
+        self.assertEqual(status.duplicating_symlinks(root, self.SUFFIXES)["files"], 0)
+
+    def test_the_real_dispatch_table_is_readable_when_graphify_is_installed(self):
+        """The default path, which the injected sets above deliberately bypass."""
+        suffixes = status.extractable_suffixes()
+        if suffixes is None:
+            self.skipTest("graphify is not installed; the default install cannot check")
+        self.assertIn(".py", suffixes)
 
     def test_an_unreadable_dispatch_table_reports_cannot_check(self):
         """The failure mode that matters: a private upstream table gets renamed and

@@ -123,10 +123,12 @@ def missing_extractors(corpus: Path) -> list[dict]:
 def extractable_suffixes() -> set[str] | None:
     """Suffixes graphify dispatches an extractor for, from its own table.
 
-    Returns None when the table cannot be read. The caller must report that as
-    "cannot check" rather than "nothing found": a hand-written suffix list is
-    exactly the enumeration this codebase has been caught by twice, and silently
-    measuring nothing is worse than not measuring.
+    Returns None when the table cannot be read - most often because graphify is
+    simply not installed, since it is this library's optional dependency rather
+    than a required one. The caller must report that as "cannot check" rather
+    than "nothing found": a hand-written suffix list is exactly the enumeration
+    this codebase has been caught by twice, and silently measuring nothing is
+    worse than not measuring.
     """
     try:
         from graphify.extract import _DISPATCH
@@ -135,7 +137,7 @@ def extractable_suffixes() -> set[str] | None:
     return {str(suffix).lower() for suffix in _DISPATCH}
 
 
-def duplicating_symlinks(corpus: Path) -> dict:
+def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
     """Symlinked corpus files that extraction will emit twice.
 
     graphify's CLI records `source_file` from the path it walked, not from the
@@ -145,9 +147,14 @@ def duplicating_symlinks(corpus: Path) -> dict:
     once per directory that links to it.
 
     Latent until the relevant extractor is installed: a suffix nothing can parse
-    yields nothing, twice.
+    yields nothing, twice. The check is therefore most useful between installing
+    an extra and rebuilding, rather than at rebuild time.
+
+    `suffixes` defaults to graphify's own table and is a parameter so that
+    scanning can be tested without the optional dependency present.
     """
-    suffixes = extractable_suffixes()
+    if suffixes is None:
+        suffixes = extractable_suffixes()
     if suffixes is None:
         return {"checked": False}
     if not corpus.is_dir():
@@ -321,8 +328,9 @@ def main(argv=None) -> int:
     links = duplicating_symlinks(config.REPOSITORIES_DIR)
     if not links["checked"]:
         print(
-            "Symlink check skipped: graphify's extractor table could not be read, so "
-            "files that would extract twice cannot be identified."
+            "Symlink check skipped: graphify is not installed, so the set of file "
+            "types it would extract - and therefore which symlinks would be "
+            "extracted twice - cannot be determined."
         )
     elif links["files"]:
         where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
