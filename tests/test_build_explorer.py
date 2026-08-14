@@ -413,6 +413,68 @@ class RepoAttributeGuardTest(unittest.TestCase):
         self.assertEqual(self._build(nodes), "")
 
 
+class JoinCardinalityTest(unittest.TestCase):
+    """A join that matches nothing must not pass as a sparse estate.
+
+    Shape, shema and freshness checks all pass on a dead join: the graph is
+    valid, the index is valid, every count is healthy. Only the cardinality of
+    the join says otherwise, and nothing measured it - on one store the
+    file-to-ticket join produced ZERO matches across 70,655 nodes and 108
+    repositories of mined tickets, with the build green and a 12-check
+    regression suite passing.
+
+    The cause is that the two documented build routes disagree about
+    `source_file`: the index is keyed on repo-relative paths, and the
+    single-root route emits `repositories/<repo>/<path>`.
+    """
+
+    INDEX = {"repo-a": {f"f{i}.py": {"tickets": {"T-1": 1}} for i in range(6)}}
+
+    def _graph(self, prefix: str) -> dict:
+        nodes = [
+            {
+                "id": f"n{i}",
+                "label": f"ServiceComponent{i}",
+                "repo": "repo-a",
+                "source_file": f"{prefix}f{i}.py",
+            }
+            for i in range(6)
+        ]
+        links = [
+            {"source": f"n{i}", "target": f"n{j}"} for i in range(6) for j in range(6) if i != j
+        ]
+        return {"nodes": nodes, "links": links}
+
+    def _build(self, prefix: str):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            entries, _ = explorer.build_index(self._graph(prefix), {}, self.INDEX)
+        return entries, err.getvalue()
+
+    def test_a_dead_join_is_reported(self):
+        entries, text = self._build("repositories/repo-a/")
+        self.assertEqual(sum(1 for e in entries if e[7]), 0)
+        self.assertIn("matched nothing", text)
+        self.assertIn(
+            "repositories/",
+            text,
+            "naming the likely cause is what makes this actionable rather than alarming",
+        )
+
+    def test_the_same_graph_joined_correctly_is_silent(self):
+        """Identical node count and identical entries - only the join differs."""
+        entries, text = self._build("")
+        self.assertEqual(sum(1 for e in entries if e[7]), 6)
+        self.assertEqual(text, "")
+
+    def test_an_estate_with_no_intent_index_is_not_reported(self):
+        """Nothing to join is not a broken join."""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            explorer.build_index(self._graph(""), {}, {})
+        self.assertEqual(err.getvalue(), "")
+
+
 if __name__ == "__main__":
     unittest.main()
 

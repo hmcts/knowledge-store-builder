@@ -122,6 +122,39 @@ def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:
     return True
 
 
+def warn_if_join_is_empty(joined: int, candidates: int, index_size: int) -> bool:
+    """Warn when a join that had both sides to work with matched nothing.
+
+    Shape, schema and freshness checks all pass on a join that matches nothing:
+    the graph is valid, the index is valid, and every count is healthy. Only the
+    cardinality of the join itself says otherwise, and nothing measured it. On
+    one store the file-to-ticket join produced **zero** matches across 70,655
+    nodes and 108 repositories of mined tickets, and the build was green.
+
+    The cause is that the two documented build routes disagree about
+    `source_file`. The index is keyed `{repo: {repo-relative path: ...}}`, which
+    is what the per-repository route plus `merge-graphs` produces; the
+    single-root route produces `repositories/<repo>/<path>` instead. Nothing
+    rewrites it - `prefix_graph_for_global` sets `repo` and `local_id` and does
+    not touch `source_file` - so the join is not degraded, it is dead.
+
+    Zero is the only safe floor to assert generically: a genuinely sparse estate
+    may join very little, but an estate with tickets on both sides that joins
+    nothing at all is broken rather than thin.
+    """
+    if not index_size or not candidates or joined:
+        return False
+    print(
+        f"WARNING: the file-to-ticket join matched nothing - {candidates} candidate node(s) "
+        f"against an index covering {index_size} repositories. Every answer will report no "
+        "ticket evidence for any file, which is indistinguishable from an estate no ticket "
+        "ever touched. The usual cause is `source_file` carrying a `repositories/<repo>/` "
+        "prefix, which the index is not keyed on.",
+        file=sys.stderr,
+    )
+    return True
+
+
 def load_labels(path: Path) -> dict:
     """Community labels, or {} when not yet generated."""
     return read_json_dict(path)
