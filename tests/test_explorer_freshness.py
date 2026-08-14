@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import io as _io
-import json
 import sys
 import tempfile
 import unittest
