@@ -355,7 +355,14 @@ def _report_symlinks() -> None:
             "extracted twice - cannot be determined."
         )
     elif links["files"]:
-        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
+        by_repo = sorted(links["by_repo"].items())
+        # One repository needs no per-repository breakdown - "60 in repo-a (60)"
+        # repeats itself. Several do, and then the total is what is missing.
+        where = (
+            by_repo[0][0]
+            if len(by_repo) == 1
+            else ", ".join(f"{repo} ({n})" for repo, n in by_repo)
+        )
         print(
             f"Symlinked source files: {links['files']} in {where}. Extraction records the "
             "path it walked, not the link target, so each is emitted twice under two paths "

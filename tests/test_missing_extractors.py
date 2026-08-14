@@ -16,6 +16,8 @@ for the import rather than for a declared dependency of our own.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -124,6 +126,35 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         self.assertTrue(found["checked"])
         self.assertEqual(found["files"], 1)
         self.assertEqual(found["by_repo"], {"repo-a": 1})
+
+    def _reported(self, by_repo: dict) -> str:
+        """The symlink report for a given scan result.
+
+        Stubs the scan: the defect being pinned is in how the result is worded,
+        and driving the real scan would tie a formatting test to whether an
+        optional dependency happens to be installed.
+        """
+        self.addCleanup(setattr, status, "duplicating_symlinks", status.duplicating_symlinks)
+        status.duplicating_symlinks = lambda *a, **k: {
+            "checked": True,
+            "files": sum(by_repo.values()),
+            "by_repo": by_repo,
+        }
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status._report_symlinks()
+        return out.getvalue()
+
+    def test_one_repository_is_reported_without_repeating_its_count(self):
+        """A released version printed "60 in cpp-terraform-azurerm-idam (60)"."""
+        text = self._reported({"repo-a": 60})
+        self.assertIn("60 in repo-a.", text)
+        self.assertNotIn("(60)", text, "the per-repository count repeats the total")
+
+    def test_several_repositories_keep_their_per_repository_counts(self):
+        """With more than one, the breakdown is the whole point."""
+        text = self._reported({"repo-a": 40, "repo-b": 20})
+        self.assertIn("60 in repo-a (40), repo-b (20).", text)
 
     def test_the_target_itself_is_not_counted(self):
         """Only the link duplicates; the real file was always going to be read."""
