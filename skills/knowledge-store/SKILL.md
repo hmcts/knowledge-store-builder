@@ -125,8 +125,16 @@ repository, degree ranking, community sizes.
   through `merge-graphs` may carry the repository under another name, or not at
   all, and every consumer that reads `repo` then silently attributes findings to
   nothing. One store carried it as `repository` on all of its nodes and `repo` on
-  none. Confirm with `graphify-out/graph.json` before relying on it, and fall
-  back to the leading path component of `source_file`.
+  none. Confirm with `graphify-out/graph.json` before relying on it.
+  **Do not re-derive the repository from `source_file`.** The two build routes
+  encode it differently and neither leading path component is a repository name:
+  the per-repository route makes `source_file` repo-relative, so it begins with a
+  source directory; the single-root route prefixes `repositories/<name>/`, so it
+  begins with the literal `repositories`. If `repo` is absent, the only
+  recoverable case is that second form — take the component *after*
+  `repositories/`. On a repo-relative graph with no `repo` attribute the
+  repository is not in the path at all, and the honest answer is that the finding
+  cannot be attributed, not a guess.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
