@@ -7,9 +7,12 @@ check reads the small tracked extract, not graph.json.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from . import config, io, provenance
@@ -160,36 +163,137 @@ def extractable_suffixes() -> set[str] | None:
     return {str(suffix).lower() for suffix in _DISPATCH}
 
 
+def _ignore_matcher(repo_root: Path):
+    """A predicate saying whether extraction would skip a path under `repo_root`.
+
+    Uses graphify's own `_load_graphifyignore` / `_is_ignored` - the same pair
+    `collect_files` uses - so this agrees with the extractor by construction
+    rather than by parallel reasoning about pattern syntax. Both names are
+    private; when they cannot be imported the caller is told it could not check
+    rather than being told nothing is excluded.
+
+    Anchored at the repository root, which is what per-repository extraction
+    scans. A `.graphifyignore` above that level is read only when the store root
+    is itself the scan root - see the placement table in the guide.
+    """
+    try:
+        from graphify.detect import _is_ignored, _load_graphifyignore
+    except (ImportError, AttributeError):
+        return None
+    patterns = _load_graphifyignore(repo_root)
+    if not patterns:
+        return lambda path: False
+    cache: dict = {}
+    return lambda path: bool(_is_ignored(path, repo_root, patterns, _cache=cache))
+
+
+def _symlink_outcome(path: Path, root: Path, suffixes: set[str]) -> str | None:
+    """Which outcome this path produces, or None when it is not a candidate.
+
+    Broken links and targets outside the corpus are named rather than left to
+    fall into misattribution by accident: they are different defects, and only
+    one of them is about attribution at all.
+    """
+    if ".git" in path.parts or not path.is_symlink():
+        return None
+    if path.suffix.lower() not in suffixes:
+        return None
+    try:
+        target = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "broken"
+    collected = target.is_relative_to(root) and target.suffix.lower() in suffixes
+    return "duplicating" if collected else "misattributing"
+
+
+def _classify_symlinks(corpus: Path, suffixes: set[str]) -> dict:
+    """Tally each symlink by outcome, skipping those already excluded."""
+    found: dict = {
+        "checked": True,
+        "duplicating": {},
+        "misattributing": {},
+        "broken": {},
+        "excluded": 0,
+        "targets": 0,
+        "exclusion_checked": True,
+    }
+    if not corpus.is_dir():
+        return found
+    # Walk from the resolved root so every path is in the same form as the
+    # anchors graphify's ignore loader returns. Mixing the two silently matches
+    # nothing - on macOS /var against /private/var was enough to report a
+    # correctly excluded symlink as exposed.
+    root = corpus.resolve()
+    matchers: dict[str, Callable[[Path], bool] | None] = {}
+    targets: set[Path] = set()
+    for path in sorted(root.rglob("*")):
+        outcome = _symlink_outcome(path, root, suffixes)
+        if not outcome:
+            continue
+        repo = path.relative_to(root).parts[0]
+        if repo not in matchers:
+            matchers[repo] = _ignore_matcher(root / repo)
+        ignored = matchers[repo]
+        if ignored is None:
+            found["exclusion_checked"] = False
+        elif ignored(path):
+            # Already mitigated. Counting it as exposed gives an operator who has
+            # done the work the same message as one who has not, and the
+            # instruction then reads as outstanding work forever.
+            found["excluded"] += 1
+            continue
+        if outcome != "broken":
+            with contextlib.suppress(OSError, RuntimeError):
+                targets.add(path.resolve(strict=True))
+        found[outcome][repo] = found[outcome].get(repo, 0) + 1
+    found["targets"] = len(targets)
+    return found
+
+
 def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
-    """Symlinked corpus files that extraction will emit twice.
+    """Symlinked corpus files, split by what extraction will actually do to them.
 
-    graphify's CLI records `source_file` from the path it walked, not from the
-    link target, so a symlink and its target become two sets of nodes with the
-    same content under different paths. On an estate asked about duplication that
-    is a wrong answer rather than a noisy one - a shared parent resource appears
-    once per directory that links to it.
+    Extraction records the path it walked, not the link target, and that has two
+    different consequences which a single count conflates:
 
-    Latent until the relevant extractor is installed: a suffix nothing can parse
-    yields nothing, twice. The check is therefore most useful between installing
-    an extra and rebuilding, rather than at rebuild time.
+    - **duplication** - on a *cold* build the target is collected too, so the same
+      content becomes two sets of nodes under two paths. It inflates counts and,
+      where anything consolidates by label, manufactures a hub that does not exist.
+    - **displacement** - on any build with a *warm* cache the two collide, because
+      the extraction cache keys on the resolved path, and the link wins. The real
+      file disappears from the graph and its content is filed under the link.
+      Reproduced in three consecutive runs of the same extraction: run 1 yields
+      two distinct `source_file` values, runs 2 and 3 yield one, and it is the
+      symlink. So a corpus predicts *which files are at risk*, never which of the
+      two outcomes a given build will produce - that is cache state, not corpus.
+      Where several links share one target, the other links show nothing at all,
+      and a reader concludes those components declare nothing.
+    - **misattribution** - the target is not collected, so nothing is duplicated,
+      but the graph asserts the content lives at a path that is a link and knows
+      nothing about the real file. Quieter, and worse to answer questions from:
+      "where is this declared?" returns the link, and asking about the real file
+      returns nothing at all.
 
-    `suffixes` defaults to graphify's own table and is a parameter so that
-    scanning can be tested without the optional dependency present.
+    On one estate a flat count reported 13 and implied 13 problems, when the
+    honest report was 2 nodes duplicated and 57 misattributed - the misattribution
+    being the larger effect, and not the one the check is named after.
+
+    This is a **prediction from the corpus, not a measurement of a built graph**,
+    because `status` must stay cheap enough to run before a rebuild and so must
+    not load the graph. A target can exist on disk and still never reach the
+    graph - excluded by a filter, or dropped by an extractor - which would turn a
+    predicted duplication into a real misattribution. The exact split needs the
+    node counts per `source_file`.
     """
     if suffixes is None:
         suffixes = extractable_suffixes()
     if suffixes is None:
         return {"checked": False}
-    if not corpus.is_dir():
-        return {"checked": True, "files": 0, "by_repo": {}}
-    by_repo: dict[str, int] = {}
-    for path in corpus.rglob("*"):
-        if ".git" in path.parts or not path.is_symlink():
-            continue
-        if path.suffix.lower() in suffixes:
-            repo = path.relative_to(corpus).parts[0]
-            by_repo[repo] = by_repo.get(repo, 0) + 1
-    return {"checked": True, "files": sum(by_repo.values()), "by_repo": by_repo}
+    found = _classify_symlinks(corpus, suffixes)
+    for key in ("duplicating", "misattributing", "broken"):
+        found[f"{key}_files"] = sum(found[key].values())
+    found["files"] = found["duplicating_files"] + found["misattributing_files"]
+    return found
 
 
 def corpus_citations(root: Path) -> dict:
@@ -283,6 +387,80 @@ def source_drift(runner=run_gh) -> list[dict] | None:
     return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
 
 
+# Two simple patterns rather than one spanning both figures. A single pattern
+# needs `[\d,]+` next to `\s+`, which is ambiguous enough to backtrack
+# super-linearly on input that never matches - and this reads a file whose
+# format is graphify's to change.
+GRAPH_NODES = re.compile(r"(\d[\d,]*) nodes")
+GRAPH_EDGES = re.compile(r"(\d[\d,]*) edges")
+
+
+def _figure(pattern: re.Pattern, text: str) -> int | None:
+    found = pattern.search(text)
+    return int(found.group(1).replace(",", "")) if found else None
+
+
+def graph_report_claims() -> dict:
+    """What GRAPH_REPORT.md says it describes, and whether it predates the graph.
+
+    The query skill deliberately carries no counts, so figures cannot rot inside
+    it, and routes every "how big is the graph" question to this file. That makes
+    the file the single point where the anti-stale-numbers design can fail - and
+    it did: one store's report claimed 809,441 nodes beside a graph holding
+    779,551, a 29,890-node disagreement in the same directory with nothing
+    reporting it. The reader believes they are checking the source, which is what
+    makes it worse than a README nobody re-derived.
+
+    Staleness is decided on commit dates rather than by counting the graph,
+    because this stage must stay cheap enough to run any time - see the module
+    docstring. `--verify-graph` opts into the exact comparison.
+    """
+    report = config.GRAPH_REPORT_PATH
+    if not report.is_file():
+        return {"present": False}
+    text = report.read_text(encoding="utf-8", errors="replace")[:4000]
+    claims = {
+        "present": True,
+        "nodes": _figure(GRAPH_NODES, text),
+        "edges": _figure(GRAPH_EDGES, text),
+    }
+    graph = config.GRAPH_PATH.with_suffix(".json.gz")
+    if not graph.is_file():
+        graph = config.GRAPH_PATH
+    report_at = _parse_iso(_committed_at(_relative(report), run_git))
+    graph_at = _parse_iso(_committed_at(_relative(graph), run_git))
+    claims["stale"] = bool(report_at and graph_at and report_at < graph_at)
+    return claims
+
+
+def _relative(path: Path) -> str:
+    return str(path.relative_to(config.ROOT)) if path.is_relative_to(config.ROOT) else str(path)
+
+
+def _report_graph_report(verify: bool) -> None:
+    claims = graph_report_claims()
+    if not claims["present"]:
+        return
+    if claims["stale"]:
+        described = f"describes {claims['nodes']:,} nodes; " if claims["nodes"] else ""
+        print(
+            f"GRAPH_REPORT.md is older than the graph beside it - it {described}"
+            "the query skill treats this file as authoritative for graph size, so a stale "
+            "one is quoted as fact. Regenerate it, or do not cite it."
+        )
+    if not verify or claims["nodes"] is None:
+        return
+    # Opt-in, like --drift: exact, and it loads the whole graph to be so.
+    actual = len(io.load_graph(config.GRAPH_PATH).get("nodes", []))
+    if actual == claims["nodes"]:
+        print(f"GRAPH_REPORT.md agrees with the graph: {actual:,} nodes.")
+    else:
+        print(
+            f"GRAPH_REPORT.md describes {claims['nodes']:,} nodes; the graph has {actual:,} "
+            f"- a {abs(actual - claims['nodes']):,} disagreement in the same directory."
+        )
+
+
 def _report_drift(recorded: dict) -> None:
     """Print the --drift section: gh availability, provenance, then results."""
     if not shutil.which("gh"):
@@ -322,6 +500,27 @@ def _report_unsynced(recorded: dict) -> None:
             )
 
 
+def _report_failed_syncs(recorded: dict) -> None:
+    """Repositories whose record survives only because their last sync failed.
+
+    Retaining the record keeps the manifest and provenance agreeing on
+    membership, which is what lets a reconciliation see the repository at all.
+    But a retained record is a stale one, and without this it would be reported
+    nowhere: `unsynced` asks who is missing from provenance, and this repository
+    is no longer missing. Trading a visible gap for an invisible staleness would
+    be the worse bargain.
+    """
+    stale = sorted(name for name, entry in recorded.items() if entry.get("sync_failed"))
+    if not stale:
+        return
+    shown = ", ".join(stale[:5]) + (f" and {len(stale) - 5} more" if len(stale) > 5 else "")
+    print(
+        f"Stale provenance: {len(stale)} of {len(recorded)} repositories kept their previous "
+        f"commit because the last sync failed - {shown}. Their graph and history describe an "
+        "older state of the source. Re-run `knowledgestore sync`."
+    )
+
+
 def _report_intent(recorded: dict) -> None:
     intent = intent_coverage(recorded)
     if intent["estate"]:
@@ -346,6 +545,30 @@ def _report_missing_extractors() -> None:
         )
 
 
+def _report_symlink_context(links: dict) -> None:
+    """Exclusions already in force, and the limits of the prediction."""
+    if links["excluded"] and not links["files"]:
+        # Saying nothing here would be worse than it looks: an operator who has
+        # mitigated cannot tell a working exclusion from a check that stopped
+        # running. The number is the evidence that it is still being enforced.
+        print(
+            f"Symlinked source files: {links['excluded']} excluded by .graphifyignore, "
+            "none exposed."
+        )
+    elif links["excluded"]:
+        print(f"  ({links['excluded']} further symlink(s) already excluded by .graphifyignore.)")
+    if not links["exclusion_checked"]:
+        print(
+            "  Exclusions could not be read, so an already-excluded symlink is counted here "
+            "as exposed."
+        )
+    if links["files"] or links["broken_files"]:
+        print(
+            "  Predicted from the corpus, not measured from a graph, and which outcome you "
+            "get depends on cache state rather than on anything in the corpus."
+        )
+
+
 def _report_symlinks() -> None:
     links = duplicating_symlinks(config.REPOSITORIES_DIR)
     if not links["checked"]:
@@ -354,14 +577,39 @@ def _report_symlinks() -> None:
             "types it would extract - and therefore which symlinks would be "
             "extracted twice - cannot be determined."
         )
-    elif links["files"]:
-        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
+        return
+
+    def where(by_repo: dict) -> str:
+        # One repository needs no breakdown - "60 in repo-a (60)" repeats itself.
+        pairs = sorted(by_repo.items())
+        return pairs[0][0] if len(pairs) == 1 else ", ".join(f"{r} ({n})" for r, n in pairs)
+
+    if links["duplicating_files"]:
+        # Several links usually share one target, so the count of links overstates
+        # the files at risk and understates how badly each is repeated: on one
+        # estate 60 links resolved to 12 targets - not 60 files duplicated once,
+        # but 12 files appearing six times each.
+        spread = f" resolving to {links['targets']} distinct target(s)" if links["targets"] else ""
         print(
-            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
-            "path it walked, not the link target, so each is emitted twice under two paths "
-            "- which reads as duplication rather than as one file. Exclude them before a "
-            "rebuild."
+            f"Symlinked source files, target inside the corpus: {links['duplicating_files']} "
+            f"in {where(links['duplicating'])}{spread}. On a cold build the content is emitted "
+            "twice under two paths; on any rebuild with a warm cache the two collide and the "
+            "LINK wins, so the real file vanishes from the graph and its content is filed "
+            "under the link. Exclude them either way."
         )
+    if links["misattributing_files"]:
+        print(
+            f"Symlinked source files, target outside the corpus: "
+            f"{links['misattributing_files']} in {where(links['misattributing'])}. Nothing is "
+            "duplicated, but the content is recorded at a path that is a link and the real "
+            "file is absent - so asking about it returns nothing."
+        )
+    if links["broken_files"]:
+        print(
+            f"Broken symlinks: {links['broken_files']} in {where(links['broken'])}. "
+            "They resolve to nothing and contribute nothing."
+        )
+    _report_symlink_context(links)
 
 
 def _report_citations() -> None:
@@ -392,6 +640,11 @@ def _report_freshness() -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--verify-graph",
+        action="store_true",
+        help="also load the graph to compare its size against GRAPH_REPORT.md (slow)",
+    )
+    parser.add_argument(
         "--drift",
         action="store_true",
         help="also check GitHub for commits since the build (one API call per repository)",
@@ -419,6 +672,8 @@ def main(argv=None) -> int:
     # mined from it, then what cannot be parsed or would be counted twice.
     _report_unsynced(recorded)
 
+    _report_failed_syncs(recorded)
+
     _report_intent(recorded)
 
     _report_missing_extractors()
@@ -428,6 +683,8 @@ def main(argv=None) -> int:
     _report_citations()
 
     _report_freshness()
+
+    _report_graph_report(arguments.verify_graph)
 
     if arguments.drift:
         _report_drift(recorded)
