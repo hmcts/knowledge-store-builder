@@ -122,8 +122,14 @@ def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:
     return True
 
 
-def warn_if_join_is_empty(joined: int, candidates: int, index_size: int) -> bool:
-    """Warn when a join that had both sides to work with matched nothing.
+def report_join_cardinality(joined: int, candidates: int, index_size: int) -> bool:
+    """Report how much of the file-to-ticket join actually matched.
+
+    Two outcomes, deliberately different in kind. A join that matched **nothing**
+    while both sides were populated is a defect and goes to stderr as a warning.
+    Any other rate is a **measurement** and goes to stdout, because the threshold
+    between "sparse" and "broken" is a judgement this library cannot make for an
+    estate - see below for why guessing it would be worse than not.
 
     Shape, schema and freshness checks all pass on a join that matches nothing:
     the graph is valid, the index is valid, and every count is healthy. Only the
@@ -138,7 +144,7 @@ def warn_if_join_is_empty(joined: int, candidates: int, index_size: int) -> bool
     rewrites it - `prefix_graph_for_global` sets `repo` and `local_id` and does
     not touch `source_file` - so the join is not degraded, it is dead.
 
-    Zero is the only safe floor to assert generically, and the reason is stronger
+    Zero is the only floor safe to assert generically, and the reason is stronger
     than caution. A non-zero floor would be a guess about estate shape; a guess
     that fires wrongly gets suppressed, and a suppressed check is worse than an
     absent one because somebody has explicitly decided to ignore it. Both sides

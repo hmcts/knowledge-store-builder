@@ -416,7 +416,7 @@ class RepoAttributeGuardTest(unittest.TestCase):
 class JoinCardinalityTest(unittest.TestCase):
     """A join that matches nothing must not pass as a sparse estate.
 
-    Shape, shema and freshness checks all pass on a dead join: the graph is
+    Shape, schema and freshness checks all pass on a dead join: the graph is
     valid, the index is valid, every count is healthy. Only the cardinality of
     the join says otherwise, and nothing measured it - on one store the
     file-to-ticket join produced ZERO matches across 70,655 nodes and 108

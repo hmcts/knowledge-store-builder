@@ -252,7 +252,7 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
     # Cardinality, not existence. Shape, schema and freshness all pass on a join
     # that matches nothing - only counting the matches says otherwise, and on one
     # store this produced zero across 70,655 nodes with the build still green.
-    io.warn_if_join_is_empty(
+    io.report_join_cardinality(
         joined=sum(1 for entry in entries if entry[7]),
         candidates=sum(
             1 for _, node, kind in kept if kind not in (kinds.FEATURE, kinds.SCENARIO, kinds.TICKET)
