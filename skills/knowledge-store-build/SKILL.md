@@ -47,7 +47,7 @@ repository, from inside each one, then merge:
 ```bash
 while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
   case "$repo" in ''|\#*) continue;; esac
-  ( cd "repositories/$repo" && graphify update . --no-cluster )
+  ( cd "repositories/$repo" && graphify update . )
 done < config/repositories.txt
 
 graphify merge-graphs repositories/*/graphify-out/graph.json \
@@ -56,8 +56,35 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
 
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
-attribute. `--no-cluster` is deliberate: the merge discards per-repository
-communities, so clustering once per repository is waste.
+attribute.
+
+**Do not add `--no-cluster` here, however wasteful per-repository clustering
+looks.** The merge does discard per-repository communities, so the reasoning is
+sound and the conclusion is wrong: the clustering path also runs **symbol
+resolution**, and skipping it leaves dangling edges that `merge-graphs` then
+materialises as contentless nodes — `id`, `local_id`, `repo`, and nothing else.
+Measured on one repository, same version, only the flag differing:
+
+| | nodes | edges | dangling endpoints |
+|---|---|---|---|
+| `--no-cluster` | 1,288 | 2,711 | 166 |
+| without | 1,288 | 2,236 | **0** |
+
+Across that estate it produced **+6% nodes and +22% edges of material carrying no
+content** — 49,506 contentless nodes with 339,159 edges pointing at them, almost
+all JDK and test-library symbols (`assertthat`, `ioexception`, `mock`,
+`loggerfactory`). Clustering would then have placed contentless nodes into
+communities and billed an authoring pass to summarise them.
+
+**A post-merge prune is not an equivalent fix**, which is worth knowing before
+reaching for the cheap one: clustering *resolves* some of those references into
+real nodes rather than discarding them, so pruning drops edges the correct path
+keeps (2,213 against 2,236 on that repository, and two fewer nodes). Re-extract
+rather than clean up afterwards.
+
+Nothing fails when the flag is used. Every stage reports success and the graph
+is simply wrong, which is why this is documented here rather than left to be
+noticed.
 
 A large graph also needs the size cap raised, or every graph operation refuses:
 
