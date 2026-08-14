@@ -130,11 +130,26 @@ repository, degree ranking, community sizes.
   encode it differently and neither leading path component is a repository name:
   the per-repository route makes `source_file` repo-relative, so it begins with a
   source directory; the single-root route prefixes `repositories/<name>/`, so it
-  begins with the literal `repositories`. If `repo` is absent, the only
-  recoverable case is that second form — take the component *after*
-  `repositories/`. On a repo-relative graph with no `repo` attribute the
-  repository is not in the path at all, and the honest answer is that the finding
-  cannot be attributed, not a guess.
+  begins with the literal `repositories`.
+
+  When `repo` is missing, recover in this order and stop at the first that
+  applies:
+
+  1. **The id prefix**, if the id contains `::`. A merged graph relabels every
+     node `<tag>::<local_id>` and keeps the original in `local_id`, so this is
+     present exactly where `source_file` cannot help. But that prefix is a
+     **tag, not a repository name**: it comes from the input directory, and
+     colliding tags are widened with their parent (`frontend_src`) and then
+     index-suffixed to guarantee uniqueness. So it reliably **groups** nodes by
+     input graph, and cannot be trusted as the repository's name — labelling the
+     group with the tag turns a correct grouping into a wrong name. On a store
+     where no two inputs collide it equals `repo` for every node, which is what
+     makes this worth stating rather than discovering.
+  2. **The path**, if `source_file` begins `repositories/` — take the next
+     component.
+  3. **Otherwise refuse.** On a repo-relative graph with no `repo` attribute the
+     repository is not recoverable, and the honest answer is that the finding
+     cannot be attributed, not a guess.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
