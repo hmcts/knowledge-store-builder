@@ -97,5 +97,35 @@ class ReportTest(SettingsIsolated):
         self.assertNotIn("Declared but never synced", text)
 
 
+class FailedSyncRetentionTest(SettingsIsolated):
+    """A failed sync must leave a marked record, not a hole.
+
+    Deleting the record is worse than a stale clone: every reconciliation that
+    iterates provenance is then blind to the repository, because a check keyed
+    on the record cannot see a record that was removed. Reported from an estate
+    where a repository with a moved tag vanished from a 163-entry manifest and a
+    provenance-versus-remote check examined 164 repositories without it.
+    """
+
+    def _report(self, recorded: dict) -> str:
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status._report_failed_syncs(recorded)
+        return out.getvalue()
+
+    def test_a_retained_record_is_reported_as_stale(self):
+        text = self._report({"a": {"sha": "x"}, "b": {"sha": "y", "sync_failed": "boom"}})
+        self.assertIn("b", text)
+        self.assertIn("1 of 2", text)
+        self.assertIn(
+            "older state",
+            text,
+            "retention without a report trades a visible gap for an invisible staleness",
+        )
+
+    def test_a_clean_estate_is_not_nagged(self):
+        self.assertEqual(self._report({"a": {"sha": "x"}}), "")
+
+
 if __name__ == "__main__":
     unittest.main()

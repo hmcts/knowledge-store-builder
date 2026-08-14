@@ -3,11 +3,13 @@ build_graph.py - the (former bash) plumbing, now testable Python."""
 
 from __future__ import annotations
 
+import contextlib
 import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -670,6 +672,100 @@ class IntentSummariseTest(SettingsIsolated):
         printed = buffer.getvalue()
         self.assertIn("1 files", printed.replace(",", ""))
         self.assertIn("1 distinct tickets", printed.replace(",", ""))
+
+
+class FailedSyncKeepsProvenanceTest(SettingsIsolated):
+    """A repository that fails to sync must keep its previous record.
+
+    `entries` starts empty each run and `provenance.write` replaces the file, so
+    a failure used to DELETE the repository's record - the manifest then declared
+    163 repositories while provenance held 162, and a reconciliation that
+    iterates provenance could not see the missing one at all. A check keyed on
+    the record cannot see a record that was removed.
+    """
+
+    def _run(self, failing: str) -> dict:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        manifest = root / "repositories.txt"
+        manifest.write_text(
+            "repo-a | https://example.invalid/repo-a.git | main\n"
+            "repo-b | https://example.invalid/repo-b.git | main\n",
+            encoding="utf-8",
+        )
+        config.configure(
+            ROOT=root,
+            REPOSITORIES_CONFIG=manifest,
+            REPOSITORIES_DIR=root / "repositories",
+            EXTERNAL_CONFIG=root / "external.txt",
+            EXTERNAL_DIR=root / "external",
+            PROVENANCE_PATH=root / "provenance.json",
+        )
+        from knowledgestore import provenance
+
+        provenance.write({"repo-a": {"sha": "old-a"}, "repo-b": {"sha": "old-b"}}, {})
+
+        self.addCleanup(setattr, sync, "sync_repository", sync.sync_repository)
+        self.addCleanup(setattr, provenance, "head_info", provenance.head_info)
+        provenance.head_info = lambda *a, **k: {"sha": "new"}
+
+        def fake(repo, repositories_dir, run=None):
+            if repo.name == failing:
+                raise RuntimeError("would clobber existing tag")
+            return 1
+
+        sync.sync_repository = fake
+        with redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            sync.main()
+        return provenance.read()
+
+    def test_the_failed_repository_keeps_its_previous_commit(self):
+        recorded = self._run("repo-b")
+        self.assertIn(
+            "repo-b",
+            recorded,
+            "dropping it makes the repository invisible to any provenance-keyed check",
+        )
+        self.assertEqual(recorded["repo-b"]["sha"], "old-b")
+        self.assertIn("clobber", recorded["repo-b"]["sync_failed"])
+
+    def test_the_successful_repository_is_updated(self):
+        recorded = self._run("repo-b")
+        self.assertEqual(recorded["repo-a"]["sha"], "new")
+        self.assertNotIn("sync_failed", recorded["repo-a"])
+
+    def test_membership_still_matches_the_manifest(self):
+        """The invariant: after a sync, every declared repository has a record."""
+        recorded = self._run("repo-b")
+        self.assertEqual(set(recorded), {"repo-a", "repo-b"})
+
+
+class FetchShapeTest(unittest.TestCase):
+    """A moved tag must not fail the whole fetch.
+
+    The refspec's leading + force-updates heads and says nothing about tags, so
+    a repository that re-points a release tag - which is routine - rejects with
+    "would clobber existing tag" and becomes mysteriously unsyncable.
+    """
+
+    def test_the_fetch_forces_tags(self):
+        calls = []
+        repo = SimpleNamespace(
+            name="repo-a", clone_url="https://example.invalid/repo-a.git", default_branch="main"
+        )
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        (Path(tmp.name) / "repo-a" / ".git").mkdir(parents=True)
+
+        def run(args):
+            calls.append(args)
+            return "1"
+
+        sync.sync_repository(repo, Path(tmp.name), run=run)
+        fetch = next(c for c in calls if "fetch" in c)
+        self.assertIn("--force", fetch, f"a moved tag fails this fetch: {fetch}")
+        self.assertIn("--tags", fetch)
 
 
 if __name__ == "__main__":
