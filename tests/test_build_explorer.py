@@ -491,6 +491,62 @@ class JoinCardinalityTest(unittest.TestCase):
             explorer.build_index(self._graph("repositories/repo-a/"), {}, self.INDEX)
         self.assertNotIn("carry ticket evidence", out.getvalue())
 
+    def _layered(self, semantic_prefix: str, semantic_repo: str = "repo-a") -> tuple[str, str]:
+        """An AST layer that joins and a semantic layer that may not."""
+        nodes = [
+            {
+                "id": f"a{i}",
+                "label": f"AstComponent{i}",
+                "repo": "repo-a",
+                "source_file": f"f{i}.py",
+                "_origin": "ast",
+            }
+            for i in range(6)
+        ]
+        nodes += [
+            {
+                "id": f"s{i}",
+                "label": f"SemComponent{i}",
+                "repo": semantic_repo,
+                "source_file": f"{semantic_prefix}f{i}.py",
+            }
+            for i in range(6)
+        ]
+        ids = [n["id"] for n in nodes]
+        graph = {
+            "nodes": nodes,
+            "links": [{"source": x, "target": y} for x in ids for y in ids if x != y],
+        }
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            explorer.build_index(graph, {}, self.INDEX)
+        return out.getvalue(), err.getvalue()
+
+    def test_one_layer_keyed_differently_is_reported_though_the_whole_is_not_zero(self):
+        """The half-dead case a composite count structurally cannot show.
+
+        One estate converted its AST layer and left the semantic layer skipping
+        every record: 5,692 of 72,370 is never zero and reads as a working join
+        on a sparse estate. Per layer it was 0 of 46,602.
+        """
+        out, err = self._layered("/absolute/gone/")
+        self.assertIn("semantic layer", err)
+        self.assertIn("0 of 6", err)
+        self.assertIn("50.0%", out, "the composite stays non-zero, which is the whole point")
+
+    def test_layers_that_all_join_are_not_reported(self):
+        out, err = self._layered("")
+        self.assertEqual(err, "")
+        self.assertIn("12 of 12", out)
+
+    def test_a_layer_whose_repository_is_not_mined_is_not_reported(self):
+        """Sparsity, not a key mismatch - and the false positive this check
+        produced on the maintainer's own estate before the restriction was
+        added: 2,115 `meta-arch` nodes joining zero because their repository is
+        not in the index at all."""
+        out, err = self._layered("", semantic_repo="unmined-repo")
+        self.assertEqual(err, "", "a layer with nothing to join against must not be accused")
+
     def test_an_estate_with_no_intent_index_is_not_reported(self):
         """Nothing to join is not a broken join."""
         err = io.StringIO()

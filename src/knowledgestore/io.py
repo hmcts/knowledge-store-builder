@@ -122,7 +122,9 @@ def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:
     return True
 
 
-def report_join_cardinality(joined: int, candidates: int, index_size: int) -> bool:
+def report_join_cardinality(
+    joined: int, candidates: int, index_size: int, by_layer: dict | None = None
+) -> bool:
     """Report how much of the file-to-ticket join actually matched.
 
     Two outcomes, deliberately different in kind. A join that matched **nothing**
@@ -156,9 +158,35 @@ def report_join_cardinality(joined: int, candidates: int, index_size: int) -> bo
     populated sides that share no keys are in different key spaces. That names a
     class - which includes joins nobody has written yet - where naming one
     likely prefix only names an instance.
+
+    `by_layer` maps each layer to `(joined, candidates)` and applies the same zero
+    floor one level down - still a floor, still no threshold. It exists because
+    the composite cannot see a **half**-dead join: one estate converted its AST
+    layer and left the semantic layer skipping every record, giving 5,692 of
+    72,370, which is never zero and reads as a working join on a sparse estate.
+    Per layer it was 0 of 46,602 against 5,692 - a zero the composite structurally
+    could not produce.
+
+    Counted only over repositories the index covers, which is the same
+    both-sides-populated condition the composite has. Without that it cries wolf:
+    on the maintainer's own estate a `meta-arch` layer of 2,115 nodes joins zero
+    because its repository is not mined at all, and that is sparsity, not a key
+    mismatch. Per-*repository* granularity was measured and rejected - in all 108
+    ticket-covered repositories of the reporting estate both layers were present,
+    so the working layer made every repository non-zero and the floor was masked
+    exactly where it mattered.
     """
     if not index_size or not candidates:
         return False
+    for layer, (layer_joined, layer_candidates) in sorted((by_layer or {}).items()):
+        if layer_candidates and not layer_joined:
+            print(
+                f"WARNING: the {layer} layer's file-to-ticket join matched nothing - "
+                f"0 of {layer_candidates:,} candidate node(s) in repositories the index "
+                "covers, while other layers joined. One layer keyed differently from the "
+                "rest is the half-dead case a whole-graph count cannot show.",
+                file=sys.stderr,
+            )
     if joined:
         # Reported as a measurement, not a verdict. Zero is the only floor safe
         # to assert (above), but a *partial* join is the quieter failure - one
