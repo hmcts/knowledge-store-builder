@@ -352,8 +352,8 @@ making re-runnable. A figure that cannot be reproduced will be believed once and
 then quietly distrusted.
 
 **Disclosure, credentials and publishing outside the organisation are the owner's
-decision.** Being asked to draft something is not authority to deploy it, and no
-peer can supply that authority.
+decision.** Being asked to draft something is not authority to deploy it, and
+nobody else can supply that authority on the owner's behalf.
 
 ### When other sessions share the work
 
