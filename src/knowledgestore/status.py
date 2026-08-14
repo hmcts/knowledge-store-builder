@@ -284,7 +284,17 @@ def source_drift(runner=run_gh) -> list[dict] | None:
     return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
 
 
-GRAPH_SUMMARY = re.compile(r"([\d,]+)\s+nodes\s*[·.]\s*([\d,]+)\s+edges")
+# Two simple patterns rather than one spanning both figures. A single pattern
+# needs `[\d,]+` next to `\s+`, which is ambiguous enough to backtrack
+# super-linearly on input that never matches - and this reads a file whose
+# format is graphify's to change.
+GRAPH_NODES = re.compile(r"(\d[\d,]*) nodes")
+GRAPH_EDGES = re.compile(r"(\d[\d,]*) edges")
+
+
+def _figure(pattern: re.Pattern, text: str) -> int | None:
+    found = pattern.search(text)
+    return int(found.group(1).replace(",", "")) if found else None
 
 
 def graph_report_claims() -> dict:
@@ -306,11 +316,10 @@ def graph_report_claims() -> dict:
     if not report.is_file():
         return {"present": False}
     text = report.read_text(encoding="utf-8", errors="replace")[:4000]
-    found = GRAPH_SUMMARY.search(text)
     claims = {
         "present": True,
-        "nodes": int(found.group(1).replace(",", "")) if found else None,
-        "edges": int(found.group(2).replace(",", "")) if found else None,
+        "nodes": _figure(GRAPH_NODES, text),
+        "edges": _figure(GRAPH_EDGES, text),
     }
     graph = config.GRAPH_PATH.with_suffix(".json.gz")
     if not graph.is_file():
