@@ -279,6 +279,76 @@ def _report_drift(recorded: dict) -> None:
     # explained why, so nothing more to print here.
 
 
+# One reporter per check, rather than one main() that accretes a block per
+# check. main() is then the running order, which is the thing worth reading at
+# a glance - and each report is reachable from a test without driving the CLI.
+def _report_intent(recorded: dict) -> None:
+    intent = intent_coverage(recorded)
+    if intent["estate"]:
+        share = 100 * intent["mined"] // intent["estate"]
+        line = f"Intent index: {intent['mined']}/{intent['estate']} repositories mined ({share}%)"
+        # Partial coverage is normal - history export is expensive and some
+        # estates mine a subset deliberately. Silence about it is not: an answer
+        # of "no tickets" from an unmined repository looks identical to one from
+        # a repository with no tickets.
+        print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
+    elif intent["mined"]:
+        print(f"Intent index: {intent['mined']} repositories mined")
+
+
+def _report_missing_extractors() -> None:
+    for gap in missing_extractors(config.REPOSITORIES_DIR):
+        kinds = ", ".join(f".{s}" for s in gap["suffixes"])
+        print(
+            f"Extractor missing: {gap['files']} {kinds} file(s) in the corpus and nothing "
+            f"installed can parse them - they contribute nothing to the graph. "
+            f"Install with `pip install 'graphifyy[{gap['extra']}]'` and rebuild."
+        )
+
+
+def _report_symlinks() -> None:
+    links = duplicating_symlinks(config.REPOSITORIES_DIR)
+    if not links["checked"]:
+        print(
+            "Symlink check skipped: graphify is not installed, so the set of file "
+            "types it would extract - and therefore which symlinks would be "
+            "extracted twice - cannot be determined."
+        )
+    elif links["files"]:
+        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
+        print(
+            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
+            "path it walked, not the link target, so each is emitted twice under two paths "
+            "- which reads as duplication rather than as one file. Exclude them before a "
+            "rebuild."
+        )
+
+
+def _report_citations() -> None:
+    cites = corpus_citations(config.ROOT)
+    if cites["dangling"]:
+        print(f"Dangling corpus citations ({len(cites['dangling'])}):")
+        for path in cites["dangling"][:10]:
+            print(f"  - {path}")
+    elif cites["checked"]:
+        print(f"Corpus citations: {cites['checked']} checked, none dangling")
+    else:
+        # "0 checked, none dangling" paired a measurement of nothing with a clean
+        # verdict, and read as a pass. Nothing checked is not the same as nothing wrong.
+        print("Corpus citations: none checked - no committed prose cites the corpus yet")
+
+
+def _report_freshness() -> None:
+    fresh = artefact_freshness()
+    if fresh.get("explorer_stale"):
+        print(
+            "Explorer page is OLDER than a layer it embeds - "
+            "run `knowledgestore explorer` and commit the rebuilt page"
+        )
+    elif fresh:
+        print("Explorer page is newer than every embedded layer")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -305,62 +375,15 @@ def main(argv=None) -> int:
         f"{cov['topics_configured']} topics configured"
     )
 
-    intent = intent_coverage(recorded)
-    if intent["estate"]:
-        share = 100 * intent["mined"] // intent["estate"]
-        line = f"Intent index: {intent['mined']}/{intent['estate']} repositories mined ({share}%)"
-        # Partial coverage is normal - history export is expensive and some
-        # estates mine a subset deliberately. Silence about it is not: an answer
-        # of "no tickets" from an unmined repository looks identical to one from
-        # a repository with no tickets.
-        print(line if share >= 95 else f"{line} - answers about the rest carry no ticket evidence")
-    elif intent["mined"]:
-        print(f"Intent index: {intent['mined']} repositories mined")
+    _report_intent(recorded)
 
-    for gap in missing_extractors(config.REPOSITORIES_DIR):
-        kinds = ", ".join(f".{s}" for s in gap["suffixes"])
-        print(
-            f"Extractor missing: {gap['files']} {kinds} file(s) in the corpus and nothing "
-            f"installed can parse them - they contribute nothing to the graph. "
-            f"Install with `pip install 'graphifyy[{gap['extra']}]'` and rebuild."
-        )
+    _report_missing_extractors()
 
-    links = duplicating_symlinks(config.REPOSITORIES_DIR)
-    if not links["checked"]:
-        print(
-            "Symlink check skipped: graphify is not installed, so the set of file "
-            "types it would extract - and therefore which symlinks would be "
-            "extracted twice - cannot be determined."
-        )
-    elif links["files"]:
-        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
-        print(
-            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
-            "path it walked, not the link target, so each is emitted twice under two paths "
-            "- which reads as duplication rather than as one file. Exclude them before a "
-            "rebuild."
-        )
+    _report_symlinks()
 
-    cites = corpus_citations(config.ROOT)
-    if cites["dangling"]:
-        print(f"Dangling corpus citations ({len(cites['dangling'])}):")
-        for path in cites["dangling"][:10]:
-            print(f"  - {path}")
-    elif cites["checked"]:
-        print(f"Corpus citations: {cites['checked']} checked, none dangling")
-    else:
-        # "0 checked, none dangling" paired a measurement of nothing with a clean
-        # verdict, and read as a pass. Nothing checked is not the same as nothing wrong.
-        print("Corpus citations: none checked - no committed prose cites the corpus yet")
+    _report_citations()
 
-    fresh = artefact_freshness()
-    if fresh.get("explorer_stale"):
-        print(
-            "Explorer page is OLDER than a layer it embeds - "
-            "run `knowledgestore explorer` and commit the rebuilt page"
-        )
-    elif fresh:
-        print("Explorer page is newer than every embedded layer")
+    _report_freshness()
 
     if arguments.drift:
         _report_drift(recorded)
