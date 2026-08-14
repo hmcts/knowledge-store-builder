@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -386,6 +387,80 @@ def source_drift(runner=run_gh) -> list[dict] | None:
     return sorted(drifted, key=lambda d: (-d["behind"], d["repo"]))
 
 
+# Two simple patterns rather than one spanning both figures. A single pattern
+# needs `[\d,]+` next to `\s+`, which is ambiguous enough to backtrack
+# super-linearly on input that never matches - and this reads a file whose
+# format is graphify's to change.
+GRAPH_NODES = re.compile(r"(\d[\d,]*) nodes")
+GRAPH_EDGES = re.compile(r"(\d[\d,]*) edges")
+
+
+def _figure(pattern: re.Pattern, text: str) -> int | None:
+    found = pattern.search(text)
+    return int(found.group(1).replace(",", "")) if found else None
+
+
+def graph_report_claims() -> dict:
+    """What GRAPH_REPORT.md says it describes, and whether it predates the graph.
+
+    The query skill deliberately carries no counts, so figures cannot rot inside
+    it, and routes every "how big is the graph" question to this file. That makes
+    the file the single point where the anti-stale-numbers design can fail - and
+    it did: one store's report claimed 809,441 nodes beside a graph holding
+    779,551, a 29,890-node disagreement in the same directory with nothing
+    reporting it. The reader believes they are checking the source, which is what
+    makes it worse than a README nobody re-derived.
+
+    Staleness is decided on commit dates rather than by counting the graph,
+    because this stage must stay cheap enough to run any time - see the module
+    docstring. `--verify-graph` opts into the exact comparison.
+    """
+    report = config.GRAPH_REPORT_PATH
+    if not report.is_file():
+        return {"present": False}
+    text = report.read_text(encoding="utf-8", errors="replace")[:4000]
+    claims = {
+        "present": True,
+        "nodes": _figure(GRAPH_NODES, text),
+        "edges": _figure(GRAPH_EDGES, text),
+    }
+    graph = config.GRAPH_PATH.with_suffix(".json.gz")
+    if not graph.is_file():
+        graph = config.GRAPH_PATH
+    report_at = _parse_iso(_committed_at(_relative(report), run_git))
+    graph_at = _parse_iso(_committed_at(_relative(graph), run_git))
+    claims["stale"] = bool(report_at and graph_at and report_at < graph_at)
+    return claims
+
+
+def _relative(path: Path) -> str:
+    return str(path.relative_to(config.ROOT)) if path.is_relative_to(config.ROOT) else str(path)
+
+
+def _report_graph_report(verify: bool) -> None:
+    claims = graph_report_claims()
+    if not claims["present"]:
+        return
+    if claims["stale"]:
+        described = f"describes {claims['nodes']:,} nodes; " if claims["nodes"] else ""
+        print(
+            f"GRAPH_REPORT.md is older than the graph beside it - it {described}"
+            "the query skill treats this file as authoritative for graph size, so a stale "
+            "one is quoted as fact. Regenerate it, or do not cite it."
+        )
+    if not verify or claims["nodes"] is None:
+        return
+    # Opt-in, like --drift: exact, and it loads the whole graph to be so.
+    actual = len(io.load_graph(config.GRAPH_PATH).get("nodes", []))
+    if actual == claims["nodes"]:
+        print(f"GRAPH_REPORT.md agrees with the graph: {actual:,} nodes.")
+    else:
+        print(
+            f"GRAPH_REPORT.md describes {claims['nodes']:,} nodes; the graph has {actual:,} "
+            f"- a {abs(actual - claims['nodes']):,} disagreement in the same directory."
+        )
+
+
 def _report_drift(recorded: dict) -> None:
     """Print the --drift section: gh availability, provenance, then results."""
     if not shutil.which("gh"):
@@ -565,6 +640,11 @@ def _report_freshness() -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--verify-graph",
+        action="store_true",
+        help="also load the graph to compare its size against GRAPH_REPORT.md (slow)",
+    )
+    parser.add_argument(
         "--drift",
         action="store_true",
         help="also check GitHub for commits since the build (one API call per repository)",
@@ -603,6 +683,8 @@ def main(argv=None) -> int:
     _report_citations()
 
     _report_freshness()
+
+    _report_graph_report(arguments.verify_graph)
 
     if arguments.drift:
         _report_drift(recorded)
