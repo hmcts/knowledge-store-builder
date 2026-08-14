@@ -164,7 +164,15 @@ repository, degree ranking, community sizes.
   valuable finding and the easiest to get wrong.
 - Cite `source_file` / `source_location` for specific claims.
 - Answer only from what the graph returns. If the graph lacks it, say so.
-- Absence of evidence is itself a finding — report it as one.
+- Absence of evidence is itself a finding — report it as one, **and say what was
+  searched**. A store is built from repositories discovered in one organisation on
+  one code host, so "there is no evidence of X" always means "no evidence of X in
+  what this store holds". The two are not the same, and conflating them has
+  already published a false finding: a payload schema was reported as never
+  readable in one place because its `$ref`s did not resolve, and they resolved
+  perfectly against a repository outside the estate. `knowledge/repository-manifest.md`
+  records the scope; cite it when reporting an absence, and say plainly that a
+  thing outside that scope would look identical.
 
 ## Business intent: "why does this code exist?"
 

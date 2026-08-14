@@ -29,6 +29,41 @@ def synced_cell(name: str, recorded: dict[str, dict]) -> str:
     return f"{str(entry.get('committed', ''))[:10]} (`{entry['sha'][:8]}`)"
 
 
+def scope_statement(counted: int) -> list[str]:
+    """What was searched, so that absence cannot be read as completeness.
+
+    A store that lacks a repository still knows it lacks it - this manifest lists
+    what is in, and a reader can see what is not. A store that never looked at a
+    whole code host reports nothing at all, and its answers are silently narrower
+    than they appear.
+
+    That is not hypothetical. A published finding once concluded a payload schema
+    had never been readable in one place because its `$ref`s did not resolve.
+    They resolved perfectly, against a repository outside the estate. The finding
+    was drawn honestly from what was indexed and was still false.
+
+    So every "no evidence of X" a store produces really means "no evidence of X
+    in what we read", and this says what that was. Discovery covering more than
+    one host is the larger change (issue #92); saying what was covered is the
+    part that stops a store implying a reach it never had.
+    """
+    where = f"the `{config.GITHUB_ORG}` organisation" if config.GITHUB_ORG else "one organisation"
+    return [
+        "## What this manifest does not cover",
+        "",
+        f"These {counted} repositories were discovered from {where} on a single "
+        "code host. Repositories outside it were never searched, so they are "
+        "absent from this store without appearing as gaps.",
+        "",
+        "**Absence of evidence here is a fact about this store's membership, not "
+        "about the estate.** When this store reports that there is no evidence of "
+        "something, read it as no evidence *in the repositories listed above* - "
+        "and check whether the thing you are looking for lives somewhere that was "
+        "never in scope.",
+        "",
+    ]
+
+
 def build_manifest(repository_dirs: list[Path]) -> None:
     lines = [
         "# Repository manifest",
@@ -65,6 +100,7 @@ def build_manifest(repository_dirs: list[Path]) -> None:
             "during graph generation and are not committed to this parent "
             "repository.",
             "",
+            *scope_statement(len(repository_dirs)),
         ]
     )
 
