@@ -240,45 +240,33 @@ def snapshot() -> int:
     return 0
 
 
-def remap(
-    bar: float = DEFAULT_BAR,
-    floor: int = DEFAULT_FLOOR,
-    coverage: float = DEFAULT_COVERAGE,
-) -> int:
-    """Carry committed summaries onto new community ids after a re-cluster.
+def _remap_refusal(
+    summaries: dict,
+    nodes: list,
+    new_community: dict,
+    old_members: dict,
+    floor: int,
+    coverage: float,
+) -> str | None:
+    """Why this remap must not run, or None when it may.
 
-    For each summary, find the new cluster holding the largest share of its old
-    members and carry it there when that share meets `bar`. Drop it otherwise,
-    and report retention so the cost of the re-cluster is a measured number.
+    These are refusals rather than warnings because each one produces a
+    plausible-looking 0% retention rather than an error: an empty result that
+    reads as legitimate churn is how a remap destroys a good summaries file
+    without anyone noticing.
     """
-    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
-        print(
-            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}. Run `summaries snapshot` "
-            "before re-clustering.",
-            file=sys.stderr,
-        )
-        return 1
-    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
-        old_members: dict[str, list[str]] = json.load(handle)
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
     if len(summaries) < floor:
-        print(
+        return (
             f"Refusing to remap: only {len(summaries)} summaries loaded from "
             f"{config.SUMMARIES_PATH} (floor {floor}). A mis-specified path looks like this. "
-            "Pass --floor to lower it for a genuinely small store.",
-            file=sys.stderr,
+            "Pass --floor to lower it for a genuinely small store."
         )
-        return 1
-    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
-    new_community = {
-        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
-    }
     # Counted over nodes, not over `new_community`, which is keyed by id: a merged
     # graph can repeat an id, and the dict would collapse those and understate
     # coverage enough to refuse a healthy graph.
     clustered = sum(1 for node in nodes if node.get("community") is not None)
     if nodes and clustered / len(nodes) < coverage:
-        print(
+        return (
             f"Refusing to remap: only {clustered} of {len(nodes)} nodes in "
             f"{config.GRAPH_PATH} carry a community "
             f"({clustered / len(nodes):.1%}, floor {coverage:.0%}). The "
@@ -286,22 +274,30 @@ def remap(
             "and reported as legitimate churn. A clustering step that printed "
             "success without writing its result looks exactly like this — check "
             "the graph's community coverage before re-running. Pass --coverage to "
-            "lower the floor for a deliberately sparse graph.",
-            file=sys.stderr,
+            "lower the floor for a deliberately sparse graph."
         )
-        return 1
     snapshot_ids = {node for ids in old_members.values() for node in ids}
     if snapshot_ids and not (snapshot_ids & set(new_community)):
-        print(
+        return (
             "Refusing to remap: the snapshot and the graph share no node ids, so "
             "this is the wrong snapshot. Proceeding would drop every summary and "
-            "report it as legitimate 0% retention.",
-            file=sys.stderr,
+            "report it as legitimate 0% retention."
         )
-        return 1
+    return None
 
-    # Pass 1: every old summary's best new cluster and the share of its
-    # members that landed there. Sorted for a deterministic tiebreak.
+
+def _claim_targets(
+    summaries: dict,
+    old_members: dict,
+    new_community: dict,
+    bar: float,
+) -> tuple[dict, dict, list, list]:
+    """Each summary's best new cluster, and what fell out on the way.
+
+    Returns the surviving claims plus the three ways a summary is lost: its
+    members gone from the graph entirely, or its best overlap short of `bar`.
+    Sorted for a deterministic tiebreak.
+    """
     claims: dict[str, tuple[str, float]] = {}
     displaced: dict[str, dict] = {}
     below_bar: list[str] = []
@@ -339,6 +335,42 @@ def remap(
             }
             continue
         claims[old_id] = (target, share_of_old)
+    return claims, displaced, below_bar, members_gone
+
+
+def remap(
+    bar: float = DEFAULT_BAR,
+    floor: int = DEFAULT_FLOOR,
+    coverage: float = DEFAULT_COVERAGE,
+) -> int:
+    """Carry committed summaries onto new community ids after a re-cluster.
+
+    For each summary, find the new cluster holding the largest share of its old
+    members and carry it there when that share meets `bar`. Drop it otherwise,
+    and report retention so the cost of the re-cluster is a measured number.
+    """
+    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
+        print(
+            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}. Run `summaries snapshot` "
+            "before re-clustering.",
+            file=sys.stderr,
+        )
+        return 1
+    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
+        old_members: dict[str, list[str]] = json.load(handle)
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
+    new_community = {
+        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
+    }
+    refusal = _remap_refusal(summaries, nodes, new_community, old_members, floor, coverage)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+
+    claims, displaced, below_bar, members_gone = _claim_targets(
+        summaries, old_members, new_community, bar
+    )
 
     # Pass 2: a contested new cluster keeps the summary whose old cluster
     # contributed the largest share of itself - it describes more of the merged
