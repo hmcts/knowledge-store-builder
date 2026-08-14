@@ -76,6 +76,29 @@ def intent_coverage(recorded: dict) -> dict:
     return {"mined": len(mined), "estate": len(recorded)}
 
 
+def unsynced(manifest: Path, recorded: dict) -> list[str]:
+    """Repositories a manifest declares that provenance does not record.
+
+    A manifest is intent; provenance is what actually reached disk. Nothing
+    compared them, so a repository could be declared, committed, and never
+    cloned - which is exactly what happened to a fetch-only entry added in the
+    same commit as its neighbour. `sync` was not re-run, `sync` had nothing to
+    complain about, and every later run reported success over an estate one
+    repository short of its own configuration.
+
+    Absent manifest means nothing declared, which is normal for `external`.
+    """
+    if not manifest.is_file():
+        return []
+    from .export_git_history import read_repository_config
+
+    try:
+        declared = [repo.name for repo in read_repository_config(manifest)]
+    except (OSError, ValueError):
+        return []
+    return sorted(name for name in declared if name not in recorded)
+
+
 # Content types graphify parses only when an optional extra is installed, and the
 # import that proves it is present. Without it the files are read as nothing: the
 # build succeeds, the graph is short, and no stage says why. Measured on one
@@ -282,6 +305,23 @@ def _report_drift(recorded: dict) -> None:
 # One reporter per check, rather than one main() that accretes a block per
 # check. main() is then the running order, which is the thing worth reading at
 # a glance - and each report is reachable from a test without driving the CLI.
+def _report_unsynced(recorded: dict) -> None:
+    external_recorded = provenance.read_external()
+    for manifest, have, label in (
+        (config.REPOSITORIES_CONFIG, recorded, "repositories"),
+        (config.EXTERNAL_CONFIG, external_recorded, "fetch-only repositories"),
+    ):
+        pending = unsynced(manifest, have)
+        if pending:
+            shown = ", ".join(pending[:5]) + (
+                f" and {len(pending) - 5} more" if len(pending) > 5 else ""
+            )
+            print(
+                f"Declared but never synced: {len(pending)} of {len(have) + len(pending)} "
+                f"{label} - {shown}. Run `knowledgestore sync`."
+            )
+
+
 def _report_intent(recorded: dict) -> None:
     intent = intent_coverage(recorded)
     if intent["estate"]:
@@ -374,6 +414,10 @@ def main(argv=None) -> int:
         f"Topic briefs: {cov['briefs_written']} written, "
         f"{cov['topics_configured']} topics configured"
     )
+
+    # Estate completeness first (what is declared but absent), then what was
+    # mined from it, then what cannot be parsed or would be counted twice.
+    _report_unsynced(recorded)
 
     _report_intent(recorded)
 
