@@ -265,9 +265,26 @@ committed dependency bundles come straight back into the graph: on one estate
 like a graph working hard rather than a graph full of a package manager — the
 god nodes are named `c()` and `push()`. Exclude vendored trees *before*
 extraction rather than filtering after it, which also keeps the corpus inventory
-from claiming the estate covers a package manager. The same argument applies
-with more force to state files such as `.tfstate`: they hold resolved secret
-values, so filtering them out after extraction is already too late.
+from claiming the estate covers a package manager. The same argument applies with more force to anything secret-bearing — a
+Terraform state file holds resolved secret values — and there "filter it out
+afterwards" is not merely untidy, it does not work. **Extract a file once and
+its derived content persists in two places later filtering never touches:**
+
+- `graphify-out/cache/ast/<version>/<sha256>.json`, the extraction cache, keyed
+  by content hash. Removing nodes from the published graph does not invalidate
+  it, and the next build replays from it.
+- each clone's own `graphify-out/graph.json` — and this is the sharp one,
+  because `sync` ends with `git clean -fd -e graphify-out`, making
+  `graphify-out/` **the one directory in a clone that sync deliberately
+  preserves**. The exemption exists for a good reason (cleaning it forces a full
+  re-extraction), but its effect is that anything extracted once is durable by
+  design.
+
+So exclude before extraction, not after. Note also that vendored code is not
+reliably *under* a vendored directory: one estate's exclusion appeared to work —
+`.yarn/` and `node_modules/` residue went to zero — while 1,914 nodes came from
+`.pnp.cjs`, a generated loader sitting at the repository root, which every
+directory-shaped pattern missed and which reads as authored code.
 
 One further trap: pass extraction an **absolute** path. Given a relative one,
 `.graphifyignore` is silently not applied — the scan simply returns everything,
