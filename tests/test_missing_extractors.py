@@ -84,5 +84,61 @@ class MissingExtractorTest(SettingsIsolated):
         self.assertEqual(status.missing_extractors(Path("/nonexistent")), [])
 
 
+class DuplicatingSymlinkTest(SettingsIsolated):
+    """Extraction records the path it walked, not the link target.
+
+    Measured through the CLI the pipeline actually invokes: one real file and one
+    symlink to it produce two distinct `source_file` values and two sets of nodes
+    with identical content. On an estate asked about duplication that is a wrong
+    answer, not a noisy one - a shared parent resource appears once per directory
+    that links to it.
+
+    An earlier version of this finding was withdrawn because it was measured
+    through the Python API with `cache_root` set to the scan root, which collapses
+    the two paths. The pipeline does not do that. Test the invocation that ships.
+    """
+
+    def _corpus(self, real: str, links: dict[str, str]) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        target = root / real
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x", encoding="utf-8")
+        for link, dest in links.items():
+            path = root / link
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(root / dest)
+        return root
+
+    def test_it_counts_symlinked_extractable_files_by_repository(self):
+        root = self._corpus("repo-a/main.tf", {"repo-a/env/live/main.tf": "repo-a/main.tf"})
+        found = status.duplicating_symlinks(root)
+        self.assertTrue(found["checked"])
+        self.assertEqual(found["files"], 1)
+        self.assertEqual(found["by_repo"], {"repo-a": 1})
+
+    def test_the_target_itself_is_not_counted(self):
+        """Only the link duplicates; the real file was always going to be read."""
+        root = self._corpus("repo-a/main.tf", {})
+        self.assertEqual(status.duplicating_symlinks(root)["files"], 0)
+
+    def test_a_symlink_nothing_extracts_is_ignored(self):
+        root = self._corpus(
+            "repo-a/notes.unknownext", {"repo-a/copy.unknownext": "repo-a/notes.unknownext"}
+        )
+        self.assertEqual(status.duplicating_symlinks(root)["files"], 0)
+
+    def test_an_unreadable_dispatch_table_reports_cannot_check(self):
+        """The failure mode that matters: a private upstream table gets renamed and
+        a naive check silently reports zero, which reads as a clean estate."""
+        real = status.extractable_suffixes
+        self.addCleanup(setattr, status, "extractable_suffixes", real)
+        status.extractable_suffixes = lambda: None
+        found = status.duplicating_symlinks(Path("/anything"))
+        self.assertFalse(found["checked"])
+        self.assertNotIn("files", found, "a skipped check must not report a count of zero")
+
+
 if __name__ == "__main__":
     unittest.main()

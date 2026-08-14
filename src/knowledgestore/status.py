@@ -120,6 +120,48 @@ def missing_extractors(corpus: Path) -> list[dict]:
     return missing
 
 
+def extractable_suffixes() -> set[str] | None:
+    """Suffixes graphify dispatches an extractor for, from its own table.
+
+    Returns None when the table cannot be read. The caller must report that as
+    "cannot check" rather than "nothing found": a hand-written suffix list is
+    exactly the enumeration this codebase has been caught by twice, and silently
+    measuring nothing is worse than not measuring.
+    """
+    try:
+        from graphify.extract import _DISPATCH
+    except (ImportError, AttributeError):
+        return None
+    return {str(suffix).lower() for suffix in _DISPATCH}
+
+
+def duplicating_symlinks(corpus: Path) -> dict:
+    """Symlinked corpus files that extraction will emit twice.
+
+    graphify's CLI records `source_file` from the path it walked, not from the
+    link target, so a symlink and its target become two sets of nodes with the
+    same content under different paths. On an estate asked about duplication that
+    is a wrong answer rather than a noisy one - a shared parent resource appears
+    once per directory that links to it.
+
+    Latent until the relevant extractor is installed: a suffix nothing can parse
+    yields nothing, twice.
+    """
+    suffixes = extractable_suffixes()
+    if suffixes is None:
+        return {"checked": False}
+    if not corpus.is_dir():
+        return {"checked": True, "files": 0, "by_repo": {}}
+    by_repo: dict[str, int] = {}
+    for path in corpus.rglob("*"):
+        if ".git" in path.parts or not path.is_symlink():
+            continue
+        if path.suffix.lower() in suffixes:
+            repo = path.relative_to(corpus).parts[0]
+            by_repo[repo] = by_repo.get(repo, 0) + 1
+    return {"checked": True, "files": sum(by_repo.values()), "by_repo": by_repo}
+
+
 def corpus_citations(root: Path) -> dict:
     corpus = io.read_json_dict(root / "graphify-out" / "graph-knowledge-corpus.json")
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
@@ -274,6 +316,21 @@ def main(argv=None) -> int:
             f"Extractor missing: {gap['files']} {kinds} file(s) in the corpus and nothing "
             f"installed can parse them - they contribute nothing to the graph. "
             f"Install with `pip install 'graphifyy[{gap['extra']}]'` and rebuild."
+        )
+
+    links = duplicating_symlinks(config.REPOSITORIES_DIR)
+    if not links["checked"]:
+        print(
+            "Symlink check skipped: graphify's extractor table could not be read, so "
+            "files that would extract twice cannot be identified."
+        )
+    elif links["files"]:
+        where = ", ".join(f"{repo} ({n})" for repo, n in sorted(links["by_repo"].items()))
+        print(
+            f"Symlinked source files: {links['files']} in {where}. Extraction records the "
+            "path it walked, not the link target, so each is emitted twice under two paths "
+            "- which reads as duplication rather than as one file. Exclude them before a "
+            "rebuild."
         )
 
     cites = corpus_citations(config.ROOT)
