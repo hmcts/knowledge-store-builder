@@ -473,6 +473,24 @@ class JoinCardinalityTest(unittest.TestCase):
         self.assertEqual(sum(1 for e in entries if e[7]), 6)
         self.assertEqual(text, "")
 
+    def test_a_working_join_reports_its_rate(self):
+        """A partial join is the quieter failure: one estate fixed the AST half
+        and left the semantic half skipping every record, and 5,692 of 72,370
+        reads as a working join on a sparse estate. The rate is a measurement,
+        not a verdict - no threshold is asserted."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            explorer.build_index(self._graph(""), {}, self.INDEX)
+        self.assertIn("6 of 6", out.getvalue())
+        self.assertIn("100.0%", out.getvalue())
+
+    def test_a_dead_join_reports_no_rate(self):
+        """Zero goes to stderr as a warning, not to stdout as a statistic."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            explorer.build_index(self._graph("repositories/repo-a/"), {}, self.INDEX)
+        self.assertNotIn("carry ticket evidence", out.getvalue())
+
     def test_an_estate_with_no_intent_index_is_not_reported(self):
         """Nothing to join is not a broken join."""
         err = io.StringIO()

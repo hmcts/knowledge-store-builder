@@ -151,7 +151,19 @@ def warn_if_join_is_empty(joined: int, candidates: int, index_size: int) -> bool
     class - which includes joins nobody has written yet - where naming one
     likely prefix only names an instance.
     """
-    if not index_size or not candidates or joined:
+    if not index_size or not candidates:
+        return False
+    if joined:
+        # Reported as a measurement, not a verdict. Zero is the only floor safe
+        # to assert (above), but a *partial* join is the quieter failure - one
+        # estate fixed the AST half and left the semantic half skipping every
+        # record, and 5,692 of 72,370 reads as a working join on a sparse
+        # estate. Printing the rate every build makes that visible across
+        # refreshes without anyone having to guess what "enough" is.
+        print(
+            f"File-to-ticket join: {joined:,} of {candidates:,} candidate nodes "
+            f"({100 * joined / candidates:.1f}%) carry ticket evidence."
+        )
         return False
     print(
         f"WARNING: the file-to-ticket join matched nothing. Both sides are populated - "
