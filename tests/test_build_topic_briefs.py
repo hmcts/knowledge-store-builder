@@ -194,6 +194,39 @@ class MarkdownTest(SettingsIsolated):
         self.assertIn("<tr><th>Repo</th><th>Role</th></tr>", html)
         self.assertIn("<tr><td>a</td><td>b</td></tr>", html)
 
+    def test_blocks_that_abut_without_a_blank_line(self):
+        """Each block consumer returns the line it stopped at, and the next starts
+        there. An off-by-one in that handoff swallows or repeats a line, and only
+        shows where two blocks touch - which real briefs do constantly."""
+        html = briefs.markdown_to_html("- item\n| H |\n|---|\n| c |\n# Heading\npara text\n")
+        self.assertIn("<ul><li>item</li></ul>", html)
+        self.assertIn("<th>H</th>", html)
+        self.assertIn("<h2>Heading</h2>", html)
+        self.assertIn("<p>para text</p>", html)
+        self.assertNotIn("<li>| H |</li>", html, "the list consumed the table's first row")
+
+    def test_a_paragraph_is_terminated_by_the_next_block(self):
+        html = briefs.markdown_to_html("first line\nstill the same\n- a list\n")
+        self.assertIn("<p>first line still the same</p>", html)
+        self.assertIn("<ul><li>a list</li></ul>", html)
+
+    def test_a_block_running_to_the_end_of_input_terminates(self):
+        """Each consumer's while loop is bounded by len(lines); a block with no
+        trailing newline or blank line must still close."""
+        for markdown, wanted in (
+            ("- only item", "<ul><li>only item</li></ul>"),
+            ("| H |\n|---|", "<th>H</th>"),
+            ("# Just a heading", "<h2>Just a heading</h2>"),
+            ("bare paragraph", "<p>bare paragraph</p>"),
+        ):
+            with self.subTest(markdown=markdown):
+                self.assertIn(wanted, briefs.markdown_to_html(markdown))
+
+    def test_empty_and_blank_only_input_render_to_nothing(self):
+        for markdown in ("", "\n", "\n\n\n", "   \n  \n"):
+            with self.subTest(markdown=repr(markdown)):
+                self.assertEqual(briefs.markdown_to_html(markdown), "")
+
     def test_escapes_html(self):
         html = briefs.markdown_to_html("A <script> tag & more\n")
         self.assertIn("&lt;script&gt;", html)

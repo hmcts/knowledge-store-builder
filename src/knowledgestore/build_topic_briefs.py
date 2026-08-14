@@ -296,44 +296,60 @@ def _table(rows: list[str]) -> str:
     return "".join(out)
 
 
+def _heading_block(lines: list[str], i: int) -> tuple[str, int]:
+    stripped = lines[i].strip()
+    level = min(len(stripped) - len(stripped.lstrip("#")), 4)
+    return f"<h{level + 1}>{_inline(stripped.lstrip('#').strip())}</h{level + 1}>", i + 1
+
+
+def _table_block(lines: list[str], i: int) -> tuple[str, int]:
+    rows = []
+    while i < len(lines) and lines[i].strip().startswith("|"):
+        rows.append(lines[i])
+        i += 1
+    return _table(rows), i
+
+
+def _list_block(lines: list[str], i: int) -> tuple[str, int]:
+    items = []
+    while i < len(lines) and lines[i].strip().startswith("- "):
+        items.append(f"<li>{_inline(lines[i].strip()[2:])}</li>")
+        i += 1
+    return "<ul>" + "".join(items) + "</ul>", i
+
+
+def _paragraph_block(lines: list[str], i: int) -> tuple[str, int]:
+    paragraph = [lines[i].strip()]
+    i += 1
+    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||- )", lines[i].strip()):
+        paragraph.append(lines[i].strip())
+        i += 1
+    return f"<p>{_inline(' '.join(paragraph))}</p>", i
+
+
 def markdown_to_html(markdown: str) -> str:
-    """Render the constrained markdown subset briefs are written in."""
+    """Render the constrained markdown subset briefs are written in.
+
+    One block consumer per shape, each returning its html and the line it stopped
+    at, so this stays a dispatch loop rather than four interleaved scanners.
+    """
     blocks: list[str] = []
     lines = markdown.splitlines()
     i = 0
     while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
+        stripped = lines[i].strip()
         if not stripped:
             i += 1
             continue
         if stripped.startswith("#"):
-            level = min(len(stripped) - len(stripped.lstrip("#")), 4)
-            blocks.append(f"<h{level + 1}>{_inline(stripped.lstrip('#').strip())}</h{level + 1}>")
-            i += 1
+            html, i = _heading_block(lines, i)
         elif stripped.startswith("|"):
-            rows = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                rows.append(lines[i])
-                i += 1
-            blocks.append(_table(rows))
+            html, i = _table_block(lines, i)
         elif stripped.startswith("- "):
-            items = []
-            while i < len(lines) and lines[i].strip().startswith("- "):
-                items.append(f"<li>{_inline(lines[i].strip()[2:])}</li>")
-                i += 1
-            blocks.append("<ul>" + "".join(items) + "</ul>")
+            html, i = _list_block(lines, i)
         else:
-            paragraph = [stripped]
-            i += 1
-            while (
-                i < len(lines)
-                and lines[i].strip()
-                and not re.match(r"^(#|\||- )", lines[i].strip())
-            ):
-                paragraph.append(lines[i].strip())
-                i += 1
-            blocks.append(f"<p>{_inline(' '.join(paragraph))}</p>")
+            html, i = _paragraph_block(lines, i)
+        blocks.append(html)
     return "".join(blocks)
 
 
