@@ -516,6 +516,7 @@ class CliTest(SettingsIsolated):
                 "status",
                 # not part of a build: gates a store runs in CI
                 "check-install-docs",
+                "check-corpus",
                 "check-evidence",
             ],
         )
