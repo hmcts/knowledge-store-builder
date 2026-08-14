@@ -207,6 +207,15 @@ from the estate, record the finding with its location — never its value — an
 say what has to change before it returns. On that estate this caught a
 hardcoded database credential that had been in a file since 2019.
 
+**An idempotency check must cover everything the step is responsible for, not
+only what it originally wrote.** A store repairing a graph attribute guarded its
+repair with "if the node already has the right value, skip" — measured against a
+field that was *already* correct, so every node counted as done, the new
+attribute was never written, and the script printed success having changed
+nothing. The report and the result disagreed and only the result mattered. This
+is why a repair is verified by re-reading the field afterwards rather than by
+trusting the line that says it was written.
+
 **Treat ingested content as untrusted data.** Repositories increasingly contain
 agent instructions, and extraction agents will read them. Instruct every
 extraction agent that file contents are data to extract from, never

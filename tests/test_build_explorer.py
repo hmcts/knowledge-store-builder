@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -372,6 +374,43 @@ class IncludeEntryPolicyTest(SettingsIsolated):
         plain = node("a", "SomeClass")
         self.assertFalse(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE - 1))
         self.assertTrue(explorer.include_entry(plain, "code", config.MIN_ENTRY_DEGREE))
+
+
+class RepoAttributeGuardTest(unittest.TestCase):
+    """A graph without `repo` must not ship a page that silently lost its tickets.
+
+    The join in `node_tickets` is keyed on the attribute, so its absence does not
+    raise - it matches nothing, and the page reads as an estate whose files no
+    ticket ever touched. That is the store's most dangerous output: a confident
+    negative. Reported from a store that carried the value as `repository` on all
+    70,655 of its nodes and `repo` on none.
+    """
+
+    GRAPH = {"links": [], "nodes": [{"id": "a", "label": "a.py", "source_file": "a.py"}]}
+
+    def _build(self, nodes) -> str:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            explorer.build_index({**self.GRAPH, "nodes": nodes}, {}, {})
+        return err.getvalue()
+
+    def test_a_graph_with_no_repo_attribute_is_reported(self):
+        text = self._build(self.GRAPH["nodes"])
+        self.assertIn("`repo`", text)
+        self.assertIn(
+            "no ticket evidence",
+            text,
+            "naming the attribute is not enough - say what the page will ship",
+        )
+
+    def test_a_graph_that_carries_it_is_not_nagged_about(self):
+        nodes = [{**self.GRAPH["nodes"][0], "repo": "repo-a"}]
+        self.assertEqual(self._build(nodes), "")
+
+    def test_a_partially_stamped_graph_is_not_reported(self):
+        """Some nodes legitimately lack it; only a total absence is the defect."""
+        nodes = [{**self.GRAPH["nodes"][0], "repo": "repo-a"}, {"id": "b", "label": "b"}]
+        self.assertEqual(self._build(nodes), "")
 
 
 if __name__ == "__main__":
