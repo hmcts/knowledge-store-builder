@@ -254,6 +254,24 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         text = self._reported({"repo-a": 1}, exclusion_checked=False)
         self.assertIn("could not be read", text)
 
+    def test_links_sharing_a_target_are_counted_once_as_a_target(self):
+        """Drives the real classification, not the stubbed reporter.
+
+        The count of links overstates the files at risk and understates how
+        badly each is repeated: several links usually share one target.
+        """
+        root = self._corpus(
+            "repo-a/main.tf",
+            {
+                "repo-a/one/main.tf": "repo-a/main.tf",
+                "repo-a/two/main.tf": "repo-a/main.tf",
+                "repo-a/three/main.tf": "repo-a/main.tf",
+            },
+        )
+        found = status.duplicating_symlinks(root, self.SUFFIXES)
+        self.assertEqual(found["duplicating"], {"repo-a": 3})
+        self.assertEqual(found["targets"], 1, "three links, one file actually at risk")
+
     def test_the_report_names_distinct_targets_not_just_links(self):
         """60 links to 12 targets is 12 files repeated six times, not 60 files
         duplicated once - a different and more alarming shape."""
