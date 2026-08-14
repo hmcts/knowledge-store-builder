@@ -137,8 +137,14 @@ class DocumentedIgnorePlacementTest(unittest.TestCase):
     # -- the sharp edge ---------------------------------------------------------
 
     def test_a_relative_target_makes_the_ignore_file_silently_inert(self):
-        """Guards: "pass extraction an absolute path. Given a relative one,
-        `.graphifyignore` is silently not applied"."""
+        """Guards: "`collect_files()` called directly with a relative path
+        silently does not apply `.graphifyignore`".
+
+        Scoped to the API deliberately. The CLI resolves the path before
+        scanning, so the documented invocation - `graphify update .` from inside
+        a repository - honours the ignore file, and an earlier revision of the
+        guide wrongly stated the trap as a general rule about extraction.
+        """
         self._ignore(self.repo, "stacks/live/")
         import os
 

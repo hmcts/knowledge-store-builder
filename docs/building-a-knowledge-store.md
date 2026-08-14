@@ -254,9 +254,23 @@ cloned corpus, where the next `sync` may remove it. There is no comfortable
 answer yet; know which trade you are making rather than discovering it in the
 graph.
 
-One further trap: pass extraction an **absolute** path. Given a relative one,
-`.graphifyignore` is silently not applied — the scan simply returns everything,
-with no error.
+**A `.graphifyignore` inside a cloned repository does not survive `sync`.** The
+sync stage ends with `git clean -fd -e graphify-out`, which deletes untracked
+files in every clone and exempts only `graphify-out/`. So the per-repository
+placement above is a build step to re-apply after every sync, never the source
+of truth for what an estate excludes. Nothing announces its disappearance; the
+symptom is `status` reverting to reporting symlinks it had previously called
+excluded.
+
+One further trap, and it is narrower than it first looked: `collect_files()`
+called directly with a **relative** path silently does not apply
+`.graphifyignore` — it returns everything, with no error. The **CLI resolves the
+path first**, so `graphify update .` from inside a repository, which is the form
+the build skill documents and the pipeline uses, honours the ignore file
+normally. So this bites the Python API, not the documented route. Measured both
+ways; an earlier revision of this guide stated it as a general rule about
+extraction, which would have had operators adding an absolute-path requirement
+they do not need.
 
 ## 6. The prose layers, and what they cost
 

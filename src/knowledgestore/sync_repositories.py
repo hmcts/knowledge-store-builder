@@ -50,6 +50,12 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
         "--prune",
         "--prune-tags",
         "--tags",
+        # Force covers the tags. The refspec's leading + force-updates heads but
+        # says nothing about tags, so a tag moved upstream - which any repository
+        # that re-points a release tag does routinely - is rejected with "would
+        # clobber existing tag" and fails the whole fetch, leaving one repository
+        # mysteriously unsyncable.
+        "--force",
         "+refs/heads/*:refs/remotes/origin/*",
     )
 
@@ -106,6 +112,13 @@ def main() -> int:
         return 1
 
     config.REPOSITORIES_DIR.mkdir(parents=True, exist_ok=True)
+    # What the last successful sync recorded. A repository that fails this time
+    # keeps that record rather than vanishing: `entries` starts empty and `write`
+    # replaces the file, so a failure used to DELETE the repository's record.
+    # That is worse than a stale clone, because every reconciliation that
+    # iterates provenance is then blind to it - a check keyed on the record
+    # cannot see a record that was removed.
+    previous = provenance.read()
     entries: dict[str, dict] = {}
     failures: list[tuple[str, str]] = []
     for repo in read_repository_config(config.REPOSITORIES_CONFIG):
@@ -119,6 +132,12 @@ def main() -> int:
         except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
             print(f"{repo.name}: FAILED - {error}", file=sys.stderr)
             failures.append((repo.name, str(error)))
+            if repo.name in previous:
+                # Keep the last known SHA, marked, so the manifest and provenance
+                # still agree on membership and the staleness is a fact somebody
+                # can read rather than an absence nobody notices.
+                entries[repo.name] = {**previous[repo.name], "sync_failed": str(error)}
+                provenance.write(entries, provenance.read_external())
             continue
         print(f"{repo.name}: {count} commits available")
         entries[repo.name] = provenance.head_info(

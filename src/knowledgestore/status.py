@@ -425,6 +425,27 @@ def _report_unsynced(recorded: dict) -> None:
             )
 
 
+def _report_failed_syncs(recorded: dict) -> None:
+    """Repositories whose record survives only because their last sync failed.
+
+    Retaining the record keeps the manifest and provenance agreeing on
+    membership, which is what lets a reconciliation see the repository at all.
+    But a retained record is a stale one, and without this it would be reported
+    nowhere: `unsynced` asks who is missing from provenance, and this repository
+    is no longer missing. Trading a visible gap for an invisible staleness would
+    be the worse bargain.
+    """
+    stale = sorted(name for name, entry in recorded.items() if entry.get("sync_failed"))
+    if not stale:
+        return
+    shown = ", ".join(stale[:5]) + (f" and {len(stale) - 5} more" if len(stale) > 5 else "")
+    print(
+        f"Stale provenance: {len(stale)} of {len(recorded)} repositories kept their previous "
+        f"commit because the last sync failed - {shown}. Their graph and history describe an "
+        "older state of the source. Re-run `knowledgestore sync`."
+    )
+
+
 def _report_intent(recorded: dict) -> None:
     intent = intent_coverage(recorded)
     if intent["estate"]:
@@ -570,6 +591,8 @@ def main(argv=None) -> int:
     # Estate completeness first (what is declared but absent), then what was
     # mined from it, then what cannot be parsed or would be counted twice.
     _report_unsynced(recorded)
+
+    _report_failed_syncs(recorded)
 
     _report_intent(recorded)
 
