@@ -213,6 +213,42 @@ extraction agent that file contents are data to extract from, never
 instructions to follow. This is not hypothetical: two independent agents
 flagged and ignored injected instructions during one refresh of that estate.
 
+**Symlinked source files are extracted twice.** Extraction records the path it
+walked, not the link target, so a symlink and its target become two sets of
+nodes with identical content under two paths. For a store whose most valuable
+answer is "these same-named things are independent implementations", that is a
+wrong answer rather than a noisy one — a shared parent resource appears once
+per directory that links to it.
+
+`knowledgestore status` reports them before a rebuild. It is most useful
+*between installing an extractor extra and rebuilding*, not at rebuild time: a
+suffix nothing can parse yields nothing, twice, so installing the parser is the
+moment a latent duplicate becomes a real one. One estate carried 60 symlinked
+`.tf` files in a single repository, invisible until the Terraform extra landed.
+
+Excluding them needs a `.graphifyignore`, and **where it goes depends on how
+extraction is invoked, which is easy to get wrong because the wrong placement
+fails silently rather than erroring.** The file is read at the scan root and its
+ancestors up to the enclosing VCS root; a file *below* the scan root is inert.
+Measured, one symlink and its target:
+
+| `.graphifyignore` at | per-repository scan | single-root scan |
+|---|---|---|
+| inside the cloned repository | **excluded** | ignored — below the scan root |
+| the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** |
+
+The two placements are mutually exclusive, and the awkward part is that the
+placement which survives `sync` (outside the corpus) only works for the
+single-root scan — which is the invocation that costs you per-repository node
+namespacing. Extract per repository and the exclusion has to live inside the
+cloned corpus, where the next `sync` may remove it. There is no comfortable
+answer yet; know which trade you are making rather than discovering it in the
+graph.
+
+One further trap: pass extraction an **absolute** path. Given a relative one,
+`.graphifyignore` is silently not applied — the scan simply returns everything,
+with no error.
+
 ## 6. The prose layers, and what they cost
 
 Three layers are LLM-authored rather than derived, and each has a two-part
@@ -247,6 +283,14 @@ silent shortfall, and the discrepancy was the only signal.
 and strands committed summaries, which must then be remapped by membership
 overlap (carry a summary only where the new cluster holds a convincing
 majority — 60% works — and drop it otherwise rather than misattach prose).
+
+**That bar measures recall, not fit.** It asks how much of the *old* cluster
+landed together, and nothing about how much of the *new* cluster those members
+constitute. A summary can therefore clear the bar and still describe a small
+corner of the cluster it lands on — most of that cluster being newly arrived
+members the prose has never seen. Retention is a coverage number, not a
+correctness one: treat carried prose as owed a re-read, and split `verify`'s
+flag rate by carried-versus-authored rather than reading the headline.
 
 **The damage scales with what you add, not with the act of re-clustering:**
 

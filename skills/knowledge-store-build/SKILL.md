@@ -301,6 +301,12 @@ knowledgestore summaries snapshot   # BEFORE re-clustering
 knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
 ```
 
+**The bar measures recall, not fit**: it asks how much of the old cluster
+landed together, never how much of the new cluster those members make up. A
+summary can clear it and still describe a corner of where it lands. Retention
+is a coverage number, not a correctness one — carried prose is owed a re-read,
+and `verify` can split its flag rate by carried-versus-authored.
+
 `remap` carries a summary only where the new cluster holding most of its old
 members holds at least 60% of them (`--bar` to change), drops it otherwise
 rather than risk prose on the wrong cluster, and prints retention so the cost of
