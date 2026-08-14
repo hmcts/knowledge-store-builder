@@ -460,6 +460,12 @@ class JoinCardinalityTest(unittest.TestCase):
             text,
             "naming the likely cause is what makes this actionable rather than alarming",
         )
+        self.assertIn(
+            "different spaces",
+            text,
+            "the evidence shape - both sides populated, intersection empty - names the "
+            "whole class; the prefix names only this instance",
+        )
 
     def test_the_same_graph_joined_correctly_is_silent(self):
         """Identical node count and identical entries - only the join differs."""

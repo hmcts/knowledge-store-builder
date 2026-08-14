@@ -138,18 +138,29 @@ def warn_if_join_is_empty(joined: int, candidates: int, index_size: int) -> bool
     rewrites it - `prefix_graph_for_global` sets `repo` and `local_id` and does
     not touch `source_file` - so the join is not degraded, it is dead.
 
-    Zero is the only safe floor to assert generically: a genuinely sparse estate
-    may join very little, but an estate with tickets on both sides that joins
-    nothing at all is broken rather than thin.
+    Zero is the only safe floor to assert generically, and the reason is stronger
+    than caution. A non-zero floor would be a guess about estate shape; a guess
+    that fires wrongly gets suppressed, and a suppressed check is worse than an
+    absent one because somebody has explicitly decided to ignore it. Both sides
+    populated with an empty intersection is the only condition that is
+    unambiguously a defect rather than a judgement, so it is the only one that
+    survives contact with an annoyed maintainer.
+
+    The evidence shape is what the message reports, not just the count: two
+    populated sides that share no keys are in different key spaces. That names a
+    class - which includes joins nobody has written yet - where naming one
+    likely prefix only names an instance.
     """
     if not index_size or not candidates or joined:
         return False
     print(
-        f"WARNING: the file-to-ticket join matched nothing - {candidates} candidate node(s) "
-        f"against an index covering {index_size} repositories. Every answer will report no "
+        f"WARNING: the file-to-ticket join matched nothing. Both sides are populated - "
+        f"{candidates} candidate node(s) against an index covering {index_size} "
+        "repositories - and the intersection is empty, so the two sides are keyed in "
+        "different spaces rather than the estate being sparse. Every answer will report no "
         "ticket evidence for any file, which is indistinguishable from an estate no ticket "
-        "ever touched. The usual cause is `source_file` carrying a `repositories/<repo>/` "
-        "prefix, which the index is not keyed on.",
+        "ever touched. Here the usual cause is `source_file` carrying a "
+        "`repositories/<repo>/` prefix the index is not keyed on.",
         file=sys.stderr,
     )
     return True
