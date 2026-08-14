@@ -160,6 +160,25 @@ def extractable_suffixes() -> set[str] | None:
     return {str(suffix).lower() for suffix in _DISPATCH}
 
 
+def _symlink_outcome(path: Path, root: Path, suffixes: set[str]) -> str | None:
+    """Which outcome this path produces, or None when it is not a candidate.
+
+    Broken links and targets outside the corpus are named rather than left to
+    fall into misattribution by accident: they are different defects, and only
+    one of them is about attribution at all.
+    """
+    if ".git" in path.parts or not path.is_symlink():
+        return None
+    if path.suffix.lower() not in suffixes:
+        return None
+    try:
+        target = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "broken"
+    collected = target.is_relative_to(root) and target.suffix.lower() in suffixes
+    return "duplicating" if collected else "misattributing"
+
+
 def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict:
     """Symlinked corpus files, split by what extraction will actually do to them.
 
@@ -191,26 +210,15 @@ def duplicating_symlinks(corpus: Path, suffixes: set[str] | None = None) -> dict
     if suffixes is None:
         return {"checked": False}
     found: dict = {"checked": True, "duplicating": {}, "misattributing": {}, "broken": {}}
-    # Every exit goes through the same finaliser below. An earlier revision
-    # returned here directly and omitted the totals, so the reporter raised
-    # KeyError on any store without a corpus on disk.
-    root = corpus.resolve() if corpus.is_dir() else None
-    for path in corpus.rglob("*") if root else ():
-        if ".git" in path.parts or not path.is_symlink():
-            continue
-        if path.suffix.lower() not in suffixes:
-            continue
-        repo = path.relative_to(corpus).parts[0]
-        try:
-            target = path.resolve(strict=True)
-        except (OSError, RuntimeError):
-            # A broken link yields nothing rather than a duplicate, but it is
-            # still a corpus defect and must not be counted as either outcome.
-            found["broken"][repo] = found["broken"].get(repo, 0) + 1
-            continue
-        collected = target.is_relative_to(root) and target.suffix.lower() in suffixes
-        bucket = "duplicating" if collected else "misattributing"
-        found[bucket][repo] = found[bucket].get(repo, 0) + 1
+    if corpus.is_dir():
+        root = corpus.resolve()
+        for path in corpus.rglob("*"):
+            outcome = _symlink_outcome(path, root, suffixes)
+            if outcome:
+                repo = path.relative_to(corpus).parts[0]
+                found[outcome][repo] = found[outcome].get(repo, 0) + 1
+    # Every exit reaches this. An earlier revision returned early for a corpus
+    # that is not on disk and omitted the totals, so the reporter raised KeyError.
     for key in ("duplicating", "misattributing", "broken"):
         found[f"{key}_files"] = sum(found[key].values())
     found["files"] = found["duplicating_files"] + found["misattributing_files"]
