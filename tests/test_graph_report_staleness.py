@@ -159,6 +159,19 @@ class WiredIntoStatusTest(SettingsIsolated):
         self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
         self.assertIn("the graph has 3", self._main(["--verify-graph"]))
 
+    def test_verify_graph_also_reports_contentless_nodes(self):
+        """Wiring, not behaviour. Unwiring the contentless report from
+        `--verify-graph` failed no test until this one existed - the sixth time
+        in two days that a check's behaviour was covered and its call site was
+        not."""
+        self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
+        self.assertIn("Contentless nodes", self._main(["--verify-graph"]))
+
+    def test_the_default_run_reports_no_contentless_nodes(self):
+        """It loads the graph to count them, so it must stay behind the flag."""
+        self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
+        self.assertNotIn("Contentless nodes", self._main([]))
+
     def test_the_default_run_does_not_load_the_graph(self):
         self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
         self.assertNotIn("the graph has", self._main([]))
