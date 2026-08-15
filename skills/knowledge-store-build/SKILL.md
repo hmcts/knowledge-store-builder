@@ -76,6 +76,28 @@ all JDK and test-library symbols (`assertthat`, `ioexception`, `mock`,
 `loggerfactory`). Clustering would then have placed contentless nodes into
 communities and billed an authoring pass to summarise them.
 
+**What removing the flag costs, which is not nothing.** The clustered path drops
+edges whose endpoints it cannot resolve, on the grounds that they are external or
+standard-library symbols. That is right most of the time and **language-dependent**
+— measured on two estates by matching dropped endpoint names against node labels:
+
+| | estate A | estate B |
+|---|---|---|
+| Java | 35.0% | 24-26% |
+| Groovy | 63.9% | - |
+| TypeScript | 0.2% | 0 of 265 repos |
+| Terraform | 0.1% | 0 of 38 repos |
+
+So on an infrastructure or TypeScript estate the dropped edges really are external
+and this costs nothing. On a Java-heavy estate roughly a quarter of them connect
+two entities the store *does* hold, and dropping them removes a real relationship
+between two displayed nodes.
+
+Extract without the flag anyway: contentless nodes are the larger harm at +6%
+nodes and +22% edges, and they cannot be cited or explained at all. But know that
+on a Java estate this is a trade rather than a clean win, and that the underlying
+defect is an id-matching failure rather than the flag.
+
 **A post-merge prune is not an equivalent fix**, which is worth knowing before
 reaching for the cheap one: clustering *resolves* some of those references into
 real nodes rather than discarding them, so pruning drops edges the correct path
