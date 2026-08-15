@@ -626,7 +626,42 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def embedded_layer_drift() -> list[str]:
+    """Layers whose content differs from what the committed page was built from.
+
+    The timestamp check this replaces could not see the ordinary case: a
+    regenerated layer and an unrebuilt page committed together have identical
+    commit dates, so the page reads as current while embedding the previous
+    build. An uncommitted layer edit moves no date at all.
+
+    Returns the layers that changed. An empty list with a recorded manifest means
+    the page really was built from what sits beside it; no manifest at all means
+    the page predates this check and cannot be judged, which the caller
+    distinguishes rather than reporting as agreement.
+    """
+    recorded = io.read_json_dict(config.EXPLORER_INPUTS_PATH)
+    if not recorded:
+        return []
+    current = io.layer_digests([config.ROOT / layer for layer in EMBEDDED_LAYERS], config.ROOT)
+    return sorted(name for name, digest in current.items() if recorded.get(name) != digest)
+
+
 def _report_freshness() -> None:
+    if config.EXPLORER_INPUTS_PATH.is_file():
+        drifted = embedded_layer_drift()
+        if drifted:
+            shown = ", ".join(drifted[:4]) + (
+                f" and {len(drifted) - 4} more" if len(drifted) > 4 else ""
+            )
+            print(
+                f"Explorer page was built from different content than {len(drifted)} of the "
+                f"layer(s) beside it now hold - {shown}. Run `knowledgestore explorer` and "
+                "commit the rebuilt page."
+            )
+        else:
+            print("Explorer page was built from the layers now beside it.")
+        return
+
     fresh = artefact_freshness()
     if fresh.get("explorer_stale"):
         print(
@@ -634,7 +669,14 @@ def _report_freshness() -> None:
             "run `knowledgestore explorer` and commit the rebuilt page"
         )
     elif fresh:
-        print("Explorer page is newer than every embedded layer")
+        # Dates only, because no build has recorded content digests yet. This is
+        # the weaker claim and says so: it cannot see a layer regenerated and
+        # committed alongside a page that was never rebuilt.
+        print(
+            "Explorer page is not older than any embedded layer by commit date "
+            "(rebuild it once to record what it was built from, which is the "
+            "question this cannot answer)"
+        )
 
 
 def main(argv=None) -> int:

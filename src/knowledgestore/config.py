@@ -159,6 +159,10 @@ LABELS_PATH = ROOT / "graphify-out" / ".graphify_labels.json"
 # notes what it added after the report was produced.
 GRAPH_REPORT_PATH = ROOT / "graphify-out" / "GRAPH_REPORT.md"
 EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
+# What the committed page was actually built from, by content. Commit dates
+# cannot answer that: the ordinary workflow commits a changed layer and the page
+# together, so their dates match whether or not the page was rebuilt.
+EXPLORER_INPUTS_PATH = ROOT / "graphify-out" / "explorer-inputs.json"
 
 # --- pinned dependencies -------------------------------------------------
 # A store that pins its dependencies keeps a requirements input and a compiled
@@ -444,6 +448,7 @@ def _recompute_paths() -> None:
         LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
         GRAPH_REPORT_PATH=root / "graphify-out" / "GRAPH_REPORT.md",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",
+        EXPLORER_INPUTS_PATH=root / "graphify-out" / "explorer-inputs.json",
         # A store that pins its dependencies keeps these; a store that installs
         # the library directly has neither, and check-install-docs says so.
         REQUIREMENTS_PATH=root / "requirements.txt",

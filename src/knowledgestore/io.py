@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import hashlib
 import json
 import sys
 from io import TextIOWrapper
@@ -210,6 +211,31 @@ def report_join_cardinality(
         file=sys.stderr,
     )
     return True
+
+
+def layer_digests(paths: "list[Path]", root: Path) -> dict:
+    """A content digest per embedded layer, for artefacts that are built from them.
+
+    Timestamps cannot answer "was this page built from these layers": the
+    ordinary workflow commits a regenerated layer and the page in one commit, so
+    their commit dates are identical whether or not the page was rebuilt, and an
+    uncommitted layer edit moves no date at all. Content is the only evidence
+    that survives both.
+
+    Missing layers are recorded as absent rather than skipped, so a layer that
+    disappears between builds is a change rather than a silence.
+
+    `root` is passed rather than read from config: this module is deliberately
+    below configuration and importing it here would invert that.
+    """
+    digests = {}
+    for path in paths:
+        name = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+        if path.is_file():
+            digests[name] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        else:
+            digests[name] = None
+    return digests
 
 
 def load_labels(path: Path) -> dict:
