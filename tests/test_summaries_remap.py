@@ -17,6 +17,7 @@ import contextlib
 import gzip
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -536,6 +537,73 @@ class ClaimTargetsTest(unittest.TestCase):
             {"x": "1", "y": "2", "z": "3"},
         )
         self.assertEqual(list(claims), ["2", "9", "10"])
+
+
+class PrecisionDistributionTest(unittest.TestCase):
+    """The reported distribution must describe the population it came from.
+
+    Shipped in v0.11.4 with overlapping bands: `next()` over a descending list
+    returns the first bound in list order, so the lower three bands all ended at
+    0.8 and every summary below 80% was counted three times. On a real estate it
+    reported 487 summaries from a population of 483, and claimed 2 sat under 20%
+    while the drop count on the line above correctly said none did.
+
+    The assertion here is the sum rather than the boundaries, deliberately: it
+    catches this whole class without encoding where the bands happen to fall,
+    and it would have failed on the shipped version without anyone knowing what
+    the bug was.
+    """
+
+    def _reported(self, precisions: list) -> str:
+        carried = {str(i): {"precision": p} for i, p in enumerate(precisions)}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            summaries._report_precision(carried)
+        return out.getvalue()
+
+    def _counts(self, text: str) -> list:
+        return [int(n) for n in re.findall(r"(\d+) at ", text)]
+
+    def test_the_bands_sum_to_the_population(self):
+        precisions = [0.95] * 481 + [0.6, 0.65]
+        counts = self._counts(self._reported(precisions))
+        self.assertEqual(
+            sum(counts),
+            len(precisions),
+            f"bands must partition the population, not overlap it: {counts}",
+        )
+
+    def test_a_value_lands_in_exactly_one_band(self):
+        for value, expected in ((0.95, 0), (0.6, 1), (0.3, 2), (0.05, 3)):
+            counts = self._counts(self._reported([value]))
+            self.assertEqual(sum(counts), 1, f"{value} counted {sum(counts)} times")
+            self.assertEqual(counts[expected], 1, f"{value} landed in the wrong band: {counts}")
+
+    def test_a_boundary_value_is_not_double_counted(self):
+        counts = self._counts(self._reported([0.8, 0.5, 0.2]))
+        self.assertEqual(sum(counts), 3, f"boundaries double-counted: {counts}")
+
+    def test_an_unmeasured_report_is_not_reported_as_perfect(self):
+        """Entries written before precision was recorded have no such field.
+        Defaulting them to 1.0 printed "5,405 at 80%+" on a real estate for a
+        report that had measured nothing - a clean verdict over an absent
+        measurement."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            summaries._report_precision({str(i): {"from": "0", "share": 0.9} for i in range(5405)})
+        text = out.getvalue()
+        self.assertIn("not recorded", text)
+        self.assertNotIn("at 80%+", text)
+
+    def test_a_partly_measured_report_says_how_much_it_measured(self):
+        carried = {"1": {"precision": 0.9}, "2": {"from": "0"}}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            summaries._report_precision(carried)
+        self.assertIn("1 of 2", out.getvalue())
+
+    def test_nothing_carried_reports_nothing(self):
+        self.assertEqual(self._reported([]), "")
 
 
 if __name__ == "__main__":

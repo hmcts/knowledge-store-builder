@@ -380,11 +380,36 @@ def _report_precision(carried: dict) -> None:
     """
     if not carried:
         return
-    values = [entry.get("precision", 1.0) for entry in carried.values()]
+    # A missing precision is not a perfect one. Entries written before this was
+    # recorded have no such field, and defaulting them to 1.0 printed "5,405 at
+    # 80%+" for a report that measured nothing - a clean verdict over an absent
+    # measurement, which is the failure this whole check exists to prevent.
+    values = [
+        entry["precision"]
+        for entry in carried.values()
+        if isinstance(entry, dict) and entry.get("precision") is not None
+    ]
+    if not values:
+        print(
+            f"Carried prose describes its new cluster: not recorded for any of "
+            f"{len(carried)} carried summaries - this report predates the measurement. "
+            "Re-run `summaries remap` to record it."
+        )
+        return
+    if len(values) < len(carried):
+        print(
+            f"  (precision recorded for {len(values)} of {len(carried)} carried summaries; "
+            "the rest predate the measurement.)"
+        )
     bands = [(0.8, "80%+"), (0.5, "50-80%"), (0.2, "20-50%"), (0.0, "under 20%")]
     counts = []
     for lower, label in bands:
-        upper = next((b[0] for b in bands if b[0] > lower), 1.01)
+        # `min`, not `next`: the bands are listed descending, so `next` returned
+        # the first bound in LIST order - 0.8 for every band below it - making
+        # the lower three nested rather than adjacent. Each summary below 80%
+        # was then counted three times, and the reported distribution summed to
+        # more than the population it described.
+        upper = min((b[0] for b in bands if b[0] > lower), default=1.01)
         n = sum(1 for v in values if lower <= v < upper)
         counts.append(f"{n} at {label}")
     print(f"Carried prose describes its new cluster: {', '.join(counts)}")
