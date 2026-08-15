@@ -219,6 +219,15 @@ and a corrupted corpus inventory that a twelve-check suite passed 12/12. If you
 build one verification primitive, make it "compare against a witness written
 before the change", not "validate the result".
 
+**A count without its layer is not a finding.** Two correct measurements taken
+at different layers look exactly like a contradiction, and this estate family
+produced three such false conflicts in one week: 456 nodes against 57 for the
+same symlink (raw AST versus published graph), 12.7% against 15% for contentless
+nodes (a loose rule against a strict one), and a clustering variance attributed
+to the partitioner that was actually in the splitting pass downstream of it. In
+every case both parties were right and one number was quoted without saying what
+it counted. State the layer with the number, always.
+
 **An idempotency check must cover everything the step is responsible for, not
 only what it originally wrote.** A store repairing a graph attribute guarded its
 repair with "if the node already has the right value, skip" — measured against a
@@ -342,6 +351,72 @@ written**. A merge reporting "361 merged" reads like success; it was a 28%
 silent shortfall, and the discrepancy was the only signal.
 
 ## 7. Refresh economics
+
+**Pin the environment before you cluster, or the graph cannot reproduce itself.**
+
+```bash
+export PYTHONHASHSEED=0     # before any clustering run
+```
+
+Without it, clustering the *same graph file* in three separate processes yields
+three different community memberships. Measured independently on two estates —
+7,789 / 7,794 / 7,795 communities on one, 42,656 / 42,629 / 42,646 on another,
+and byte-identical once pinned. On the second, the *committed* graph turned out
+to be a fourth value, so that store could not have reproduced its own published
+clustering and nothing said so.
+
+The cause is not graphify's, and knowing which layer it sits in matters because
+two other explanations look identical. graphify's partitioner is sorted and
+seeded and **is** deterministic — measured, 3/3 identical. The variance is
+downstream, in the pass that splits oversized communities with networkx's
+Louvain, where `seed=` fixes that algorithm's node shuffle but not the iteration
+order of the node-id **sets** it aggregates between levels.
+
+**It is input-dependent, and its rate is not portable between estates.** Swept
+across 28 real communities of one graph, three processes each:
+
+| community size | unstable |
+|---|---|
+| 100+ | 11 of 12 |
+| under 20 | 1 of 16 |
+| any size, `PYTHONHASHSEED=0` | **0 of 28** |
+
+Two other estates then tried to reproduce it on single large communities and both
+came back stable — 899 nodes on one, 2,832 on another, the latter *larger than
+anything in the sweep above*. If 11-of-12 were a per-community probability, two
+independent stable draws would be a 0.7% event; it is far likelier that the rate
+differs between graphs. Those twelve also come from one graph and share its
+structure, so 11/12 is that estate's rate rather than a general one.
+
+So: instability is size-correlated **within** a graph, and its overall rate
+varies **between** graphs.
+
+That is the argument for a blanket pin, and it is stronger than "one clean run
+misleads you". **The rate does not transfer.** A store that tests carefully and
+concludes it is unaffected has learned something about its graph today and
+nothing about the next estate, the next refresh, or a community that grows past
+whatever it happened to sample. Pinning removes a question that cannot be
+answered cheaply and whose answer would not travel if it could.
+
+**If you ever do check it, hash the membership — do not compare counts.** Of the
+12 unstable communities, **4 returned an identical community count with different
+membership**. A count-based check would have passed on a third of the real
+failures, which is the same count-versus-content trap as a ticket join that
+matches nothing while every total looks healthy.
+
+The near-tie explanation predicts the size gradient and has not been measured
+directly; treat it as the working mechanism rather than an established one.
+
+The cost lands where it hurts most. Loss rate rises with community size — 0.86%
+of communities with 5+ members, 1.13% at 10+, **2.12% at 20+** — and large
+communities are exactly the ones carrying authored prose. A flat "1.5% of
+communities move" understates it against any summary-weighted measure.
+
+**Record which partitioner ran, too.** graphify uses Leiden when `graspologic`
+is installed and silently falls back to Louvain when it is not. Nothing records
+the choice, so two operators on one corpus can produce different partitions and
+read it as the corpus having changed. Pinning the hash seed does not help if the
+partitioner differs.
 
 **Re-clustering is the cost centre.** Adding repositories moves community ids
 and strands committed summaries, which must then be remapped by membership

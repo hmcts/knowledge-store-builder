@@ -86,6 +86,19 @@ Nothing fails when the flag is used. Every stage reports success and the graph
 is simply wrong, which is why this is documented here rather than left to be
 noticed.
 
+**Pin the hash seed before clustering.** Without it the same graph file can yield
+a different community membership in each process — measured on two estates, and
+on one the committed graph matched none of its own rebuilds. It is input-dependent
+(11 of 12 communities over 100 nodes on one graph, 1 of 16 under 20) and the
+rate varies between graphs — two other estates saw no instability at 899 and
+2,832 nodes — so a store that tests clean has learned about its own graph today
+and nothing that transfers. Summaries are keyed by
+community id, so the loss is authored prose:
+
+```bash
+export PYTHONHASHSEED=0
+```
+
 A large graph also needs the size cap raised, or every graph operation refuses:
 
 ```bash
