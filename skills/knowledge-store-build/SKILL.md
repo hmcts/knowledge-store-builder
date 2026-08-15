@@ -86,10 +86,12 @@ Nothing fails when the flag is used. Every stage reports success and the graph
 is simply wrong, which is why this is documented here rather than left to be
 noticed.
 
-**Pin the hash seed before clustering.** Without it the same graph file yields a
-different community membership in each process — measured on two estates, and on
-one of them the committed graph matched none of its own rebuilds. Summaries are
-keyed by community id, so the loss is authored prose:
+**Pin the hash seed before clustering.** Without it the same graph file can yield
+a different community membership in each process — measured on two estates, and
+on one the committed graph matched none of its own rebuilds. It is input-
+dependent (11 of 12 communities over 100 nodes, 1 of 16 under 20), so a store
+that looks stable in one test is not thereby safe. Summaries are keyed by
+community id, so the loss is authored prose:
 
 ```bash
 export PYTHONHASHSEED=0

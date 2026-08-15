@@ -369,10 +369,32 @@ The cause is not graphify's, and knowing which layer it sits in matters because
 two other explanations look identical. graphify's partitioner is sorted and
 seeded and **is** deterministic — measured, 3/3 identical. The variance is
 downstream, in the pass that splits oversized communities with networkx's
-Louvain: `seed=` fixes that algorithm's node shuffle but not the iteration order
-of the node-id **sets** it aggregates between levels, and that order decides
-near-ties in modularity gain. Sorting the input cannot reach it, because the
-ambiguity arises between the algorithm's internal levels.
+Louvain, where `seed=` fixes that algorithm's node shuffle but not the iteration
+order of the node-id **sets** it aggregates between levels.
+
+**It is input-dependent, not universal**, and that is why pinning beats testing.
+Swept across 28 real communities, three processes each:
+
+| community size | unstable |
+|---|---|
+| 100+ | 11 of 12 |
+| under 20 | 1 of 16 |
+| any size, `PYTHONHASHSEED=0` | **0 of 28** |
+
+Two independent attempts to reproduce it on single communities of 899 and 2,832
+nodes came back stable, which is consistent with this rather than against it — a
+stable sample says nothing about the next one. That is the argument for a blanket
+pin: whether a given store is affected is not cheaply knowable, and checking
+per-estate invites the wrong conclusion from one clean result.
+
+**If you ever do check it, hash the membership — do not compare counts.** Of the
+12 unstable communities, **4 returned an identical community count with different
+membership**. A count-based check would have passed on a third of the real
+failures, which is the same count-versus-content trap as a ticket join that
+matches nothing while every total looks healthy.
+
+The near-tie explanation predicts the size gradient and has not been measured
+directly; treat it as the working mechanism rather than an established one.
 
 The cost lands where it hurts most. Loss rate rises with community size — 0.86%
 of communities with 5+ members, 1.13% at 10+, **2.12% at 20+** — and large
