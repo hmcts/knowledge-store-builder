@@ -159,6 +159,19 @@ class WiredIntoStatusTest(SettingsIsolated):
         self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
         self.assertIn("the graph has 3", self._main(["--verify-graph"]))
 
+    def test_verify_graph_also_reports_contentless_nodes(self):
+        """Wiring, not behaviour. Unwiring the contentless report from
+        `--verify-graph` failed no test until this one existed - the sixth time
+        in two days that a check's behaviour was covered and its call site was
+        not."""
+        self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
+        self.assertIn("Contentless nodes", self._main(["--verify-graph"]))
+
+    def test_the_default_run_reports_no_contentless_nodes(self):
+        """It loads the graph to count them, so it must stay behind the flag."""
+        self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
+        self.assertNotIn("Contentless nodes", self._main([]))
+
     def test_the_default_run_does_not_load_the_graph(self):
         self._store("2026-08-11T00:00:00+00:00", "2026-08-11T00:00:00+00:00")
         self.assertNotIn("the graph has", self._main([]))
@@ -204,6 +217,72 @@ class ParsingTest(SettingsIsolated):
         with contextlib.redirect_stdout(out):
             status._report_graph_report(True)
         self.assertEqual(out.getvalue(), "")
+
+
+class ContentlessNodesTest(unittest.TestCase):
+    """Nodes that carry identity and nothing else.
+
+    `merge-graphs` composes with networkx, which creates a node for any id an
+    edge mentions, so an edge endpoint absent from its own per-repository graph
+    arrives as identity alone. One estate carried 94,899 - 15% of its merged
+    layer - and they pass every obvious guard: a dangling-endpoint check,
+    because after the merge they really are nodes, and a repository filter,
+    because the merge stamps `repo` on everything.
+    """
+
+    def test_identity_only_nodes_are_counted_by_repository(self):
+        nodes = [
+            {"id": "a::x", "local_id": "x", "repo": "a", "_origin": "ast"},
+            {"id": "a::y", "local_id": "y", "repo": "a"},
+            {"id": "b::z", "local_id": "z", "repo": "b"},
+        ]
+        self.assertEqual(status.contentless_nodes(nodes), {"a": 2, "b": 1})
+
+    def test_a_node_with_a_label_but_no_source_file_is_not_contentless(self):
+        """The loose rule reads well and is wrong. On the maintainer's own estate
+        99,828 nodes lack a `source_file` while carrying a label, a normalised
+        label and a file type, and every one is legitimate - a check reporting
+        those would be dismissed the first time it ran."""
+        nodes = [
+            {"id": "a::any", "repo": "a", "label": "any", "norm_label": "any", "file_type": "code"}
+        ]
+        self.assertEqual(status.contentless_nodes(nodes), {})
+
+    def test_a_node_with_only_a_source_file_is_not_contentless(self):
+        nodes = [{"id": "a::f", "repo": "a", "source_file": "src/f.py"}]
+        self.assertEqual(status.contentless_nodes(nodes), {})
+
+    def test_community_membership_alone_does_not_rescue_a_node(self):
+        """Clustering assigns a community to everything, phantoms included, so
+        carrying one is not evidence of content - it is evidence that clustering
+        ran."""
+        nodes = [
+            {
+                "id": "a::x",
+                "repo": "a",
+                "local_id": "x",
+                "community": 7,
+                "community_name": "some cluster",
+            }
+        ]
+        self.assertEqual(status.contentless_nodes(nodes), {"a": 1})
+
+    def test_an_empty_node_is_not_counted(self):
+        self.assertEqual(status.contentless_nodes([{}]), {})
+
+    def test_a_clean_graph_says_so_rather_than_going_quiet(self):
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status._report_contentless([{"id": "a", "label": "Thing", "repo": "a"}])
+        self.assertIn("none of 1", out.getvalue())
+
+    def test_the_report_explains_why_nothing_else_caught_them(self):
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status._report_contentless([{"id": "a::x", "repo": "a", "local_id": "x"}])
+        text = out.getvalue()
+        self.assertIn("dangling-endpoint", text)
+        self.assertIn("repository filter", text)
 
 
 if __name__ == "__main__":

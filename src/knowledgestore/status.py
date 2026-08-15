@@ -437,6 +437,60 @@ def _relative(path: Path) -> str:
     return str(path.relative_to(config.ROOT)) if path.is_relative_to(config.ROOT) else str(path)
 
 
+# Keys a node can carry and still be nothing: its identity, and where the merge
+# filed it. Anything else - a label, a file, a type - makes it a real node.
+IDENTITY_KEYS = frozenset({"id", "local_id", "repo", "_origin", "community", "community_name"})
+
+
+def contentless_nodes(nodes: list) -> dict:
+    """Nodes carrying identity and nothing else, by repository.
+
+    `merge-graphs` composes with networkx, which creates a node for any id an
+    edge mentions. A per-repository graph can legitimately hold an edge whose
+    endpoint is absent from its own node list, so those endpoints arrive as
+    identity and nothing more. One estate carried 94,899 of them, 15% of its
+    merged layer, and graphify warns at build time and then builds anyway.
+
+    They defeat the obvious guards: they pass a dangling-endpoint check, because
+    after the merge they genuinely are nodes; and `prefix_graph_for_global` sets
+    `repo` on everything it touches, so they satisfy a repository filter and
+    survive an estate cut. A node with no label and no source file cannot be
+    cited, explained or attributed - it is mass in clustering and a blank row
+    anywhere it is listed.
+
+    Identity-only, deliberately, rather than "missing a label or a source file".
+    The looser rule reads well and is wrong: on the maintainer's own estate
+    99,828 nodes lack a `source_file` while carrying a label, a normalised label
+    and a file type, and every one of them is legitimate. A check that reported
+    those would be dismissed the first time it ran.
+    """
+    by_repo: dict[str, int] = {}
+    for node in nodes:
+        carried = {key for key, value in node.items() if value not in (None, "", [], {})}
+        if carried and carried <= IDENTITY_KEYS:
+            repo = node.get("repo") or "(no repository)"
+            by_repo[repo] = by_repo.get(repo, 0) + 1
+    return by_repo
+
+
+def _report_contentless(nodes: list) -> None:
+    found = contentless_nodes(nodes)
+    total = sum(found.values())
+    if not total:
+        print(f"Contentless nodes: none of {len(nodes):,}.")
+        return
+    where = ", ".join(
+        f"{repo} ({n})" for repo, n in sorted(found.items(), key=lambda kv: -kv[1])[:4]
+    )
+    print(
+        f"Contentless nodes: {total:,} of {len(nodes):,} ({100 * total / len(nodes):.1f}%) carry "
+        f"identity and nothing else - {where}. `merge-graphs` creates a node for any id an edge "
+        "mentions, so an edge endpoint missing from its own graph becomes one of these. They "
+        "cannot be cited, explained or attributed, and they pass both a dangling-endpoint check "
+        "and a repository filter."
+    )
+
+
 def _report_graph_report(verify: bool) -> None:
     claims = graph_report_claims()
     if not claims["present"]:
@@ -451,7 +505,9 @@ def _report_graph_report(verify: bool) -> None:
     if not verify or claims["nodes"] is None:
         return
     # Opt-in, like --drift: exact, and it loads the whole graph to be so.
-    actual = len(io.load_graph(config.GRAPH_PATH).get("nodes", []))
+    nodes = io.load_graph(config.GRAPH_PATH).get("nodes", [])
+    _report_contentless(nodes)
+    actual = len(nodes)
     if actual == claims["nodes"]:
         print(f"GRAPH_REPORT.md agrees with the graph: {actual:,} nodes.")
     else:
