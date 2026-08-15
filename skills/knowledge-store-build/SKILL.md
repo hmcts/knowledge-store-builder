@@ -88,9 +88,11 @@ noticed.
 
 **Pin the hash seed before clustering.** Without it the same graph file can yield
 a different community membership in each process — measured on two estates, and
-on one the committed graph matched none of its own rebuilds. It is input-
-dependent (11 of 12 communities over 100 nodes, 1 of 16 under 20), so a store
-that looks stable in one test is not thereby safe. Summaries are keyed by
+on one the committed graph matched none of its own rebuilds. It is input-dependent
+(11 of 12 communities over 100 nodes on one graph, 1 of 16 under 20) and the
+rate varies between graphs — two other estates saw no instability at 899 and
+2,832 nodes — so a store that tests clean has learned about its own graph today
+and nothing that transfers. Summaries are keyed by
 community id, so the loss is authored prose:
 
 ```bash

@@ -372,8 +372,8 @@ downstream, in the pass that splits oversized communities with networkx's
 Louvain, where `seed=` fixes that algorithm's node shuffle but not the iteration
 order of the node-id **sets** it aggregates between levels.
 
-**It is input-dependent, not universal**, and that is why pinning beats testing.
-Swept across 28 real communities, three processes each:
+**It is input-dependent, and its rate is not portable between estates.** Swept
+across 28 real communities of one graph, three processes each:
 
 | community size | unstable |
 |---|---|
@@ -381,11 +381,22 @@ Swept across 28 real communities, three processes each:
 | under 20 | 1 of 16 |
 | any size, `PYTHONHASHSEED=0` | **0 of 28** |
 
-Two independent attempts to reproduce it on single communities of 899 and 2,832
-nodes came back stable, which is consistent with this rather than against it — a
-stable sample says nothing about the next one. That is the argument for a blanket
-pin: whether a given store is affected is not cheaply knowable, and checking
-per-estate invites the wrong conclusion from one clean result.
+Two other estates then tried to reproduce it on single large communities and both
+came back stable — 899 nodes on one, 2,832 on another, the latter *larger than
+anything in the sweep above*. If 11-of-12 were a per-community probability, two
+independent stable draws would be a 0.7% event; it is far likelier that the rate
+differs between graphs. Those twelve also come from one graph and share its
+structure, so 11/12 is that estate's rate rather than a general one.
+
+So: instability is size-correlated **within** a graph, and its overall rate
+varies **between** graphs.
+
+That is the argument for a blanket pin, and it is stronger than "one clean run
+misleads you". **The rate does not transfer.** A store that tests carefully and
+concludes it is unaffected has learned something about its graph today and
+nothing about the next estate, the next refresh, or a community that grows past
+whatever it happened to sample. Pinning removes a question that cannot be
+answered cheaply and whose answer would not travel if it could.
 
 **If you ever do check it, hash the membership — do not compare counts.** Of the
 12 unstable communities, **4 returned an identical community count with different
