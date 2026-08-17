@@ -50,6 +50,14 @@ jobs:
       - name: Unit tests, with extras
         run: python3 -m unittest discover -s tests -v
 
+      # A green suite reports two things with the same output: that the product
+      # works, and that nothing is checking it. This gate distinguishes them by
+      # breaking the product on purpose and requiring the suite to notice. Every
+      # mutation in it is a defect that was actually written, reviewed and caught
+      # late - one of them shipped in a release.
+      - name: Mutation gate
+        run: python3 tests/mutation_gate.py
+
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
