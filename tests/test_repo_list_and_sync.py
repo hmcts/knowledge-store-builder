@@ -717,8 +717,12 @@ class FailedSyncKeepsProvenanceTest(SettingsIsolated):
             return 1
 
         sync.sync_repository = fake
-        with redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        printed = io.StringIO()
+        with redirect_stdout(printed), contextlib.redirect_stderr(io.StringIO()):
             sync.main()
+        # Kept, not discarded: one of these tests asserts on the reported
+        # denominator, which is where the retention fix broke the arithmetic.
+        self.printed = printed.getvalue()
         return provenance.read()
 
     def test_the_failed_repository_keeps_its_previous_commit(self):
@@ -735,6 +739,24 @@ class FailedSyncKeepsProvenanceTest(SettingsIsolated):
         recorded = self._run("repo-b")
         self.assertEqual(recorded["repo-a"]["sha"], "new")
         self.assertNotIn("sync_failed", recorded["repo-a"])
+
+    def test_the_failure_count_does_not_double_count_a_retained_record(self):
+        """The retention fix broke the arithmetic of the message reporting it.
+
+        `total` was `len(entries) + len(failures)`, and retaining a failed
+        repository puts its name in BOTH - so it was counted twice. Only on the
+        retention path: without a previous record the sum was right, which is why
+        a test had to pre-seed provenance AND assert on the printed denominator
+        to see it. On a 361-repository sync it read "12 of 373", sending an
+        operator to look for twelve missing clones in a list of 361.
+        """
+        self._run("repo-b")
+        line = next(x for x in self.printed.splitlines() if "failed to sync" in x)
+        self.assertIn(
+            "1 of 2",
+            line,
+            f"the manifest declares two repositories: {line!r}",
+        )
 
     def test_membership_still_matches_the_manifest(self):
         """The invariant: after a sync, every declared repository has a record."""
