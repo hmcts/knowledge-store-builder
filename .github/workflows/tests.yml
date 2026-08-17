@@ -49,7 +49,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install graphifyy
+          pip install --only-binary :all: 'graphifyy==0.9.45'
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and
