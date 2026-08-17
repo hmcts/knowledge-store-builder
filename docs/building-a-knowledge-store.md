@@ -352,6 +352,26 @@ silent shortfall, and the discrepancy was the only signal.
 
 ## 7. Refresh economics
 
+**Run each store from its own virtual environment.** A store that pins this
+library in a lock file and then runs it from a shared interpreter has not pinned
+anything: whichever session installed last decides what the build used, and the
+lock file records an intention rather than a fact.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.lock
+.venv/bin/knowledgestore status          # not the bare `knowledgestore`
+```
+
+Measured while two stores shared one machine: a store's lock pinned `0.11.3`
+while the interpreter on the path held `0.11.5`, and nobody could say who had
+upgraded it. The cost is not theoretical — it invalidated a control run, because
+output labelled as one version had been produced by another, and the only reason
+it was caught was that the newer version printed a line the older one did not.
+
+The same reasoning as pinning the hash seed below, one level up: a build is
+reproducible when everything that decides its output is recorded, and the
+interpreter decides more than the lock file does.
+
 **Pin the environment before you cluster, or the graph cannot reproduce itself.**
 
 ```bash
