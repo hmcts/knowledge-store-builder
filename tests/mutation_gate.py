@@ -88,6 +88,20 @@ MUTATIONS = (
         "the test drove a stub, so it pinned the wording and not the computation",
     ),
     Mutation(
+        "verify finding renamed back to 'unsupported'",
+        "build_community_summaries.py",
+        '"  [not in digest] community',
+        '"  [unsupported] community',
+        "a label that claimed 98% more than it measured, so the gate got ignored",
+    ),
+    Mutation(
+        "estate pass never narrows anything",
+        "build_community_summaries.py",
+        "missing = {term for term in terms if _normalise(term) not in estate}",
+        "missing = set(terms)",
+        "the wider check exists to narrow; a pass-through would look identical",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",

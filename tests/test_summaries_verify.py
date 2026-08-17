@@ -20,7 +20,7 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -368,6 +368,80 @@ class ProvenanceSplitTest(SettingsIsolated):
         self.assertIn("grounding by provenance", text)
         self.assertIn("carried 100% (1 of 1)", text)
         self.assertIn("authored 0% (0 of 1)", text)
+
+
+class VerifyNamesWhatItMeasuresTest(SettingsIsolated):
+    """A digest is a 12-node sample; "unsupported" claimed more than that.
+
+    `verify` reported 260 of 482 summaries with "unsupported citations", which
+    reads as half the store making unbacked claims. Measured on that estate, 239
+    of 244 distinct flagged terms (98%) existed in the corpus - the digest simply
+    had not sampled them. A gate that is 98% false positives gets ignored, and
+    then stops catching the 2% that matter.
+    """
+
+    def _store(self, digest_nodes: list, prose: str, graph_labels: list | None = None) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "knowledge" / "summaries").mkdir(parents=True)
+        (root / "graphify-out").mkdir(parents=True)
+        config.configure(root=str(root))
+        # json.dump rather than knowledgestore.io, because this module already
+        # imports the stdlib `io` and shadowing it would be worse than verbose.
+        config.SUMMARIES_INPUT_PATH.write_text(
+            json.dumps([{"id": "1", "top_nodes": [{"label": n} for n in digest_nodes]}]),
+            encoding="utf-8",
+        )
+        config.SUMMARIES_PATH.write_text(json.dumps({"1": prose}), encoding="utf-8")
+        config.GRAPH_PATH.write_text(
+            json.dumps({"nodes": [{"id": n, "label": n} for n in (graph_labels or [])]}),
+            encoding="utf-8",
+        )
+
+    def _run(self, **kwargs) -> str:
+        captured = io.StringIO()
+        with redirect_stdout(captured), redirect_stderr(io.StringIO()):
+            summaries.verify(**kwargs)
+        return captured.getvalue()
+
+    def test_the_digest_finding_is_not_called_unsupported(self):
+        """It measures digest corroboration, and saying "unsupported" invites
+        someone to act on 98% noise."""
+        self._store(["AlphaService"], "Covers AlphaService and BetaWidget.")
+        text = self._run()
+        self.assertIn("not in digest", text)
+        self.assertNotIn("[unsupported]", text)
+
+    def test_the_digest_run_says_the_finding_is_usually_real_content(self):
+        self._store(["AlphaService"], "Covers AlphaService and BetaWidget.")
+        self.assertIn("did not sample", self._run())
+
+    def test_a_term_in_the_graph_is_not_reported_as_absent(self):
+        """The point of the wider pass: the digest missed it, the estate has it."""
+        self._store(["AlphaService"], "Covers AlphaService and BetaWidget.", ["BetaWidget"])
+        text = self._run(estate=True)
+        self.assertNotIn("not in graph", text)
+        self.assertIn("exists somewhere in the graph", text)
+
+    def test_a_term_in_neither_is_reported_as_a_candidate_not_a_fabrication(self):
+        """Wording matters here: the graph is narrower than the corpus, so this
+        is a shortlist to read. On a real estate the one summary it isolated
+        cited two terms that existed in the corpus."""
+        self._store(["AlphaService"], "Covers AlphaService and GammaThing.", ["BetaWidget"])
+        text = self._run(estate=True)
+        self.assertIn("not in graph", text)
+        self.assertIn("NARROWER one than the corpus", text)
+        self.assertNotIn("fabrication", text.replace("proven fabrications", ""))
+
+    def test_strict_without_estate_keeps_its_previous_meaning(self):
+        """An existing CI invocation must not silently change what it fails on."""
+        self._store(["AlphaService"], "Covers AlphaService and GammaThing.", ["GammaThing"])
+        self.assertEqual(summaries.verify(strict=True), 1)
+
+    def test_strict_with_estate_fails_only_on_what_the_graph_lacks(self):
+        self._store(["AlphaService"], "Covers AlphaService and GammaThing.", ["GammaThing"])
+        self.assertEqual(summaries.verify(strict=True, estate=True), 0)
 
 
 if __name__ == "__main__":

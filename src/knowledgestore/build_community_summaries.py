@@ -669,28 +669,77 @@ def _sample_ids(ids: list[str], sample: int | None) -> list[str]:
     return [ids[int(i * step)] for i in range(sample)]
 
 
+def _report_verify_totals(
+    unsupported: list[tuple[str, set[str]]],
+    speculative: list[tuple[str, list[str]]],
+    orphaned: list[str],
+    absent: dict[str, set[str]] | None,
+) -> None:
+    """The counts, and what they do and do not mean."""
+    if not (unsupported or speculative or orphaned):
+        print("  nothing cited beyond its digest.")
+        return
+    print(
+        f"  {len(unsupported)} citing beyond their digest, {len(speculative)} speculative, "
+        f"{len(orphaned)} without a digest."
+    )
+    if absent is None:
+        print(
+            "  A term absent from a 12-node digest is usually real content the digest did "
+            "not sample - on one estate 98% of them existed in the corpus. Run with "
+            "--estate to check the graph instead, which is the truthfulness gate."
+        )
+        return
+    total_absent = sum(len(terms) for terms in absent.values())
+    if total_absent:
+        print(
+            f"  Of those, {total_absent} term(s) in {len(absent)} summary(ies) are absent from "
+            "the graph as well. The graph is a wider evidence base than a 12-node digest and a "
+            "NARROWER one than the corpus, so these are candidates to read rather than proven "
+            "fabrications - a term can be real content in a file nothing extracted. Measured on "
+            "one estate: this narrowed 9 flagged summaries to 1, and that one cited two terms "
+            "that did exist in the corpus."
+        )
+    else:
+        print(
+            "  Every one of them exists somewhere in the graph, so none is citing something "
+            "the store cannot speak about."
+        )
+
+
 def _report_verify(
     checked: int,
     total: int,
     unsupported: list[tuple[str, set[str]]],
     speculative: list[tuple[str, list[str]]],
     orphaned: list[str],
+    absent: dict[str, set[str]] | None = None,
 ) -> None:
+    """Report the digest check for what it is, and the estate check for what it is.
+
+    The old wording called a term the digest did not mention "unsupported",
+    which reads as an unbacked claim. A digest carries 12 `top_nodes` and a
+    community can span dozens of files, so most such terms are real content the
+    digest simply did not sample. Measured on one estate: of 244 distinct flagged
+    terms, **239 (98%) existed in the corpus** and 5 did not.
+
+    A gate whose headline is 98% false positives gets ignored, and then stops
+    catching the 2% that are real. So the digest finding is now named for what it
+    measures, and `absent` - populated only by the estate-wide pass - carries the
+    finding that actually means a summary cites something that does not exist.
+    """
     print(f"Verified {checked} of {total} summaries against their digests.")
     for cid, extra in unsupported:
-        print(f"  [unsupported] community {cid} cites: {', '.join(sorted(extra))}")
+        print(f"  [not in digest] community {cid} cites: {', '.join(sorted(extra))}")
     for cid, hedges in speculative:
         words = sorted({hedge.lower() for hedge in hedges})
         print(f"  [speculation] community {cid}: {', '.join(words)}")
     for cid in orphaned:
         print(f"  [no digest] community {cid} has prose but no evidence to check it against")
-    if unsupported or speculative or orphaned:
-        print(
-            f"  {len(unsupported)} unsupported, {len(speculative)} speculative, "
-            f"{len(orphaned)} without a digest."
-        )
-    else:
-        print("  nothing unsupported.")
+    if absent:
+        for cid, terms in sorted(absent.items()):
+            print(f"  [not in graph] community {cid} cites: {', '.join(sorted(terms))}")
+    _report_verify_totals(unsupported, speculative, orphaned, absent)
 
 
 def _ungrounded(text: str, digest: dict) -> set[str]:
@@ -731,12 +780,84 @@ def _report_provenance_split(checked: list[str], unsupported: list[tuple[str, se
     )
 
 
-def verify(sample: int | None = None, strict: bool = False) -> int:
+def _verify_exit(
+    strict: bool,
+    estate: bool,
+    unsupported: list,
+    orphaned: list,
+    absent: dict | None,
+) -> int:
+    """Whether to fail, and on which finding.
+
+    Under `--estate`, fail on what is genuinely unbacked rather than on what a
+    12-node sample failed to mention. Without it the previous behaviour stands,
+    so an existing CI invocation does not silently change meaning.
+    """
+    if not strict:
+        return 0
+    blocking = (absent or orphaned) if estate else (unsupported or orphaned)
+    return 1 if blocking else 0
+
+
+def estate_identifiers() -> set[str]:
+    """Every identifier the graph holds, normalised - the estate's own vocabulary.
+
+    The wider evidence base a digest is a 12-node sample of. Node labels and
+    `local_id`s together are what a summary could legitimately be about, so a
+    cited term absent from all of them is not merely uncorroborated: nothing in
+    the store can answer a question about it.
+
+    Loads the graph, which is why it is opt-in. `status` must stay cheap; this
+    stage is already an authoring-time check and can afford it.
+    """
+    graph = io.read_json_dict(config.GRAPH_PATH)
+    identifiers: set[str] = set()
+    for node in graph.get("nodes", []):
+        for field in ("label", "local_id"):
+            value = node.get(field)
+            if value:
+                identifiers.add(_normalise(str(value)))
+        source = node.get("source_file")
+        if source:
+            # The filename alone, because prose cites `AddressPipe` and
+            # `address.pipe.ts` rather than the whole repo-relative path.
+            identifiers.add(_normalise(str(source).rsplit("/", 1)[-1]))
+    identifiers.discard("")
+    return identifiers
+
+
+def absent_from_estate(unsupported: list[tuple[str, set[str]]]) -> dict[str, set[str]]:
+    """Of the terms a digest did not corroborate, those the graph does not hold."""
+    if not unsupported:
+        return {}
+    estate = estate_identifiers()
+    if not estate:
+        return {}
+    absent = {}
+    for cid, terms in unsupported:
+        missing = {term for term in terms if _normalise(term) not in estate}
+        if missing:
+            absent[cid] = missing
+    return absent
+
+
+def verify(sample: int | None = None, strict: bool = False, estate: bool = False) -> int:
     """Check authored summaries cite only what their digests contain.
 
     Coverage checks confirm every digest got prose; this confirms the prose is
     grounded. Reports rather than fails, so it can be run over a whole store
     without blocking; `strict` is for CI.
+
+    The digest check answers "was the author's own evidence enough to support
+    this?" - useful for authoring discipline and a poor truthfulness gate, since
+    a digest samples 12 nodes of a community that may span dozens of files.
+    `estate=True` widens the evidence to the whole graph. That is a much better
+    filter than the digest - it narrowed 9 flagged summaries to 1 on a real
+    sample - but it is not proof of fabrication: the graph is narrower than the
+    corpus, and the one summary it isolated cited two terms that existed in the
+    corpus in files nothing had extracted. Treat its findings as the shortlist
+    worth a human read. Checking the corpus itself is the only true gate and is
+    not implemented here.
     """
     loaded = io.read_json(config.SUMMARIES_INPUT_PATH, default=[]) or []
     digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
@@ -765,9 +886,13 @@ def verify(sample: int | None = None, strict: bool = False) -> int:
         if hedges:
             speculative.append((cid, hedges))
 
-    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned)
+    absent = absent_from_estate(unsupported) if estate else None
+    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent)
     _report_provenance_split(checked, unsupported)
-    return 1 if (strict and (unsupported or orphaned)) else 0
+    # Under --estate, fail on what is genuinely unbacked rather than on what a
+    # 12-node sample failed to mention. Without it, the old behaviour stands so
+    # an existing CI invocation does not silently change meaning.
+    return _verify_exit(strict, estate, unsupported, orphaned, absent)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -782,8 +907,14 @@ def main(argv: list[str] | None = None) -> int:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries verify")
         parser.add_argument("--sample", type=int, default=None)
         parser.add_argument("--strict", action="store_true")
+        parser.add_argument(
+            "--estate",
+            action="store_true",
+            help="re-check terms the digest did not corroborate against the whole graph, "
+            "which is what distinguishes an unbacked claim from an unsampled one",
+        )
         options = parser.parse_args(arguments[1:])
-        return verify(sample=options.sample, strict=options.strict)
+        return verify(sample=options.sample, strict=options.strict, estate=options.estate)
     if arguments[:1] == ["remap"]:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries remap")
         parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
