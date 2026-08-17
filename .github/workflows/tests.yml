@@ -43,6 +43,13 @@ jobs:
       - name: Install the optional extras
         run: |
           pip install --only-binary :all: 'PyYAML==6.0.3'
+          # graphify too, and not only for the deployments stage. Without it 20
+          # tests skip silently - every check that reads graphify's own dispatch
+          # table or its ignore helpers - so "with extras" was green over a fifth
+          # of its own suite never running. Found by the mutation gate below,
+          # which reported a symlink-exclusion mutation as surviving in CI while
+          # the same mutation was caught locally.
+          pip install graphifyy
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and
