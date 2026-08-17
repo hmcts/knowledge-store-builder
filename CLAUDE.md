@@ -113,6 +113,19 @@ How that looks in this codebase:
   effect, return the default — at least one test should fail for each
   realistic mutation. A mutation nothing catches is unprotected behaviour
   or a tautological test.
+- **Name the quantity you are claiming, then check the code computes that
+  quantity and not a neighbour of it.** Every wrong measurement this codebase
+  has shipped or nearly shipped was *correct code answering a different
+  question*: `$?` after a pipeline reads the last command's exit status, not
+  the one being tested; a name matched against a path-qualified id cannot match
+  and returns a clean 0.0%; `"export X=0" in text` stays true when the line is
+  commented out; a bucket tally summed to more than the population it described.
+  None of these look wrong on the page and none is caught by re-running them —
+  only by asking whether the expression computes the thing the sentence claims.
+  Two corollaries worth applying directly: a result that is *suspiciously
+  uniform* across populations differing in every other respect indicts the
+  instrument, not the populations; and a count is not a finding until you can
+  say which layer it counted.
 - **A non-editable install of this library shadows `src/` for the whole
   suite.** Test modules put `src/` on `sys.path` at import time, but once any
   earlier module has imported `knowledgestore`, `sys.modules` is already bound
