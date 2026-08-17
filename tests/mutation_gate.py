@@ -123,6 +123,20 @@ MUTATIONS = (
         "graphify does not catch that import error, so Louvain there is a guess, not a probe",
     ),
     Mutation(
+        "records from an ambiguous graph pair",
+        "record_clustering.py",
+        "    ambiguity = shipping_ambiguity()",
+        "    ambiguity = None",
+        "shipped in v0.11.6; recorded a discarded run's counts and exited 0",
+    ),
+    Mutation(
+        "record does not say which file it described",
+        "record_clustering.py",
+        '"described": config.GRAPH_PATH.name,',
+        "",
+        "a reader then guesses which of a store's two graph files it refers to",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",

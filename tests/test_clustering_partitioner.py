@@ -147,6 +147,67 @@ class Recording(SettingsIsolated):
         self.assertIsNone(record_clustering.recorded_partitioner())
 
 
+class DescribesTheGraphThatShips(SettingsIsolated):
+    """A record must not describe a graph nobody will have.
+
+    Shipped in v0.11.6: the recorder read the uncompressed `graph.json`, which is
+    gitignored in every store because the compressed `.gz` is the artefact. On a
+    real estate a discarded verification run had left `graph.json` in the tree, so
+    the stage recorded 42,572 communities over 785,610 nodes while the committed
+    `.gz` held 42,627 over 785,493 - and exited 0 with real-looking counts.
+
+    That is worse than not having the stage: it converts an honest "unknown, not
+    agreed" into a false "agreed", and both files are called graph-something so
+    nothing about the run looks wrong.
+    """
+
+    def _store(self, compressed: bool) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "graphify-out").mkdir(parents=True)
+        config.configure(root=str(root))
+        config.GRAPH_PATH.write_text(
+            json.dumps({"nodes": [{"id": "a", "community": 1}, {"id": "b", "community": 2}]}),
+            encoding="utf-8",
+        )
+        if compressed:
+            # Content deliberately not written - existence alone is the signal,
+            # because comparing 1.4 GB of graph is what this refuses to do.
+            config.GRAPH_PATH.with_suffix(".json.gz").write_bytes(b"\x1f\x8b")
+        return root
+
+    def test_it_refuses_when_both_graph_files_exist(self):
+        self._store(compressed=True)
+        out = _io.StringIO()
+        with contextlib.redirect_stderr(out), contextlib.redirect_stdout(_io.StringIO()):
+            code = record_clustering.main()
+        self.assertEqual(code, 1)
+        self.assertFalse(
+            config.CLUSTERING_RECORD_PATH.exists(),
+            "a refused run must write nothing - a record is committed and believed",
+        )
+        self.assertIn("what ships", out.getvalue())
+
+    def test_it_records_when_only_the_uncompressed_graph_exists(self):
+        """The intended build-time case: recorded beside the clustering that just
+        wrote it, before anything is compressed."""
+        self._store(compressed=False)
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            code = record_clustering.main()
+        self.assertEqual(code, 0)
+        self.assertTrue(config.CLUSTERING_RECORD_PATH.is_file())
+
+    def test_the_record_says_which_file_it_described(self):
+        """So a reader never has to guess which of a store's two graph files a
+        record refers to."""
+        self._store(compressed=False)
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            record_clustering.main()
+        written = json.loads(config.CLUSTERING_RECORD_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(written["described"], config.GRAPH_PATH.name)
+
+
 class Verdict(unittest.TestCase):
     def test_an_unrecorded_partitioner_is_never_reported_as_agreement(self):
         """The failure this whole family is about: nothing measured, printed as a

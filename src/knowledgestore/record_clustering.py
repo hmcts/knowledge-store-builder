@@ -96,9 +96,48 @@ def _clustering(nodes: list) -> tuple[int, int]:
     return len(members), sum(1 for node in nodes if node.get("community") is not None)
 
 
+def shipping_ambiguity() -> str | None:
+    """Why this record could describe a graph nobody will have, or None.
+
+    The uncompressed graph is the right input at build time: this stage runs
+    beside the clustering that just wrote it, and the committed `.gz` is produced
+    later. But `graph.json` is gitignored in every store - the compressed one is
+    the artefact - so once a `.gz` exists the uncompressed file is a working copy
+    that may be from any run at all.
+
+    On a real estate that is exactly what happened: a discarded verification run
+    left `graph.json` in the tree, and the record described 42,572 communities
+    over 785,610 nodes while the committed `.gz` held 42,627 over 785,493. The
+    stage exited 0 and printed real counts for a graph nobody has.
+
+    Comparing the two by content would settle it, and cannot be afforded here -
+    the compressed graph on that estate expands to 1.4 GB, and this library
+    refuses to load graphs it does not need to. So the ambiguity is refused
+    rather than resolved: the operator knows which of their two files is real,
+    and this stage does not.
+    """
+    compressed = config.GRAPH_PATH.with_suffix(".json.gz")
+    if not compressed.is_file() or not config.GRAPH_PATH.is_file():
+        return None
+    return (
+        f"Both {config.GRAPH_PATH.name} and {compressed.name} exist. The compressed one is "
+        "what ships and the uncompressed one is gitignored, so a record taken from "
+        f"{config.GRAPH_PATH.name} may describe a graph nobody will have - on one estate it "
+        "described a discarded verification run, off by 55 communities and 117 nodes, and "
+        "exited 0. Record immediately after clustering and before compressing, or remove the "
+        "stale uncompressed graph, so there is only one candidate."
+    )
+
+
 def main() -> int:
+    ambiguity = shipping_ambiguity()
+    if ambiguity:
+        print(ambiguity, file=sys.stderr)
+        return 1
+
     # The uncompressed graph, because this runs at build time beside the
-    # clustering that just wrote it - the committed .gz is produced later.
+    # clustering that just wrote it - the committed .gz is produced later, and
+    # `shipping_ambiguity` above refuses the case where it already exists.
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     communities, clustered = _clustering(nodes)
     if not communities:
@@ -127,7 +166,14 @@ def main() -> int:
     # would cry wolf. What this file is *for* is the partitioner.
     io.write_json(
         config.CLUSTERING_RECORD_PATH,
-        {"partitioner": partitioner, "communities": communities, "clustered_nodes": clustered},
+        {
+            "partitioner": partitioner,
+            "communities": communities,
+            "clustered_nodes": clustered,
+            # Which file these counts came from, so a reader never has to guess
+            # which of a store's two graph files a record describes.
+            "described": config.GRAPH_PATH.name,
+        },
         indent=2,
     )
     print(
