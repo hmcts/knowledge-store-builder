@@ -163,6 +163,12 @@ EXPLORER_PATH = ROOT / "graphify-out" / "explorer.html"
 # cannot answer that: the ordinary workflow commits a changed layer and the page
 # together, so their dates match whether or not the page was rebuilt.
 EXPLORER_INPUTS_PATH = ROOT / "graphify-out" / "explorer-inputs.json"
+# Which partitioner produced the communities in the graph. graphify chooses it
+# from the environment - Leiden where graspologic imports, Louvain where it does
+# not - and community ids key every authored summary, so the choice is a silent
+# input to the whole summary layer. Small on purpose: `status` reads it and must
+# never load the graph.
+CLUSTERING_RECORD_PATH = ROOT / "graphify-out" / "clustering-inputs.json"
 
 # --- pinned dependencies -------------------------------------------------
 # A store that pins its dependencies keeps a requirements input and a compiled
@@ -449,6 +455,7 @@ def _recompute_paths() -> None:
         GRAPH_REPORT_PATH=root / "graphify-out" / "GRAPH_REPORT.md",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",
         EXPLORER_INPUTS_PATH=root / "graphify-out" / "explorer-inputs.json",
+        CLUSTERING_RECORD_PATH=root / "graphify-out" / "clustering-inputs.json",
         # A store that pins its dependencies keeps these; a store that installs
         # the library directly has neither, and check-install-docs says so.
         REQUIREMENTS_PATH=root / "requirements.txt",

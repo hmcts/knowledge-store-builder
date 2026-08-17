@@ -264,18 +264,27 @@ accepted Markdown and evidence checks.
 
 ### Build and check the page
 
-Recompress the final graph after clustering or any later graph mutation, then
-build the page:
+Record which partitioner clustered the graph, recompress it after clustering or
+any later graph mutation, then build the page:
 
 ```bash
+knowledgestore record-clustering
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
 knowledgestore status
 ```
 
+`record-clustering` writes `graphify-out/clustering-inputs.json`, naming the
+partitioner the clustering environment offered: graphify uses graspologic's Leiden
+where that library imports and networkx's Louvain where it does not, and that
+choice decides every community id. Run it in the environment that clustered, and
+commit it — `status` reads it to report when an environment cannot reproduce the
+committed clustering, and says **unknown** rather than agreement where no build
+recorded one.
+
 `graphify-out/explorer.html` is the self-contained query page. `status` reports
-provenance, layer coverage, dangling citations and whether the page predates a
-layer it embeds. It always exits zero because drift and missing optional layers
+provenance, layer coverage, dangling citations, the recorded partitioner and
+whether the page predates a layer it embeds. It always exits zero because drift and missing optional layers
 are conditions to assess, not build failures; read the report.
 
 ## Publish the store

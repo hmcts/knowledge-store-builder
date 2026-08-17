@@ -413,10 +413,35 @@ communities are exactly the ones carrying authored prose. A flat "1.5% of
 communities move" understates it against any summary-weighted measure.
 
 **Record which partitioner ran, too.** graphify uses Leiden when `graspologic`
-is installed and silently falls back to Louvain when it is not. Nothing records
-the choice, so two operators on one corpus can produce different partitions and
-read it as the corpus having changed. Pinning the hash seed does not help if the
-partitioner differs.
+is installed and falls back to Louvain when it is not, so two operators on one
+corpus produce different partitions and read it as the corpus having changed.
+Pinning the hash seed does not help if the partitioner differs.
+
+```bash
+knowledgestore record-clustering    # -> graphify-out/clustering-inputs.json
+```
+
+Run it in the environment that clustered, immediately after clustering, and
+commit the record beside the graph. It records what *that* environment offered
+and cannot know what a clustering it did not run was built with — and it refuses
+on an unclustered graph rather than naming a partitioner for communities that do
+not exist.
+
+`status` then reads that file — never the graph — and compares it against the
+environment it is run in, so a mismatch arrives as one line instead of an
+unexplainable retention collapse:
+
+```
+Clustering partitioner: graphify-out/clustering-inputs.json records Leiden
+(graspologic); this environment has Louvain (networkx), so a re-cluster here will
+NOT reproduce those communities - the ids move, and `summaries remap` reports
+retention loss with no cause in the corpus.
+```
+
+A store with no record is reported as **unknown**, never as agreement. Whether
+this environment has graspologic is decided by attempting graphify's own import,
+because anything inferred instead — a pinned extra, a lock file, an installed
+version — can disagree with what actually ran.
 
 **Re-clustering is the cost centre.** Adding repositories moves community ids
 and strands committed summaries, which must then be remapped by membership

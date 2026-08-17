@@ -133,10 +133,12 @@ knowledgestore packages        # cross-repository package nodes and import edges
 ```
 
 **Cluster after `gherkin`, not before**, so the Gherkin layer is clustered with
-everything else — then build the page:
+everything else. Then record which partitioner did it, in the same environment
+and immediately afterwards, and build the page:
 
 ```bash
-knowledgestore explorer        # the self-contained search page
+knowledgestore record-clustering   # -> graphify-out/clustering-inputs.json
+knowledgestore explorer            # the self-contained search page
 ```
 
 Stages are independent and idempotent — re-run one without repeating the rest.
@@ -437,6 +439,23 @@ round. Loading the graph yourself also means the node count reaching the writer
 matches the file on disk, so the guard above has nothing to fire on; do not reach
 for `force=True` to get past it unless you can account for the difference.
 
+**Record the partitioner every time you cluster**, before anything reads the new
+ids:
+
+```bash
+knowledgestore record-clustering    # -> graphify-out/clustering-inputs.json
+```
+
+graphify partitions with graspologic's Leiden where that library imports and with
+networkx's Louvain where it does not, so the algorithm behind every community id
+is a property of the machine that clustered. Two operators on one corpus then get
+two partitions, and `remap` reports a retention collapse with no cause in the
+corpus. The record must be written by the environment that clustered — it cannot
+know what someone else's run used — and committed beside the graph, which is what
+lets a later `status` say *"records Leiden; this environment has only Louvain, so
+a re-cluster here will not reproduce these communities"*. A store with no record
+is reported as unknown, so do not read a silent `status` as agreement.
+
 Community ids are not stable across re-clustering, and summaries are keyed by
 id. After a re-cluster, do **not** assume the old file still applies. Either
 regenerate, or remap by membership overlap: for each old cluster, find the new
@@ -543,7 +562,9 @@ knowledgestore explorer
 ## Checking a store's health
 
 `knowledgestore status` reports provenance, summary/brief coverage, dangling
-corpus citations and whether the page is older than a layer it embeds. Add
+corpus citations, the partitioner recorded in
+`graphify-out/clustering-inputs.json` against the one this environment offers,
+and whether the page is older than a layer it embeds. Add
 `--drift` to ask GitHub how far each repository has moved since the build
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.

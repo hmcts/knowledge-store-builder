@@ -76,14 +76,20 @@ Then reconcile the number of per-repository graphs against
 `config/repositories.txt` before merging, because a loop that skipped
 repositories still exits zero.
 
-After clustering, carry summaries onto new IDs by membership overlap:
+After clustering, record which partitioner produced the new IDs, then carry
+summaries onto them by membership overlap:
 
 ```bash
+knowledgestore record-clustering
 knowledgestore summaries remap
 knowledgestore summaries extract
 ```
 
-Read the retention reported by `remap`. Author and merge the uncovered summary
+Read the retention reported by `remap` — and before you attribute a low figure to
+the corpus, read what `status` says about the partitioner. A refresh run where
+`graspologic` is installed or absent differently from the build that produced the
+committed communities re-keys all of them, and the retention loss then has nothing
+to do with the estate. Author and merge the uncovered summary
 digests, then run `summaries verify`. Regenerate the semantic index when the
 graph vocabulary or summaries changed materially, and refresh any affected
 topic briefs and deep dives.
