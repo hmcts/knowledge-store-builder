@@ -648,10 +648,10 @@ def _report_symlinks() -> None:
         spread = f" resolving to {links['targets']} distinct target(s)" if links["targets"] else ""
         print(
             f"Symlinked source files, target inside the corpus: {links['duplicating_files']} "
-            f"in {where(links['duplicating'])}{spread}. On a cold build the content is emitted "
-            "twice under two paths; on any rebuild with a warm cache the two collide and the "
-            "LINK wins, so the real file vanishes from the graph and its content is filed "
-            "under the link. Exclude them either way."
+            f"in {where(links['duplicating'])}{spread}. Extraction records the path it walked, "
+            "not the link target, so the real file can be displaced by the link and vanish from "
+            "the graph - measured on one estate as 11 of 12 shared files lost on a COLD build, "
+            "not only on a warm rebuild. Exclude them before extracting."
         )
     if links["misattributing_files"]:
         print(

@@ -208,12 +208,17 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         after the first, which is most of them.
         """
         text = self._reported({"repo-a": 7})
-        self.assertIn("cold build", text)
-        self.assertIn("LINK wins", text)
+        self.assertIn("COLD build", text)
         self.assertIn(
-            "real file vanishes",
+            "vanish from the graph",
             text,
-            "the displacement outcome is the quieter one and must be named",
+            "displacement is the quieter outcome and must be named",
+        )
+        self.assertNotIn(
+            "warm cache",
+            text,
+            "an earlier version implied displacement needed a warm cache; an estate "
+            "measured 11 of 12 shared files lost on a cold build",
         )
 
     def test_one_repository_is_reported_without_repeating_its_count(self):
