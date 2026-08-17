@@ -51,7 +51,11 @@ zero times across the 1,266 feature files it was built against.
 **Communities** are detected by modularity optimisation over the merged
 graph, driven by graphify: graspologic's Leiden where that library is
 installed, seeded networkx Louvain otherwise — the same seed either way, so
-like-for-like reruns are stable and churn is graph-change-driven.
+like-for-like reruns are stable and churn is graph-change-driven. Which of the
+two ran is therefore an input to every community id, and machine-dependent:
+`knowledgestore record-clustering` writes it to
+`graphify-out/clustering-inputs.json`, and `status` reports when the environment
+it runs in could not reproduce what that file records.
 Community ids are not stable across runs — nothing in modularity optimisation
 anchors them — so two mechanisms restore continuity:
 

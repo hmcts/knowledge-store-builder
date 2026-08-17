@@ -102,6 +102,27 @@ MUTATIONS = (
         "the wider check exists to narrow; a pass-through would look identical",
     ),
     Mutation(
+        "partitioner check unwired",
+        "status.py",
+        "    _report_clustering()",
+        "    pass",
+        "the third instance of this escape: reported through the function, never through main()",
+    ),
+    Mutation(
+        "unrecorded partitioner defaults to a partitioner",
+        "record_clustering.py",
+        "    return named if named in PARTITIONER_NAMES else None",
+        "    return named or LOUVAIN",
+        "an absent measurement reading as a clean result - shipped twice in one week",
+    ),
+    Mutation(
+        "a broken graspologic reported as the fallback",
+        "record_clustering.py",
+        '        return None, f"importing graspologic raised',
+        '        return LOUVAIN, f"importing graspologic raised',
+        "graphify does not catch that import error, so Louvain there is a guess, not a probe",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",

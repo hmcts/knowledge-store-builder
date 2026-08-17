@@ -65,6 +65,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_deployments",
         "add per-environment deployment config and join it to services (opt-in)",
     ),
+    "record-clustering": (
+        "record_clustering",
+        "record which partitioner produced the graph's communities (run after clustering)",
+    ),
     "summaries": (
         "build_community_summaries",
         "extract community digests, or merge written summaries back in",

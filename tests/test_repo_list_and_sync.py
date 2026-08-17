@@ -511,6 +511,9 @@ class CliTest(SettingsIsolated):
                 "packages",
                 # before clustering, so deployment nodes join communities
                 "deployments",
+                # clustering itself is graphify's; this records which partitioner
+                # it used, because that choice re-keys every summary
+                "record-clustering",
                 "summaries",
                 "semantic",
                 "topics",

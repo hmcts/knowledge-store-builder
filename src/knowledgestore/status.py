@@ -1,7 +1,9 @@
 """Report how stale the store's layers are. Never fails: drift is normal.
 
 Cheap by design — this stage must not load the graph. The corpus citation
-check reads the small tracked extract, not graph.json.
+check reads the small tracked extract, not graph.json, and the partitioner
+check reads the recorded `clustering-inputs.json` rather than the clustering
+sitting in the graph.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config, io, provenance
+from . import config, io, provenance, record_clustering
 from .build_topic_briefs import read_topics
 
 
@@ -735,6 +737,62 @@ def _report_freshness() -> None:
         )
 
 
+def partitioner_verdict(recorded: str | None, here: str | None, how: str) -> str:
+    """What to say about the partitioner, given the record and this environment.
+
+    Four states, and the reason they are four rather than two: an unrecorded
+    partitioner is *unknown*, which must never be printed as agreement. Community
+    ids key every summary, so a store clustered with Leiden and re-clustered with
+    Louvain loses its prose wholesale - and `summaries remap` reports that as
+    churn, indistinguishable in its output from a corpus that really did move.
+
+    Every message names the file it consulted. Each silent failure of this kind
+    has come from a check that could not say what it read.
+    """
+    record = _relative(config.CLUSTERING_RECORD_PATH)
+    if here is None:
+        return (
+            f"Clustering partitioner: this environment's is undeterminable - {how}. graphify "
+            "catches ImportError and falls back to Louvain; it does not catch this, so it would "
+            f"fail here rather than cluster, and nothing can be concluded about {record}."
+        )
+    mine = record_clustering.PARTITIONER_NAMES[here]
+    if recorded is None:
+        return (
+            f"Clustering partitioner: not recorded - {record} names none, so nothing says which "
+            f"partitioner produced the communities in the graph beside it. This environment has "
+            f"{mine}; whether it matches is unknown, not agreed. Run "
+            "`knowledgestore record-clustering` in the environment that clusters."
+        )
+    theirs = record_clustering.PARTITIONER_NAMES[recorded]
+    if recorded == here:
+        return (
+            f"Clustering partitioner: {record} records {theirs}, and this environment has the "
+            "same partitioner, so a re-cluster here starts from the algorithm that built the "
+            "committed communities (reproducing them also needs PYTHONHASHSEED=0)."
+        )
+    return (
+        f"Clustering partitioner: {record} records {theirs}; this environment has {mine}, so a "
+        "re-cluster here will NOT reproduce those communities - the ids move, and `summaries "
+        "remap` reports retention loss with no cause in the corpus. Match the recorded "
+        "partitioner (graspologic installed for Leiden, absent for Louvain), or expect to "
+        "re-author the prose the remap drops."
+    )
+
+
+def _report_clustering() -> None:
+    """Print the partitioner verdict.
+
+    Reads the recorded artefact rather than the graph, per the module docstring.
+    The one cost is the availability probe: on a machine that *has* graspologic,
+    importing it takes a second or two. That is the price of deciding by the same
+    import graphify decides by, rather than inferring from something cheaper that
+    can disagree with it.
+    """
+    here, how = record_clustering.available_partitioner()
+    print(partitioner_verdict(record_clustering.recorded_partitioner(), here, how))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -781,6 +839,8 @@ def main(argv=None) -> int:
     _report_citations()
 
     _report_freshness()
+
+    _report_clustering()
 
     _report_graph_report(arguments.verify_graph)
 

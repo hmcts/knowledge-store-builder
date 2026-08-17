@@ -131,13 +131,17 @@ done < config/repositories.txt
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 
-knowledgestore gherkin      # then cluster, then:
+knowledgestore gherkin             # then cluster, then:
+knowledgestore record-clustering   # which partitioner clustered: Leiden or Louvain
 knowledgestore explorer
 ```
 
 Cluster **after** `gherkin`. Follow `/knowledge-store:knowledge-store-build` for this step:
 `graphify cluster-only` reports success without writing its result, which is
-destructive if it goes unnoticed.
+destructive if it goes unnoticed. Record the partitioner from the environment that
+clustered: graphify uses Leiden where `graspologic` is installed and Louvain where
+it is not, and that choice re-keys every community — so `status` needs the record
+to tell an operator whose environment cannot reproduce the committed clustering.
 
 ### Checks worth running
 
