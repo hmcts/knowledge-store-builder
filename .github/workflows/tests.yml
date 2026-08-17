@@ -43,12 +43,27 @@ jobs:
       - name: Install the optional extras
         run: |
           pip install --only-binary :all: 'PyYAML==6.0.3'
+          # graphify too, and not only for the deployments stage. Without it 20
+          # tests skip silently - every check that reads graphify's own dispatch
+          # table or its ignore helpers - so "with extras" was green over a fifth
+          # of its own suite never running. Found by the mutation gate below,
+          # which reported a symlink-exclusion mutation as surviving in CI while
+          # the same mutation was caught locally.
+          pip install --only-binary :all: 'graphifyy==0.9.45'
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and
       # green would mean nothing about it.
       - name: Unit tests, with extras
         run: python3 -m unittest discover -s tests -v
+
+      # A green suite reports two things with the same output: that the product
+      # works, and that nothing is checking it. This gate distinguishes them by
+      # breaking the product on purpose and requiring the suite to notice. Every
+      # mutation in it is a defect that was actually written, reviewed and caught
+      # late - one of them shipped in a release.
+      - name: Mutation gate
+        run: python3 tests/mutation_gate.py
 
       - uses: actions/setup-node@v7
         with:
