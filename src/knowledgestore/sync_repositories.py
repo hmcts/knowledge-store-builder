@@ -164,7 +164,12 @@ def main() -> int:
     if external:
         print(f"Plus {len(external)} fetched but never extracted -> {config.EXTERNAL_DIR}")
     if failures:
-        total = len(entries) + len(failures)
+        # Union, not sum. Retaining a failed repository's previous record (above)
+        # puts its name in BOTH `entries` and `failures`, so adding the lengths
+        # counts it twice - the retention fix broke the arithmetic of the message
+        # that reports it. On a 361-repository sync that read as "12 of 373",
+        # sending an operator to look for twelve missing clones in a list of 361.
+        total = len({*entries, *(name for name, _ in failures)})
         print(f"\n{len(failures)} of {total} repositories failed to sync:")
         for name, error in failures:
             print(f"  {name}: {error}")
