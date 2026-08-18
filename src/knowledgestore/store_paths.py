@@ -82,23 +82,34 @@ def relative(p: str | Path) -> str:
     converted inventory claimed coverage of a file with no nodes on it and stopped naming
     the path the nodes were actually under. It read as more correct than the truth.
 
-    So: match on the `repositories/` marker first and never call `resolve()`. A store whose
-    own root contains a symlinked component is handled by the marker for everything under
-    `repositories/`, which is every path this function is asked about in practice.
+    So: never call `resolve()`. Relativise against the current root lexically, and fall
+    back to the `repositories/` marker only for a path from a foreign root.
+
+    **The order matters, and the marker cannot come first.** `~/repositories/<store>` is an
+    ordinary place to keep clones, and such a store has a `repositories/` directory *above*
+    its corpus as well as inside it. Matching the first occurrence kept the store's own
+    directory name as a prefix, `absolute()` then re-rooted it a second time, and the round
+    trip named a file that does not exist - while the conversion succeeded, the counts
+    reconciled and the JSON stayed well-formed.
+
+    The fallback keeps matching the *first* marker rather than the last, deliberately.
+    Under-truncating yields a path that fails to resolve, which someone finds; over-
+    truncating can yield a shorter path that happens to name a *different real file*, which
+    nobody finds.
     """
     s = str(p)
-    i = s.find(_MARKER)
-    if i >= 0:
-        return s[i:]
     if s.startswith("/"):
-        # Inside the store but outside `repositories/` — relativise without following
-        # links. `relpath` is purely lexical, unlike `resolve`.
+        # The current root first, and lexically. `relpath` never touches the filesystem,
+        # so it cannot follow a link; `resolve()` would, which is the defect above.
         try:
             rel = os.path.relpath(s, _root())
             if not rel.startswith(".."):
                 return rel
         except (ValueError, OSError):
             pass
+    i = s.find(_MARKER)
+    if i >= 0:
+        return s[i:]
     return s
 
 

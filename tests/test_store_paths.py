@@ -38,6 +38,28 @@ class StorePathsTest(SettingsIsolated):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def test_a_store_living_under_a_directory_called_repositories(self):
+        """`~/repositories/<store>` is an ordinary place to keep clones, and it broke this.
+
+        `relative()` matched the FIRST `repositories/` in the string, which for such a
+        store is the parent holding the clone, not the corpus inside it. Every path then
+        kept the store's own directory name as a prefix, so `absolute()` re-rooted it a
+        second time and the round trip named a file that does not exist.
+
+        Silent in exactly the way that matters: the conversion succeeds, the entry counts
+        reconcile, the JSON is well-formed - and every path in it is unresolvable.
+        """
+        outer = Path(self._tmp.name).resolve() / "repositories" / "a-store"
+        (outer / "repositories" / "infra").mkdir(parents=True)
+        (outer / "graphify-out").mkdir()
+        config.configure(root=str(outer))
+        f = outer / "repositories" / "infra" / "main.tf"
+        f.write_text("resource {}\n")
+
+        self.assertEqual(store_paths.relative(f), "repositories/infra/main.tf")
+        # And the round trip must land back on the real file, not one directory deeper.
+        self.assertEqual(Path(store_paths.absolute(store_paths.relative(f))), f)
+
     def test_relative_does_not_follow_symlinks(self):
         """A link and its target must relativise to DIFFERENT paths.
 
