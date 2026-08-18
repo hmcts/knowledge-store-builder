@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from . import __version__
+
 from . import config
 
 # Stages that build their own argument parser, and so document themselves better
@@ -124,6 +126,7 @@ def usage() -> str:
         "",
         "Global options:",
         "  --root PATH   the knowledge store directory (default: current directory)",
+        "  --version     the installed library version, for checking against the skills",
         "",
         "Settings can also come from the environment: KSB_ROOT, KSB_GITHUB_ORG,",
         "KSB_TICKET_BROWSE_URL, KSB_EXPLORER_TITLE and others - see config.py.",
@@ -143,9 +146,22 @@ def main(argv: list[str] | None = None) -> int:
     if known.root:
         config.configure(root=known.root)
 
+    if rest[:1] in (["--version"], ["-V"]):
+        # Askable, because it was not. The skills are distributed separately from
+        # this library - skills through the plugin cache, the library through pip -
+        # so they drift, and the first question when a documented stage is
+        # "unknown" is which version is actually installed. There was no way to
+        # find out short of importlib.metadata.
+        print(f"knowledgestore {__version__}")
+        return 0
+
     stage = rest[0] if rest else ""
     if stage not in STAGES:
-        print(f"unknown stage: {stage or '(none)'}\n", file=sys.stderr)
+        print(
+            f"unknown stage: {stage or '(none)'} (this is knowledgestore {__version__}; the "
+            "skills describing a stage you do not have is the usual cause)\n",
+            file=sys.stderr,
+        )
         print(usage(), file=sys.stderr)
         return 1
 
