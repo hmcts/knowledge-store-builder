@@ -737,6 +737,36 @@ def _report_freshness() -> None:
         )
 
 
+def _seed_clause() -> str:
+    """What the record says about hash randomisation when it clustered.
+
+    Three states, because the matching-partitioner message previously read the
+    same whether or not the seed was pinned - so a store that clustered unseeded
+    was indistinguishable from one that did not. The community count cannot stand
+    in for this: a re-cluster can return an identical count with different
+    membership, measured on one estate as 4 of 12 unstable communities.
+    """
+    recorded = io.read_json_dict(config.CLUSTERING_RECORD_PATH)
+    if "hash_randomised" not in recorded:
+        return (
+            "Whether hashes were pinned when it clustered is not recorded, so reproducibility is "
+            "unknown - a matching partitioner is necessary and not sufficient, since reproducing "
+            "the ids also needs PYTHONHASHSEED=0. Re-run `knowledgestore record-clustering` to "
+            "capture it."
+        )
+    if recorded["hash_randomised"]:
+        return (
+            "But hash randomisation was ON when it clustered, so those communities are NOT "
+            "reproducible even here - re-cluster with PYTHONHASHSEED=0 before relying on the ids."
+        )
+    if record_clustering.hash_randomisation():
+        return (
+            "Hashes were pinned when it clustered, but NOT in this process - reproducing the ids "
+            "needs PYTHONHASHSEED=0 here too."
+        )
+    return "Hashes were pinned when it clustered and in this process, so the ids reproduce."
+
+
 def partitioner_verdict(recorded: str | None, here: str | None, how: str) -> str:
     """What to say about the partitioner, given the record and this environment.
 
@@ -769,7 +799,7 @@ def partitioner_verdict(recorded: str | None, here: str | None, how: str) -> str
         return (
             f"Clustering partitioner: {record} records {theirs}, and this environment has the "
             "same partitioner, so a re-cluster here starts from the algorithm that built the "
-            "committed communities (reproducing them also needs PYTHONHASHSEED=0)."
+            f"committed communities. {_seed_clause()}"
         )
     return (
         f"Clustering partitioner: {record} records {theirs}; this environment has {mine}, so a "

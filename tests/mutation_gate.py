@@ -123,11 +123,18 @@ MUTATIONS = (
         "graphify does not catch that import error, so Louvain there is a guess, not a probe",
     ),
     Mutation(
-        "records from an ambiguous graph pair",
+        "seed state not recorded",
         "record_clustering.py",
-        "    ambiguity = shipping_ambiguity()",
-        "    ambiguity = None",
-        "shipped in v0.11.6; recorded a discarded run's counts and exited 0",
+        '"hash_randomised": hash_randomisation(),',
+        "",
+        "a store that clustered unseeded then looks identical to one that did not",
+    ),
+    Mutation(
+        "unpinned hashes not reported at record time",
+        "record_clustering.py",
+        "    if hash_randomisation():",
+        "    if False:",
+        "the record would say unseeded while the run said nothing",
     ),
     Mutation(
         "record does not say which file it described",
