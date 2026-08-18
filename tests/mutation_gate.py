@@ -123,6 +123,27 @@ MUTATIONS = (
         "graphify does not catch that import error, so Louvain there is a guess, not a probe",
     ),
     Mutation(
+        "seed state not recorded",
+        "record_clustering.py",
+        '"hash_randomised": hash_randomisation(),',
+        "",
+        "a store that clustered unseeded then looks identical to one that did not",
+    ),
+    Mutation(
+        "unpinned hashes not reported at record time",
+        "record_clustering.py",
+        "    if hash_randomisation():",
+        "    if False:",
+        "the record would say unseeded while the run said nothing",
+    ),
+    Mutation(
+        "record does not say which file it described",
+        "record_clustering.py",
+        '"described": config.GRAPH_PATH.name,',
+        "",
+        "a reader then guesses which of a store's two graph files it refers to",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",

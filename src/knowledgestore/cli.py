@@ -25,6 +25,7 @@ SELF_PARSING = frozenset(
         "status",
         "check-evidence",
         "check-corpus",
+        "record-clustering",
     }
 )
 

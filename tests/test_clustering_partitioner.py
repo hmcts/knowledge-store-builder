@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import io as _io
 import json
+import sys
 import tempfile
 import unittest
 from importlib.util import find_spec
@@ -109,7 +110,7 @@ class Recording(SettingsIsolated):
         self._store(CLUSTERED)
         out = _io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(record_clustering.main(), 0)
+            self.assertEqual(record_clustering.main([]), 0)
         written = self._record()
         self.assertIn(written["partitioner"], record_clustering.PARTITIONER_NAMES)
         self.assertEqual(written["communities"], 2)
@@ -119,7 +120,7 @@ class Recording(SettingsIsolated):
     def test_the_recorded_partitioner_is_the_one_this_environment_offers(self):
         self._store(CLUSTERED)
         with contextlib.redirect_stdout(_io.StringIO()):
-            record_clustering.main()
+            record_clustering.main([])
         detected, _ = record_clustering.available_partitioner()
         self.assertEqual(self._record()["partitioner"], detected)
 
@@ -130,7 +131,7 @@ class Recording(SettingsIsolated):
         self._store({"nodes": [{"id": "a"}, {"id": "b"}], "links": []})
         err = _io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertEqual(record_clustering.main(), 1)
+            self.assertEqual(record_clustering.main([]), 1)
         self.assertFalse(config.CLUSTERING_RECORD_PATH.exists())
         self.assertIn("Cluster the graph before recording", err.getvalue())
 
@@ -145,6 +146,110 @@ class Recording(SettingsIsolated):
     def test_no_record_at_all_reads_as_unknown(self):
         self._store(CLUSTERED)
         self.assertIsNone(record_clustering.recorded_partitioner())
+
+
+class DescribesTheGraphThatShips(SettingsIsolated):
+    """A record must not describe a graph nobody will have.
+
+    Shipped in v0.11.6: the recorder read the uncompressed `graph.json`, which is
+    gitignored in every store because the compressed `.gz` is the artefact. On a
+    real estate a discarded verification run had left `graph.json` in the tree, so
+    the stage recorded 42,572 communities over 785,610 nodes while the committed
+    `.gz` held 42,627 over 785,493 - and exited 0 with real-looking counts.
+
+    That is worse than not having the stage: it converts an honest "unknown, not
+    agreed" into a false "agreed", and both files are called graph-something so
+    nothing about the run looks wrong.
+    """
+
+    def _store(self, compressed: bool) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "graphify-out").mkdir(parents=True)
+        config.configure(root=str(root))
+        config.GRAPH_PATH.write_text(
+            json.dumps({"nodes": [{"id": "a", "community": 1}, {"id": "b", "community": 2}]}),
+            encoding="utf-8",
+        )
+        if compressed:
+            # Content deliberately not written - existence alone is the signal,
+            # because comparing 1.4 GB of graph is what this refuses to do.
+            config.GRAPH_PATH.with_suffix(".json.gz").write_bytes(b"\x1f\x8b")
+        return root
+
+    def test_it_records_when_both_graph_files_exist_and_names_the_other(self):
+        """An earlier fix REFUSED here, and that was wrong: the committed `.gz` is
+        tracked, so it is present from checkout on every refresh after the first -
+        both files exist at the exact moment this stage is meant to run, and the
+        refusal made the stage unreachable on any store that commits a compressed
+        graph, which is the documented practice."""
+        self._store(compressed=True)
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(_io.StringIO()):
+            code = record_clustering.main([])
+        self.assertEqual(code, 0, "refusing here breaks the normal refresh")
+        self.assertTrue(config.CLUSTERING_RECORD_PATH.is_file())
+        self.assertIn("also exists", out.getvalue())
+        self.assertIn("--graph", out.getvalue())
+
+    def test_an_explicit_graph_overrides_the_default(self):
+        """The operator knows which of their two files is real; this stage does not."""
+        root = self._store(compressed=True)
+        other = root / "graphify-out" / "elsewhere.json"
+        other.write_text(json.dumps({"nodes": [{"id": "z", "community": 9}]}), encoding="utf-8")
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            record_clustering.main(["--graph", str(other)])
+        written = json.loads(config.CLUSTERING_RECORD_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(written["described"], "elsewhere.json")
+        self.assertEqual(written["communities"], 1)
+
+    def test_the_record_captures_whether_hashes_were_randomised(self):
+        """Without it, a store that clustered unseeded is indistinguishable from one
+        that did not - and the community count cannot substitute, because a
+        re-cluster can return an identical count with different membership."""
+        self._store(compressed=False)
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            record_clustering.main([])
+        written = json.loads(config.CLUSTERING_RECORD_PATH.read_text(encoding="utf-8"))
+        self.assertIn("hash_randomised", written)
+        self.assertEqual(written["hash_randomised"], bool(sys.flags.hash_randomization))
+
+    def test_an_unpinned_run_says_so_at_record_time(self):
+        """Recording the field is not enough: the operator is standing there when
+        this runs, and it is the cheapest moment to tell them the communities they
+        just built are not reproducible."""
+        if not sys.flags.hash_randomization:
+            self.skipTest("this interpreter pins hashes; the unpinned path cannot be observed")
+        self._store(compressed=False)
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(_io.StringIO()):
+            record_clustering.main([])
+        self.assertIn("randomisation was ON", out.getvalue())
+        self.assertIn("PYTHONHASHSEED=0", out.getvalue())
+
+    def test_the_seed_is_read_from_the_interpreter_not_the_environment(self):
+        """`PYTHONHASHSEED=random` is legal, reads like an instruction, and leaves
+        randomisation on. The environment variable would record it as set."""
+        self.assertEqual(record_clustering.hash_randomisation(), bool(sys.flags.hash_randomization))
+
+    def test_it_records_when_only_the_uncompressed_graph_exists(self):
+        """The intended build-time case: recorded beside the clustering that just
+        wrote it, before anything is compressed."""
+        self._store(compressed=False)
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            code = record_clustering.main([])
+        self.assertEqual(code, 0)
+        self.assertTrue(config.CLUSTERING_RECORD_PATH.is_file())
+
+    def test_the_record_says_which_file_it_described(self):
+        """So a reader never has to guess which of a store's two graph files a
+        record refers to."""
+        self._store(compressed=False)
+        with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+            record_clustering.main([])
+        written = json.loads(config.CLUSTERING_RECORD_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(written["described"], config.GRAPH_PATH.name)
 
 
 class Verdict(unittest.TestCase):

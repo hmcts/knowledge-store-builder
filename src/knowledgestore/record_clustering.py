@@ -23,10 +23,12 @@ partitioner mismatch if the record travelled with the store.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import sys
 from collections.abc import Callable
 from io import StringIO
+from pathlib import Path
 
 from . import config
 from . import io
@@ -96,9 +98,70 @@ def _clustering(nodes: list) -> tuple[int, int]:
     return len(members), sum(1 for node in nodes if node.get("community") is not None)
 
 
-def main() -> int:
-    # The uncompressed graph, because this runs at build time beside the
-    # clustering that just wrote it - the committed .gz is produced later.
+def other_graph_note() -> str:
+    """A line naming the other graph file, when one exists. Never a refusal.
+
+    `graph.json` is gitignored in every store and the compressed `.gz` is the
+    committed artefact, so a record taken from the uncompressed file can describe
+    a graph nobody will have. On one estate exactly that happened: a discarded
+    verification run had left `graph.json` in the tree, and the record described
+    42,572 communities over 785,610 nodes while the committed `.gz` held 42,627
+    over 785,493, exiting 0 with real-looking counts.
+
+    An earlier attempt at this **refused** when both files existed. That was
+    wrong, and the estate that reported the original defect showed why: the `.gz`
+    is *tracked*, so it is present from checkout on every refresh after the first,
+    and both files therefore exist at the exact moment this stage is meant to run.
+    The refusal fired on the normal case and made the stage unreachable.
+
+    So the source is stated rather than adjudicated, and `--graph` lets an
+    operator say which file they mean. That follows from the reasoning the
+    refusal was built on: the operator knows which of their two files is real,
+    and this stage does not.
+    """
+    other = config.GRAPH_PATH.with_suffix(".json.gz")
+    if not other.is_file():
+        return ""
+    return (
+        f"  {other.name} also exists and is normally the committed artefact. This record "
+        f"describes {config.GRAPH_PATH.name}, which is correct immediately after clustering "
+        "and wrong if that file is left from an earlier run - pass --graph to be explicit."
+    )
+
+
+def hash_randomisation() -> bool:
+    """Whether this interpreter randomises hashes - i.e. the seed is NOT pinned.
+
+    Read from `sys.flags` rather than the environment, deliberately.
+    `PYTHONHASHSEED=random` is a legal value that reads like an instruction and
+    leaves randomisation **on**; the environment variable would record it as set
+    while the flag correctly reports unpinned.
+
+    A proxy, and labelled as one: this is the process that recorded, which is the
+    process that clustered only if the operator ran them together, as this
+    stage's module docstring instructs.
+    """
+    return bool(sys.flags.hash_randomization)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore record-clustering",
+        description="Record which partitioner clustered the graph, and whether hashes were pinned.",
+    )
+    parser.add_argument(
+        "--graph",
+        type=Path,
+        default=None,
+        help="the graph to describe, when a store holds more than one candidate",
+    )
+    arguments = parser.parse_args(argv)
+    if arguments.graph is not None:
+        config.configure(GRAPH_PATH=arguments.graph)
+
+    # The uncompressed graph by default, because this runs at build time beside
+    # the clustering that just wrote it. The committed .gz is last release's until
+    # the build finishes, so preferring it would describe the previous graph.
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     communities, clustered = _clustering(nodes)
     if not communities:
@@ -127,7 +190,20 @@ def main() -> int:
     # would cry wolf. What this file is *for* is the partitioner.
     io.write_json(
         config.CLUSTERING_RECORD_PATH,
-        {"partitioner": partitioner, "communities": communities, "clustered_nodes": clustered},
+        {
+            "partitioner": partitioner,
+            "communities": communities,
+            "clustered_nodes": clustered,
+            # Which file these counts came from, so a reader never has to guess
+            # which of a store's two graph files a record describes.
+            "described": config.GRAPH_PATH.name,
+            # Whether the recording interpreter randomised hashes. Without this,
+            # a store that clustered unseeded is indistinguishable from one that
+            # did not - and the community count cannot stand in for it, because
+            # a re-cluster can return an identical count with different
+            # membership. Measured: 4 of 12 unstable communities did exactly that.
+            "hash_randomised": hash_randomisation(),
+        },
         indent=2,
     )
     print(
@@ -136,6 +212,14 @@ def main() -> int:
         f"{config.GRAPH_PATH.name} -> {config.CLUSTERING_RECORD_PATH}"
     )
     print(f"Determined by import, not inferred: {how}.")
+    if hash_randomisation():
+        print(
+            "  Hash randomisation was ON in this process, so these communities are not "
+            "reproducible even with the same partitioner. Cluster with PYTHONHASHSEED=0."
+        )
+    note = other_graph_note()
+    if note:
+        print(note)
     return 0
 
 
