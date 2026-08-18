@@ -38,6 +38,7 @@ across that boundary.
 Readers that want the old behaviour call `load_plan()` and get absolute paths, so adopting
 the relative format costs them no change.
 """
+
 from __future__ import annotations
 
 import json

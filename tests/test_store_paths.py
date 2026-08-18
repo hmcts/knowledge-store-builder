@@ -50,16 +50,12 @@ class StorePathsTest(SettingsIsolated):
         (repo / "environments" / "variables.tf").write_text("variable {}\n")
         (repo / "components").mkdir()
         (repo / "components" / "a").mkdir()
-        (repo / "components" / "a" / "variables.tf").symlink_to(
-            "../../environments/variables.tf"
-        )
+        (repo / "components" / "a" / "variables.tf").symlink_to("../../environments/variables.tf")
 
         link = repo / "components" / "a" / "variables.tf"
         target = repo / "environments" / "variables.tf"
 
-        self.assertEqual(
-            store_paths.relative(link), "repositories/infra/components/a/variables.tf"
-        )
+        self.assertEqual(store_paths.relative(link), "repositories/infra/components/a/variables.tf")
         self.assertEqual(
             store_paths.relative(target), "repositories/infra/environments/variables.tf"
         )
@@ -100,9 +96,7 @@ class StorePathsTest(SettingsIsolated):
         original = {"0001": ["repositories/x/main.tf", "repositories/y/b.tf"]}
         plan = self.root / "graphify-out/p.json"
         plan.write_text(json.dumps(original))
-        self.assertEqual(
-            store_paths.store_relative_plan(store_paths.load_plan(plan)), original
-        )
+        self.assertEqual(store_paths.store_relative_plan(store_paths.load_plan(plan)), original)
 
     def test_the_root_is_read_at_call_time_not_import_time(self):
         """A module-level ROOT constant binds whichever root was current at import.
