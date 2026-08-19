@@ -22,6 +22,9 @@ The failures these defend against, in order of how badly each one lies:
 
 from __future__ import annotations
 
+import gzip
+import io as io_module
+
 import contextlib
 import io as _io
 import json
@@ -173,8 +176,18 @@ class DescribesTheGraphThatShips(SettingsIsolated):
             encoding="utf-8",
         )
         if compressed:
-            # Content deliberately not written - existence alone is the signal,
-            # because comparing 1.4 GB of graph is what this refuses to do.
+            # Two bytes of gzip header and nothing else - deliberately truncated.
+            #
+            # This used to say "existence alone is the signal, because comparing
+            # 1.4 GB of graph is what this refuses to do". The counts ARE compared
+            # now: measured at 4.7s and 3.8 GB peak for 785,493 nodes, and the thing
+            # being refused was a node-by-node CONTENT comparison, which is a
+            # different and far more expensive question than two counts.
+            #
+            # So the stub now earns its keep twice over: it proves an unreadable
+            # counterpart cannot take the stage down. It raised EOFError - neither
+            # OSError nor ValueError - and escaped the handler, over a file the
+            # stage was not asked to describe.
             config.GRAPH_PATH.with_suffix(".json.gz").write_bytes(b"\x1f\x8b")
         return root
 
@@ -385,3 +398,99 @@ class Stage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheCommittedGraphCanBeDescribed(SettingsIsolated):
+    """The escape hatch the stage's own warning names must actually work.
+
+    Reported by a store operator against v0.12.0: the default run described a stale
+    uncompressed `graph.json` left by a discarded verification run, the warning said
+    "pass --graph to be explicit", and doing so with the only artefact that store
+    ships died on the gzip magic byte:
+
+        UnicodeDecodeError: 'utf-8' codec can't decode byte 0x8b in position 1
+
+    So the fix is in `io.read_json`, not here: three other call sites read
+    `GRAPH_PATH` with the same reader.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.root = Path(self.tmp)
+        (self.root / "graphify-out").mkdir()
+        config.configure(root=str(self.root))
+
+    def _write(self, name: str, communities: int, nodes: int) -> Path:
+        graph = {
+            "nodes": [
+                {"id": f"n{i}", "community": i % communities, "label": f"L{i}"}
+                for i in range(nodes)
+            ]
+        }
+        path = self.root / "graphify-out" / name
+        if name.endswith(".gz"):
+            with gzip.open(path, "wt", encoding="utf-8") as handle:
+                json.dump(graph, handle)
+        else:
+            path.write_text(json.dumps(graph))
+        return path
+
+    def test_a_gzipped_graph_can_be_read(self):
+        committed = self._write("graph.json.gz", communities=7, nodes=140)
+        out = io_module.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = record_clustering.main(["--graph", str(committed)])
+        self.assertEqual(code, 0, out.getvalue())
+        record = json.loads((self.root / "graphify-out" / "clustering-inputs.json").read_text())
+        self.assertEqual(record["communities"], 7)
+        self.assertEqual(record["clustered_nodes"], 140)
+        self.assertEqual(record["described"], "graph.json.gz")
+
+    def test_the_counterpart_is_found_in_both_directions(self):
+        uncompressed = self.root / "graphify-out" / "graph.json"
+        self.assertEqual(
+            record_clustering.counterpart(uncompressed).name,
+            "graph.json.gz",
+            "the .gz beside a .json",
+        )
+        self.assertEqual(
+            record_clustering.counterpart(self.root / "graphify-out" / "graph.json.gz").name,
+            "graph.json",
+            "and back again - with_suffix produced graph.json.json.gz here, which never exists",
+        )
+
+    def test_a_stale_counterpart_is_named_with_both_counts(self):
+        """The operator had to diff the two files by hand. That is the stage's job.
+
+        Asserts on the numbers, not merely that something was said: a warning that
+        fires without naming which file holds what is the same puzzle one step on.
+        """
+        self._write("graph.json", communities=5, nodes=120)
+        self._write("graph.json.gz", communities=7, nodes=140)
+        err = io_module.StringIO()
+        with contextlib.redirect_stdout(io_module.StringIO()), contextlib.redirect_stderr(err):
+            code = record_clustering.main([])
+        self.assertEqual(code, 0)
+        message = err.getvalue()
+        self.assertIn("MISMATCH", message)
+        self.assertIn("graph.json has 5 communities over 120", message)
+        self.assertIn("graph.json.gz has 7 over 140", message)
+
+    def test_agreeing_graphs_say_nothing(self):
+        """Otherwise the finding fires on every normal refresh and stops being read."""
+        self._write("graph.json", communities=7, nodes=140)
+        self._write("graph.json.gz", communities=7, nodes=140)
+        err = io_module.StringIO()
+        with contextlib.redirect_stdout(io_module.StringIO()), contextlib.redirect_stderr(err):
+            record_clustering.main([])
+        self.assertNotIn("MISMATCH", err.getvalue())
+
+    def test_an_explicit_graph_skips_the_comparison(self):
+        """--graph answers "which file did you mean", so re-reading the other is cost
+        for nothing - and on a real estate the other file is tens of megabytes."""
+        self._write("graph.json", communities=5, nodes=120)
+        committed = self._write("graph.json.gz", communities=7, nodes=140)
+        err = io_module.StringIO()
+        with contextlib.redirect_stdout(io_module.StringIO()), contextlib.redirect_stderr(err):
+            record_clustering.main(["--graph", str(committed)])
+        self.assertNotIn("MISMATCH", err.getvalue())

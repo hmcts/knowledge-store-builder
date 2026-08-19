@@ -18,9 +18,23 @@ from pathlib import Path
 
 
 def read_json(path: Path, default=None):
-    """Parse a JSON file; return `default` if it does not exist."""
+    """Parse a JSON file, gzipped or not; return `default` if it does not exist.
+
+    The suffix decides. Without this, a stage handed a `.gz` path died on the gzip
+    magic byte - `UnicodeDecodeError: 0x8b in position 1` - and on one estate that
+    made `record-clustering --graph graphify-out/graph.json.gz` impossible, which
+    was the only artefact that store ships. The dispatch is here rather than in
+    that stage because three other call sites read `GRAPH_PATH` the same way, so
+    fixing it once fixes the class.
+
+    Adding capability, never changing behaviour: a caller passing an uncompressed
+    path takes exactly the branch it always took.
+    """
     if not path.exists():
         return default
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
