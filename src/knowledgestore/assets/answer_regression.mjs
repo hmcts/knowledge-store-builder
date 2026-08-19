@@ -81,7 +81,10 @@ export function parseQuestions(text) {
   /** @type {string[]} */
   const problems = [];
   text.split('\n').forEach((raw, i) => {
-    const line = raw.replace(/#.*$/, '').trim();
+    // indexOf rather than /#.*$/: the regex was flagged for super-linear
+    // backtracking, and a comment strip needs no pattern matching.
+    const hash = raw.indexOf('#');
+    const line = (hash < 0 ? raw : raw.slice(0, hash)).trim();
     if (!line) return;
     const bar = line.lastIndexOf('|');
     if (bar < 0) {
@@ -142,7 +145,7 @@ export function classify(api, question) {
   // counted, and it was not what the label said. `vTicket` takes its evidence
   // from exactly these two structures, so this asks the same question it does.
   const ticketId = idInQuestion ? idInQuestion[0] : '';
-  const inTicketLayer = Boolean(ticketId) && Boolean(api.TICKET_INFO && api.TICKET_INFO[ticketId]);
+  const inTicketLayer = Boolean(ticketId) && Boolean(api.TICKET_INFO?.[ticketId]);
   /** @param {any[]} row */
   const rowNames = (row) => (row[7] || []).includes(ticketId) || row[0] === ticketId;
   // A row of kind `ticket` IS the ticket, so it is not evidence that the ticket
@@ -254,7 +257,8 @@ export function run(api, questions, previous = {}) {
 
 /** @param {string[]} a @param {string[]} b */
 function sameSet(a, b) {
-  return a.length === b.length && [...a].sort().join() === [...b].sort().join();
+    const ordered = (/** @type {string[]} */ xs) => [...xs].sort((x, y) => x.localeCompare(y));
+  return a.length === b.length && ordered(a).join() === ordered(b).join();
 }
 
 /** @param {string[]} argv */
@@ -273,6 +277,115 @@ export function parseArgs(argv) {
   return args;
 }
 
+/** Read and validate the question set. Null means it already reported why.
+ * @param {string} path
+ */
+function loadQuestions(path) {
+  const { questions, problems } = parseQuestions(readFileSync(path, 'utf-8'));
+  if (problems.length) {
+    console.error(`FAIL  ${path} could not be read as a question set:`);
+    for (const p of problems) console.error(`      ${p}`);
+    return null;
+  }
+  if (!questions.length) {
+    // A question set that parses to nothing would otherwise pass every assertion
+    // below and report success - the emptiest possible false testimony.
+    console.error(`FAIL  ${path} declares no questions, so this gate would assert nothing`);
+    return null;
+  }
+  return questions;
+}
+
+/** The modes last recorded for each question, from the estate's baseline region.
+ * @param {string} path
+ * @returns {Record<string, string[]>}
+ */
+function readBaseline(path) {
+  if (!path || !existsSync(path)) return {};
+  const doc = JSON.parse(readFileSync(path, 'utf-8'));
+  return doc.estate?.answers || {};
+}
+
+/** Write the baseline's two regions.
+ *
+ * They carry different authority. The estate owns its answers and may rewrite
+ * them; the library region records what the runner asserted and is not the
+ * estate's to silence - a failure only the library can fix must not be
+ * silenceable from here, and a failure the estate owns must not block a library
+ * upgrade.
+ *
+ * @param {string} path @param {any[]} results
+ */
+function writeBaseline(path, results) {
+  const doc = {
+    library: {
+      runner: 'answer_regression.mjs',
+      modes: MODES,
+      note: 'Derived from the library. Rewritten by --write-baseline; not an estate override.',
+    },
+    estate: {
+      note: 'The estate owns this region. Review its diff like any other change.',
+      answers: Object.fromEntries(results.map((r) => [r.question, r.modes])),
+    },
+  };
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
+  console.log(`wrote baseline -> ${path}  (${results.length} questions)`);
+}
+
+/** Report one question. Returns 1 if it is a failure, 0 otherwise.
+ * @param {any} r @param {Record<string, string[]>} previous
+ */
+function reportOne(r, previous) {
+  const source = r.modes.map((/** @type {string} */ m) => MODE_SOURCE[m] || m).join('; ');
+  if (!r.composed) {
+    console.error(`FAIL  ${r.question}`);
+    console.error('      the engine threw while composing the answer');
+    return 1;
+  }
+  if (!r.pass) {
+    console.error(`FAIL  ${r.question}`);
+    console.error(`      expected ${r.accept.join(' or ')}, got ${r.modes.join(' + ')}`);
+    console.error(`      read from: ${source}`);
+    if (r.accept.includes('abstain') && r.carried.length) {
+      // Measured on a real estate: "how is quantum chromodynamics configured
+      // here?" answered, because `configured` expanded to settings/setup and
+      // matched. The engine abstains only when EVERY term is unevidenced, so a
+      // question meant to test abstention must contain no term the estate has.
+      console.error(
+        `      abstention needs EVERY term unevidenced; the estate has: ${r.carried.join(', ')}`,
+      );
+    }
+    if (r.meta) console.error(`      engine said: ${r.meta.slice(0, 160)}`);
+    return 1;
+  }
+  if (r.lostAnswer) {
+    console.error(`FAIL  ${r.question}`);
+    console.error('      the baseline has this answered; it now abstains');
+    return 1;
+  }
+  if (r.moved) {
+    // A note, not a failure. Movement between two accepted shapes is what a
+    // refresh legitimately does; a harness that fails on it gets switched off.
+    const was = previous[r.question].join(' + ');
+    console.log(`note  ${r.question}  ->  ${r.modes.join(' + ')} (was ${was})`);
+    return 0;
+  }
+  console.log(`ok    ${r.question}  ->  ${r.modes.join(' + ')}`);
+  return 0;
+}
+
+/** The per-mode zero floors, which a pass rate cannot show.
+ * @param {{mode: string, declared: number}[]} floors
+ */
+function reportFloors(floors) {
+  for (const f of floors) {
+    console.error(`FAIL  no question expecting "${f.mode}" passed, of ${f.declared} declared`);
+    console.error(`      read from: ${MODE_SOURCE[f.mode] || f.mode}`);
+    console.error('      a pass rate hides this: the other modes carry the total');
+  }
+  return floors.length;
+}
+
 /** @param {string[]} argv */
 function main(argv) {
   let args;
@@ -288,18 +401,8 @@ function main(argv) {
     return 2;
   }
 
-  const { questions, problems } = parseQuestions(readFileSync(args.questions, 'utf-8'));
-  if (problems.length) {
-    console.error(`FAIL  ${args.questions} could not be read as a question set:`);
-    for (const p of problems) console.error(`      ${p}`);
-    return 2;
-  }
-  if (!questions.length) {
-    // A question set that parses to nothing would otherwise pass every assertion
-    // below and report success - the emptiest possible false testimony.
-    console.error(`FAIL  ${args.questions} declares no questions, so this gate would assert nothing`);
-    return 2;
-  }
+  const questions = loadQuestions(args.questions);
+  if (!questions) return 2;
 
   let api;
   try {
@@ -312,88 +415,20 @@ function main(argv) {
     return 2;
   }
 
-  /** @type {Record<string, string[]>} */
-  let previous = {};
-  let baselineRegion = null;
-  if (args.baseline && existsSync(args.baseline)) {
-    const doc = JSON.parse(readFileSync(args.baseline, 'utf-8'));
-    baselineRegion = doc;
-    previous = (doc.estate && doc.estate.answers) || {};
-  }
-
+  const previous = readBaseline(args.baseline);
   const { results, byMode, floors } = run(api, questions, previous);
 
-  if (args.write) {
-    const doc = {
-      // Two regions with different authority. The estate owns its answers and
-      // may rewrite them; the library region records what the runner asserted
-      // and is not the estate's to silence - a failure only the library can fix
-      // must not be silenceable from here, and a failure the estate owns must
-      // not block a library upgrade.
-      library: {
-        runner: 'answer_regression.mjs',
-        modes: MODES,
-        note: 'Derived from the library. Rewritten by --write-baseline; not an estate override.',
-      },
-      estate: {
-        note: 'The estate owns this region. Review its diff like any other change.',
-        answers: Object.fromEntries(results.map((r) => [r.question, r.modes])),
-      },
-    };
-    writeFileSync(args.baseline, JSON.stringify(doc, null, 2) + '\n');
-    console.log(`wrote baseline -> ${args.baseline}  (${results.length} questions)`);
-  }
-
-  if (args.json) {
-    console.log(JSON.stringify({ results, byMode, floors }, null, 2));
-  }
+  if (args.write) writeBaseline(args.baseline, results);
+  if (args.json) console.log(JSON.stringify({ results, byMode, floors }, null, 2));
 
   let failures = 0;
-  for (const r of results) {
-    const source = r.modes.map((m) => MODE_SOURCE[m] || m).join('; ');
-    if (!r.composed) {
-      failures++;
-      console.error(`FAIL  ${r.question}`);
-      console.error(`      the engine threw while composing the answer`);
-    } else if (!r.pass) {
-      failures++;
-      console.error(`FAIL  ${r.question}`);
-      console.error(`      expected ${r.accept.join(' or ')}, got ${r.modes.join(' + ')}`);
-      console.error(`      read from: ${source}`);
-      if (r.accept.includes('abstain') && r.carried.length) {
-        // Measured on a real estate: "how is quantum chromodynamics configured
-        // here?" answered, because `configured` expanded to settings/setup and
-        // matched. The engine abstains only when EVERY term is unevidenced, so a
-        // question meant to test abstention must contain no term the estate has.
-        console.error(
-          `      abstention needs EVERY term unevidenced; the estate has: ${r.carried.join(', ')}`,
-        );
-      }
-      if (r.meta) console.error(`      engine said: ${r.meta.slice(0, 160)}`);
-    } else if (r.lostAnswer) {
-      failures++;
-      console.error(`FAIL  ${r.question}`);
-      console.error(`      the baseline has this answered; it now abstains`);
-    } else if (r.moved) {
-      // A note, not a failure. Movement between two accepted shapes is what a
-      // refresh legitimately does; a harness that fails on it gets switched off.
-      console.log(`note  ${r.question}  ->  ${r.modes.join(' + ')} (was ${previous[r.question].join(' + ')})`);
-    } else {
-      console.log(`ok    ${r.question}  ->  ${r.modes.join(' + ')}`);
-    }
-  }
+  for (const r of results) failures += reportOne(r, previous);
+  failures += reportFloors(floors);
 
-  for (const f of floors) {
-    failures++;
-    console.error(`FAIL  no question expecting "${f.mode}" passed, of ${f.declared} declared`);
-    console.error(`      read from: ${MODE_SOURCE[f.mode] || f.mode}`);
-    console.error('      a pass rate hides this: the other modes carry the total');
-  }
-
-  const passed = results.filter((r) => r.pass).length;
+  const passed = results.filter((/** @type {any} */ r) => r.pass).length;
   const parts = Object.entries(byMode)
     .map(([m, c]) => `${m} ${c.passed}/${c.declared}`)
-    .sort()
+    .sort((x, y) => x.localeCompare(y))
     .join(', ');
   console.log(`\n${passed} of ${results.length} questions answered as declared  (${parts})`);
   console.log(`page: ${args.page}`);
@@ -401,6 +436,6 @@ function main(argv) {
 }
 
 // Only when run directly, so the tests can import the pieces above.
-if (process.argv[1] && process.argv[1].endsWith('answer_regression.mjs')) {
+if (process.argv[1]?.endsWith('answer_regression.mjs')) {
   process.exit(main(process.argv.slice(2)));
 }

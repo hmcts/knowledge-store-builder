@@ -126,7 +126,7 @@ for (const m of mutations) {
     console.error(`FAIL  could not apply mutation "${m.name}": ${e.message}`);
     continue;
   }
-  const { code, out } = runGate(mutatedPath);
+  const { code } = runGate(mutatedPath);
   if (code === 0) {
     failures++;
     console.error(`FAIL  survived: ${m.name}`);
@@ -136,7 +136,6 @@ for (const m of mutations) {
     caught++;
     console.log(`ok    caught:   ${m.name}`);
   }
-  void out;
 }
 
 // Counted, not derived from the failure total - which also carries the control and

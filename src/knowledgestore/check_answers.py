@@ -143,7 +143,11 @@ def main(argv: list[str] | None = None) -> int:
         # flush: the runner writes to the same terminal from a subprocess, and an
         # unflushed banner arrives after the output it introduces.
         print(f"Checking the CANDIDATE page at {page}", flush=True)
-    completed = subprocess.run(command, check=False)
+    # shell=False explicitly, and a list rather than a string: every element here
+    # is either a path this module resolved or a literal flag, so nothing reaches a
+    # shell to be quoted wrongly. Stated rather than left to the default, because
+    # the default is what a reader has to remember.
+    completed = subprocess.run(command, check=False, shell=False)
     return completed.returncode
 
 

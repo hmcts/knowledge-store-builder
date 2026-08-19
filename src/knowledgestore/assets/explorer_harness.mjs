@@ -111,7 +111,9 @@ export function loadPage(pagePath, options = {}) {
 
   /** @type {Record<string, any>} */
   const elements = {};
-  for (const id of REQUIRED_BLOCKS) elements[id] = { textContent: blocks[id] };
+  for (const id of REQUIRED_BLOCKS) {
+    elements[id] = { textContent: blocks[id] };
+  }
 
   // Cast once, deliberately: this DOM is as small as the engine can run against,
   // and typing it as a real Document would mean stubbing an interface nothing here
