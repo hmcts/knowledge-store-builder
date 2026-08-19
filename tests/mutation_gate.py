@@ -16,6 +16,13 @@ would have stopped the thing that actually happened.
 
 A surviving mutation is a failure of this gate, not a curiosity: it means the
 behaviour it describes could be removed today and the suite would stay green.
+
+There are two mutation gates, and this is the Python one. The answer gate that
+ships to store operators has its own, `tests/explorer/answer-regression-mutations.mjs`,
+because its defects live in the shipped `.mjs` runner and are only observable by
+breaking a built page. Three successive versions of that runner's ticket predicate
+passed every assertion here and in the page regression while failing to notice a
+dead file-to-ticket join. Neither gate covers the other.
 """
 
 from __future__ import annotations

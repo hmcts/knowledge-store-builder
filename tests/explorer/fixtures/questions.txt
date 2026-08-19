@@ -1,0 +1,12 @@
+# The fixture estate's questions, with the route each SHOULD take.
+# Format: question | expected mode(s), any of which is acceptable.
+#
+# These are chosen against the fixture's actual content (a topic brief on
+# addresses, a deep dive on demo-core, three tickets, a small graph), so a wrong
+# route here is the runner's fault and not the fixture's.
+
+how are addresses formatted?                    | brief
+what does demo-core do?                         | dive
+which repositories implement PaymentService?    | graph
+what changed in DEMO-1?                         | ticket
+how is quantum entanglement configured?         | abstain

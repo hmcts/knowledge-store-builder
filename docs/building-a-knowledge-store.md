@@ -585,3 +585,73 @@ step-definition edges once, and nothing else noticed.
   what catches a silent break in a join, and every new layer deserves a shape
   in it. On that estate this caught a file-to-ticket join failure that no
   other gate saw.
+
+## 9. Asserting the store still answers
+
+A refresh can leave every count healthy and every artefact well-formed while the
+store has quietly stopped answering the questions it was built for. Two operators
+of separate estates each discovered this and each built a regression suite for it
+independently, neither knowing the other had (#134). The library now ships the
+runner, so the third estate does not have to.
+
+**The library owns the runner; the estate owns the questions.** A question like
+"what is crime case readiness?" means nothing on another estate - generalise the
+questions and every store fights the result, generalise the runner and every store
+gets the gate for free.
+
+```bash
+cp examples/questions.txt config/questions.txt   # then make them your own
+knowledgestore check-answers                     # did we publish something broken?
+knowledgestore check-answers --candidate PATH     # are we about to?
+```
+
+Both positions matter. A gate that can only read the published page is a
+post-mortem tool wearing a gate's clothes: one estate's suite reported 12/12 while
+a rebuild sat unexamined, because every check read the *published* artefact and
+would have gone on reporting 12/12 however bad the candidate was. Pointed at the
+candidate, it failed immediately on the two things that were actually wrong.
+
+### What it asserts
+
+Answer **shapes**, not answer text - `brief`, `dive`, `tickets`, `graph`,
+`ticket`, `abstain`. A harness pinning prose is red after every refresh that
+legitimately reworded something, and a harness that is always red is one nobody
+reads.
+
+The assertions run in Node against the shipped page, because `assets/app.js` is
+the ranker every consumer uses. An earlier attempt approximated it in Python with
+keyword overlap and was measured and discarded: at one shared term "what is the
+data retention policy?" routed to tickets on the word *data*; at two, a genuine
+graph question collapsed to nothing. The failures were in opposite directions, so
+it was not a threshold to tune - it was a second implementation of routing.
+
+### Two things it does deliberately
+
+**A pass rate is decomposed by mode, and each mode carries a zero floor.** A
+composite is a weighted average of parts that fail independently, so a healthy
+majority always masks a dead minority: 18 of 20 passing reads fine while every
+`graph` question in the set abstains. The floor needs no estate-shaped threshold -
+if a mode has questions declared and none pass, that is a finding whatever the
+total says.
+
+**Every finding names the artefact it read.** Each miss that motivated this was
+false testimony rather than silence - something was counted, and the number meant
+something other than it appeared to. None of them could have been written down
+naming its source.
+
+### Declare at least one `abstain`
+
+A store that answers everything is not answering well - it is failing to say when
+it has nothing, and that is the assertion nothing else makes.
+
+**Every term in such a question must be absent from the estate's vocabulary.** The
+engine abstains only when it has evidence for none of them, so a single ordinary
+word produces an answer. Measured on a real estate: *"how is quantum chromodynamics
+configured here?"* answered, because `configured` expanded to settings/setup and
+matched - the meta line honestly said "no evidence for: quantum, chromodynamics"
+while the answer composed from the one word that did match. `what is the production
+database password?` fails the same way, on *database*.
+
+Use vocabulary from another field entirely. When a declared `abstain` does answer,
+the gate names the terms the estate turned out to have, so the fix is to reword the
+question rather than to go looking for a defect.

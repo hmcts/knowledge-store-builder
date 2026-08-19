@@ -11,89 +11,35 @@
 //
 // Run: python3 tests/explorer/fixture.py && node tests/explorer/page-regression.mjs
 
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { loadPage, strip } from '../../src/knowledgestore/assets/explorer_harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appPath = join(here, '..', '..', 'src', 'knowledgestore', 'assets', 'app.js');
 const pagePath = process.env.KSB_FIXTURE_PAGE
   || join(here, '..', '..', '.fixture-store', 'graphify-out', 'explorer.html');
 
-let html;
+// Page loading, block extraction and the DOM stub live in the shipped harness,
+// which `check-answers` also uses. They were duplicated here; a harness holding
+// its own private copy of the extraction rules is the same shape of mistake this
+// codebase has made four times over (#115, #146, #134), so there is one copy.
+//
+// requireVerbatim, because THIS suite is testing the shipped code: the page must
+// inline the current app.js byte for byte. A store checking its own published
+// page must not demand that, and does not.
+let api;
+let jsonBlocks;
 try {
-  html = readFileSync(pagePath, 'utf-8');
-} catch {
-  console.error(`FAIL  no built page at ${pagePath}`);
+  ({ api, blocks: jsonBlocks } = loadPage(pagePath, { requireVerbatim: true }));
+} catch (e) {
+  console.error(`FAIL  ${e.message}`);
   console.error('      run: python3 tests/explorer/fixture.py');
   process.exit(1);
 }
-const appSource = readFileSync(appPath, 'utf-8');
-
-// The page must carry app.js verbatim - the module we test IS the shipped code.
-if (!html.includes(appSource)) {
-  console.error('FAIL  built page does not inline the current app.js');
-  process.exit(1);
-}
-
-// Linear-time extraction of the embedded JSON blocks (no backtracking-prone
-// regex over a potentially very large page). The build escapes "</" inside the
-// data, so splitting on the close tag is safe - but an opening "<script" can
-// appear in the data itself (a commit body quoting markup), so take the FIRST
-// one in each part, which is the block's own tag, never a later one from data.
-const jsonBlocks = {};
-for (const part of html.split('</script>')) {
-  const open = part.indexOf('<script');
-  if (open < 0) continue;
-  const tagEnd = part.indexOf('>', open);
-  const idMatch = /id="(\w+)"/.exec(part.slice(open, tagEnd));
-  if (idMatch) jsonBlocks[idMatch[1]] = part.slice(tagEnd + 1);
-}
-
-// --- minimal DOM stub, installed before the module loads -----------------
-const makeEl = () => ({
-  textContent: '', innerHTML: '', value: '', placeholder: '', style: {},
-  insertAdjacentHTML(position, markup) {
-    this.innerHTML = position === 'afterbegin' ? markup + this.innerHTML : this.innerHTML + markup;
-  },
-  checked: true,
-  classList: { toggle() {} },
-  addEventListener() {}, add() {},
-});
-const elements = {};
-for (const id of ['data', 'edges', 'titles', 'summaries', 'synonyms', 'tickets',
-                  'config', 'topics', 'dives']) {
-  if (!jsonBlocks[id]) throw new Error(`missing embedded JSON block: #${id}`);
-  elements[id] = { textContent: jsonBlocks[id] };
-}
-globalThis.document = {
-  getElementById: (id) => (elements[id] ??= makeEl()),
-  // The kind filters, which search mode reads before it will show anything. A
-  // stub answering nothing leaves every kind unticked, so every entry is
-  // filtered out and a search assertion passes or fails for the wrong reason.
-  querySelectorAll: (sel) => (sel === '.k'
-    ? ['code', 'concept', 'feature', 'scenario', 'ticket']
-      .map((value) => ({ value, checked: true, addEventListener() {} }))
-    : []),
-};
-globalThis.Option = function Option() {};
-
-const require = createRequire(import.meta.url);
-require(appPath);
-const api = globalThis.__explorerApi;
 
 // --- assertions -----------------------------------------------------------
-function strip(h) {
-  let text = '';
-  let inTag = false;
-  for (const ch of h) {
-    if (ch === '<') inTag = true;
-    else if (ch === '>') { inTag = false; text += ' '; }
-    else if (!inTag) text += ch;
-  }
-  return text.replace(/\s+/g, ' ').trim();
-}
+// `strip` comes from the shared harness, for the same reason as the loader above.
 let failures = 0;
 
 /** @param {string} haystack @param {string[]} wanted @param {string} label */

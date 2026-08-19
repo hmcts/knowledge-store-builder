@@ -592,6 +592,32 @@ A model embeds the graph's own vocabulary once, locally; only the
 nearest-neighbour map ships. Regenerate after the vocabulary changes
 materially — new repositories, or many new summaries.
 
+## Asserting the store still answers
+
+A refresh can leave every count healthy and every artefact well-formed while the
+store has quietly stopped answering what it was built for. Declare the estate's
+questions once, then gate every refresh on them:
+
+```bash
+cp examples/questions.txt config/questions.txt   # once, then make them your own
+knowledgestore check-answers --candidate graphify-out/explorer.html   # before publishing
+knowledgestore check-answers                                          # after
+```
+
+Check the **candidate** before committing it. Reading only the published page can
+diagnose a bad publish and never prevent one - one estate's suite reported 12/12
+while a rebuild sat unexamined, because every check read the published artefact.
+
+Questions declare an answer *shape*, not text: `brief`, `dive`, `tickets`,
+`graph`, `ticket`, `abstain`. Declare at least one `abstain` - a store that
+answers everything is failing to say when it has nothing. `ticket` is the
+strongest of them, because it asserts the file-to-ticket join, whose canonical
+failure was 0 of 70,655 joined with the build green and both layers present.
+
+Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
+`10 of 10` cannot both be reported, but a total alone hides a dead layer behind a
+healthy one. See `docs/building-a-knowledge-store.md` §9.
+
 ## Finishing a refresh
 
 ```bash

@@ -1352,4 +1352,8 @@ run();
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
   matchTopic, matchDive, runAsk, runSearch, q, out, meta,
   ticketEvidence, unevidencedTerms, extraSubjects,
+  // The two structures `vTicket` draws its evidence from. Exposed so a harness
+  // can ask whether a ticket id has any record here, rather than concluding it
+  // from the id appearing in the question - which is true of any string.
+  DATA, TICKET_INFO,
 };

@@ -101,6 +101,7 @@ REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
 # for part of the estate.
 EXTERNAL_CONFIG = ROOT / "config" / "repositories-external.txt"
 TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
+QUESTIONS_PATH = ROOT / "config" / "questions.txt"
 
 # --- working directories (regenerable; do not commit) --------------------
 REPOSITORIES_DIR = ROOT / "repositories"
@@ -428,6 +429,7 @@ def _recompute_paths() -> None:
         REPOSITORIES_CONFIG=root / "config" / "repositories.txt",
         EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
+        QUESTIONS_PATH=root / "config" / "questions.txt",
         REPOSITORIES_DIR=root / "repositories",
         EXTERNAL_DIR=root / "external",
         HISTORY_DIR=root / "knowledge" / "git-history",
