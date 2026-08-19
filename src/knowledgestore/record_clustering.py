@@ -216,9 +216,27 @@ def counterpart(path: Path) -> Path | None:
 # contain "nodes", and starting the scan there would count the wrong array.
 _NODES_ARRAY = re.compile(r'"nodes"\s*:\s*\[')
 
-# 1 MiB reads. Large enough that the decode loop dominates, small enough that the
-# buffer never approaches the size of what it is avoiding holding.
-_CHUNK = 1 << 20
+# Two constants, not one, because they do very different things and this file had
+# them conflated. Swept on a real 785,493-node graph, read size varied alone:
+#
+#      64 KiB   2.1s   0.030 GB        4 MiB   2.2s   0.239 GB
+#     256 KiB   2.1s   0.032 GB        1 MiB   2.2s   0.037 GB
+#
+# Read size sets peak memory and barely touches wall clock - flat across a 64x
+# range. An operator running the same shape with 4 MiB reads measured 0.215 GB and
+# I measured 0.037 GB with 1 MiB, and I wrongly put the difference down to their
+# machine being under memory pressure. Peak allocation is a property of the code;
+# pressure costs time, not peak. Their reading was right and mine was an excuse.
+#
+# 256 KiB rather than 64 KiB: 2 MB more peak, no measurable time difference, and
+# fewer syscalls on a filesystem slower than this one.
+_READ_SIZE = 1 << 18
+
+# When to drop the consumed prefix. Measured as barely mattering - 0.215 against
+# 0.214 GB across a 16x change - so it is set to one read, and is not a knob worth
+# tuning. What it must not be is *nothing*: compacting per node instead of per
+# threshold is the copy that made the first version slower than loading the file.
+_COMPACT_AFTER = _READ_SIZE
 
 
 def _seek_nodes_array(handle) -> tuple[str, int] | None:
@@ -231,11 +249,11 @@ def _seek_nodes_array(handle) -> tuple[str, int] | None:
         found = _NODES_ARRAY.search(buffer)
         if found:
             return buffer, found.end()
-        chunk = handle.read(_CHUNK)
+        chunk = handle.read(_READ_SIZE)
         if not chunk:
             return None
         buffer += chunk
-        if len(buffer) > 2 * _CHUNK:
+        if len(buffer) > 2 * _READ_SIZE:
             buffer = buffer[-64:]
 
 
@@ -267,14 +285,14 @@ def _iter_nodes(handle, buffer: str, pos: int):
                 node, pos = decoder.raw_decode(buffer, pos)
         if node is not None:
             yield node
-            if pos > _CHUNK:
+            if pos > _COMPACT_AFTER:
                 buffer, pos = buffer[pos:], 0
             continue
         # Incomplete node, or nothing left: drop the consumed prefix and read on.
         # Exhausting the handle mid-array means truncated JSON, which is the
         # caller's error to report rather than ours to guess at.
         buffer, pos = buffer[pos:], 0
-        chunk = handle.read(_CHUNK)
+        chunk = handle.read(_READ_SIZE)
         if not chunk:
             return
         buffer += chunk
