@@ -180,9 +180,10 @@ class DescribesTheGraphThatShips(SettingsIsolated):
             #
             # This used to say "existence alone is the signal, because comparing
             # 1.4 GB of graph is what this refuses to do". The counts ARE compared
-            # now: measured at 4.7s and 3.8 GB peak for 785,493 nodes, and the thing
-            # being refused was a node-by-node CONTENT comparison, which is a
-            # different and far more expensive question than two counts.
+            # now, and without loading either graph: 2.2s at 0.04 GB streamed,
+            # against 5.3s at 3.75 GB loaded, for 785,493 nodes. What that comment
+            # refused was a node-by-node CONTENT diff, which is a different and far
+            # more expensive question than two counts.
             #
             # So the stub now earns its keep twice over: it proves an unreadable
             # counterpart cannot take the stage down. It raised EOFError - neither
@@ -494,3 +495,87 @@ class TheCommittedGraphCanBeDescribed(SettingsIsolated):
         with contextlib.redirect_stdout(io_module.StringIO()), contextlib.redirect_stderr(err):
             record_clustering.main(["--graph", str(committed)])
         self.assertNotIn("MISMATCH", err.getvalue())
+
+
+class StreamingAgreesWithLoading(unittest.TestCase):
+    """The streamed counter must return exactly what loading the graph returns.
+
+    These numbers go into a committed record, so a subtly different count is a
+    silently different artefact - and hand-rolled streaming breaks at chunk
+    boundaries, which no small fixture exercises.
+
+    Every case below is checked against `_clustering(json.load(...)["nodes"])`,
+    which is the implementation the record's numbers used to come from.
+    """
+
+    def _agree(self, graph: dict, label: str, compress: bool = False) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ("g.json.gz" if compress else "g.json")
+            text = json.dumps(graph)
+            if compress:
+                with gzip.open(path, "wt", encoding="utf-8") as handle:
+                    handle.write(text)
+            else:
+                path.write_text(text, encoding="utf-8")
+            loaded = record_clustering._clustering(graph.get("nodes", []))
+            streamed = record_clustering.graph_counts(path)
+            self.assertEqual(streamed, loaded, f"{label}: streamed {streamed} vs loaded {loaded}")
+
+    def test_communities_of_mixed_types_collapse_the_same_way(self):
+        """`str()` makes 1 and "1" one community. The streamed side must agree."""
+        self._agree(
+            {"nodes": [{"community": 1}, {"community": "1"}, {"community": 2}]},
+            "mixed int and str",
+        )
+
+    def test_nodes_without_a_community_are_not_counted(self):
+        self._agree(
+            {"nodes": [{"community": 3}, {"community": None}, {"id": "no community key"}]},
+            "missing and null",
+        )
+
+    def test_an_absent_or_empty_nodes_array(self):
+        self._agree({"links": []}, "no nodes key")
+        self._agree({"nodes": []}, "empty nodes")
+
+    def test_a_label_containing_the_nodes_pattern_does_not_start_the_scan(self):
+        """The scan looks for `"nodes"` followed by `:` and `[`, not the bare word.
+
+        A node label can contain anything, and starting the count at the wrong
+        array would silently count something else.
+        """
+        graph = {
+            "graph": {"note": 'this metadata mentions "nodes": [1,2,3] on purpose'},
+            "nodes": [{"community": 9}, {"community": 8}],
+        }
+        self._agree(graph, "decoy in earlier metadata")
+
+    def test_nested_structures_and_unicode_inside_nodes(self):
+        self._agree(
+            {
+                "nodes": [
+                    {"community": 1, "meta": {"tickets": ["A-1", "B-2"], "deep": [[1], [2]]}},
+                    {"community": 2, "label": "Ll\u0177n Peninsula \u2013 Cymraeg"},
+                ]
+            },
+            "nested and unicode",
+        )
+
+    def test_a_graph_larger_than_the_read_chunk(self):
+        """Where hand-rolled streaming actually breaks.
+
+        Big enough to span several 1 MiB reads, so nodes straddle chunk boundaries
+        and the buffer has to refill mid-object. Run compressed as well, because
+        that is the path a committed artefact takes.
+        """
+        graph = {
+            "nodes": [
+                {"id": f"n{i}", "community": i % 97, "label": "x" * 200} for i in range(20000)
+            ]
+        }
+        self._agree(graph, "spans chunk boundaries")
+        self._agree(graph, "spans chunk boundaries, gzipped", compress=True)
+
+    def test_a_missing_file_counts_as_nothing_rather_than_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(record_clustering.graph_counts(Path(tmp) / "absent.json"), (0, 0))

@@ -41,6 +41,9 @@ partitioner mismatch if the record travelled with the store.
 from __future__ import annotations
 
 import argparse
+import gzip
+import json
+import re
 import contextlib
 import sys
 from collections.abc import Callable
@@ -209,6 +212,86 @@ def counterpart(path: Path) -> Path | None:
     return None
 
 
+# `"nodes": [` at a structural position, not the bare word: a node label could
+# contain "nodes", and starting the scan there would count the wrong array.
+_NODES_ARRAY = re.compile(r'"nodes"\s*:\s*\[')
+
+# 1 MiB reads. Large enough that the decode loop dominates, small enough that the
+# buffer never approaches the size of what it is avoiding holding.
+_CHUNK = 1 << 20
+
+
+def _stream_clustering(handle) -> tuple[int, int]:
+    """(communities, clustered nodes) without ever holding the graph.
+
+    Counting does not need the graph in memory, and holding it is what made this
+    expensive. Each node is decoded, its `community` recorded, and the node
+    discarded.
+
+    **Decoding advances an index; it does not re-slice the buffer.** The first
+    version did `buffer = buffer[end:]` per node, which copies the whole remaining
+    buffer 785,493 times - measured at 13.1s against 5.2s for simply loading the
+    file, so the streaming version was two and a half times *slower* than the thing
+    it replaced while looking like an optimisation. `raw_decode` takes a start
+    index; using it, and compacting only when the index has run far enough,
+    removes the copying.
+
+    Must agree exactly with `_clustering` - these numbers go into a committed
+    record, so a subtly different count would be a silently different artefact.
+    `test_streaming_and_loading_agree` pins it, including the `str()` that
+    collapses 1 and "1".
+    """
+    decoder = json.JSONDecoder()
+    members: set[str] = set()
+    clustered = 0
+    buffer = ""
+    pos = 0
+
+    # Find the nodes array. The tail is kept when trimming, because the pattern can
+    # straddle a chunk boundary.
+    while True:
+        found = _NODES_ARRAY.search(buffer)
+        if found:
+            pos = found.end()
+            break
+        chunk = handle.read(_CHUNK)
+        if not chunk:
+            return 0, 0
+        buffer += chunk
+        if len(buffer) > 2 * _CHUNK:
+            buffer = buffer[-64:]
+
+    while True:
+        while pos < len(buffer) and buffer[pos] in " \t\r\n,":
+            pos += 1
+        if pos < len(buffer) and buffer[pos] == "]":
+            break
+        node = None
+        if pos < len(buffer):
+            with contextlib.suppress(ValueError):
+                node, pos = decoder.raw_decode(buffer, pos)
+        if node is not None:
+            community = node.get("community") if isinstance(node, dict) else None
+            if community is not None:
+                members.add(str(community))
+                clustered += 1
+            # Compact only once the consumed prefix is worth the copy.
+            if pos > _CHUNK:
+                buffer = buffer[pos:]
+                pos = 0
+            continue
+        # Incomplete node, or nothing left: drop the consumed prefix and read on.
+        # Exhausting the handle mid-array means truncated JSON, which is the
+        # caller's error to report rather than ours to guess at.
+        buffer = buffer[pos:]
+        pos = 0
+        chunk = handle.read(_CHUNK)
+        if not chunk:
+            break
+        buffer += chunk
+    return len(members), clustered
+
+
 def graph_counts(path: Path) -> tuple[int, int]:
     """(communities, clustered nodes) for one graph file.
 
@@ -216,19 +299,33 @@ def graph_counts(path: Path) -> tuple[int, int]:
     graphs, and holding both node lists at once would double peak memory on an
     estate where one of them is already the largest thing in the process.
 
-    Measured on the largest estate available: 785,493 nodes and 42,627 communities
-    out of a 40 MB `graph.json.gz` in **4.7s at 3.8 GB peak RSS**. Peak does not
-    double, because the caller releases the first graph's nodes before this runs.
+    Measured on the largest estate available - 785,493 nodes, 42,627 communities
+    out of a 40 MB `graph.json.gz`:
 
-    That measurement matters because an earlier decision in this module refused to
-    compare the two files at all, on the grounds that "comparing 1.4 GB of graph"
-    was too expensive - and it was never measured. It was also refusing something
-    else: a *content* comparison, node by node. This compares counts, which is what
-    the record already stores, and 4.7s once per refresh is not a cost worth a
-    silently wrong record.
+        streamed   2.2s    0.04 GB peak RSS
+        loaded     5.3s    3.75 GB peak RSS
+
+    An operator measured the loading form at **9.2s and 5.17-6.07 GB** on the box
+    that actually runs their build - twice my time and well over my memory - and
+    that box was already swapping hard enough for one clustering run to take 77
+    minutes against a normal 2.2. On a machine under that pressure a 5 GB peak can
+    cost far more than the seconds it saves, and it would present as "the build is
+    mysteriously slow" rather than as this check being expensive. They asked for
+    streaming rather than a flag to switch the check off, which was the right ask.
+
+    An earlier decision in this module refused to compare the two files at all,
+    because "comparing 1.4 GB of graph is what this refuses to do". That was right
+    about what it refused - a node-by-node *content* diff - and over-broad: counting
+    is a different question, and it turns out not to need the graph in memory at all.
     """
-    nodes = io.read_json_dict(path).get("nodes", [])
-    return _clustering(nodes)
+    if not path.is_file():
+        # The loading reader returned {} for a missing file and the stage reported
+        # "no communities" from it. Opening would raise instead, turning a handled
+        # condition into a traceback.
+        return 0, 0
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as handle:
+        return _stream_clustering(handle)
 
 
 def hash_randomisation() -> bool:
@@ -265,9 +362,12 @@ def main(argv: list[str] | None = None) -> int:
     # The uncompressed graph by default, because this runs at build time beside
     # the clustering that just wrote it. The committed .gz is last release's until
     # the build finishes, so preferring it would describe the previous graph.
-    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
-    communities, clustered = _clustering(nodes)
-    del nodes  # before reading any counterpart below; see graph_counts
+    # Streamed, not loaded. This stage only ever counted the graph, so holding it
+    # was pure cost: 2.2s at 0.04 GB against 5.3s at 3.75 GB on a 785,493-node
+    # graph, and an operator measured the loading form at 9.2s and 5-6 GB on the
+    # machine that actually runs their build - a box already swapping hard enough
+    # that one clustering run took 77 minutes against a normal 2.2.
+    communities, clustered = graph_counts(config.GRAPH_PATH)
     if not communities:
         print(
             f"No communities in {config.GRAPH_PATH}. Cluster the graph before recording - "

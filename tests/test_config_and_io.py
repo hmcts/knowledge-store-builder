@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
+import json
+
 import re
 import tempfile
 import unittest
@@ -197,3 +200,36 @@ class TicketBrowseUrlTest(SettingsIsolated):
     def test_unset_stays_empty_so_linking_stays_off(self):
         config.configure(TICKET_BROWSE_URL="")
         self.assertEqual(config.TICKET_BROWSE_URL, "")
+
+
+class TheJsonReaderHandlesGzip(unittest.TestCase):
+    """`read_json` dispatches on the `.gz` suffix, and three stages depend on it.
+
+    Shipped in v0.12.0 without this: a stage handed a gzipped path died on the gzip
+    magic byte (`UnicodeDecodeError: 0x8b in position 1`). It was reported through
+    `record-clustering`, but the reason the fix went here is that
+    `build_community_summaries` reads `GRAPH_PATH` the same way in three places.
+
+    Tested directly rather than through a stage, deliberately. It WAS covered
+    through `record-clustering` until that stage switched to streaming its counts -
+    at which point the mutation gate reported this behaviour as removable with the
+    suite still green, which is precisely what it is for.
+    """
+
+    def test_a_gzipped_json_object_is_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layer.json.gz"
+            with gzip.open(path, "wt", encoding="utf-8") as handle:
+                json.dump({"nodes": [{"id": "a"}], "note": "Cymraeg"}, handle)
+            self.assertEqual(pio.read_json_dict(path), {"nodes": [{"id": "a"}], "note": "Cymraeg"})
+
+    def test_an_uncompressed_file_still_takes_the_path_it_always_took(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layer.json"
+            path.write_text(json.dumps({"a": 1}), encoding="utf-8")
+            self.assertEqual(pio.read_json_dict(path), {"a": 1})
+
+    def test_an_absent_file_returns_the_default_either_way(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(pio.read_json(Path(tmp) / "gone.json.gz", default={"d": 1}), {"d": 1})
+            self.assertEqual(pio.read_json(Path(tmp) / "gone.json", default={"d": 1}), {"d": 1})

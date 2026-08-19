@@ -44,9 +44,16 @@ what changed under ABC-1234?                      | ticket
 # --- and what the store should NOT claim to know -------------------------------
 # Every term must be absent from the estate's vocabulary. The engine abstains only
 # when it has evidence for NONE of them, so one ordinary word is enough to produce
-# an answer: measured on a real estate, "how is quantum chromodynamics configured
-# here?" answered, because `configured` expanded to settings/setup and matched. Both
-# of the examples that used to be here - a database password, court staffing - failed
-# for exactly that reason, on the words "database" and "court".
+# an answer. Measured on real estates: "how is quantum chromodynamics CONFIGURED
+# here?" answered on `configured` (settings, setup); "what is the production
+# DATABASE password?" on `database`; "how is paediatric anaesthetic dosage
+# CALCULATED?" on `calculated` alone.
+#
+# And the one that kills the obvious strategy: `orchestra` is PRESENT on a court
+# estate, because it matches `orchestrator`. The expansion is morphological, not
+# semantic, so "something from another domain" is not enough on its own.
+#
+# What works: two or three terms from an unrelated technical field, with no everyday
+# verb among them.
 quantum chromodynamics gluon                      | abstain
 photosynthesis chlorophyll thylakoid              | abstain
