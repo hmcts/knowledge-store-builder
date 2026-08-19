@@ -221,75 +221,92 @@ _NODES_ARRAY = re.compile(r'"nodes"\s*:\s*\[')
 _CHUNK = 1 << 20
 
 
-def _stream_clustering(handle) -> tuple[int, int]:
-    """(communities, clustered nodes) without ever holding the graph.
+def _seek_nodes_array(handle) -> tuple[str, int] | None:
+    """Buffer and offset just past `"nodes": [`, or None when there is no such array.
 
-    Counting does not need the graph in memory, and holding it is what made this
-    expensive. Each node is decoded, its `community` recorded, and the node
-    discarded.
-
-    **Decoding advances an index; it does not re-slice the buffer.** The first
-    version did `buffer = buffer[end:]` per node, which copies the whole remaining
-    buffer 785,493 times - measured at 13.1s against 5.2s for simply loading the
-    file, so the streaming version was two and a half times *slower* than the thing
-    it replaced while looking like an optimisation. `raw_decode` takes a start
-    index; using it, and compacting only when the index has run far enough,
-    removes the copying.
-
-    Must agree exactly with `_clustering` - these numbers go into a committed
-    record, so a subtly different count would be a silently different artefact.
-    `test_streaming_and_loading_agree` pins it, including the `str()` that
-    collapses 1 and "1".
+    The tail is kept when trimming, because the pattern can straddle a read.
     """
-    decoder = json.JSONDecoder()
-    members: set[str] = set()
-    clustered = 0
     buffer = ""
-    pos = 0
-
-    # Find the nodes array. The tail is kept when trimming, because the pattern can
-    # straddle a chunk boundary.
     while True:
         found = _NODES_ARRAY.search(buffer)
         if found:
-            pos = found.end()
-            break
+            return buffer, found.end()
         chunk = handle.read(_CHUNK)
         if not chunk:
-            return 0, 0
+            return None
         buffer += chunk
         if len(buffer) > 2 * _CHUNK:
             buffer = buffer[-64:]
 
+
+def _skip_gaps(buffer: str, pos: int) -> int:
+    """Past whitespace and separators, without copying."""
+    while pos < len(buffer) and buffer[pos] in " \t\r\n,":
+        pos += 1
+    return pos
+
+
+def _iter_nodes(handle, buffer: str, pos: int):
+    """Yield each node object in turn, holding only one at a time.
+
+    **Advances an index; never re-slices per node.** The first version did
+    `buffer = buffer[end:]` each time, copying the remainder 785,493 times, and
+    measured 13.1s against 5.2s for simply loading the file - two and a half times
+    slower than the thing it replaced, while looking like an optimisation.
+    `raw_decode` takes a start index, and compaction happens only once the consumed
+    prefix is worth the copy.
+    """
+    decoder = json.JSONDecoder()
     while True:
-        while pos < len(buffer) and buffer[pos] in " \t\r\n,":
-            pos += 1
+        pos = _skip_gaps(buffer, pos)
         if pos < len(buffer) and buffer[pos] == "]":
-            break
+            return
         node = None
         if pos < len(buffer):
             with contextlib.suppress(ValueError):
                 node, pos = decoder.raw_decode(buffer, pos)
         if node is not None:
-            community = node.get("community") if isinstance(node, dict) else None
-            if community is not None:
-                members.add(str(community))
-                clustered += 1
-            # Compact only once the consumed prefix is worth the copy.
+            yield node
             if pos > _CHUNK:
-                buffer = buffer[pos:]
-                pos = 0
+                buffer, pos = buffer[pos:], 0
             continue
         # Incomplete node, or nothing left: drop the consumed prefix and read on.
         # Exhausting the handle mid-array means truncated JSON, which is the
         # caller's error to report rather than ours to guess at.
-        buffer = buffer[pos:]
-        pos = 0
+        buffer, pos = buffer[pos:], 0
         chunk = handle.read(_CHUNK)
         if not chunk:
-            break
+            return
         buffer += chunk
+
+
+def _count_nodes(handle, buffer: str, pos: int) -> tuple[int, int]:
+    """(communities, clustered nodes), counted as `_clustering` counts them."""
+    members: set[str] = set()
+    clustered = 0
+    for node in _iter_nodes(handle, buffer, pos):
+        community = node.get("community") if isinstance(node, dict) else None
+        if community is not None:
+            members.add(str(community))
+            clustered += 1
     return len(members), clustered
+
+
+def _stream_clustering(handle) -> tuple[int, int]:
+    """(communities, clustered nodes) without ever holding the graph.
+
+    Counting does not need the graph in memory, and holding it is what made this
+    expensive.
+
+    Must agree exactly with `_clustering` - these numbers go into a committed
+    record, so a subtly different count would be a silently different artefact.
+    `StreamingAgreesWithLoading` pins it, including the `str()` that collapses
+    1 and "1", and a graph large enough for nodes to straddle reads.
+    """
+    found = _seek_nodes_array(handle)
+    if found is None:
+        return 0, 0
+    return _count_nodes(handle, *found)
 
 
 def graph_counts(path: Path) -> tuple[int, int]:
