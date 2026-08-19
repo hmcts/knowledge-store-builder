@@ -1,0 +1,52 @@
+# The questions this store exists to answer, and the shape of answer each should
+# get. Copy to config/questions.txt and replace with your estate's own.
+#
+#   question | mode[, mode ...]
+#
+# Modes are answer SHAPES, not text - a harness pinning prose is red after every
+# refresh that legitimately reworded something, and one that is always red is one
+# nobody reads. Several modes means any of them is acceptable, which is how a
+# question survives legitimately moving from a graph traversal to a written brief.
+#
+#   brief    a committed topic brief answered it        (docs/topics)
+#   dive     a repository deep dive answered it         (docs/deep-dives)
+#   tickets  commit evidence matched the words          (knowledge/intent)
+#   graph    the graph ranked nodes for it              (graphify-out/graph.json)
+#   ticket   a ticket id resolved AND reached the graph (asserts the join)
+#   abstain  nothing answered, and that is correct
+#
+# Two notes worth having before you write these.
+#
+# `ticket` is the strongest assertion here: it requires the store to hold that
+# ticket AND for a code or concept node to be reached from it. That conjunction IS
+# the file-to-ticket join, whose canonical failure was 0 of 70,655 joined with the
+# build green and both layers present. A ticket whose files were all filtered out
+# of the index is real but unjoined - declare `tickets` for a question like that.
+#
+# Declare at least one `abstain`. A store that answers everything is not answering
+# well; it is failing to say when it has nothing, and this is the only assertion
+# that catches that.
+
+# --- questions a brief should answer -------------------------------------------
+how is Welsh language support implemented?        | brief
+how are addresses validated and formatted?        | brief, graph
+
+# --- a repository someone always asks about ------------------------------------
+what does the progression service do?             | dive, graph
+
+# --- the graph's own strength: independent implementations ---------------------
+which repositories implement AppState?            | graph
+which services publish hearing results?           | graph, tickets
+
+# --- the join, asserted through a ticket that should reach code ----------------
+what changed under ABC-1234?                      | ticket
+
+# --- and what the store should NOT claim to know -------------------------------
+# Every term must be absent from the estate's vocabulary. The engine abstains only
+# when it has evidence for NONE of them, so one ordinary word is enough to produce
+# an answer: measured on a real estate, "how is quantum chromodynamics configured
+# here?" answered, because `configured` expanded to settings/setup and matched. Both
+# of the examples that used to be here - a database password, court staffing - failed
+# for exactly that reason, on the words "database" and "court".
+quantum chromodynamics gluon                      | abstain
+photosynthesis chlorophyll thylakoid              | abstain

@@ -524,6 +524,7 @@ class CliTest(SettingsIsolated):
                 "check-install-docs",
                 "check-corpus",
                 "check-evidence",
+                "check-answers",
             ],
         )
 

@@ -26,6 +26,7 @@ SELF_PARSING = frozenset(
         "summaries",
         "status",
         "check-evidence",
+        "check-answers",
         "check-corpus",
         "record-clustering",
     }
@@ -104,6 +105,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "check-evidence": (
         "check_evidence",
         "fail if committed commit-mined text identifies a specific case or person",
+    ),
+    "check-answers": (
+        "check_answers",
+        "fail if the store stopped answering its declared questions (config/questions.txt)",
     ),
 }
 

@@ -16,6 +16,8 @@ set -euo pipefail
 
 ESLINT_VERSION=10.8.0
 TYPESCRIPT_VERSION=7.0.2
+# The shipped .mjs modules are Node code; app.js alone never needed these.
+NODE_TYPES_VERSION=24.3.0
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repo_root"
@@ -25,19 +27,36 @@ cd "$repo_root"
 prefix=${JS_TOOLCHAIN_PREFIX:-$repo_root/.js-toolchain}
 bin=$prefix/node_modules/.bin
 
-if [[ ! -x "$bin/eslint" ]] || [[ ! -x "$bin/tsc" ]]; then
+# Every piece is checked, not just the first: adding @types/node to this list
+# installed nothing on any checkout that already had eslint, and tsc then failed
+# with "cannot find type definition file" on a toolchain that looked present.
+if [[ ! -x "$bin/eslint" ]] || [[ ! -x "$bin/tsc" ]] \
+  || [[ ! -d "$prefix/node_modules/@types/node" ]]; then
   echo "installing pinned JS toolchain into ${prefix#"$repo_root"/}"
   mkdir -p "$prefix"
   [[ -f "$prefix/package.json" ]] || printf '{"name":"js-toolchain","private":true}\n' > "$prefix/package.json"
   npm install --prefix "$prefix" --ignore-scripts --no-audit --no-fund --silent \
-    "eslint@$ESLINT_VERSION" "typescript@$TYPESCRIPT_VERSION"
+    "eslint@$ESLINT_VERSION" "typescript@$TYPESCRIPT_VERSION" \
+      "@types/node@$NODE_TYPES_VERSION"
 fi
 
 echo "eslint $ESLINT_VERSION"
-"$bin/eslint" src/knowledgestore/assets/app.js tests/explorer/*.mjs
+"$bin/eslint" src/knowledgestore/assets/app.js src/knowledgestore/assets/*.mjs tests/explorer/*.mjs
 
-echo "tsc $TYPESCRIPT_VERSION --checkJs"
+echo "tsc $TYPESCRIPT_VERSION --checkJs (browser: app.js)"
 "$bin/tsc" --checkJs --noEmit --target es2020 --lib es2020,dom \
   src/knowledgestore/assets/app.js
+
+# Two invocations, not one, because the two halves are different runtimes. app.js
+# is browser code and needs lib.dom; the shipped .mjs modules are Node code and
+# need @types/node. Checking them together fails inside @types/node itself, where
+# its URLPattern declaration contradicts lib.dom's - an error in neither of our
+# files, and one that would have to be silenced with a blanket skipLibCheck.
+echo "tsc $TYPESCRIPT_VERSION --checkJs (node: the shipped harness and answer gate)"
+"$bin/tsc" --checkJs --noEmit --target es2022 --lib es2022 \
+  --module nodenext --moduleResolution nodenext \
+  --typeRoots "$prefix/node_modules/@types" --types node \
+  src/knowledgestore/assets/explorer_harness.mjs \
+  src/knowledgestore/assets/answer_regression.mjs
 
 echo "explorer JavaScript gates pass"

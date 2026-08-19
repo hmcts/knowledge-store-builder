@@ -17,6 +17,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Before the Python steps, not after: the answer gate's own test drives the
+      # shipped runner through Node and fails rather than skips without it. Ordered
+      # after the Python setup it would have failed the job on a runner without a
+      # preinstalled node, for a reason nothing in the log would explain.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
       # Versions pinned, binary-only, no lifecycle scripts: the lint and test
       # toolchain is fixed so a dependency release cannot fail an unrelated PR.
       - name: Lint Python (ruff)
@@ -65,10 +73,6 @@ jobs:
       - name: Mutation gate
         run: python3 tests/mutation_gate.py
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-
       # One script, run here and by contributors, so the pinned versions and the
       # checked paths cannot differ between the two.
       - name: Lint and type-check explorer JavaScript
@@ -83,3 +87,10 @@ jobs:
         run: |
           python3 tests/explorer/fixture.py
           node tests/explorer/page-regression.mjs
+
+      # The answer gate, broken on purpose. Three successive versions of its
+      # ticket predicate passed the good page and every assertion while failing to
+      # notice a dead file-to-ticket join - the defect the gate exists for. Only
+      # this catches that, and it caught it three times.
+      - name: Answer gate mutations
+        run: node tests/explorer/answer-regression-mutations.mjs
