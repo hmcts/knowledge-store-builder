@@ -133,8 +133,13 @@ class ThisSuiteCanStillTell(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 path = write(Path(tmp), self.GRAPH)
+                # Streamed outside the assertRaises so that only the comparison can
+                # throw inside it. With both in there, a broken streamer that raised
+                # would satisfy the test without the comparison ever running - the
+                # assertion would be about the wrong failure.
+                streamed = list(graph_stream.iter_array(path))
                 with self.assertRaises(AssertionError):
-                    self.assertEqual(list(graph_stream.iter_array(path)), self.GRAPH["nodes"])
+                    self.assertEqual(streamed, self.GRAPH["nodes"])
         finally:
             graph_stream.iter_array = original
 
