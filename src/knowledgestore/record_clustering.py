@@ -41,9 +41,6 @@ partitioner mismatch if the record travelled with the store.
 from __future__ import annotations
 
 import argparse
-import gzip
-import json
-import re
 import contextlib
 import sys
 from collections.abc import Callable
@@ -51,6 +48,7 @@ from io import StringIO
 from pathlib import Path
 
 from . import config
+from . import graph_stream
 from . import io
 
 
@@ -212,121 +210,6 @@ def counterpart(path: Path) -> Path | None:
     return None
 
 
-# `"nodes": [` at a structural position, not the bare word: a node label could
-# contain "nodes", and starting the scan there would count the wrong array.
-_NODES_ARRAY = re.compile(r'"nodes"\s*:\s*\[')
-
-# Two constants, not one, because they do very different things and this file had
-# them conflated. Swept on a real 785,493-node graph, read size varied alone:
-#
-#      64 KiB   2.1s   0.030 GB        4 MiB   2.2s   0.239 GB
-#     256 KiB   2.1s   0.032 GB        1 MiB   2.2s   0.037 GB
-#
-# Read size sets peak memory and barely touches wall clock - flat across a 64x
-# range. An operator running the same shape with 4 MiB reads measured 0.215 GB and
-# I measured 0.037 GB with 1 MiB, and I wrongly put the difference down to their
-# machine being under memory pressure. Peak allocation is a property of the code;
-# pressure costs time, not peak. Their reading was right and mine was an excuse.
-#
-# 256 KiB rather than 64 KiB: 2 MB more peak, no measurable time difference, and
-# fewer syscalls on a filesystem slower than this one.
-_READ_SIZE = 1 << 18
-
-# When to drop the consumed prefix. Measured as barely mattering - 0.215 against
-# 0.214 GB across a 16x change - so it is set to one read, and is not a knob worth
-# tuning. What it must not be is *nothing*: compacting per node instead of per
-# threshold is the copy that made the first version slower than loading the file.
-_COMPACT_AFTER = _READ_SIZE
-
-
-def _seek_nodes_array(handle) -> tuple[str, int] | None:
-    """Buffer and offset just past `"nodes": [`, or None when there is no such array.
-
-    The tail is kept when trimming, because the pattern can straddle a read.
-    """
-    buffer = ""
-    while True:
-        found = _NODES_ARRAY.search(buffer)
-        if found:
-            return buffer, found.end()
-        chunk = handle.read(_READ_SIZE)
-        if not chunk:
-            return None
-        buffer += chunk
-        if len(buffer) > 2 * _READ_SIZE:
-            buffer = buffer[-64:]
-
-
-def _skip_gaps(buffer: str, pos: int) -> int:
-    """Past whitespace and separators, without copying."""
-    while pos < len(buffer) and buffer[pos] in " \t\r\n,":
-        pos += 1
-    return pos
-
-
-def _iter_nodes(handle, buffer: str, pos: int):
-    """Yield each node object in turn, holding only one at a time.
-
-    **Advances an index; never re-slices per node.** The first version did
-    `buffer = buffer[end:]` each time, copying the remainder 785,493 times, and
-    measured 13.1s against 5.2s for simply loading the file - two and a half times
-    slower than the thing it replaced, while looking like an optimisation.
-    `raw_decode` takes a start index, and compaction happens only once the consumed
-    prefix is worth the copy.
-    """
-    decoder = json.JSONDecoder()
-    while True:
-        pos = _skip_gaps(buffer, pos)
-        if pos < len(buffer) and buffer[pos] == "]":
-            return
-        node = None
-        if pos < len(buffer):
-            with contextlib.suppress(ValueError):
-                node, pos = decoder.raw_decode(buffer, pos)
-        if node is not None:
-            yield node
-            if pos > _COMPACT_AFTER:
-                buffer, pos = buffer[pos:], 0
-            continue
-        # Incomplete node, or nothing left: drop the consumed prefix and read on.
-        # Exhausting the handle mid-array means truncated JSON, which is the
-        # caller's error to report rather than ours to guess at.
-        buffer, pos = buffer[pos:], 0
-        chunk = handle.read(_READ_SIZE)
-        if not chunk:
-            return
-        buffer += chunk
-
-
-def _count_nodes(handle, buffer: str, pos: int) -> tuple[int, int]:
-    """(communities, clustered nodes), counted as `_clustering` counts them."""
-    members: set[str] = set()
-    clustered = 0
-    for node in _iter_nodes(handle, buffer, pos):
-        community = node.get("community") if isinstance(node, dict) else None
-        if community is not None:
-            members.add(str(community))
-            clustered += 1
-    return len(members), clustered
-
-
-def _stream_clustering(handle) -> tuple[int, int]:
-    """(communities, clustered nodes) without ever holding the graph.
-
-    Counting does not need the graph in memory, and holding it is what made this
-    expensive.
-
-    Must agree exactly with `_clustering` - these numbers go into a committed
-    record, so a subtly different count would be a silently different artefact.
-    `StreamingAgreesWithLoading` pins it, including the `str()` that collapses
-    1 and "1", and a graph large enough for nodes to straddle reads.
-    """
-    found = _seek_nodes_array(handle)
-    if found is None:
-        return 0, 0
-    return _count_nodes(handle, *found)
-
-
 def graph_counts(path: Path) -> tuple[int, int]:
     """(communities, clustered nodes) for one graph file.
 
@@ -353,14 +236,14 @@ def graph_counts(path: Path) -> tuple[int, int]:
     about what it refused - a node-by-node *content* diff - and over-broad: counting
     is a different question, and it turns out not to need the graph in memory at all.
     """
-    if not path.is_file():
-        # The loading reader returned {} for a missing file and the stage reported
-        # "no communities" from it. Opening would raise instead, turning a handled
-        # condition into a traceback.
-        return 0, 0
-    opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rt", encoding="utf-8") as handle:
-        return _stream_clustering(handle)
+    members: set[str] = set()
+    clustered = 0
+    for node in graph_stream.iter_array(path):
+        community = node.get("community") if isinstance(node, dict) else None
+        if community is not None:
+            members.add(str(community))
+            clustered += 1
+    return len(members), clustered
 
 
 def hash_randomisation() -> bool:
