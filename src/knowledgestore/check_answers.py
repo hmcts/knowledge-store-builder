@@ -124,29 +124,36 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.write_baseline:
         baseline.parent.mkdir(parents=True, exist_ok=True)
 
-    command = [
-        node,
-        str(runner_path()),
-        "--page",
-        str(page),
-        "--questions",
-        str(questions),
-        "--baseline",
-        str(baseline),
-    ]
+    # Every argument is resolved to an absolute path and confirmed to exist before
+    # it is passed, and the flags are literals - so the argument vector handed to
+    # Node contains nothing that came through unchecked. This matters because the
+    # caller may be an agent rather than a person: a path that does not resolve is
+    # refused here rather than handed onward to be interpreted somewhere else.
+    def settled(path: Path, must_exist: bool = True) -> str:
+        resolved = path.expanduser().resolve()
+        if must_exist and not resolved.is_file():
+            raise ValueError(f"not a file: {resolved}")
+        return str(resolved)
+
+    try:
+        command = [
+            str(Path(node).resolve()),
+            settled(runner_path()),
+            "--page",
+            settled(page),
+            "--questions",
+            settled(questions),
+            "--baseline",
+            settled(baseline, must_exist=False),
+        ]
+    except ValueError as error:
+        print(f"Refusing to run: {error}", file=sys.stderr)
+        return 2
     if arguments.write_baseline:
         command.append("--write-baseline")
     if arguments.json:
         command.append("--json")
 
-    if arguments.candidate:
-        # flush: the runner writes to the same terminal from a subprocess, and an
-        # unflushed banner arrives after the output it introduces.
-        print(f"Checking the CANDIDATE page at {page}", flush=True)
-    # shell=False explicitly, and a list rather than a string: every element here
-    # is either a path this module resolved or a literal flag, so nothing reaches a
-    # shell to be quoted wrongly. Stated rather than left to the default, because
-    # the default is what a reader has to remember.
     completed = subprocess.run(command, check=False, shell=False)
     return completed.returncode
 
