@@ -17,6 +17,23 @@ records what *this* environment offers; it cannot know what a clustering it did
 not run was built with. `status` then compares the record against the environment
 it is run in, reading only that small file - it must never load the graph.
 
+That makes `hash_randomised` a proxy, and it can be wrong in both directions. Only
+one of them is dangerous:
+
+    recorded in a shell WITHOUT the seed, clustered WITH it
+        -> hash_randomised: true, understating reproducibility. Alarming, and an
+           alarm gets investigated.
+
+    recorded in a shell WITH the seed, clustered WITHOUT it
+        -> hash_randomised: false, claiming a clustering is reproducible when it
+           is not. Silent, reassuring and wrong, which is the direction that
+           costs someone a re-cluster they cannot repeat.
+
+So invoke this from the build script that clusters, not as a later manual step -
+an operator reported doing exactly that after being caught by the first direction,
+and moving it into the build closes both. A record made in a different shell from
+the clustering describes that shell, however carefully it is read.
+
 Commit the record beside the graph. A consumer's `status` can only report a
 partitioner mismatch if the record travelled with the store.
 """
@@ -24,6 +41,9 @@ partitioner mismatch if the record travelled with the store.
 from __future__ import annotations
 
 import argparse
+import gzip
+import json
+import re
 import contextlib
 import sys
 from collections.abc import Callable
@@ -119,14 +139,228 @@ def other_graph_note() -> str:
     refusal was built on: the operator knows which of their two files is real,
     and this stage does not.
     """
-    other = config.GRAPH_PATH.with_suffix(".json.gz")
-    if not other.is_file():
+    described = config.GRAPH_PATH
+    other = counterpart(described)
+    if other is None or not other.is_file():
         return ""
+    if described.suffix == ".gz":
+        # The other direction, which this note used to get wrong: it called the
+        # uncompressed file "normally the committed artefact", which is the exact
+        # opposite of true, whenever an operator described the `.gz` explicitly.
+        return (
+            f"  {other.name} also exists and is what clustering writes. This record describes "
+            f"{described.name}, the committed artefact - right if you mean what ships, and "
+            "wrong if a newer clustering has not been published yet."
+        )
     return (
         f"  {other.name} also exists and is normally the committed artefact. This record "
-        f"describes {config.GRAPH_PATH.name}, which is correct immediately after clustering "
+        f"describes {described.name}, which is correct immediately after clustering "
         "and wrong if that file is left from an earlier run - pass --graph to be explicit."
     )
+
+
+def counterpart_disagreement(described: Path, counts: tuple[int, int]) -> str:
+    """A line naming both files and both counts when they disagree. Empty when they agree.
+
+    The advisory note above tells an operator that the other file exists and that
+    this one might be stale. It cannot tell them whether it *is*, so on one estate
+    the stage recorded 42,572 communities over 785,610 nodes from a leftover
+    uncompressed graph while the committed artefact held 42,627 over 785,493 - and
+    the operator had to diff the two by hand to find out.
+
+    So this measures it. Silent-but-wrong becomes named-and-wrong, which is the
+    whole difference: every count in that record reconciled, and described the
+    wrong graph.
+
+    Only when `--graph` was not passed. An operator who named a file has already
+    said which one they mean, and re-reading the other would be cost for nothing.
+    """
+    other = counterpart(described)
+    if other is None or not other.is_file():
+        return ""
+    try:
+        other_counts = graph_counts(other)
+    except (OSError, ValueError, EOFError) as error:
+        # EOFError explicitly: a truncated `.gz` raises it and it is neither an
+        # OSError nor a ValueError, so it escaped and took the stage down with it -
+        # over a file the stage was not even asked to describe.
+        # A counterpart that cannot be read is not this stage's business to fail
+        # over - it is describing the file it was pointed at. Say so and move on.
+        return f"  {other.name} exists but could not be read for comparison: {error}"
+    if other_counts == counts:
+        return ""
+    return (
+        f"  MISMATCH: {described.name} has {counts[0]:,} communities over {counts[1]:,} "
+        f"clustered nodes; {other.name} has {other_counts[0]:,} over {other_counts[1]:,}. "
+        f"One of them is stale, and this record describes {described.name}. If the "
+        f"committed artefact is the real one, re-run with --graph {other.name}."
+    )
+
+
+def counterpart(path: Path) -> Path | None:
+    """The store's *other* graph file: the `.gz` beside a `.json`, or vice versa.
+
+    Both directions, because `--graph` may name either. `with_suffix(".json.gz")`
+    handled only one: given `graph.json.gz` it produced `graph.json.json.gz`, a
+    path that never exists, so the note about a stale counterpart went silent in
+    exactly the case where the operator had been explicit about the compressed one.
+    """
+    if path.suffix == ".gz":
+        return path.with_suffix("")
+    if path.suffix == ".json":
+        return path.with_name(path.name + ".gz")
+    return None
+
+
+# `"nodes": [` at a structural position, not the bare word: a node label could
+# contain "nodes", and starting the scan there would count the wrong array.
+_NODES_ARRAY = re.compile(r'"nodes"\s*:\s*\[')
+
+# Two constants, not one, because they do very different things and this file had
+# them conflated. Swept on a real 785,493-node graph, read size varied alone:
+#
+#      64 KiB   2.1s   0.030 GB        4 MiB   2.2s   0.239 GB
+#     256 KiB   2.1s   0.032 GB        1 MiB   2.2s   0.037 GB
+#
+# Read size sets peak memory and barely touches wall clock - flat across a 64x
+# range. An operator running the same shape with 4 MiB reads measured 0.215 GB and
+# I measured 0.037 GB with 1 MiB, and I wrongly put the difference down to their
+# machine being under memory pressure. Peak allocation is a property of the code;
+# pressure costs time, not peak. Their reading was right and mine was an excuse.
+#
+# 256 KiB rather than 64 KiB: 2 MB more peak, no measurable time difference, and
+# fewer syscalls on a filesystem slower than this one.
+_READ_SIZE = 1 << 18
+
+# When to drop the consumed prefix. Measured as barely mattering - 0.215 against
+# 0.214 GB across a 16x change - so it is set to one read, and is not a knob worth
+# tuning. What it must not be is *nothing*: compacting per node instead of per
+# threshold is the copy that made the first version slower than loading the file.
+_COMPACT_AFTER = _READ_SIZE
+
+
+def _seek_nodes_array(handle) -> tuple[str, int] | None:
+    """Buffer and offset just past `"nodes": [`, or None when there is no such array.
+
+    The tail is kept when trimming, because the pattern can straddle a read.
+    """
+    buffer = ""
+    while True:
+        found = _NODES_ARRAY.search(buffer)
+        if found:
+            return buffer, found.end()
+        chunk = handle.read(_READ_SIZE)
+        if not chunk:
+            return None
+        buffer += chunk
+        if len(buffer) > 2 * _READ_SIZE:
+            buffer = buffer[-64:]
+
+
+def _skip_gaps(buffer: str, pos: int) -> int:
+    """Past whitespace and separators, without copying."""
+    while pos < len(buffer) and buffer[pos] in " \t\r\n,":
+        pos += 1
+    return pos
+
+
+def _iter_nodes(handle, buffer: str, pos: int):
+    """Yield each node object in turn, holding only one at a time.
+
+    **Advances an index; never re-slices per node.** The first version did
+    `buffer = buffer[end:]` each time, copying the remainder 785,493 times, and
+    measured 13.1s against 5.2s for simply loading the file - two and a half times
+    slower than the thing it replaced, while looking like an optimisation.
+    `raw_decode` takes a start index, and compaction happens only once the consumed
+    prefix is worth the copy.
+    """
+    decoder = json.JSONDecoder()
+    while True:
+        pos = _skip_gaps(buffer, pos)
+        if pos < len(buffer) and buffer[pos] == "]":
+            return
+        node = None
+        if pos < len(buffer):
+            with contextlib.suppress(ValueError):
+                node, pos = decoder.raw_decode(buffer, pos)
+        if node is not None:
+            yield node
+            if pos > _COMPACT_AFTER:
+                buffer, pos = buffer[pos:], 0
+            continue
+        # Incomplete node, or nothing left: drop the consumed prefix and read on.
+        # Exhausting the handle mid-array means truncated JSON, which is the
+        # caller's error to report rather than ours to guess at.
+        buffer, pos = buffer[pos:], 0
+        chunk = handle.read(_READ_SIZE)
+        if not chunk:
+            return
+        buffer += chunk
+
+
+def _count_nodes(handle, buffer: str, pos: int) -> tuple[int, int]:
+    """(communities, clustered nodes), counted as `_clustering` counts them."""
+    members: set[str] = set()
+    clustered = 0
+    for node in _iter_nodes(handle, buffer, pos):
+        community = node.get("community") if isinstance(node, dict) else None
+        if community is not None:
+            members.add(str(community))
+            clustered += 1
+    return len(members), clustered
+
+
+def _stream_clustering(handle) -> tuple[int, int]:
+    """(communities, clustered nodes) without ever holding the graph.
+
+    Counting does not need the graph in memory, and holding it is what made this
+    expensive.
+
+    Must agree exactly with `_clustering` - these numbers go into a committed
+    record, so a subtly different count would be a silently different artefact.
+    `StreamingAgreesWithLoading` pins it, including the `str()` that collapses
+    1 and "1", and a graph large enough for nodes to straddle reads.
+    """
+    found = _seek_nodes_array(handle)
+    if found is None:
+        return 0, 0
+    return _count_nodes(handle, *found)
+
+
+def graph_counts(path: Path) -> tuple[int, int]:
+    """(communities, clustered nodes) for one graph file.
+
+    Reads and discards inside this function on purpose. The caller compares two
+    graphs, and holding both node lists at once would double peak memory on an
+    estate where one of them is already the largest thing in the process.
+
+    Measured on the largest estate available - 785,493 nodes, 42,627 communities
+    out of a 40 MB `graph.json.gz`:
+
+        streamed   2.2s    0.04 GB peak RSS
+        loaded     5.3s    3.75 GB peak RSS
+
+    An operator measured the loading form at **9.2s and 5.17-6.07 GB** on the box
+    that actually runs their build - twice my time and well over my memory - and
+    that box was already swapping hard enough for one clustering run to take 77
+    minutes against a normal 2.2. On a machine under that pressure a 5 GB peak can
+    cost far more than the seconds it saves, and it would present as "the build is
+    mysteriously slow" rather than as this check being expensive. They asked for
+    streaming rather than a flag to switch the check off, which was the right ask.
+
+    An earlier decision in this module refused to compare the two files at all,
+    because "comparing 1.4 GB of graph is what this refuses to do". That was right
+    about what it refused - a node-by-node *content* diff - and over-broad: counting
+    is a different question, and it turns out not to need the graph in memory at all.
+    """
+    if not path.is_file():
+        # The loading reader returned {} for a missing file and the stage reported
+        # "no communities" from it. Opening would raise instead, turning a handled
+        # condition into a traceback.
+        return 0, 0
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as handle:
+        return _stream_clustering(handle)
 
 
 def hash_randomisation() -> bool:
@@ -156,14 +390,19 @@ def main(argv: list[str] | None = None) -> int:
         help="the graph to describe, when a store holds more than one candidate",
     )
     arguments = parser.parse_args(argv)
-    if arguments.graph is not None:
-        config.configure(GRAPH_PATH=arguments.graph)
+    explicit_graph = arguments.graph
+    if explicit_graph is not None:
+        config.configure(GRAPH_PATH=explicit_graph)
 
     # The uncompressed graph by default, because this runs at build time beside
     # the clustering that just wrote it. The committed .gz is last release's until
     # the build finishes, so preferring it would describe the previous graph.
-    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
-    communities, clustered = _clustering(nodes)
+    # Streamed, not loaded. This stage only ever counted the graph, so holding it
+    # was pure cost: 2.2s at 0.04 GB against 5.3s at 3.75 GB on a 785,493-node
+    # graph, and an operator measured the loading form at 9.2s and 5-6 GB on the
+    # machine that actually runs their build - a box already swapping hard enough
+    # that one clustering run took 77 minutes against a normal 2.2.
+    communities, clustered = graph_counts(config.GRAPH_PATH)
     if not communities:
         print(
             f"No communities in {config.GRAPH_PATH}. Cluster the graph before recording - "
@@ -212,6 +451,16 @@ def main(argv: list[str] | None = None) -> int:
         f"{config.GRAPH_PATH.name} -> {config.CLUSTERING_RECORD_PATH}"
     )
     print(f"Determined by import, not inferred: {how}.")
+    # Both of the counterpart hints below are answers to "which file did you mean",
+    # so an operator who passed --graph has already answered and gets neither. That
+    # is also what keeps the comparison's cost off the explicit path.
+    if explicit_graph is None:
+        disagreement = counterpart_disagreement(config.GRAPH_PATH, (communities, clustered))
+        if disagreement:
+            # Flushed first: stdout buffers when piped, so without this the finding
+            # arrives above the lines it qualifies and reads as being about nothing.
+            sys.stdout.flush()
+            print(disagreement, file=sys.stderr)
     if hash_randomisation():
         print(
             "  Hash randomisation was ON in this process, so these communities are not "

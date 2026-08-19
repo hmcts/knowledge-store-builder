@@ -53,6 +53,23 @@ class Mutation:
 # exercised. Both classes passed review repeatedly.
 MUTATIONS = (
     Mutation(
+        "gzipped graph unreadable again",
+        "io.py",
+        'if path.suffix == ".gz":',
+        "if False:",
+        "shipped in v0.12.0 and found by an operator: `record-clustering --graph "
+        "graph.json.gz` died on the gzip magic byte, so the escape hatch the stage's "
+        "own warning names was unavailable for the only artefact that store ships",
+    ),
+    Mutation(
+        "stale counterpart no longer named",
+        "record_clustering.py",
+        "        disagreement = counterpart_disagreement(config.GRAPH_PATH, (communities, clustered))",
+        '        disagreement = ""',
+        "the same operator had to diff two graph files by hand to find that the "
+        "record described a stale leftover; every count in it reconciled",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",

@@ -646,12 +646,36 @@ it has nothing, and that is the assertion nothing else makes.
 
 **Every term in such a question must be absent from the estate's vocabulary.** The
 engine abstains only when it has evidence for none of them, so a single ordinary
-word produces an answer. Measured on a real estate: *"how is quantum chromodynamics
-configured here?"* answered, because `configured` expanded to settings/setup and
-matched - the meta line honestly said "no evidence for: quantum, chromodynamics"
-while the answer composed from the one word that did match. `what is the production
-database password?` fails the same way, on *database*.
+word produces an answer. Measured on real estates:
 
-Use vocabulary from another field entirely. When a declared `abstain` does answer,
-the gate names the terms the estate turned out to have, so the fix is to reword the
-question rather than to go looking for a defect.
+| question | why it answered |
+|---|---|
+| how is quantum chromodynamics **configured** here? | `configured` expands to settings, setup |
+| what is the production **database** password? | `database` is everywhere |
+| how is paediatric anaesthetic dosage **calculated**? | `calculated`, and nothing else |
+| does the **orchestra** perform on Tuesdays? | `orchestra` matches `orchestrator` |
+
+The last is the one to remember: the expansion is **morphological, not semantic**,
+so "pick something obviously from another domain" is not a strategy. `orchestra` is
+as far from a court estate as a word gets and it still matched. Two or three terms
+from an unrelated technical field, with no everyday verb among them, is what works -
+`gluon confinement lattice chromodynamics` abstains on both estates that tried it.
+
+Three of those four were written by people who had already read this warning,
+including its author.
+
+When a declared `abstain` does answer, the gate names the terms the estate turned
+out to have, so the fix is to reword the question rather than to go looking for a
+defect.
+
+**Why this section exists at all is worth stating**, because the mistake generalises
+past `abstain`. The first version of `examples/questions.txt` shipped with two
+`abstain` examples that would have failed on any real estate - they were written
+against the synthetic fixture, where an estate's vocabulary is a dozen words, and
+nothing tested them against a real one. Every mechanical check passed: the file
+parsed, the modes were valid, the fixture went green.
+
+That is the stale-fixture class - a claim about the shape of real input that was
+only ever checked against invented input - and a fixture cannot catch it by
+construction. One run against a real estate did, in seconds. When you write anything
+that asserts what real data looks like, run it against real data before you ship it.
