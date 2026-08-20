@@ -507,6 +507,7 @@ class CliTest(SettingsIsolated):
                 # the other route to the same enrichment: ask the tracker
                 # rather than import an export of it
                 "fetch-tickets",
+                "chunk-plan",
                 "gherkin",
                 "packages",
                 # before clustering, so deployment nodes join communities

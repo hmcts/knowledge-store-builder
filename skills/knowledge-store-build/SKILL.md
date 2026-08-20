@@ -70,6 +70,61 @@ Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
 attribute.
 
+### Before dispatching semantic extraction
+
+If the estate carries documents, papers or images, write the chunk plan first:
+
+```bash
+knowledgestore chunk-plan          # -> graphify-out/.graphify_chunk_plan.json
+```
+
+The dispatching agent reads it with `store_paths.load_plan()`, which resolves the
+paths to absolute - the extraction spec requires agents to receive and echo paths
+verbatim and absolute, while the committed file stores them relative to the store
+root so nothing machine-specific is committed.
+
+Write it even when dispatching from context anyway: **it is the only map from chunk
+number to file list**, so without it a committed chunk archive cannot be read back.
+The stage warns, with a count, if any path could not be made relative - which means
+the corpus sits outside the store and the plan will not survive a clone.
+
+**Choose `--kinds` before your first run.** The default plans `document,paper,image`,
+because code is the AST layer's job and semantically re-extracting it pays twice for
+the same nodes. But graphify classifies **YAML and Terraform as `code`**, so on an
+infrastructure estate the default covers a quarter of the corpus - measured at 4,651
+of 17,539 paths on one, where the interesting content is Flux Kustomizations, Helm
+values and `variables.tf`. Such a store should pass `--kinds code,document`
+deliberately.
+
+**Expect many chunks smaller than the 20-25 graphify's skill mentions.** One
+directory per chunk, never mixed, and `--chunk-size` is a maximum rather than a
+target - so a three-file directory becomes a three-file chunk. The skill asks for
+both "20-25 files" and "group files from the same directory together", which cannot
+both hold; grouping wins here, because cross-file relationships are the reason the
+semantic layer exists and padding a chunk with unrelated files asks an agent to
+relate things that have no relation.
+
+**Passing `code` is also a decision about fan-out cost.** Directory purity on an
+estate whose code is spread thinly across deep trees produces many small chunks:
+measured at 6,704 chunks averaging 3.3 files, against 762 averaging 22 for the same
+corpus partitioned ad-hoc. That is roughly nine times the agent dispatches, which
+interacts with the fan-out's own limits. Decide both together.
+
+**Adopting this planner is a full re-archive.** On the one estate with an existing
+plan, matching its path set exactly, only 799 chunks have identical membership - and
+794 of those are single-image chunks, which agree by construction. Of its 762 text
+chunks, **5 agree**. All the extraction value is in the text chunks.
+
+Note what that estate's plan is, because it is the reason this stage exists: nothing
+generates it. Eight scripts read it and none writes it - it was partitioned in an
+agent's context during a build and never captured, so it cannot be regenerated,
+audited, or even described reliably. Its own operator described it to me as
+directory-grouped; it is not.
+
+**Chunk numbering is the archive's only index.** If you change `--chunk-size`
+between refreshes the numbering moves, and an archive of previous extractions is no
+longer addressable by it. Decide the maximum once per estate.
+
 **Do not add `--no-cluster` here, however wasteful per-repository clustering
 looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol
