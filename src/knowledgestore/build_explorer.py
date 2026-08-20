@@ -533,9 +533,16 @@ def main() -> int:
     # answer that question - the ordinary workflow commits a regenerated layer
     # and the page together, so their dates match whether or not the page was
     # rebuilt - and `status` compares these digests instead.
+    # A list of records, not an object keyed by path. Keyed by path put
+    # `knowledge/semantic/token-neighbours.json.gz` immediately beside a hex
+    # digest, and a key containing "token" adjacent to a hex string reads as a
+    # hard-coded secret: SonarCloud raises `json:S6418` as a BLOCKER, so one
+    # store could not commit this artefact at all. The information is identical;
+    # only the adjacency changes. Sorted, so a committed file diffs readably.
+    digests = io.layer_digests([config.ROOT / layer for layer in status_layers()], config.ROOT)
     io.write_json(
         config.EXPLORER_INPUTS_PATH,
-        io.layer_digests([config.ROOT / layer for layer in status_layers()], config.ROOT),
+        [{"path": path, "hash": digest} for path, digest in sorted(digests.items())],
     )
     # Bytes as well as megabytes: a change to the page's own code or to what it
     # embeds moves the size by kilobytes, which one decimal place of a megabyte
