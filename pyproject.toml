@@ -35,7 +35,7 @@ deploy = ["PyYAML>=6"]
 # make the choice deliberately.
 documents = ["markitdown>=0.0.1"]
 # Lint, format and type-check tooling, pinned to what CI runs.
-dev = ["ruff==0.16.2", "pyright==1.1.411"]
+dev = ["ruff==0.16.3", "pyright==1.1.411"]
 
 [project.scripts]
 knowledgestore = "knowledgestore.cli:main"
