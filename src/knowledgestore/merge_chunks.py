@@ -264,15 +264,20 @@ def consolidate(nodes: dict, remap: dict, counters: dict) -> None:
         keep, *rest = sorted(ids)
         counters["consolidated"] += len(rest)
         for dropped in rest:
-            node = nodes.pop(dropped)
-            merged = nodes[keep]
-            merged["source_files"] = sorted(
-                set(merged["source_files"]) | set(node.get("source_files") or [])
-            )
-            merged.setdefault("consolidated_ids", []).append(dropped)
-            for key, value in remap.items():
-                if value == dropped:
-                    remap[key] = keep
+            _absorb(nodes, remap, keep, dropped)
+
+
+def _absorb(nodes: dict, remap: dict, keep: str, dropped: str) -> None:
+    """Fold one fragmented id into the id being kept, recording what was absorbed."""
+    node = nodes.pop(dropped)
+    merged = nodes[keep]
+    merged["source_files"] = sorted(
+        set(merged["source_files"]) | set(node.get("source_files") or [])
+    )
+    merged.setdefault("consolidated_ids", []).append(dropped)
+    for key, value in remap.items():
+        if value == dropped:
+            remap[key] = keep
 
 
 def _endpoint(
