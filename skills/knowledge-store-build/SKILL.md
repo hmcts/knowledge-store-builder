@@ -104,11 +104,22 @@ both hold; grouping wins here, because cross-file relationships are the reason t
 semantic layer exists and padding a chunk with unrelated files asks an agent to
 relate things that have no relation.
 
-That is this library's choice and not an observed convention: the one plan that
-exists elsewhere resolves the conflict the other way, filling to 22 and mixing
-directories in 47% of its chunks. Adopting this planner is therefore a **full
-re-archive** - of 1,203 chunk ids present in both plans, none has identical
-membership.
+**Passing `code` is also a decision about fan-out cost.** Directory purity on an
+estate whose code is spread thinly across deep trees produces many small chunks:
+measured at 6,704 chunks averaging 3.3 files, against 762 averaging 22 for the same
+corpus partitioned ad-hoc. That is roughly nine times the agent dispatches, which
+interacts with the fan-out's own limits. Decide both together.
+
+**Adopting this planner is a full re-archive.** On the one estate with an existing
+plan, matching its path set exactly, only 799 chunks have identical membership - and
+794 of those are single-image chunks, which agree by construction. Of its 762 text
+chunks, **5 agree**. All the extraction value is in the text chunks.
+
+Note what that estate's plan is, because it is the reason this stage exists: nothing
+generates it. Eight scripts read it and none writes it - it was partitioned in an
+agent's context during a build and never captured, so it cannot be regenerated,
+audited, or even described reliably. Its own operator described it to me as
+directory-grouped; it is not.
 
 **Chunk numbering is the archive's only index.** If you change `--chunk-size`
 between refreshes the numbering moves, and an archive of previous extractions is no

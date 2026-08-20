@@ -1,10 +1,20 @@
 """Write the semantic fan-out's chunk plan, so it is a file rather than a memory.
 
 graphify's skill says only *"split into chunks of 20-25 files each"* and leaves it
-to the dispatching agent. Nothing writes the split down, so it exists in one
-agent's context and nowhere else. Every store running the fan-out therefore
-invents its own plan, its own prompt generation, coverage check and merge - one
-estate accumulated six scripts around a plan file the library had never heard of.
+to the dispatching agent. Nothing writes the split down.
+
+**The consequence is worse than every store inventing its own plan.** A plan
+produced in an agent's context cannot be characterised, audited or reproduced at
+all. Measured on the one estate that has such a file: eight scripts read it and
+**none writes it** - it was partitioned in-session during a build, and its operator
+could not regenerate it if the file were lost, which would leave the archive it
+indexes permanently unaddressable.
+
+That has a second cost, subtler and already paid. Its operator described the plan to
+me as grouping by directory and refusing to mix; measured, 47% of its chunks span
+multiple directories. Neither of us could have known: there was no code to read. An
+ad-hoc partition is not merely unrepeatable, it is **unfalsifiable** - any claim
+about it, including its own author's, is a guess.
 
 Two things follow from the plan being ad-hoc, and the second is the reason this
 stage exists at all:
@@ -131,13 +141,21 @@ def chunk_groups(groups: list[list[str]], chunk_size: int) -> list[list[str]]:
     cross-file relationships are the reason the semantic layer exists and padding a
     chunk with unrelated files asks an agent to relate things that have no relation.
 
-    **That is this library's choice, not an observed convention.** An earlier version
-    of this docstring cited the one real chunk plan in existence as an example of
-    directory-first grouping. Measured, it is not: 47% of its 1,556 chunks span
-    multiple directories and a quarter of those cross repository boundaries, so it
-    resolves the same conflict the other way - it fills to 22 and mixes. Its operator
-    believed otherwise until they measured it, and I repeated it on their word. The
-    reasoning above stands on its own; the evidence for it does not exist yet.
+    **That is this library's choice, and there is no convention to follow.** An
+    earlier version of this docstring cited the one existing chunk plan as
+    directory-first grouping. It is not - 47% of its chunks span multiple directories
+    - and more to the point it is not an algorithm at all: nothing generates it, so
+    it resolves the skill's conflict neither way. It is one agent's partition. The
+    reasoning above therefore stands on its own, with no observed practice behind it,
+    and that is the honest state of the evidence.
+
+    **The cost of strictness is real and falls on deep, thin trees.** On an estate of
+    12,888 code files spread across deep directories, one-directory-per-chunk yields
+    a mean of 3.3 files per chunk against that estate's ad-hoc 22 - roughly nine
+    times the agent dispatches. Whether some middle ground is better (merging sibling
+    directories under a common parent, say) is unmeasured, and inventing a heuristic
+    here is what produced the mixing defect this function was just corrected for. So
+    the cost is documented rather than optimised away.
     """
     chunks: list[list[str]] = []
     for group in groups:
