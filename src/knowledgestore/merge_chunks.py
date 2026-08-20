@@ -124,7 +124,18 @@ def is_global_identifier(label: str) -> bool:
         return False
     if text.lower() in GENERIC_LABELS:
         return False
-    return any(sep in text for sep in "./:@")
+    # A separator that implies *addressing* - a host, a path, a registry tag, an
+    # account. A bare dot does not, and accepting it was a defect: `values.yaml`,
+    # `README.md`, `package.json` and `index.ts` all passed, so every one of them in
+    # the estate would have consolidated into a single node, fabricating
+    # relationships between unrelated files. That is the exact failure this function
+    # exists to avoid, and it fired on every estate rather than only infra ones.
+    #
+    # The cost is that dotted names which ARE global - a Java FQCN, say - now stay
+    # fragmented and are counted in `fragmented_left`. That is the direction this
+    # stage deliberately errs in: a fabricated edge is worse than a missing one,
+    # because nothing downstream can detect it.
+    return any(sep in text for sep in "/:@")
 
 
 def spec_stem(source_file: str) -> str:
