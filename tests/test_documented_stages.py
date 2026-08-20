@@ -26,7 +26,11 @@ from pathlib import Path
 from knowledgestore import cli
 
 ROOT = Path(__file__).resolve().parent.parent
-INVOCATION = re.compile(r"\bknowledgestore\s+([a-z][a-z0-9-]*)")
+# A CLI invocation, not a Python import. `from knowledgestore import graph_stream`
+# matched the earlier pattern and was read as the stage `import`, so documenting a
+# public helper failed this test - the instrument answering a neighbouring
+# question, which is the failure mode this file exists to catch elsewhere.
+INVOCATION = re.compile(r"(?<!from )\bknowledgestore\s+([a-z][a-z0-9-]*)")
 
 
 def shipped_documentation() -> list[Path]:
@@ -68,6 +72,35 @@ class DocumentedStagesExist(unittest.TestCase):
                         "which is not a stage in this release - a reader following it "
                         "gets `unknown stage`",
                     )
+
+
+class TheScanCanStillTell(unittest.TestCase):
+    """Break the scan's inputs, confirm it notices, restore - in this run.
+
+    The check above can only pass or fail; it cannot report that it has stopped
+    discriminating. It nearly did: the pattern was narrowed to stop matching Python
+    imports, and a narrowing is exactly the kind of improvement that quietly turns
+    a check vacuous. So the pattern is exercised against text it must flag and text
+    it must ignore, rather than trusted because the corpus happens to be clean.
+    """
+
+    def test_it_flags_an_invocation_of_a_stage_that_does_not_exist(self):
+        found = {m.group(1) for m in INVOCATION.finditer("run `knowledgestore reticulate` now")}
+        self.assertEqual(found, {"reticulate"})
+        self.assertNotIn("reticulate", cli.STAGES, "the fixture must name a non-stage")
+
+    def test_it_still_finds_a_real_invocation(self):
+        found = {m.group(1) for m in INVOCATION.finditer("then `knowledgestore explorer`")}
+        self.assertEqual(found, {"explorer"})
+
+    def test_it_ignores_a_python_import(self):
+        """The narrowing that prompted this class. Both import forms must be silent."""
+        for text in (
+            "from knowledgestore import graph_stream",
+            "import knowledgestore",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([m.group(1) for m in INVOCATION.finditer(text)], [])
 
 
 class ThePluginIsIdentifiable(unittest.TestCase):

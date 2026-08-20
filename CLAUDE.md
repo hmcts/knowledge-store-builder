@@ -126,6 +126,20 @@ How that looks in this codebase:
   uniform* across populations differing in every other respect indicts the
   instrument, not the populations; and a count is not a finding until you can
   say which layer it counted.
+- **Every gate asserts its own sensitivity in the same run**, and every gate
+  names what it covers. Break what it protects, confirm it notices, restore. A
+  gate that can only pass or fail cannot report that it has become *vacuous* —
+  and the way it goes vacuous is usually an improvement: moving markdown
+  handling into a library and deleting the local walk leaves a gate reporting
+  green over code that is gone. A gate that also verifies its own discriminating
+  power says "this check can no longer tell a guarded walk from an unguarded
+  one" instead. The naming half is the other side of the same problem:
+  `io.read_json`'s gzip dispatch was tested only as a side effect of
+  `record-clustering` reading a `.gz`, so when that stage switched to streaming,
+  the behaviour lost its last observer and nothing could notice, because
+  incidental coverage cannot self-report. A named mutation entry caught it. Both
+  halves are needed, and a separate mutation run is not a substitute for the
+  first: it only catches a vacuous test if somebody wrote a mutation for it.
 - **A non-editable install of this library shadows `src/` for the whole
   suite.** Test modules put `src/` on `sys.path` at import time, but once any
   earlier module has imported `knowledgestore`, `sys.modules` is already bound

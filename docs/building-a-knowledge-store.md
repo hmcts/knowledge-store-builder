@@ -679,3 +679,84 @@ That is the stale-fixture class - a claim about the shape of real input that was
 only ever checked against invented input - and a fixture cannot catch it by
 construction. One run against a real estate did, in seconds. When you write anything
 that asserts what real data looks like, run it against real data before you ship it.
+
+## 10. Reading a large graph from your own scripts
+
+Most things that read a graph want a few fields per node, not the graph. A store's
+own scripts are where this bites hardest, because they are written against a
+subset and then meet the whole estate.
+
+```python
+from knowledgestore import graph_stream
+
+for node in graph_stream.iter_array(path):                  # "nodes"
+    ...
+for edge in graph_stream.iter_array(path, key="links"):
+    ...
+```
+
+Gzipped or not - the suffix decides, so scanning the committed `.gz` costs no more
+than the uncompressed form. Measured on a 785,493-node estate:
+
+| | wall | peak RSS |
+|---|---|---|
+| streamed | 2.1s | **0.032 GB** |
+| loaded | 5.3s | 3.75 GB |
+
+That difference is why this exists rather than being a preference. The case that
+prompted it: one estate's `merge-graphs` output is 1.5 GB on disk across 627,737
+nodes, and the script that reads it does a pure per-field scan over `id`, `label`,
+`source_file` and `repo`. Loading it needs **4.1-4.3 GB**, so on a 16 GB machine a
+store can complete its own build and only just read the result.
+
+### What loading a graph actually costs
+
+Three graphs, two estates, both CPython 3.13 on arm64:
+
+| graph | on disk | nodes | edges | edges/node | peak RSS | x file |
+|---|---|---|---|---|---|---|
+| cut + semantic | 0.10 GB | 72,370 | 104,874 | 1.45 | 0.40 GB | 4.16x |
+| committed `graph.json` | 1.36 GB | 785,493 | 1,495,218 | 1.90 | 3.75 GB | 2.76x |
+| `merge-graphs` output | 1.51 GB | 627,737 | 2,318,935 | 3.69 | 4.10 GB | 2.72x |
+
+**There is no portable multiplier, and the useful part is why not.** The factor
+*falls* as the estate grows, which is the opposite of what everyone involved
+predicted. Neither obvious normalisation explains it: bytes-per-node runs
+5,867 / 1,866 / 7,010 across those three rows and bytes-per-object runs
+2,396 / 643 / 1,493 - neither ordering matches the factor. The one quantity that
+orders all three is the **edge-to-node ratio**, and the reason is composition: a
+merged edge is a thin two-key dict, while a cut-graph node carries `community`,
+`label`, `norm_label`, `file_type`, `_origin` and both repository attributes. An
+edge-heavy graph is cheaper per byte because most of its bytes are cheap objects.
+
+Three points do not make a law, and the last two are nearly flat, so treat this as
+**expect roughly 3x, and up to 4x for a node-heavy graph, then measure your own.**
+An earlier estimate for the merged file - 6.6 GB - came from scaling one small
+graph's 4.16x, and was 1.6x too high; the correction offered for it predicted the
+factor would *rise*, and was also wrong. Both errors were reasoning about the right
+quantity in the wrong direction, which is why the number here is measured rather
+than derived.
+
+**Quote max RSS and peak footprint together, or neither.** Their ordering inverts
+between the small and large files above - 0.40 against 0.39 GB on one, 4.10 against
+4.32 GB on the other - so either alone makes one file look better than the pair
+does.
+
+**A truncated file raises rather than returning what it read.** A caller counting
+nodes would otherwise receive a smaller number indistinguishable from a real one,
+which is the shape of every expensive mistake in this pipeline. An *absent* array
+yields nothing and does not raise, because absent and empty are both legitimately
+"no such content".
+
+Two things to know before writing your own version instead, both of which were got
+wrong here first:
+
+- **Advance an index; never re-slice per object.** `buffer = buffer[end:]` copies
+  the remainder once per object, and on that estate measured **13.1s against 5.3s
+  for simply loading the file** - two and a half times slower than the thing it
+  replaced, with an excellent memory graph. `raw_decode` takes a start index.
+- **Read size sets peak memory; the compaction threshold barely matters.** 64 KiB
+  gives 0.030 GB and 4 MiB gives 0.239 GB, with wall clock flat across the range.
+  Two operators saw a 6x difference in peak between their implementations and put
+  it down to one machine being under memory pressure. It was this constant. Peak
+  allocation is a property of the code; pressure costs time, not peak.
