@@ -44,9 +44,22 @@ from pathlib import Path
 
 from . import config, io, store_paths
 
-# Content categories only. Code is covered structurally by the AST pass, and
-# flattening every category here makes subagents re-read every source file.
-# Video is transcribed to a document before this runs.
+# graphify's own detect categories. Video is transcribed to a document before this
+# runs, so it is never planned directly.
+KNOWN_KINDS = ("code", "document", "paper", "image")
+
+# The default: prose and diagrams, because code is the AST layer's job on most
+# estates and semantically re-extracting it would pay twice for the same nodes.
+#
+# **On an infrastructure estate this default covers a quarter of the corpus.**
+# graphify classifies YAML and Terraform as `code`, so on one real estate the
+# semantically interesting content - Flux Kustomizations, Helm values,
+# `variables.tf` - is 12,888 files this default excludes against 3,857 it includes:
+# 4,651 of 17,539 planned paths, 27%. That estate's fan-out extracted from the code
+# files deliberately, because an AST pass over a Kustomization tells you the shape
+# of the YAML and nothing about which environment it deploys.
+#
+# So `kinds` is an operator choice with a default, not a fixed set.
 CONTENT_KINDS = ("document", "paper", "image")
 
 # The skill says 20-25. 22 sits in the middle; the flag exists because the right
@@ -75,7 +88,10 @@ def group_by_directory(paths: list[str]) -> list[list[str]]:
 
 
 def plan_chunks(
-    detect: dict, chunk_size: int = DEFAULT_CHUNK_SIZE, only: set[str] | None = None
+    detect: dict,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    only: set[str] | None = None,
+    kinds: tuple[str, ...] = CONTENT_KINDS,
 ) -> dict[str, list[str]]:
     """The chunk plan: chunk id -> file list, absolute as detected.
 
@@ -86,7 +102,7 @@ def plan_chunks(
     than given an oversized one: an over-long FILE_LIST is what pushes an agent
     into the output limit that destroys its whole batch (#131).
     """
-    files = content_files(detect)
+    files = content_files(detect, kinds)
     if only is not None:
         files = {kind: [f for f in paths if f in only] for kind, paths in files.items()}
 
@@ -95,11 +111,9 @@ def plan_chunks(
     # documents makes an agent do two jobs in one prompt.
     chunks.extend([image] for image in files.get("image", []))
 
-    chunks.extend(
-        chunk_groups(
-            group_by_directory([*files.get("document", []), *files.get("paper", [])]), chunk_size
-        )
-    )
+    # Everything except images, which got a chunk each above.
+    grouped = [path for kind, paths in files.items() if kind != "image" for path in paths]
+    chunks.extend(chunk_groups(group_by_directory(grouped), chunk_size))
     return {f"{index + 1:04d}": chunk for index, chunk in enumerate(chunks)}
 
 
@@ -112,19 +126,62 @@ def chunk_groups(groups: list[list[str]], chunk_size: int) -> list[list[str]]:
     opposite of the intent. On a realistic estate of twelve three-file directories
     at the suggested size of 22, every chunk mixed four directories.
 
-    That was measured against the only real chunk plan in existence: 1,556 chunks
-    over 17,539 files, min 1, max 22, mean 11.3, with **51% holding fewer than 20**.
-    Small chunks are the deliberate consequence of grouping, not drift from the
-    skill's "20-25 files" - and the skill asks for both, which cannot be satisfied
-    at once. Grouping wins, because cross-file relationships are the reason the
-    semantic layer exists and padding a chunk with unrelated files from elsewhere
-    buys an agent nothing while asking it to relate things that have no relation.
+    The skill asks for both "20-25 files each" and "group files from the same
+    directory together", which cannot both hold. Grouping wins here, because
+    cross-file relationships are the reason the semantic layer exists and padding a
+    chunk with unrelated files asks an agent to relate things that have no relation.
+
+    **That is this library's choice, not an observed convention.** An earlier version
+    of this docstring cited the one real chunk plan in existence as an example of
+    directory-first grouping. Measured, it is not: 47% of its 1,556 chunks span
+    multiple directories and a quarter of those cross repository boundaries, so it
+    resolves the same conflict the other way - it fills to 22 and mixes. Its operator
+    believed otherwise until they measured it, and I repeated it on their word. The
+    reasoning above stands on its own; the evidence for it does not exist yet.
     """
     chunks: list[list[str]] = []
     for group in groups:
         for start in range(0, len(group), chunk_size):
             chunks.append(group[start : start + chunk_size])
     return chunks
+
+
+def requested_kinds(raw: str) -> tuple[str, ...] | None:
+    """The kinds asked for, or None when the request cannot be honoured.
+
+    A misspelled kind is refused rather than ignored: planning nothing for
+    `documnet` looks exactly like an estate with no documents, which is the wrong
+    answer to a typo.
+    """
+    kinds = tuple(k.strip() for k in raw.split(",") if k.strip())
+    unknown = [k for k in kinds if k not in KNOWN_KINDS]
+    if unknown or not kinds:
+        print(
+            f"--kinds must name detect categories from {', '.join(KNOWN_KINDS)}"
+            + (f"; not {', '.join(unknown)}" if unknown else ""),
+            flush=True,
+        )
+        return None
+    return kinds
+
+
+def uncached_paths() -> set[str]:
+    """The paths graphify's cache check left to extract."""
+    if not config.UNCACHED_PATH.is_file():
+        return set()
+    text = config.UNCACHED_PATH.read_text(encoding="utf-8")
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
+def report(plan: dict[str, list[str]], counted: dict[str, list[str]], chunk_size: int) -> None:
+    """What was planned, and from what. Every number names the quantity it counts."""
+    sizes = sorted(len(files) for files in plan.values())
+    print(
+        f"{len(plan):,} chunks over {sum(sizes):,} files -> {config.CHUNK_PLAN_PATH}\n"
+        f"  per chunk: smallest {sizes[0]}, largest {sizes[-1]}, maximum {chunk_size}\n"
+        "  detected: " + ", ".join(f"{kind} {len(paths):,}" for kind, paths in counted.items()),
+        flush=True,
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -141,6 +198,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "of them hold fewer than 20",
     )
     parser.add_argument(
+        "--kinds",
+        default=",".join(CONTENT_KINDS),
+        help="comma-separated detect categories to plan, from "
+        + "/".join(KNOWN_KINDS)
+        + f" (default {','.join(CONTENT_KINDS)}). An infrastructure estate should add "
+        "`code` deliberately: graphify classifies YAML and Terraform there, and on one "
+        "such estate the default covers 27 per cent of the corpus",
+    )
+    parser.add_argument(
         "--uncached",
         action="store_true",
         help="plan only files graphify's cache check left to extract; without this the plan "
@@ -155,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
         print("--chunk-size must be at least 1", flush=True)
         return 2
 
+    kinds = requested_kinds(arguments.kinds)
+    if kinds is None:
+        return 2
+
     detect = io.read_json_dict(config.DETECT_PATH)
     if not detect:
         print(
@@ -165,23 +235,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    only = None
-    if arguments.uncached:
-        text = (
-            config.UNCACHED_PATH.read_text(encoding="utf-8")
-            if config.UNCACHED_PATH.is_file()
-            else ""
-        )
-        only = {line.strip() for line in text.splitlines() if line.strip()}
+    only = uncached_paths() if arguments.uncached else None
 
-    plan = plan_chunks(detect, arguments.chunk_size, only)
-    counted = content_files(detect)
+    plan = plan_chunks(detect, arguments.chunk_size, only, kinds)
+    counted = content_files(detect, kinds)
     if not plan:
         # Not a failure: a code-only estate never runs the fan-out at all, and
         # saying so is more useful than writing an empty file it will not read.
         print(
-            "No document, paper or image files detected, so the semantic fan-out has "
-            "nothing to split. Nothing written.",
+            f"No {' or '.join(kinds)} files detected, so there is nothing to split. "
+            "Nothing written. If this estate's content is YAML or Terraform, graphify "
+            "classifies that as `code` - pass --kinds code,document to include it.",
             flush=True,
         )
         return 0
@@ -189,12 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     stored = store_paths.store_relative_plan(plan)
     io.write_json(config.CHUNK_PLAN_PATH, stored, indent=2)
     sizes = sorted(len(files) for files in plan.values())
-    print(
-        f"{len(plan):,} chunks over {sum(sizes):,} files -> {config.CHUNK_PLAN_PATH}\n"
-        f"  per chunk: smallest {sizes[0]}, largest {sizes[-1]}, target {arguments.chunk_size}\n"
-        f"  detected: " + ", ".join(f"{kind} {len(paths):,}" for kind, paths in counted.items()),
-        flush=True,
-    )
+    report(plan, counted, arguments.chunk_size)
     if only is not None:
         print(f"  restricted to {len(only):,} uncached file(s)", flush=True)
     print(

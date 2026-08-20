@@ -154,6 +154,55 @@ class PlanningTest(unittest.TestCase):
         self.assertEqual(build_chunk_plan.plan_chunks({"files": {"code": ["/s/a.py"]}}), {})
 
 
+class KindsAreAnOperatorChoice(unittest.TestCase):
+    """graphify classifies YAML and Terraform as `code`, and on an infrastructure
+    estate that is where the semantically interesting content lives.
+
+    Measured on a real one: the prose default plans 4,651 of 17,539 paths - 27% -
+    because 12,888 of the files its fan-out extracted from are classified `code`.
+    The default is still right for a doc estate (code is the AST layer's job, and
+    re-extracting it pays twice for the same nodes), so this is a choice rather than
+    a fix.
+    """
+
+    DETECT = {
+        "files": {
+            "code": [f"/s/repositories/infra/env{d}/main.tf" for d in range(9)],
+            "document": ["/s/repositories/docs/readme.md"],
+        }
+    }
+
+    def _planned(self, **kwargs) -> int:
+        plan = build_chunk_plan.plan_chunks(self.DETECT, 22, **kwargs)
+        return sum(len(chunk) for chunk in plan.values())
+
+    def test_the_default_excludes_code(self):
+        self.assertEqual(self._planned(), 1)
+
+    def test_code_is_planned_when_asked_for(self):
+        self.assertEqual(self._planned(kinds=("code", "document")), 10)
+
+    def test_an_unknown_kind_is_refused_rather_than_ignored(self):
+        """Silently planning nothing for a misspelled kind would look like an estate
+        with no such content, which is the wrong answer to a typo."""
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = build_chunk_plan.main(["--kinds", "documnet"])
+        self.assertEqual(code, 2)
+        self.assertIn("documnet", out.getvalue())
+
+    def test_an_empty_kinds_list_is_refused(self):
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(build_chunk_plan.main(["--kinds", " , "]), 2)
+
+    def test_the_default_matches_the_documented_default(self):
+        """The help text names the default; a drift between them sends an operator
+        looking for content the stage never planned."""
+        self.assertEqual(build_chunk_plan.parse_args([]).kinds, "document,paper,image")
+        self.assertEqual(build_chunk_plan.CONTENT_KINDS, ("document", "paper", "image"))
+
+
 class TheWrittenPlan(SettingsIsolated):
     def _store(self, documents: int = 6, inside: bool = True) -> Path:
         tmp = tempfile.TemporaryDirectory()

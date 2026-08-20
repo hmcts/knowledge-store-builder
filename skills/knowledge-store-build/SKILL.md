@@ -88,15 +88,27 @@ number to file list**, so without it a committed chunk archive cannot be read ba
 The stage warns, with a count, if any path could not be made relative - which means
 the corpus sits outside the store and the plan will not survive a clone.
 
+**Choose `--kinds` before your first run.** The default plans `document,paper,image`,
+because code is the AST layer's job and semantically re-extracting it pays twice for
+the same nodes. But graphify classifies **YAML and Terraform as `code`**, so on an
+infrastructure estate the default covers a quarter of the corpus - measured at 4,651
+of 17,539 paths on one, where the interesting content is Flux Kustomizations, Helm
+values and `variables.tf`. Such a store should pass `--kinds code,document`
+deliberately.
+
 **Expect many chunks smaller than the 20-25 graphify's skill mentions.** One
 directory per chunk, never mixed, and `--chunk-size` is a maximum rather than a
-target - so a three-file directory becomes a three-file chunk. On the one estate
-that runs this at scale, 1,556 chunks over 17,539 files average 11.3 and **half
-hold fewer than 20**. The skill asks for both "20-25 files" and "group files from
-the same directory together", which cannot be satisfied at once; grouping wins,
-because cross-file relationships are the reason the semantic layer exists and
-padding a chunk with unrelated files asks an agent to relate things that have no
-relation.
+target - so a three-file directory becomes a three-file chunk. The skill asks for
+both "20-25 files" and "group files from the same directory together", which cannot
+both hold; grouping wins here, because cross-file relationships are the reason the
+semantic layer exists and padding a chunk with unrelated files asks an agent to
+relate things that have no relation.
+
+That is this library's choice and not an observed convention: the one plan that
+exists elsewhere resolves the conflict the other way, filling to 22 and mixing
+directories in 47% of its chunks. Adopting this planner is therefore a **full
+re-archive** - of 1,203 chunk ids present in both plans, none has identical
+membership.
 
 **Chunk numbering is the archive's only index.** If you change `--chunk-size`
 between refreshes the numbering moves, and an archive of previous extractions is no
