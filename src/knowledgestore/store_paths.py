@@ -124,7 +124,7 @@ def load_plan(path: str | Path | None = None) -> dict[str, list[str]]:
 
     Callers get what they always got. The on-disk format is free to be relative.
     """
-    p = Path(path) if path else _root() / "graphify-out/.graphify_chunk_plan.json"
+    p = Path(path) if path else config.CHUNK_PLAN_PATH
     plan = json.loads(p.read_text(encoding="utf-8"))
     return {k: [absolute(f) for f in v] for k, v in plan.items()}
 

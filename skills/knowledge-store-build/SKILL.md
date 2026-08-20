@@ -70,6 +70,24 @@ Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
 attribute.
 
+### Before dispatching semantic extraction
+
+If the estate carries documents, papers or images, write the chunk plan first:
+
+```bash
+knowledgestore chunk-plan          # -> graphify-out/.graphify_chunk_plan.json
+```
+
+The dispatching agent reads it with `store_paths.load_plan()`, which resolves the
+paths to absolute - the extraction spec requires agents to receive and echo paths
+verbatim and absolute, while the committed file stores them relative to the store
+root so nothing machine-specific is committed.
+
+Write it even when dispatching from context anyway: **it is the only map from chunk
+number to file list**, so without it a committed chunk archive cannot be read back.
+The stage warns, with a count, if any path could not be made relative - which means
+the corpus sits outside the store and the plan will not survive a clone.
+
 **Do not add `--no-cluster` here, however wasteful per-repository clustering
 looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol
