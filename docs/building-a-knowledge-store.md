@@ -721,21 +721,38 @@ Three graphs, two estates, both CPython 3.13 on arm64:
 
 **There is no portable multiplier, and the useful part is why not.** The factor
 *falls* as the estate grows, which is the opposite of what everyone involved
-predicted. Neither obvious normalisation explains it: bytes-per-node runs
-5,867 / 1,866 / 7,010 across those three rows and bytes-per-object runs
-2,396 / 643 / 1,493 - neither ordering matches the factor. The one quantity that
-orders all three is the **edge-to-node ratio**, and the reason is composition: a
-merged edge is a thin two-key dict, while a cut-graph node carries `community`,
-`label`, `norm_label`, `file_type`, `_origin` and both repository attributes. An
-edge-heavy graph is cheaper per byte because most of its bytes are cheap objects.
+predicted. Nothing about total size explains it; **composition does**, and
+consistently computed the cost per object falls as edge density rises:
 
-Three points do not make a law, and the last two are nearly flat, so treat this as
-**expect roughly 3x, and up to 4x for a node-heavy graph, then measure your own.**
-An earlier estimate for the merged file - 6.6 GB - came from scaling one small
-graph's 4.16x, and was 1.6x too high; the correction offered for it predicted the
-factor would *rise*, and was also wrong. Both errors were reasoning about the right
-quantity in the wrong direction, which is why the number here is measured rather
-than derived.
+| graph | edges/node | RSS per node | RSS per object |
+|---|---|---|---|
+| cut + semantic | 1.45 | 5,935 | 2,423 |
+| committed `graph.json` | 1.90 | 5,126 | 1,765 |
+| `merge-graphs` output | 3.69 | 7,013 | 1,494 |
+
+Per *node* the numbers do not order - 5,935, 5,126, 7,013. Per *object* they fall
+monotonically, because **an edge costs about a third of a node**: a merged edge is
+a thin two-key dict, while a cut-graph node carries `community`, `label`,
+`norm_label`, `file_type`, `_origin` and both repository attributes. Fitting the
+three measurements to two coefficients gives roughly `3,150 B/node + 1,045 B/edge`,
+which reproduces the two larger graphs to within 0.3% and misses the smallest by
+21%.
+
+**Treat the coefficients as the reason, not as a formula.** Three points fit two
+parameters, which is not a law, and the 21% miss is the honest warning: that graph's
+nodes carry 11.1 fields against the merged file's 8.0, and the model assumes every
+node costs the same. Shape is the variable, and attribute richness is part of shape.
+So: **expect roughly 3x, up to 4x for a node-heavy graph, then measure your own** -
+that range is the two coefficients, not a rule of thumb.
+
+Two estimates were wrong before these were measured, in opposite directions. 6.6 GB
+came from scaling the smallest graph's 4.16x and was 1.6x too high; the correction
+offered for it predicted the factor would *rise*. And the first version of this
+section reported per-object costs that did not order - because the middle row's
+figure was bytes-per-object **on disk** while the outer two were per-object **in
+memory**. Mixing two quantities in one sequence hid a monotonic relationship and
+turned a real finding into an apparent absence, which is why this table names the
+metric in every column heading.
 
 **Quote max RSS and peak footprint together, or neither.** Their ordering inverts
 between the small and large files above - 0.40 against 0.39 GB on one, 4.10 against
