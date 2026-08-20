@@ -115,6 +115,56 @@ class Consolidation(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertTrue(merge_chunks.is_global_identifier(label))
 
+    def test_an_ordinary_filename_is_not_a_global_identifier(self):
+        """The defect this fixes, and it fired on every estate rather than infra ones.
+
+        The test accepted a bare dot, so `values.yaml`, `README.md`, `package.json`
+        and `index.ts` all qualified - meaning every one of them in the corpus would
+        consolidate into a single node, fabricating relationships between unrelated
+        files. That is exactly what excluding `Kustomization` by name exists to
+        prevent, arriving through the separator rule instead of the stop-list.
+        """
+        for label in (
+            "values.yaml",
+            "README.md",
+            "index.ts",
+            "Chart.yaml",
+            "package.json",
+            "kustomization.yaml",
+            "main.tf",
+            "docker-compose.yml",
+        ):
+            with self.subTest(label=label):
+                self.assertFalse(
+                    merge_chunks.is_global_identifier(label),
+                    f"{label} would fuse every file of that name in the estate",
+                )
+
+    def test_an_address_still_qualifies(self):
+        """The sensitivity check on the test above: a rule rejecting everything would
+        satisfy it while consolidating nothing, which loses the 1,051 real fragments."""
+        for label in (
+            "registry.example.io/api:1.2",
+            "https://vault.example.net/secret",
+            "user@host.example",
+            "ghcr.io/org/image:sha-abc123",
+        ):
+            with self.subTest(label=label):
+                self.assertTrue(merge_chunks.is_global_identifier(label))
+
+    def test_files_of_the_same_name_are_left_fragmented_and_counted(self):
+        """End to end: the residue must be visible, not silently fused."""
+        chunks = [
+            ("c1", {"nodes": [node("a_one_values", "values.yaml", "a/one/values.yaml")]}),
+            ("c2", {"nodes": [node("b_two_values", "values.yaml", "b/two/values.yaml")]}),
+        ]
+        nodes, remap, base = merge_chunks.merge_nodes(chunks)
+        counters = base | {"consolidated": 0, "fragmented_left": 0}
+        merge_chunks.consolidate(nodes, remap, counters)
+        self.assertEqual(len(nodes), 2, "two different files were fused into one")
+        self.assertEqual(counters["consolidated"], 0)
+        self.assertEqual(counters["fragmented_left"], 1)
+
 
 class Edges(unittest.TestCase):
     def _resolved(self, chunks):
