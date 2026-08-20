@@ -29,6 +29,7 @@ SELF_PARSING = frozenset(
         "check-answers",
         "check-corpus",
         "chunk-plan",
+        "merge-chunks",
         "record-clustering",
     }
 )
@@ -64,6 +65,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "chunk-plan": (
         "build_chunk_plan",
         "write the semantic fan-out's chunk plan (run before dispatching extraction)",
+    ),
+    "merge-chunks": (
+        "merge_chunks",
+        "merge per-chunk semantic extractions without fusing unrelated entities",
     ),
     "gherkin": ("extract_gherkin", "add Gherkin features, scenarios and ticket links to the graph"),
     "packages": (

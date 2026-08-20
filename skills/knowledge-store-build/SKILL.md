@@ -125,6 +125,32 @@ directory-grouped; it is not.
 between refreshes the numbering moves, and an archive of previous extractions is no
 longer addressable by it. Decide the maximum once per estate.
 
+### Merging the chunk extractions
+
+Replace the skill's concatenation of `.graphify_chunk_*.json` with:
+
+```bash
+knowledgestore merge-chunks        # -> graphify-out/.graphify_semantic_new.json
+```
+
+Concatenation is wrong in two opposite directions at once, and both are silent.
+Independent agents produce ids unique only *within* a chunk, so the same slug in two
+chunks may be one entity or two - and **the label decides which of two opposite
+actions is correct**. Concatenation merges both cases, re-pointing every edge at
+whichever node won, which asserts relationships that were never in the corpus.
+Conversely a genuinely shared entity that agents named by path gets one id per chunk
+that saw it, so the cross-file linking the layer exists for is lost.
+
+Read all eight counters, not the node total. `merged` and `consolidated` are the
+linking working; `namespaced` is fabrication prevented; `fragmented` is the residue
+of deliberately under-merging; `recovered` are cross-chunk edges a concatenation
+would have thrown away; `ambiguous` and `dangling` are edges dropped rather than
+guessed at.
+
+Every renamed node carries `original_id`, and the stage refuses to write an id
+carrying a chunk-derived suffix - the extraction spec forbids those outright, and
+such an id changes on any re-plan.
+
 **Do not add `--no-cluster` here, however wasteful per-repository clustering
 looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol
