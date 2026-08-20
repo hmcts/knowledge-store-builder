@@ -140,6 +140,27 @@ How that looks in this codebase:
   incidental coverage cannot self-report. A named mutation entry caught it. Both
   halves are needed, and a separate mutation run is not a substitute for the
   first: it only catches a vacuous test if somebody wrote a mutation for it.
+- **A check's silence only licenses a claim about the artefact it read.** A
+  zero-tolerance rule running where the violation cannot occur reads as
+  compliance for something it never looked at: `validate_chunk` forbids
+  chunk-numbered ids and reported 0 errors across 1,556 chunk files, while the
+  graph those files merge into holds 187 of them. The check was correct, present
+  and passing. Before trusting a green result, say which artefact it read and
+  whether that is the artefact that can be wrong.
+- **A correction ships the check that makes it durable.** Removing the
+  *precondition* for an error is not detecting its recurrence - naming the metric
+  in a table's column headings stopped two quantities looking comparable, and
+  would not have noticed the same substitution returning. If a change explains
+  what was wrong, it should also fail when that thing is wrong again.
+- **A claim about your own artefact needs the same treatment as a claim about
+  your own numbers, and gets it less often.** Between two operators and this
+  repository, one week produced seven corrections of the form "I described
+  something I built and was wrong": a plan characterised as directory-grouped
+  that was 47% mixed, a fill algorithm that turned out not to exist, a planner
+  asserted to keep directories together while a passing test agreed. Describing
+  what you built runs on your model of it, and that model is what you would check
+  *with* - so it cannot be what you check *against*. Re-derive it from the
+  artefact, or have someone else do it.
 - **A non-editable install of this library shadows `src/` for the whole
   suite.** Test modules put `src/` on `sys.path` at import time, but once any
   earlier module has imported `knowledgestore`, `sys.modules` is already bound

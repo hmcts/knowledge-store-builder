@@ -508,6 +508,7 @@ class CliTest(SettingsIsolated):
                 # rather than import an export of it
                 "fetch-tickets",
                 "chunk-plan",
+                "merge-chunks",
                 "gherkin",
                 "packages",
                 # before clustering, so deployment nodes join communities
