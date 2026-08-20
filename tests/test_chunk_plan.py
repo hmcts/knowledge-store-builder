@@ -11,6 +11,9 @@ from __future__ import annotations
 import contextlib
 import io as _io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,13 +94,57 @@ class PlanningTest(unittest.TestCase):
         for chunk in image_chunks:
             self.assertEqual(len(chunk), 1)
 
-    def test_the_plan_is_reproducible(self):
-        """Same corpus, same plan. A plan that reshuffles invalidates a chunk archive
-        that is keyed on chunk number."""
-        detect = {"files": {"document": [f"/s/repositories/d{i % 4}/{i}.md" for i in range(40)]}}
-        self.assertEqual(
-            build_chunk_plan.plan_chunks(detect, 9), build_chunk_plan.plan_chunks(detect, 9)
+    def test_the_plan_does_not_depend_on_the_order_files_were_detected(self):
+        """A plan that reshuffles invalidates a chunk archive keyed on chunk number.
+
+        Calling the function twice in one process proved almost nothing - the inputs
+        are identical, so Sonar was right to flag it (S5863) and it would only have
+        caught a regression that made the function stateful. The property that matters
+        is that the plan is a function of the *set* of files, not of the order graphify
+        happened to list them in.
+        """
+        files = [f"/s/repositories/d{i % 4}/{i:02d}.md" for i in range(40)]
+        forwards = build_chunk_plan.plan_chunks({"files": {"document": files}}, 9)
+        backwards = build_chunk_plan.plan_chunks({"files": {"document": files[::-1]}}, 9)
+        rotated = build_chunk_plan.plan_chunks({"files": {"document": files[7:] + files[:7]}}, 9)
+        self.assertEqual(forwards, backwards)
+        self.assertEqual(forwards, rotated)
+        self.assertGreater(len(forwards), 1, "one chunk would make this vacuous")
+
+    def test_the_plan_survives_a_different_hash_seed(self):
+        """Across processes, not within one.
+
+        The plan groups by directory through a dict, so an unsorted implementation
+        would be stable inside a single interpreter and vary between runs - which is
+        the failure that matters, because a chunk archive is keyed on chunk number and
+        a refresh is a different process. This estate has already been bitten by
+        hash-order nondeterminism in clustering, so it is not hypothetical.
+        """
+        # The source path is derived from this file, not from the working directory.
+        # It was `sys.path.insert(0, 'src')`, which assumed cwd was the repository
+        # root - true under `unittest discover -s tests`, false under the mutation
+        # gate's `-s .`, so the subprocess failed and the test errored for a reason
+        # that had nothing to do with what it checks.
+        source = Path(__file__).resolve().parent.parent / "src"
+        script = (
+            "import json,sys;"
+            f"sys.path.insert(0, {str(source)!r});"
+            "from knowledgestore import build_chunk_plan as b;"
+            "files=[f'/s/repositories/d{i % 4}/{i:02d}.md' for i in range(40)];"
+            "print(json.dumps(b.plan_chunks({'files': {'document': files}}, 9)))"
         )
+        outputs = []
+        for seed in ("0", "1", "random"):
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=True,
+                env={**os.environ, "PYTHONHASHSEED": seed},
+            )
+            outputs.append(result.stdout.strip())
+        self.assertEqual(len(set(outputs)), 1, "the plan changed with the hash seed")
+        self.assertTrue(outputs[0].strip(), "the subprocess produced no plan at all")
 
     def test_a_code_only_corpus_plans_nothing(self):
         self.assertEqual(build_chunk_plan.plan_chunks({"files": {"code": ["/s/a.py"]}}), {})
