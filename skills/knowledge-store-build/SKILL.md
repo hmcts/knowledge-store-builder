@@ -88,6 +88,20 @@ number to file list**, so without it a committed chunk archive cannot be read ba
 The stage warns, with a count, if any path could not be made relative - which means
 the corpus sits outside the store and the plan will not survive a clone.
 
+**Expect many chunks smaller than the 20-25 graphify's skill mentions.** One
+directory per chunk, never mixed, and `--chunk-size` is a maximum rather than a
+target - so a three-file directory becomes a three-file chunk. On the one estate
+that runs this at scale, 1,556 chunks over 17,539 files average 11.3 and **half
+hold fewer than 20**. The skill asks for both "20-25 files" and "group files from
+the same directory together", which cannot be satisfied at once; grouping wins,
+because cross-file relationships are the reason the semantic layer exists and
+padding a chunk with unrelated files asks an agent to relate things that have no
+relation.
+
+**Chunk numbering is the archive's only index.** If you change `--chunk-size`
+between refreshes the numbering moves, and an archive of previous extractions is no
+longer addressable by it. Decide the maximum once per estate.
+
 **Do not add `--no-cluster` here, however wasteful per-repository clustering
 looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol

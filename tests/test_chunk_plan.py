@@ -24,39 +24,43 @@ from knowledgestore import build_chunk_plan, config, store_paths
 
 
 class PlanningTest(unittest.TestCase):
-    def test_a_directory_is_kept_together(self):
-        """Cross-file relationships are what the semantic layer exists to find, and an
-        agent cannot relate two files it never saw together.
+    def test_no_chunk_ever_mixes_directories(self):
+        """Twelve small directories against a large maximum - the case that fails.
 
-        The sizes here are chosen so a FLAT split would demonstrably fail: three files
-        per directory against a chunk size of four puts the boundary one file into the
-        second directory. An earlier version of this test used three files total with
-        the same chunk size, so everything landed in one chunk and the assertion held
-        whether or not grouping happened - it passed against a mutation that removed
-        the grouping entirely.
+        This test previously used three files against a chunk size of four, where the
+        old implementation happened to close the chunk at the boundary, so it passed
+        while the code mixed directories at every realistic size. An operator with the
+        only real chunk plan in existence found that: twelve three-file directories at
+        the suggested maximum of 22 produced chunks of four directories each.
+
+        So the sizes here are the ones where mixing occurs if it can: small groups, a
+        large maximum, and more than one chunk.
         """
-        detect = {
-            "files": {
-                "document": [
-                    "/s/repositories/a/1.md",
-                    "/s/repositories/a/2.md",
-                    "/s/repositories/a/3.md",
-                    "/s/repositories/b/1.md",
-                    "/s/repositories/b/2.md",
-                    "/s/repositories/b/3.md",
-                ]
-            }
-        }
-        plan = build_chunk_plan.plan_chunks(detect, chunk_size=4)
-        chunks = list(plan.values())
-        self.assertGreater(len(chunks), 1, "one chunk would make this vacuous")
-        for directory in ("/s/repositories/a/", "/s/repositories/b/"):
-            holding = [c for c in chunks if any(f.startswith(directory) for f in c)]
-            self.assertEqual(len(holding), 1, f"{directory} was split across {len(holding)} chunks")
-        # And no chunk mixes the two, which is the property grouping buys.
-        for chunk in chunks:
+        files = [f"/s/repositories/r{d:02d}/doc{i}.md" for d in range(12) for i in range(3)]
+        plan = build_chunk_plan.plan_chunks({"files": {"document": files}}, chunk_size=22)
+        self.assertGreater(len(plan), 1, "one chunk would make this vacuous")
+        for name, chunk in plan.items():
             directories = {f.rsplit("/", 1)[0] for f in chunk}
-            self.assertEqual(len(directories), 1, f"chunk mixes directories: {sorted(directories)}")
+            self.assertEqual(len(directories), 1, f"chunk {name} spans {sorted(directories)}")
+
+    def test_a_small_directory_is_not_padded_to_the_maximum(self):
+        """`--chunk-size` is a maximum, not a target.
+
+        Half the chunks on the real estate hold fewer than 20 against a stated 20-25,
+        and that is the deliberate consequence of grouping rather than drift: padding a
+        chunk with unrelated files asks an agent to relate things that have no
+        relation, and cross-file relationships are the reason the layer exists.
+        """
+        files = [f"/s/repositories/solo/only{i}.md" for i in range(3)]
+        plan = build_chunk_plan.plan_chunks({"files": {"document": files}}, chunk_size=22)
+        self.assertEqual([len(c) for c in plan.values()], [3])
+
+    def test_a_directory_larger_than_the_maximum_is_split(self):
+        """The maximum is real: an over-long FILE_LIST is what pushes an agent into the
+        output limit that destroys its whole batch (#131)."""
+        files = [f"/s/repositories/big/{i:03d}.md" for i in range(50)]
+        plan = build_chunk_plan.plan_chunks({"files": {"document": files}}, chunk_size=22)
+        self.assertEqual(sorted(len(c) for c in plan.values()), [6, 22, 22])
 
     def test_no_chunk_exceeds_the_requested_size(self):
         """An over-long FILE_LIST is what pushes an agent into the output limit that
