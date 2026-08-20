@@ -684,6 +684,35 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def recorded_digests() -> dict[str, str]:
+    """What the page was built from, from either manifest shape.
+
+    The current shape is a list of `{path, hash}` records; stores built before
+    that hold an object keyed by path. Both are read, because the alternative is
+    that a store's existing page silently becomes unjudgeable at upgrade - and
+    "cannot be judged" is a state this check deliberately distinguishes from
+    "agrees", so corrupting it would be worse than a hard failure.
+
+    Accepting both is not permanent. The keyed shape can go once every store has
+    rebuilt a page, which `status` will say has happened when no store reports it.
+    """
+    # Values are NOT coerced to str. `layer_digests` records an absent layer as a
+    # non-string sentinel rather than skipping it - so a layer that disappears
+    # between builds is a change rather than a silence - and coercing turned every
+    # absent layer into a permanent false drift: seven of them, on a fixture with
+    # one real layer.
+    raw = io.read_json(config.EXPLORER_INPUTS_PATH, default=None)
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, list):
+        return {
+            entry["path"]: entry["hash"]
+            for entry in raw
+            if isinstance(entry, dict) and "path" in entry and "hash" in entry
+        }
+    return {}
+
+
 def embedded_layer_drift() -> list[str]:
     """Layers whose content differs from what the committed page was built from.
 
@@ -697,7 +726,7 @@ def embedded_layer_drift() -> list[str]:
     the page predates this check and cannot be judged, which the caller
     distinguishes rather than reporting as agreement.
     """
-    recorded = io.read_json_dict(config.EXPLORER_INPUTS_PATH)
+    recorded = recorded_digests()
     if not recorded:
         return []
     current = io.layer_digests([config.ROOT / layer for layer in EMBEDDED_LAYERS], config.ROOT)
