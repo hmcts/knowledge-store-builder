@@ -76,7 +76,7 @@ class TheThreeTreatments(unittest.TestCase):
             ("c0043", {"nodes": [node("slug", "second", "b/two.yaml")]}),
         ]
         nodes, _remap, _counters = merge_chunks.merge_nodes(chunks)
-        self.assertEqual(merge_chunks.spec_breaches(nodes), [])
+        self.assertEqual(merge_chunks.spec_breaches(nodes, {"0042", "0043"}), [])
         for nid in nodes:
             self.assertNotIn("0042", nid)
             self.assertNotIn("0043", nid)
@@ -293,3 +293,98 @@ class TheOutputGate(SettingsIsolated):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefectsFoundOnARealEstate(unittest.TestCase):
+    """The four defects an operator found by running this against 1,556 chunks.
+
+    All four were reported on the PR before it merged and were still on `main`.
+    Every expected number here is from that run, diffed against that store's own
+    committed merge output rather than a reimplementation of this logic.
+    """
+
+    def test_a_form_code_is_not_a_chunk_suffix(self):
+        """The blocking one. `_c\\d{2,}` matched 34 ids on that estate, every one a
+        family court form code - C21, C43, C51, C63, C100, the last in 40 files. The
+        refusal is hard, so a false positive was not a warning but total
+        unavailability: the stage could not run there at all.
+
+        Tested against the run's real chunk numbers, which is exact in both
+        directions. Widening to `\\d{4}` would have cleared these and been wrong for
+        the reason it worked - 4-digit padding is one store's convention.
+        """
+        chunk_numbers = {f"{i:04d}" for i in range(1, 1557)}
+        # The form code lands at the END of the id, because it is at the end of the
+        # label it was normalised from - 'Blank order or directions (C21)'. An earlier
+        # version of this test put the code at the start, where the anchored pattern
+        # could never match it, so the test passed whether or not the chunk numbers
+        # were consulted. Vacuous, and only a mutation showed it.
+        ids = {
+            "blank_order_or_directions_c21": {},
+            "child_arrangements_specific_issue_order_c43": {},
+            "applicant_details_c100": {},
+            "supporting_documents_c51": {},
+            "statement_of_service_c63": {},
+        }
+        for nid in ids:
+            self.assertRegex(nid, r"_c\d+$", "the fixture must actually match the pattern")
+        self.assertEqual(merge_chunks.spec_breaches(ids, chunk_numbers), [])
+
+    def test_a_real_chunk_suffix_is_still_caught(self):
+        """The sensitivity check: a rule that flagged nothing would satisfy the test
+        above while letting the spec breach through, which is what the output-side
+        assertion exists to catch - it found 187 real ones an input gate could not."""
+        chunk_numbers = {"0042", "0007"}
+        ids = {"slug_c0042": {}, "other_chunk0007": {}, "c21_form": {}}
+        self.assertEqual(
+            merge_chunks.spec_breaches(ids, chunk_numbers), ["other_chunk0007", "slug_c0042"]
+        )
+
+    def test_two_identities_sharing_stem_and_original_both_survive(self):
+        """13 of 47,653 nodes were lost silently, and this is the collision the
+        namespacing exists to resolve, reintroduced by the step that resolves it.
+
+        `namespaced` reported 367 kept apart while 13 were dropped - a counter
+        overstating success, which is the reassuring direction and the dangerous one.
+        """
+        chunks = [
+            (
+                "c1",
+                {
+                    "nodes": [
+                        node("end_ga_hwf", "End Ga Hwf Notify Process", "pmn/diagrams.bpmn"),
+                        node("end_ga_hwf", "END_GA_HWF_NOTIFY_PROCESS", "pmn/diagrams.bpmn"),
+                    ]
+                },
+            )
+        ]
+        nodes, remap, counters = merge_chunks.merge_nodes(chunks)
+        self.assertEqual(len(nodes), 2, "one identity was dropped on an id collision")
+        self.assertEqual(counters["disambiguated"], 1)
+        self.assertEqual(len({remap[("c1", "end_ga_hwf")]}), 1)
+        self.assertEqual(len({n["label"] for n in nodes.values()}), 2, "both labels survive")
+
+    def test_a_templated_label_is_not_a_global_identifier(self):
+        """`${ENVIRONMENT}` resolves differently per environment, so consolidating on
+        it collapses every environment's resource into one node and every edge
+        follows. 25 such labels on that estate; rejecting them moved `consolidated`
+        from 1,070 to 1,051, exactly reproducing the committed count.
+        """
+        for label in (
+            "${SERVICE_NAME}-documents-api.preview.platform.example.net",
+            "./apps/pdm/${ENVIRONMENT}/base",
+            "/case/X/Y/${[CASE_REFERENCE]}/trigger/*",
+            "{{ .Release.Name }}/api",
+            "%(env)s/service",
+        ):
+            with self.subTest(label=label):
+                self.assertFalse(merge_chunks.is_global_identifier(label))
+
+    def test_consolidate_accepts_merge_nodes_counters(self):
+        """Both are public, and only `main` injected the two keys, so any other caller
+        got a KeyError."""
+        chunks = [("c1", {"nodes": [node("a", "registry.example.io/x:1", "a.yaml")]})]
+        nodes, remap, counters = merge_chunks.merge_nodes(chunks)
+        merge_chunks.consolidate(nodes, remap, counters)
+        for key in ("consolidated", "fragmented_left", "disambiguated"):
+            self.assertIn(key, counters)

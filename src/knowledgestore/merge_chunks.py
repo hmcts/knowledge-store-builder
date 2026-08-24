@@ -77,7 +77,7 @@ from . import config, io
 # Forbidden by the extraction spec, and asserted on this stage's own OUTPUT rather
 # than only on its input - a gate positioned where the violation cannot occur reads
 # as compliance for the artefact nobody asked it about.
-CHUNK_SUFFIX = re.compile(r"_(c|chunk)\d{2,}(_\d+)?$")
+CHUNK_SUFFIX = re.compile(r"_(?:c|chunk)(\d+)(?:_\d+)?$")
 
 # A label is treated as a global identifier when it carries a separator, holds no
 # whitespace, and is long enough to be an address rather than a word. Generic
@@ -123,6 +123,14 @@ def is_global_identifier(label: str) -> bool:
     if len(text) < MIN_GLOBAL_LENGTH or any(c.isspace() for c in text):
         return False
     if text.lower() in GENERIC_LABELS:
+        return False
+    # A templated label is not one identifier, it is a family of them.
+    # `${ENVIRONMENT}` resolves differently per environment, so consolidating on it
+    # collapses every environment's resource into one node and every edge follows -
+    # the fabricate-relationships direction. Measured on a 361-repo estate: 25 such
+    # labels, and rejecting them moved `consolidated` from 1,070 to 1,051, exactly
+    # reproducing that store's committed count.
+    if any(marker in text for marker in ("${", "{{", "%(")):
         return False
     # A separator that implies *addressing* - a host, a path, a registry tag, an
     # account. A bare dot does not, and accepting it was a defect: `values.yaml`,
@@ -193,7 +201,17 @@ def _collect(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict, dict]:
     by_identity: dict[tuple[str, str, str], dict] = {}
     labels_for_id: dict[str, set[str]] = defaultdict(set)
     origin: dict[tuple[str, str], tuple[str, str, str]] = {}
-    counters = {"merged": 0, "namespaced": 0, "seen": 0}
+    # Seeded here, not in `main`: `consolidate()` and `merge_nodes()` are both
+    # public, and passing one's counters to the other raised KeyError for any caller
+    # that did not go through `main`.
+    counters = {
+        "merged": 0,
+        "namespaced": 0,
+        "disambiguated": 0,
+        "seen": 0,
+        "consolidated": 0,
+        "fragmented_left": 0,
+    }
 
     for chunk_name, payload in chunks:
         for node in payload.get("nodes") or []:
@@ -247,6 +265,18 @@ def merge_nodes(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict]:
             stem = spec_stem(node["source_files"][0] if node["source_files"] else label)
             node["original_id"] = original
             node["id"] = f"{stem}_{original}" if stem else original
+        # Two identities differing only in label share `stem` and `original`, so the
+        # namespaced form collides and a plain assignment drops one. That lost 13 of
+        # 47,653 nodes on a real estate while `namespaced` reported 367 kept apart -
+        # a counter overstating success, which is the reassuring direction and the
+        # dangerous one. This is the very collision the namespacing exists to
+        # resolve, reintroduced by the step that resolves it.
+        if node["id"] in nodes:
+            counters["disambiguated"] += 1
+            base, suffix = node["id"], 2
+            while f"{base}_{suffix}" in nodes:
+                suffix += 1
+            node["id"] = f"{base}_{suffix}"
         final_for[identity] = node["id"]
         nodes[node["id"]] = node
 
@@ -361,15 +391,31 @@ def _resolve_one(
     return merged
 
 
-def spec_breaches(nodes: dict) -> list[str]:
+def spec_breaches(nodes: dict, chunk_numbers: set[str]) -> list[str]:
     """Ids carrying a chunk-derived suffix, which the spec forbids outright.
 
     Asserted on this stage's OUTPUT. One estate's chunk-file gate enforces the same
     rule at zero tolerance on the input, where the violation cannot occur, and its
     merger emitted 187 ids the gate would have rejected. A check reads one artefact,
     and its silence licenses a claim about that artefact only.
+
+    **Tested against the run's actual chunk numbers, not a digit pattern.** A
+    pattern of `\d{2,}` matched 34 ids on a 361-repo estate that were all family
+    court form codes - `C21`, `C43`, `C51`, `C63`, `C100`, with `C100` alone in 40
+    files - and because this refusal is hard, a false positive is not a warning but
+    total unavailability: the stage could not run on that estate at all.
+
+    Widening the pattern to `\d{4}` would have cleared those 34 and been wrong for
+    the reason it worked: 4-digit padding is one store's convention. `read_chunks`
+    already knows the real numbers, so comparing against that set is exact in both
+    directions and needs no heuristic.
     """
-    return sorted(nid for nid in nodes if CHUNK_SUFFIX.search(nid))
+    breaches = []
+    for nid in nodes:
+        found = CHUNK_SUFFIX.search(nid)
+        if found and found.group(1) in chunk_numbers:
+            breaches.append(nid)
+    return sorted(breaches)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -391,13 +437,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     nodes, remap, counters = merge_nodes(chunks)
-    counters["consolidated"] = 0
-    counters["fragmented_left"] = 0
     if not arguments.no_consolidate:
         consolidate(nodes, remap, counters)
     edges, edge_counters = resolve_edges(chunks, nodes, remap)
 
-    breaches = spec_breaches(nodes)
+    breaches = spec_breaches(
+        nodes, {name.split("_")[-1].removesuffix(".json") for name, _p in chunks}
+    )
     if breaches:
         print(
             f"REFUSING to write: {len(breaches)} merged id(s) carry a chunk-derived suffix, "
@@ -424,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
         f"-> {destination}\n"
         f"  merged      {counters['merged']:>6}  same id and label across chunks: one entity\n"
         f"  namespaced  {counters['namespaced']:>6}  same id, different label: kept apart\n"
+        f"  disambig.   {counters['disambiguated']:>6}  namespaced ids that still collided\n"
         f"  consolidated{counters['consolidated']:>6}  global identifiers collapsed to one id\n"
         f"  fragmented  {counters['fragmented_left']:>6}  label spans several ids, left alone\n"
         f"  recovered   {edge_counters['recovered']:>6}  endpoints resolved in another chunk\n"
