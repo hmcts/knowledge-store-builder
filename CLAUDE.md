@@ -23,8 +23,18 @@ the traps that are not visible in the code, and cost hours when rediscovered.
   is reviewing in between:
   - Run the gates the way CI does. `ruff check` and `ruff format --check` are
     different commands, and passing one is not passing the other.
-  - Chain the push on the checks, in the same command. Verifying separately and
-    pushing separately is not a gate.
+  - Chain the push on the checks with `&&`, in the same command. Verifying
+    separately and pushing separately is not a gate — and **`set -e` is not a
+    gate either**: in an agent shell `set -e; false; echo REACHED` prints
+    `REACHED`, so a batch that opens with `set -e` and ends in `git push` will
+    push past a failed check. Five bad pushes here began that way.
+  - **Never pipe a checker through `tail`, `head`, `grep` or `sed` inside a
+    gating chain.** A pipeline's exit status is the last command's, so
+    `pytest | tail -1` succeeds whatever pytest did. This is the most repeated
+    mistake in this repository's history: it has masked a failing suite, a
+    pyright run carrying 24 errors, and `node`'s exit code read as `grep`'s three
+    times in one sitting. Redirect to a file and read it, or check
+    `${PIPESTATUS[0]}`.
   - Mutation-test a new gate: remove the behaviour it describes, confirm it fails,
     and confirm only it fails. A gate that cannot fail is decoration.
   - Assert that an automated edit matched. A find-and-replace that silently matches
@@ -32,6 +42,14 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 
   Stop and ask when the next step is a decision rather than a step: a release, an
   output change consumers will see, or anything that rewrites published history.
+
+- **Stage explicit paths. Never `git add -A` or `git add .`** The working tree
+  here routinely holds three things that must not be committed together:
+  generated pipeline output, another session's in-progress edits, and scratch
+  files. `-A` cannot tell them apart, and it has swept all three into commits on
+  this repository — including a scratch artefact that became the repo's only
+  broken link and survived a later cleanup. Read `git status --short`, list the
+  paths, then confirm with `git show --stat HEAD` that nothing rode along.
 
 ## Testing
 
@@ -109,6 +127,21 @@ How that looks in this codebase:
   shown to fail against the broken code before it is trusted — check out
   or temporarily revert the fix and watch it fail. A pin that has never
   failed is unverified protection.
+- **A green suite means the code runs, not that it works.** Every stage that has
+  shipped, or nearly shipped, doing nothing here had passing tests at the time: a
+  `repositories.txt` parser that read the clone-URL field, because every fixture
+  used bare names; a stage whose 23 tests passed against a stubbed HTTP boundary
+  and which had never once authenticated against a real one. After the suite is
+  green, do one end-to-end run on real inputs and **read the output rather than
+  the exit code**. Where a fixture stands in for a file format something else
+  owns, add one carrying the real format verbatim.
+- **Name every input file, and reconcile what landed against what you sent.** A
+  glob in a merge command picked up a previous run's outputs and would have
+  rewritten 397 clusters with prose describing different data — mechanically
+  valid, entirely wrong. The merge reported "331 merged" and looked healthy. A
+  tool's own count is not verification: compare the result against the inputs you
+  named. For a replace-in-place operation assert the total is *unchanged*, because
+  a revision must never add.
 - **Mutation check before finishing:** mentally flip a branch, drop a side
   effect, return the default — at least one test should fail for each
   realistic mutation. A mutation nothing catches is unprotected behaviour
@@ -342,6 +375,11 @@ reports the same context for the ignored paths.
 
 ## Releases
 
+**Cutting a release is the maintainer's call, not a contributor's.** Publishing
+moves a feed other repositories consume, so finish at a merged PR on `main` and
+say what the release would contain. Do not tag, push tags, or dispatch the
+publish workflow.
+
 **The version is the git tag** (hatch-vcs): creating a GitHub release is the
 whole bump — no file mentions a version, so there is nothing to keep in step.
 Pushes to main publish drafts as `<next>.devN+g<sha>` automatically, and
@@ -352,6 +390,19 @@ releases can no longer desync the lockfile.
 
 ## SonarCloud, learned the hard way
 
+- **A green quality gate does not mean no issues.** The gate tolerates open
+  issues, so `gh pr checks` can be entirely green while criticals sit unread.
+  Query the issues API after every push, and poll until the analysis for the
+  current head SHA has concluded — a stale one reports the pre-fix number:
+
+  ```bash
+  curl -sS "https://sonarcloud.io/api/issues/search?componentKeys=<key>&pullRequest=<n>&resolved=false"
+  ```
+
+- **Two lint metrics are not one gate.** eslint measures cyclomatic complexity
+  and Sonar measures cognitive complexity; satisfying one says nothing about the
+  other. `complexipy` is closer but is not a proxy either — it has read both above
+  and below Sonar on this codebase, once by 9 points.
 - Automatic analysis **ignores `sonar-project.properties` entirely** —
   exclusions and issue-ignore rules alike. Scope exclusions are a UI action.
 - `NOSONAR` comments work for the Python analyser and are ignored by the
