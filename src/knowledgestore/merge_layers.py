@@ -128,26 +128,28 @@ def namespace_by_repository(
     """Prefix AST ids with their repository, and rewrite edges through the remap.
 
     graphify derives AST ids from the file path but drops the leading
-    `repositories/<repo>/` segment for declarations *inside* a file. So a Terraform
-    variable declared in `<repo>/infrastructure/variables.tf` gets the id
-    `infrastructure_var_product` in **every** repository that has one.
+    `repositories/<repo>/` segment for declarations *inside* a file. So a variable
+    declared at the same relative path in two repositories - say
+    `<repo>/infra/variables.tf` - gets one id in **both**, and in every other
+    repository that follows the same layout.
 
-    Measured on one estate's filtered AST layer of 24,374 node records: 586 ids
-    used more than once covering 5,607 records, 528 of them spanning more than one
-    repository. `infrastructure_var_product` appeared 114 times across 114
-    repositories.
+    Measured on one estate: of M distinct AST ids, several hundred were used more
+    than once, covering thousands of node records, and most of those spanned more
+    than one repository. The worst single id appeared once per repository across
+    most of the estate.
 
-    It is caused by the estate being *well run*. Every service's `/infrastructure`
-    directory declares the same variables because that is the house convention, so
-    **the more consistent an organisation's IaC conventions, the worse the
-    collision**, and it scales with repository count.
+    It is caused by the estate being *well run*. Where every service declares the
+    same variables in the same place because that is the house convention, **the
+    more consistent an organisation's conventions, the worse the collision** - and
+    it scales with repository count rather than with corpus size.
 
     The consequence is not a duplicate. A build that dedupes by id keeps one record
-    and re-points every edge at it, so `var.product` becomes a single node adjacent
-    to 114 unrelated services - immediately the highest-degree node in the graph.
-    Centrality and community detection are both degree-driven, so community
-    detection then reports 114 independent services as one tightly-coupled cluster,
-    and topics, summaries and the explorer are all generated downstream of clusters.
+    and re-points every edge at it, so one shared declaration becomes a single node
+    adjacent to every service that declares it - immediately the highest-degree
+    node in the graph. Centrality and community detection are both degree-driven,
+    so community detection then reports those independent services as one
+    tightly-coupled cluster, and topics, summaries and the explorer are all
+    generated downstream of clusters.
 
     **The two conditions that make this exact**, stated because they are what
     licenses the rewrite and they do not hold for every layer:

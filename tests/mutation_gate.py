@@ -192,8 +192,8 @@ MUTATIONS = (
         '        new_id = f"{repository}::{node_id}"',
         "        new_id = node_id",
         "#115: graphify drops the repositories/<repo>/ segment for declarations "
-        "inside a file, so one estate had `infrastructure_var_product` in 114 "
-        "repositories - a dedupe then makes it a single node adjacent to 114 "
+        "inside a file, so one estate had one shared id across most of its "
+        "repositories - a dedupe then makes it a single node adjacent to many "
         "unrelated services and the highest-degree node in the graph",
     ),
     Mutation(

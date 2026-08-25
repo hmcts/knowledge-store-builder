@@ -263,13 +263,13 @@ class NamespaceByRepositoryTest(unittest.TestCase):
 
     graphify drops the `repositories/<repo>/` segment for declarations inside a
     file, so a Terraform variable declared in `<repo>/infrastructure/variables.tf`
-    gets the same id in every repository that has one. On one estate
-    `infrastructure_var_product` appeared 114 times across 114 repositories.
+    gets the same id in every repository that has one. On one estate the worst such id
+    appeared once per repository across most of the estate.
 
     The consequence is not a duplicate: a build that dedupes by id keeps one record
-    and re-points every edge at it, so that node becomes adjacent to 114 unrelated
-    services and is immediately the highest-degree node in the graph. Community
-    detection then reports 114 independent services as one cluster, and topics,
+    and re-points every edge at it, so that node becomes adjacent to every service
+    that declares it and is immediately the highest-degree node in the graph. Community
+    detection then reports those independent services as one cluster, and topics,
     summaries and the explorer are all generated downstream of clusters.
     """
 
@@ -285,14 +285,14 @@ class NamespaceByRepositoryTest(unittest.TestCase):
         one id, many repositories, fused into a false hub by any dedupe."""
         nodes = [
             _node(
-                "infrastructure_var_product",
+                "infra_var_shared",
                 "var.product",
-                source_file="repositories/service-one/infrastructure/variables.tf",
+                source_file="repositories/service-one/infra/variables.tf",
             ),
             _node(
-                "infrastructure_var_product",
+                "infra_var_shared",
                 "var.product",
-                source_file="repositories/service-two/infrastructure/variables.tf",
+                source_file="repositories/service-two/infra/variables.tf",
             ),
         ]
         counters = self._counters()
@@ -301,7 +301,7 @@ class NamespaceByRepositoryTest(unittest.TestCase):
 
         self.assertEqual(
             {n["id"] for n in renamed},
-            {"service-one::infrastructure_var_product", "service-two::infrastructure_var_product"},
+            {"service-one::infra_var_shared", "service-two::infra_var_shared"},
         )
         self.assertEqual(counters["ast_namespaced"], 2)
 
@@ -313,14 +313,14 @@ class NamespaceByRepositoryTest(unittest.TestCase):
         """
         nodes = [
             _node(
-                "infrastructure_var_product",
+                "infra_var_shared",
                 "var.product",
-                source_file="repositories/service-one/infrastructure/variables.tf",
+                source_file="repositories/service-one/infra/variables.tf",
             ),
             _node(
-                "infrastructure_var_product",
+                "infra_var_shared",
                 "var.product",
-                source_file="repositories/service-two/infrastructure/variables.tf",
+                source_file="repositories/service-two/infra/variables.tf",
             ),
         ]
         self.assertEqual(nodes[0]["id"], nodes[1]["id"])
