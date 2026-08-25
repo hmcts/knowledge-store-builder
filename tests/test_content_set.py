@@ -144,10 +144,10 @@ class NoiseAttributionTest(unittest.TestCase):
         """Break it catches: attributing a file to its own parent directory.
 
         Walking up from the file rather than down from the repository splits these
-        four pipeline artefacts across `graphify-out/cache/ast` and `graphify-out`
-        - and on a real estate across thousands of content-hash
-        directories, which turns the single dominant noise source into thousands of
-        one-file rows nobody can read.
+        four pipeline artefacts across `graphify-out/cache/ast` and `graphify-out`,
+        and on a real estate across thousands of content-hash directories - which
+        turns the single dominant noise source into thousands of one-file rows
+        nobody can read.
         """
         # Four files by hand: three under alpha's graphify-out, one under beta's.
         self.assertEqual(self.roots()["graphify-out"], (4, 2))
@@ -368,17 +368,18 @@ class StageTest(SettingsIsolated):
         Both files are committed in consumer repositories, so non-determinism shows
         up as a whole-file diff on a build that changed nothing.
         """
+
+        def artefacts() -> tuple[bytes, bytes]:
+            return (
+                config.CONTENT_FILES_PATH.read_bytes(),
+                config.CONTENT_SET_PATH.read_bytes(),
+            )
+
         self.build_a_store()
         self.assertEqual(run()[0], 0)
-        first = (
-            config.CONTENT_FILES_PATH.read_bytes(),
-            config.CONTENT_SET_PATH.read_bytes(),
-        )
+        first_run = artefacts()
         self.assertEqual(run()[0], 0)
-        self.assertEqual(
-            (config.CONTENT_FILES_PATH.read_bytes(), config.CONTENT_SET_PATH.read_bytes()),
-            first,
-        )
+        self.assertEqual(artefacts(), first_run)
 
     def test_it_names_the_dominant_noise_directory_and_reconciles_the_tally(self):
         """Break it catches: printing bucket counts without their total.
