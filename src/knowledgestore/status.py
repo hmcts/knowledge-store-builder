@@ -20,6 +20,7 @@ import gzip
 import re
 import shutil
 import subprocess
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -462,7 +463,13 @@ def absolute_paths_at_rest(run=run_git) -> dict:
     for name in tracked:
         try:
             found, read = scan_file(config.ROOT / name)
-        except (OSError, EOFError, gzip.BadGzipFile):
+        # Three unrelated hierarchies, and each has to be here. `gzip.BadGzipFile`
+        # needs no mention because it is an OSError; a *truncated* archive raises
+        # EOFError and a corrupt deflate body raises `zlib.error`, and neither is.
+        # Measured, not reasoned about: a valid gzip header over random bytes
+        # raises `zlib.error`, which would have taken a stage that must never fail
+        # down over one bad file.
+        except (OSError, EOFError, zlib.error):
             scan["unreadable"].append(name)
             continue
         scan["files"] += 1

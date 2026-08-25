@@ -17,6 +17,7 @@ neighbouring quantity and gets switched off:
 - `/etc/hosts` and `/api/v1/things` reported as findings, which is "every absolute
   path" rather than "every path this store wrote absolute"
 - a report of "none found" over files it never opened
+- a corrupt archive ending the run, in a stage that must never fail
 
 Every fixture here is a real git repository with real `git add`, because the thing being
 scoped is what git considers tracked. The only stub is the git seam itself, and only in
@@ -75,6 +76,13 @@ class StoreFixture(SettingsIsolated):
         self.track(name)
         return path
 
+    def write_bytes(self, name: str, data: bytes) -> Path:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        self.track(name)
+        return path
+
     def track(self, name: str) -> None:
         subprocess.run(
             ["git", "-C", str(self.root), "add", "--", name],
@@ -82,9 +90,6 @@ class StoreFixture(SettingsIsolated):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-
-    def scan(self) -> dict:
-        return status.absolute_paths_at_rest()
 
 
 class WhatCounts(StoreFixture):
@@ -95,7 +100,7 @@ class WhatCounts(StoreFixture):
             "graphify-out/.graphify_chunk_plan.json",
             '{"0001": ["%s/repositories/infra/main.tf"]}' % self.root,
         )
-        scan = self.scan()
+        scan = status.absolute_paths_at_rest()
         self.assertEqual(scan["findings"], {"graphify-out/.graphify_chunk_plan.json": 1})
         self.assertEqual(scan["files"], 1, "the scan must say what it actually read")
         self.assertGreater(scan["characters"], 0, "a scan that read nothing found nothing")
@@ -105,13 +110,15 @@ class WhatCounts(StoreFixture):
         current root: a path written on the build machine no longer starts with this
         store's root, and it is exactly the one that has already gone wrong."""
         self.write("knowledge/inventory.json", '{"files": ["%s"]}' % FOREIGN)
-        self.assertEqual(self.scan()["findings"], {"knowledge/inventory.json": 1})
+        self.assertEqual(
+            status.absolute_paths_at_rest()["findings"], {"knowledge/inventory.json": 1}
+        )
 
     def test_a_relative_path_is_not_a_finding(self):
         """The compliant form. If this failed, every correctly-written store would be
         reported and the check would be turned off on first contact."""
         self.write("knowledge/inventory.json", '{"files": ["repositories/infra/main.tf"]}')
-        self.assertEqual(self.scan()["findings"], {})
+        self.assertEqual(status.absolute_paths_at_rest()["findings"], {})
 
     def test_an_absolute_path_outside_the_store_is_not_a_finding(self):
         """The quantity, not a neighbour of it. `/etc/hosts` and an API route are
@@ -121,20 +128,20 @@ class WhatCounts(StoreFixture):
             "docs/notes.md",
             "reads /etc/hosts and posts to /api/v1/things via /usr/local/bin/tool\n",
         )
-        self.assertEqual(self.scan()["findings"], {})
+        self.assertEqual(status.absolute_paths_at_rest()["findings"], {})
 
     def test_a_url_is_not_a_finding(self):
         """`https://host/repositories/x/y` contains the marker `store_paths` falls back
         to, so a check reading the marker without the lookbehind reports every link in
         the store's prose."""
         self.write("docs/notes.md", "see https://example.invalid/repositories/infra/main.tf\n")
-        self.assertEqual(self.scan()["findings"], {})
+        self.assertEqual(status.absolute_paths_at_rest()["findings"], {})
 
     def test_a_glob_pattern_is_not_a_finding(self):
         """Config and docs are full of `**/*.py`. Matching `*` as a path segment turns
         every glob in the store into a finding."""
         self.write("docs/notes.md", "the glob is **/*.py and src/**/*.ts\n")
-        self.assertEqual(self.scan()["findings"], {})
+        self.assertEqual(status.absolute_paths_at_rest()["findings"], {})
 
 
 class WhatIsRead(StoreFixture):
@@ -143,7 +150,9 @@ class WhatIsRead(StoreFixture):
         would report a clean store while the archive it ships is full of them - the
         exact shape of the defect that motivated the rule."""
         self.write_gz("knowledge/intent/inventory.json.gz", '{"files": ["%s"]}' % FOREIGN)
-        self.assertEqual(self.scan()["findings"], {"knowledge/intent/inventory.json.gz": 1})
+        self.assertEqual(
+            status.absolute_paths_at_rest()["findings"], {"knowledge/intent/inventory.json.gz": 1}
+        )
 
     def test_a_path_straddling_a_read_block_boundary_is_counted_once(self):
         """The scan streams, so a path can be cut in half by a block boundary. Losing it
@@ -152,7 +161,9 @@ class WhatIsRead(StoreFixture):
         of 2 is derived by hand from that, so both failures are visible."""
         padding = " " * (status.READ_BLOCK - 10 - len(FOREIGN))
         self.write("knowledge/inventory.json", FOREIGN + padding + FOREIGN + "\n")
-        self.assertEqual(self.scan()["findings"], {"knowledge/inventory.json": 2})
+        self.assertEqual(
+            status.absolute_paths_at_rest()["findings"], {"knowledge/inventory.json": 2}
+        )
 
     def test_a_path_spanning_the_hold_back_point_is_not_lost(self):
         """The defect this scan shipped in its own first draft, found by reconciling a
@@ -167,14 +178,32 @@ class WhatIsRead(StoreFixture):
         head = " " * (start - len(FOREIGN))
         tail = " " * (status.READ_BLOCK + 100 - start - len(FOREIGN))
         self.write("knowledge/inventory.json", FOREIGN + head + FOREIGN + tail + "\n")
-        self.assertEqual(self.scan()["findings"], {"knowledge/inventory.json": 2})
+        self.assertEqual(
+            status.absolute_paths_at_rest()["findings"], {"knowledge/inventory.json": 2}
+        )
+
+    def test_a_corrupt_archive_does_not_take_the_stage_down(self):
+        """`status` must never fail, and a corrupt `.gz` is three unrelated exceptions
+        rather than one. A valid gzip header over random bytes raises `zlib.error`,
+        which is not an OSError and not an EOFError - so catching the gzip errors alone
+        leaves one bad tracked file able to end the whole run."""
+        good = gzip.compress(b'{"files": ["%s"]}' % FOREIGN.encode())
+        header, body = good[:10], good[10:]
+        self.write_bytes("knowledge/random-body.json.gz", header + bytes(len(body)))
+        self.write_bytes("knowledge/truncated.json.gz", good[: len(good) // 2])
+        self.write_gz("knowledge/ok.json.gz", '{"files": ["%s"]}' % FOREIGN)
+        scan = status.absolute_paths_at_rest()
+        self.assertEqual(
+            scan["unreadable"], ["knowledge/random-body.json.gz", "knowledge/truncated.json.gz"]
+        )
+        self.assertEqual(scan["findings"], {"knowledge/ok.json.gz": 1})
 
     def test_an_untracked_file_is_not_read(self):
         """Untracked build intermediates are regenerated on the next run and their shape
         is nobody's business. Reporting them makes the check unactionable."""
         self.write("knowledge/inventory.json", "clean\n")
         self.write("graphify-out/scratch.json", '{"files": ["%s"]}' % FOREIGN, track=False)
-        scan = self.scan()
+        scan = status.absolute_paths_at_rest()
         self.assertEqual(scan["findings"], {})
         self.assertEqual(scan["listed"], 1, "only the tracked file should have been listed")
 
@@ -183,7 +212,7 @@ class WhatIsRead(StoreFixture):
         as read would let a store whose artefacts are all unreadable report clean."""
         self.write_gz("knowledge/ok.json.gz", '{"files": ["%s"]}' % FOREIGN)
         self.write("knowledge/broken.json.gz", "this is not gzip at all\n")
-        scan = self.scan()
+        scan = status.absolute_paths_at_rest()
         self.assertEqual(scan["unreadable"], ["knowledge/broken.json.gz"])
         self.assertEqual(scan["files"], 1)
         self.assertEqual(scan["findings"], {"knowledge/ok.json.gz": 1})
@@ -197,7 +226,7 @@ class TheIntendedException(StoreFixture):
         self.write(
             "graphify-out/.graphify_uncached.txt", f"{self.root}/repositories/infra/main.tf\n"
         )
-        scan = self.scan()
+        scan = status.absolute_paths_at_rest()
         self.assertEqual(scan["findings"], {})
         self.assertEqual(scan["in_flight"], {"graphify-out/.graphify_uncached.txt": 1})
 
