@@ -106,11 +106,10 @@ Three axes - `file` (the node's `source_file`), `kind` (its declaration kind) an
 `repo` (the repository it came from, falling back to the `repositories/<name>/`
 segment of the graph file's own path, because `merge-graphs` is what adds the
 `repo` attribute and the layer as extracted has none) - each with a `not-` form.
-A node is kept
-when it matches at least one rule on **every axis the cut constrains** and no
-`not-` rule. So rules on one axis widen a cut and rules on a second narrow it,
-which is what lets `file *.java` + `not-kind method` express "Java declarations
-without the callables".
+A node is kept when it matches at least one rule on **every axis the cut
+constrains** and no `not-` rule. So rules on one axis widen a cut and rules on a
+second narrow it, which is what lets `file *.java` + `not-kind method` express
+"Java declarations without the callables".
 
 Globs are `fnmatch`, where `*` crosses directory separators: `*.tf` already means
 "any `.tf` at any depth". `**` is refused rather than silently read as one `*`,
