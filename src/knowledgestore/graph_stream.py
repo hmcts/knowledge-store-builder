@@ -59,13 +59,11 @@ from __future__ import annotations
 import contextlib
 import gzip
 import json
-import re
 from collections.abc import Iterator
 from pathlib import Path
 
 # The key at a structural position, not the bare word: a node label can contain
 # `"nodes"`, and starting the scan there would stream the wrong array.
-_ARRAY_AT = '"{key}"\\s*:\\s*\\['
 
 # Sets peak memory. See the sweep above before changing it.
 READ_SIZE = 1 << 18
@@ -88,23 +86,107 @@ def _skip_gaps(buffer: str, pos: int) -> int:
     return pos
 
 
-def _seek_array(handle, key: str) -> tuple[str, int] | None:
-    """Buffer and offset just past `"<key>": [`, or None if there is no such array.
+class _TopLevelKeyScanner:
+    """Finds `"<key>": [` at nesting depth 1, streaming, one character at a time.
 
-    The tail is kept when trimming, because the pattern can straddle a read.
+    Depth-aware on purpose. The previous implementation regex-matched the pattern
+    anywhere in the file, so it locked onto the first occurrence in byte order at
+    any depth - and a merged graph carrying hyperedges has
+    `graph.hyperedges[].nodes`, a list of id *strings*, before its top-level node
+    array. The iterator then yielded strings, every consumer that type-checks the
+    item saw nothing, and `graph_counts` returned `(0, 0)` for a fully clustered
+    graph.
+
+    Silently, which is what made it expensive: two guards built on those counts read
+    "the two files agree" on exactly the graphs a real estate has. One was a refusal
+    protecting against an irreversible overwrite, and a data-loss guard that cannot
+    fire is worse than none because it is believed.
+
+    A graph with no hyperedges has exactly one `"nodes"` key, so the defect is
+    invisible in any fixture without them - which is why the tests passed. The
+    fixture that would have caught it is the one nobody writes, because hyperedges
+    look like an unrelated feature.
+
+    `iter_array`'s docstring already promised "the named top-level array". This makes
+    the code do what it said.
     """
-    pattern = re.compile(_ARRAY_AT.format(key=re.escape(key)))
-    buffer = ""
+
+    def __init__(self, key: str):
+        self.key = key
+        self.depth = 0
+        self.in_string = False
+        self.escaped = False
+        self.pending_key: str | None = None
+        self.token_start = -1
+        self.after_colon = False
+
+    def _end_string(self, buffer: str, pos: int) -> None:
+        """Remember a completed string as a candidate key.
+
+        **The single depth test.** An earlier version repeated it here, at the
+        capture start and again at the bracket; every one-line mutation of any of
+        the three survived, because the other two still blocked. Three guards that
+        hide each other cannot be shown to matter, so there is one.
+        """
+        self.in_string = False
+        if self.depth == 1 and self.token_start >= 0:
+            self.pending_key = buffer[self.token_start : pos]
+        self.token_start = -1
+
+    def _in_string_step(self, buffer: str, pos: int) -> None:
+        char = buffer[pos]
+        if self.escaped:
+            self.escaped = False
+        elif char == "\\":
+            self.escaped = True
+        elif char == '"':
+            self._end_string(buffer, pos)
+
+    def feed(self, buffer: str, pos: int) -> tuple[int | None, int]:
+        """(offset just past the opening bracket, or None; the new scan position)."""
+        while pos < len(buffer):
+            char = buffer[pos]
+            if self.in_string:
+                self._in_string_step(buffer, pos)
+                pos += 1
+                continue
+            if char == '"':
+                self.in_string = True
+                self.token_start = pos + 1
+            elif char == ":":
+                self.after_colon = True
+            elif char in "{[":
+                # No depth test here: `pending_key` is only set at depth 1 and is
+                # cleared on entering any container, so a match implies depth 1.
+                if char == "[" and self.after_colon and self.pending_key == self.key:
+                    return pos + 1, pos + 1
+                self.depth += 1
+                self.pending_key, self.after_colon = None, False
+            elif char in "}]":
+                self.depth -= 1
+                self.pending_key, self.after_colon = None, False
+            elif char == ",":
+                self.pending_key, self.after_colon = None, False
+            pos += 1
+        return None, pos
+
+
+def _seek_array(handle, key: str) -> tuple[str, int] | None:
+    """Buffer and offset just past the top-level `"<key>": [`, or None if absent."""
+    scanner = _TopLevelKeyScanner(key)
+    buffer, pos = "", 0
     while True:
-        found = pattern.search(buffer)
-        if found:
-            return buffer, found.end()
+        found, pos = scanner.feed(buffer, pos)
+        if found is not None:
+            return buffer, found
         chunk = handle.read(READ_SIZE)
         if not chunk:
             return None
-        buffer += chunk
-        if len(buffer) > 2 * READ_SIZE:
-            buffer = buffer[-64:]
+        # Trimming must not cut a key mid-capture, so keep from its start.
+        keep = scanner.token_start if scanner.token_start >= 0 else pos
+        buffer, pos = buffer[keep:] + chunk, pos - keep
+        if scanner.token_start >= 0:
+            scanner.token_start = 0
 
 
 def _iter_objects(handle, buffer: str, pos: int, source: str) -> Iterator[dict]:
