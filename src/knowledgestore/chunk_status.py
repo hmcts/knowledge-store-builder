@@ -107,7 +107,11 @@ def log_tokens(paths: list[Path]) -> list[str]:
     """
     tokens: list[str] = []
     for path in paths:
-        for raw in path.read_text(encoding="utf-8").split():
+        # Sonar S8707: reading a caller-supplied path is this maintainer CLI's
+        # purpose - the operator names the log they dispatched from - and it runs
+        # offline against a local clone with no privilege boundary to cross. Same
+        # treatment as `summaries merge <written.json>`, for the same reason.
+        for raw in path.read_text(encoding="utf-8").split():  # NOSONAR(S8707)
             token = raw.strip(",").strip()
             if token:
                 tokens.append(token)
