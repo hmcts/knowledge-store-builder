@@ -525,6 +525,10 @@ class CliTest(SettingsIsolated):
                 "deepdive",
                 "explorer",
                 "status",
+                # a diagnostic, not a build step: it reads the per-repository
+                # graphs before they are merged, which is the only point at
+                # which a dangling endpoint still exists to be counted
+                "dangling-endpoints",
                 # not part of a build: gates a store runs in CI
                 "check-install-docs",
                 "check-corpus",
