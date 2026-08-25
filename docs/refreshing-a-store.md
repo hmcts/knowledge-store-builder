@@ -271,6 +271,40 @@ release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer
 skills.
 
+### Deciding whether a local check can go
+
+A release often absorbs something a store had built for itself, and the obvious
+move is to delete the local copy. Do that only after comparing the **failure
+mode**, not the feature. Two checks that detect the same condition and disagree
+about whether it stops the build are not the same check.
+
+| The library now… | Do this |
+|---|---|
+| detects it and **refuses** | delete the local guard |
+| detects it and **reports** | keep it, and record the divergence |
+| detects a **narrower** case | keep it, and note what is still uncovered |
+
+Reporting is usually the right default for the library, because refusing would
+break pipelines it does not own. That is exactly why it may be the wrong default
+for one store: **a line on stderr in a run that exits 0 is indistinguishable from
+no line at all**, so a check that reported where yours refused has quietly stopped
+being a gate.
+
+Where you keep a local check, write the divergence into the check itself rather
+than into a note beside it. The person who deletes it later will be reading the
+code, and "the library covers this now" is a reasonable-looking conclusion that
+the code is the only place to contradict.
+
+Two failures, both reported by store operators:
+
+- **Swapping a refusing check for a reporting one.** It costs nothing on the day
+  and everything on the day it matters.
+- **Deleting a set of checks because the release notes mention the area.** One
+  operator was told two local checks were now redundant; only one was, because
+  the other detected a condition the library still does not detect at all. Verify
+  each one against the library's actual behaviour, not against a summary of it -
+  including a summary from whoever maintains the library.
+
 ## Troubleshooting
 
 | Symptom | Action |
