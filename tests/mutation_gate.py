@@ -205,6 +205,24 @@ MUTATIONS = (
         "pointed at - indistinguishable from a graph with no edges",
     ),
     Mutation(
+        "estate check stops matching name segments",
+        "build_community_summaries.py",
+        "            if len(normalised) >= MIN_SEGMENT_MATCH and normalised in segments:",
+        "            if False:",
+        "#179: a whole-label match reported `NgRx` absent while the estate held it "
+        "under eight scoped package names across 228 labels - a check that fires on "
+        "an entire ecosystem's naming convention gets switched off",
+    ),
+    Mutation(
+        "the segment floor is removed",
+        "build_community_summaries.py",
+        "MIN_SEGMENT_MATCH = 3",
+        "MIN_SEGMENT_MATCH = 1",
+        "without a floor the looser match becomes a substring match in effect, and "
+        "a two-character segment would corroborate a two-character claim - the "
+        "false-negative direction, which fails reassuringly",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -256,9 +274,11 @@ MUTATIONS = (
     Mutation(
         "estate pass never narrows anything",
         "build_community_summaries.py",
-        "missing = {term for term in terms if _normalise(term) not in estate}",
-        "missing = set(terms)",
-        "the wider check exists to narrow; a pass-through would look identical",
+        "            if normalised in estate:\n                continue",
+        "            if True:\n                continue",
+        "the wider check exists to narrow; a pass-through would look identical. "
+        "Retargeted when #179 replaced the comprehension with an explicit loop - "
+        "the gate refused to run rather than quietly stop testing this",
     ),
     Mutation(
         "partitioner check unwired",
