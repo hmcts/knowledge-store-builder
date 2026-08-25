@@ -509,6 +509,11 @@ class CliTest(SettingsIsolated):
                 "fetch-tickets",
                 "chunk-plan",
                 "merge-chunks",
+                # before the layers are merged, because a content cut decides
+                # what the merge is given - and it reads the per-repository
+                # layer as extracted, which is the only place that layer can
+                # still be measured on its own terms (#116)
+                "size-cuts",
                 # the third fan-out seam: merges the AST and semantic layers
                 # without re-pointing edges at unrelated nodes (#129)
                 "merge-layers",

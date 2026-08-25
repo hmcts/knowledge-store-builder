@@ -194,6 +194,11 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
 
 Reconcile the number of graphs produced with `config/repositories.txt` before
 merging. A shell loop that skipped repositories can still exit successfully.
+`knowledgestore size-cuts` does that reconciliation for you and sizes the layer
+while it is still per-repository — see
+[sizing the AST layer](building-a-knowledge-store.md#sizing-the-ast-layer-before-you-commit-to-it),
+which matters most on an estate mixing symbol-level languages with
+infrastructure formats.
 
 Do not run graphify at the store root or pass `repositories/<name>` from the
 store root. The first route sees a near-empty ignored tree; the second writes
