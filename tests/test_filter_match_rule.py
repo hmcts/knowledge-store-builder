@@ -48,7 +48,7 @@ class MatchRuleTest(SettingsIsolated):
         """So it generalises the existing rule rather than sitting beside it."""
         by_glob = _filters("match cpp-ui-*\n")
         by_prefix = _filters("prefix cpp-ui-\n")
-        for name in ("cpp-ui-hearing", "cpp-ui-e2e", "cpp-context-hearing", "other"):
+        for name in ("cpp-ui-hearing", "cpp-ui-example", "cpp-context-hearing", "other"):
             with self.subTest(name=name):
                 self.assertEqual(by_glob.matches(name), by_prefix.matches(name))
 
