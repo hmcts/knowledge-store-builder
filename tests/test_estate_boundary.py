@@ -190,6 +190,21 @@ class ManifestTest(BoundaryTestCase):
         self.assertIn("`payments.api`", written)
         self.assertIn("2026-01-15 (refreshed by hand)", written)
 
+    def test_a_snapshot_or_alias_with_no_ruling_still_reaches_the_manifest(self):
+        """Break: key the table on `rulings` alone, which is how it was first written.
+        A repository declared only by a snapshot date, or only by an alias, then
+        parses cleanly, is counted in the `status` summary line, and is rendered
+        nowhere - declared and unsurfaced, which is the defect the whole section
+        exists to remove, one level in."""
+        self.declare(
+            "snapshot dated-only-service 2026-03-02\nalias other.name aliased-only-service\n"
+        )
+        ctx.build_manifest([])
+        written = config.MANIFEST_PATH.read_text(encoding="utf-8")
+        self.assertIn("| `dated-only-service` | not ruled |", written)
+        self.assertIn("2026-03-02 (refreshed by hand)", written)
+        self.assertIn("| `aliased-only-service` | not ruled | `other.name` |", written)
+
     def test_the_manifest_says_when_no_boundary_is_declared(self):
         """Break: render nothing when the file is absent. A reader then cannot tell a
         repository that is outside the estate by decision from one nobody has looked

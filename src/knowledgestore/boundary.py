@@ -283,30 +283,25 @@ def manifest_section(declared: Boundary | None) -> list[str]:
             + ". Code held there is absent from this store without appearing as a gap.",
             "",
         ]
-    if declared.rulings:
+    # Every repository the declaration mentions at all, not only the ruled ones.
+    # Keying the table on rulings alone left a repository declared solely by a
+    # snapshot date, or solely by an alias, parsed and counted in `status` and
+    # rendered nowhere - the same declared-and-unsurfaced defect this section is
+    # here to remove, one level in.
+    subjects = sorted({*declared.rulings, *declared.snapshots, *declared.aliases.values()})
+    if subjects:
         lines += [
             "| Repository | Ruling | Also known as | Off-host copy taken |",
             "|---|---|---|---|",
         ]
-        for name in sorted(declared.rulings):
+        for name in subjects:
             others = ", ".join(f"`{other}`" for other in declared.names_for(name)) or "-"
             when = declared.snapshots.get(name)
             lines.append(
-                f"| `{name}` | {declared.rulings[name]} | {others} "
+                f"| `{name}` | {declared.rulings.get(name, 'not ruled')} | {others} "
                 f"| {when + ' (refreshed by hand)' if when else '-'} |"
             )
         lines.append("")
-    unruled = sorted(set(declared.aliases.values()) - set(declared.rulings))
-    if unruled:
-        lines += [
-            "Also known by another name: "
-            + "; ".join(
-                f"`{name}` is also " + ", ".join(f"`{o}`" for o in declared.names_for(name))
-                for name in unruled
-            )
-            + ".",
-            "",
-        ]
     return lines + [NO_COMPLETENESS, ""]
 
 

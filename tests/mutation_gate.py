@@ -452,6 +452,15 @@ MUTATIONS = (
         "its hosts and was still hunting services with no locatable repository",
     ),
     Mutation(
+        "declared repository with no ruling vanishes from the manifest",
+        "boundary.py",
+        "    subjects = sorted({*declared.rulings, *declared.snapshots, *declared.aliases.values()})",
+        "    subjects = sorted(declared.rulings)",
+        "written this way first, and found by re-reading the artefact rather than by a "
+        "test: a repository declared only by a snapshot date or only by an alias parsed "
+        "cleanly, was counted in the status summary, and reached no reader at all",
+    ),
+    Mutation(
         "status no longer says the boundary is undeclared",
         "status.py",
         "    _report_boundary(recorded)",
