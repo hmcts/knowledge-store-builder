@@ -17,7 +17,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config, graph_files, io, provenance, record_clustering
+from . import boundary, config, graph_files, io, provenance, record_clustering
 from .build_topic_briefs import read_topics
 
 
@@ -558,6 +558,60 @@ def _report_unsynced(recorded: dict) -> None:
             )
 
 
+def _report_boundary(recorded: dict) -> None:
+    """What the estate says lies outside it, and where that disagrees with disk.
+
+    A store's most dangerous output is a confident negative, and "no evidence of
+    X" is one whenever the reader cannot tell it from "no evidence of X in the
+    repositories this store holds". Nothing said which of the two it was. This
+    reports the declaration if there is one and its absence if there is not,
+    because an undeclared boundary is the case where the reader is most exposed.
+
+    Never raises. `status` never returns non-zero either, so an unparseable
+    declaration is reported as the defect it is rather than taking the stage
+    down - the manifest build is where it stops a store being published.
+    """
+    try:
+        declared = boundary.read()
+    except (OSError, ValueError) as error:
+        print(f"Estate boundary: {_relative(config.BOUNDARY_PATH)} cannot be read - {error}")
+        return
+    if declared is None:
+        print(
+            "Estate boundary: not declared. Every 'no evidence of X' this store reports "
+            "means 'no evidence in the "
+            + boundary.plural(len(recorded), "repository", "repositories")
+            + " provenance records' - write "
+            + _relative(config.BOUNDARY_PATH)
+            + " to say which hosts were searched and to rule the repositories left out."
+        )
+        return
+    print(boundary.summary_line(declared))
+    disagreements = boundary.reconciliation(declared, set(recorded))
+    for key, message in (
+        (
+            "active_absent",
+            "declared active and not held here, so a question about one is answered as "
+            "though it did not exist",
+        ),
+        (
+            "ruled_out_held",
+            "held here and ruled not-used or decommissioned, so the graph carries them "
+            "and answers cite them as current",
+        ),
+        (
+            "alias_absent",
+            "named as the estate side of an alias and not held here, so the alias resolves "
+            "to nothing and a ruling written under the other name lands nowhere",
+        ),
+    ):
+        names = disagreements[key]
+        if names:
+            shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+            counted = boundary.plural(len(names), "repository", "repositories")
+            print(f"Boundary: {counted} {message} - {shown}.")
+
+
 def _report_failed_syncs(recorded: dict) -> None:
     """Repositories whose record survives only because their last sync failed.
 
@@ -914,6 +968,8 @@ def main(argv=None) -> int:
     # Estate completeness first (what is declared but absent), then what was
     # mined from it, then what cannot be parsed or would be counted twice.
     _report_unsynced(recorded)
+
+    _report_boundary(recorded)
 
     _report_failed_syncs(recorded)
 

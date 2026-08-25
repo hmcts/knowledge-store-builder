@@ -96,6 +96,11 @@ GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
 REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
+# What the estate is, what it deliberately excludes, and what it does not claim.
+# Hand-maintained and optional: none of it can be derived, because a ruling on a
+# repository is a decision. Absent means the estate has declared no boundary,
+# which the manifest and `status` both say rather than passing over in silence.
+BOUNDARY_PATH = ROOT / "config" / "estate-boundary.txt"
 # Repositories fetched but never extracted (`fetch` rules). A separate file, not a
 # column, so that nothing which reads the estate manifest can mistake one of these
 # for part of the estate.
@@ -434,6 +439,7 @@ def _recompute_paths() -> None:
     module.update(
         FILTERS_PATH=root / "config" / "repository-filters.txt",
         REPOSITORIES_CONFIG=root / "config" / "repositories.txt",
+        BOUNDARY_PATH=root / "config" / "estate-boundary.txt",
         EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",

@@ -366,6 +366,56 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
+    # The boundary declaration (#92). Its whole purpose is to stop a store
+    # implying a reach it never had, so every way of removing it while the suite
+    # stays green is the defect it exists to prevent - and the two shapes below
+    # are the ones this repository has actually shipped: a check that parses and
+    # is never rendered, and prose that renders while meaning something else.
+    Mutation(
+        "declared boundary never reaches the manifest",
+        "build_knowledge_context.py",
+        "        *boundary.manifest_section(boundary.read()),",
+        "        *[],",
+        "the unwired-check class this library has shipped twice - the parse works, "
+        "the rendering works, and the committed artefact a reader opens says none of "
+        "it, which is indistinguishable from an estate that declared nothing",
+    ),
+    Mutation(
+        "store stops saying it does not claim completeness",
+        "boundary.py",
+        '    return lines + [NO_COMPLETENESS, ""]',
+        "    return lines",
+        "a declaration that reads as `this is all of it` is a new false claim "
+        "replacing the old silent one; the estate that prompted this had enumerated "
+        "its hosts and was still hunting services with no locatable repository",
+    ),
+    Mutation(
+        "status no longer says the boundary is undeclared",
+        "status.py",
+        "    _report_boundary(recorded)",
+        "    pass",
+        "silence is the state every store starts in, so a report that speaks only "
+        "for the configured case never reaches the stores that most need telling "
+        "what their own absences mean",
+    ),
+    Mutation(
+        "off-host name stops resolving to the repository held",
+        "boundary.py",
+        "        target = aliases.get(name, name)",
+        "        target = name",
+        "the false absence the declaration exists to remove, reintroduced inside it: "
+        "a ruling written under the off-host name keys itself under a name no store "
+        "holds, so `status` reports a held repository as missing",
+    ),
+    Mutation(
+        "declaration stops being reconciled against disk",
+        "status.py",
+        "    disagreements = boundary.reconciliation(declared, set(recorded))",
+        "    disagreements = {k: [] for k in ('active_absent', 'ruled_out_held', 'alias_absent')}",
+        "a declaration nothing checks is a second artefact that can be quietly "
+        "wrong, and a repository ruled live and not held is the exact shape of the "
+        "published finding that was drawn honestly and was false",
+    ),
 )
 
 
