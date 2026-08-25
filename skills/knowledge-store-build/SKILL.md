@@ -479,10 +479,28 @@ path is the failure mode to check for.
 ### When clustering changes
 
 ```bash
+knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
 knowledgestore summaries snapshot   # BEFORE re-clustering
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+knowledgestore summaries snapshot   # re-key the baseline to the new clustering
 ```
+
+**`adrift` first, and never straight after a snapshot.** Community ids are
+positional, so only the snapshot binds a summary to a member set; re-cluster or
+rebuild without refreshing it and every summary stays attached to a community it
+no longer describes, while every community still has a summary and `status`
+reports the same coverage either way. `remap` cannot see it — it refuses when the
+snapshot and the graph share *no* node ids, and a snapshot taken from a stale
+graph shares *every* id with that same stale file. Run `adrift` on the store as
+committed; run it immediately after `summaries snapshot` and it compares the
+snapshot against the graph it was just taken from, which passes by construction.
+
+Exit 1 is drift. **Exit 2 means the check could not run**, and it names why: no
+membership read, or the wrong snapshot. Both make every summary compare as adrift,
+and the response is to fix the graph or re-take the snapshot — never to re-author
+prose. An id-space mismatch (`<repo>::<id>` on one side, bare ids on the other) is
+reported as a note for the same reason.
 
 **The bar measures recall, not fit**: it asks how much of the old cluster
 landed together, never how much of the new cluster those members make up. A

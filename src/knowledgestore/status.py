@@ -65,6 +65,35 @@ def layer_coverage() -> dict:
     }
 
 
+def snapshot_pointer() -> str:
+    """What the summaries count above does *not* say, and how to find out.
+
+    The count is the same whether or not the prose still describes the community
+    it is keyed to. Community ids are positional, so only the membership snapshot
+    binds a summary to a member set; rebuild or re-cluster without refreshing it
+    and every summary is silently re-pointed while every community still has one.
+    An operator read exactly that coverage line as healthy.
+
+    A pointer rather than the check itself, because `status` must not read the
+    graph and the comparison cannot be made without it - so what `status` can
+    honestly do here is name its own blind spot instead of leaving a green line
+    to be read as a verdict. `summaries adrift` is the check.
+    """
+    if not config.SUMMARIES_PATH.is_file():
+        return ""
+    if not config.SUMMARIES_SNAPSHOT_PATH.is_file():
+        return (
+            f"Summary membership: no snapshot at {_relative(config.SUMMARIES_SNAPSHOT_PATH)}, so "
+            "nothing can say whether that prose still describes those communities. Run "
+            "`knowledgestore summaries snapshot`."
+        )
+    return (
+        "Summary membership: not checked here - `status` never reads the graph. The count above "
+        "is the same whether or not the prose still describes its community; run "
+        "`knowledgestore summaries adrift`."
+    )
+
+
 def intent_coverage(recorded: dict) -> dict:
     """How much of the estate the intent index actually covers.
 
@@ -906,6 +935,9 @@ def main(argv=None) -> int:
         f"Summaries: {cov['summaries_written']}/{cov['summaries_expected']} "
         f"significant communities have prose"
     )
+    pointer = snapshot_pointer()
+    if pointer:
+        print(pointer)
     print(
         f"Topic briefs: {cov['briefs_written']} written, "
         f"{cov['topics_configured']} topics configured"
