@@ -102,7 +102,13 @@ def content_files(detect: dict, kinds: "tuple[str, ...]" = CODE_KINDS) -> "list[
 
 def read_file_list(path: Path) -> "list[Path]":
     """A newline-delimited path list, as written for `grep -f` and the like."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    # Sonar S8707, on the same grounds as `build_community_summaries.merge`, which
+    # reads a caller-supplied batch the same way: reading a path this stage's
+    # operator named is the purpose of the flag, and this is a maintainer CLI run
+    # offline against a local clone with no privilege boundary to cross. Recorded
+    # once there and cross-referenced here rather than reasoned out twice, so the
+    # two cannot drift into two different policies.
+    lines = path.read_text(encoding="utf-8").splitlines()  # NOSONAR(S8707)
     return [Path(line.strip()) for line in lines if line.strip()]
 
 
@@ -130,9 +136,11 @@ def pipeline_artefacts(files: "list[Path]", graph_directory: Path) -> "list[Path
             candidate = path.resolve()
         except OSError:
             continue
-        if candidate == resolved or resolved in candidate.parents:
-            inside.append(path)
-        elif name and name in candidate.parts[:-1]:
+        at_the_store_root = candidate == resolved or resolved in candidate.parents
+        # `parts[:-1]`: a *directory* component, so a file that merely shares the
+        # name is not swept up with the directories that hold artefacts.
+        in_a_clone = bool(name) and name in candidate.parts[:-1]
+        if at_the_store_root or in_a_clone:
             inside.append(path)
     return inside
 

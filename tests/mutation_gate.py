@@ -431,8 +431,8 @@ MUTATIONS = (
     Mutation(
         "only the store root's output is refused",
         "extract_ast.py",
-        "        elif name and name in candidate.parts[:-1]:",
-        "        elif False:",
+        "        in_a_clone = bool(name) and name in candidate.parts[:-1]",
+        "        in_a_clone = False",
         "the first version of the refusal above, written and caught the same hour by "
         "reading this library's own build notes: `sync` ends with "
         "`git clean -fd -e graphify-out`, so that directory is the one thing in a "
