@@ -268,8 +268,8 @@ def movement(before: "dict[str, int]", after: "dict[str, int]") -> "dict[str, li
             for name in set(before) & set(after)
             if after[name] < before[name]
         ),
-        "absent": sorted(name for name in set(before) - set(after)),
-        "new": sorted(name for name in set(after) - set(before)),
+        "absent": sorted(set(before) - set(after)),
+        "new": sorted(set(after) - set(before)),
     }
 
 
@@ -427,48 +427,66 @@ def parse_args(argv: "list[str] | None") -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: "list[str] | None" = None) -> int:
-    arguments = parse_args(argv)
-    graph_directory = config.GRAPH_PATH.parent
-    destination = arguments.out or (graph_directory / ".graphify_ast.json")
+class InputRefused(Exception):
+    """A reason not to start, carrying the message an operator needs.
 
+    Deciding *what* to extract and *extracting* it are different jobs with
+    different failure modes: everything here refuses before the parser is even
+    imported, and nothing here can leave a half-written layer behind. Separating
+    them keeps every refusal in one place, which is what makes it answerable to
+    ask whether they are all still reachable.
+    """
+
+
+def resolve_input(arguments, graph_directory: Path) -> "tuple[list[Path], Path]":
+    """The files to extract and where the list came from, or a refusal.
+
+    Both routes end here on purpose. `--files` is the route most likely to carry
+    a hand-rolled list, so it is the one that least deserves to skip the checks.
+    """
     if arguments.files:
         if not arguments.files.is_file():
-            print(f"File list not found: {arguments.files}", file=sys.stderr)
-            return 1
+            raise InputRefused(f"File list not found: {arguments.files}")
         files = read_file_list(arguments.files)
         source = arguments.files
     else:
         source = arguments.detect or config.DETECT_PATH
         if not source.is_file():
-            print(
+            raise InputRefused(
                 f"Content set not found: {source}. The extractor writes it; run detection "
-                "first, or pass an explicit list with --files.",
-                file=sys.stderr,
+                "first, or pass an explicit list with --files."
             )
-            return 1
         files = content_files(io.read_json_dict(source))
 
     if not files:
         # An empty layer is an upstream failure, and writing one would look like a
         # successful run right up until `merge-layers` refused it.
-        print(
+        raise InputRefused(
             f"Refusing to extract: {source} names no parseable content. An empty layer is "
-            "an upstream failure, and writing one would look like a success.",
-            file=sys.stderr,
+            "an upstream failure, and writing one would look like a success."
         )
-        return 1
 
     artefacts = pipeline_artefacts(files, graph_directory)
     if artefacts:
         # The real defect this refusal exists for: a store's own exclusion list
         # omitted this directory, so the pipeline's artefacts were parsed as source.
-        print(
+        raise InputRefused(
             f"Refusing to extract: {len(artefacts):,} of {len(files):,} input paths are this "
             f"pipeline's own output, under {graph_directory}. Parsing them feeds the graph "
-            f"back to the extractor. First: {artefacts[0]}",
-            file=sys.stderr,
+            f"back to the extractor. First: {artefacts[0]}"
         )
+    return files, source
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    arguments = parse_args(argv)
+    graph_directory = config.GRAPH_PATH.parent
+    destination = arguments.out or (graph_directory / ".graphify_ast.json")
+
+    try:
+        files, _source = resolve_input(arguments, graph_directory)
+    except InputRefused as refusal:
+        print(str(refusal), file=sys.stderr)
         return 1
 
     try:
