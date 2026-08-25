@@ -17,6 +17,39 @@ from io import TextIOWrapper
 from pathlib import Path
 
 
+def checked_write_target(path: Path) -> Path:
+    """The write target, or `ValueError` if any component climbs upward.
+
+    These writers are reached with paths built from `--root` and other CLI
+    arguments, so whatever constructs those arguments - an operator, a script, or
+    an agent - decides where the process writes. A `..` component is the one thing
+    that is never legitimate here: every caller in this library names an output
+    path directly, and none needs to climb out of it.
+
+    Two wider guards were tried first and both were wrong. Confining writes to the
+    store root failed 48 tests, because `configure()` sets each output path
+    independently and an output directory outside the root is supported. Widening
+    the allow-list to every directory the configuration declares still failed 4,
+    because this module's own unit tests write to bare temporary directories -
+    which is the tell that the check sat in the wrong place. A low-level writer
+    consulting global configuration would surprise any consumer using it as one.
+
+    So this checks the property that holds wherever the store lives. Confining
+    writes to a declared boundary is a real improvement on it, but it belongs at
+    the stage or CLI boundary where that boundary is known, and it is an interface
+    change rather than a fix.
+
+    Checked lexically, before any resolution: `realpath` collapses `..`, so
+    resolving first would launder exactly what this rejects.
+    """
+    if any(part == ".." for part in Path(path).parts):
+        raise ValueError(
+            f"refusing to write to a path that traverses upward: {path}. "
+            "Name the output path directly."
+        )
+    return Path(path)
+
+
 def read_json(path: Path, default=None):
     """Parse a JSON file, gzipped or not; return `default` if it does not exist.
 
@@ -49,8 +82,9 @@ def read_json_dict(path: Path) -> dict:
 
 
 def write_json(path: Path, data, indent: int | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
+    target = checked_write_target(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
 
 
 def read_gzip_json(path: Path, default=None):
@@ -78,9 +112,10 @@ def gzip_text(path: Path, compresslevel: int = 9):
     changed, quietly defeating the byte-identical guarantee and dirtying
     version control on every run.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    target = checked_write_target(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
     with (
-        open(path, "wb") as raw,
+        open(target, "wb") as raw,
         # filename="" explicitly: GzipFile otherwise lifts raw.name into the
         # header's FNAME field, which is the other source of byte churn.
         gzip.GzipFile(

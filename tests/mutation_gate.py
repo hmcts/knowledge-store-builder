@@ -70,6 +70,15 @@ MUTATIONS = (
         "record described a stale leftover; every count in it reconciled",
     ),
     Mutation(
+        "upward write paths accepted again",
+        "io.py",
+        '    if any(part == ".." for part in Path(path).parts):',
+        "    if False:",
+        "reported by SonarCloud as pythonsecurity:S8707 on write_json: a path "
+        "assembled from CLI arguments reached write_text unvalidated, so whatever "
+        "built those arguments chose where the process wrote",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
