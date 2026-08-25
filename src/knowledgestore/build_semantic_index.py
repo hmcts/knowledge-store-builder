@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections import Counter
 
 
 from . import config
+from . import graph_files
 from . import io
 
 
@@ -48,6 +50,11 @@ STOP = set(
 
 def collect_vocabulary() -> list[str]:
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    print(
+        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the semantic layer"),
+        end="",
+        file=sys.stderr,
+    )
     texts = [n.get("label") or "" for n in graph["nodes"]]
     if config.LABELS_PATH.exists():
         texts += list(json.loads(config.LABELS_PATH.read_text(encoding="utf-8")).values())

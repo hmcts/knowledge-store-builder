@@ -48,7 +48,7 @@ from io import StringIO
 from pathlib import Path
 
 from . import config
-from . import graph_stream
+from . import graph_files
 from . import io
 
 
@@ -157,93 +157,31 @@ def other_graph_note() -> str:
     )
 
 
-def counterpart_disagreement(described: Path, counts: tuple[int, int]) -> str:
-    """A line naming both files and both counts when they disagree. Empty when they agree.
-
-    The advisory note above tells an operator that the other file exists and that
-    this one might be stale. It cannot tell them whether it *is*, so on one estate
-    the stage recorded 42,572 communities over 785,610 nodes from a leftover
-    uncompressed graph while the committed artefact held 42,627 over 785,493 - and
-    the operator had to diff the two by hand to find out.
-
-    So this measures it. Silent-but-wrong becomes named-and-wrong, which is the
-    whole difference: every count in that record reconciled, and described the
-    wrong graph.
-
-    Only when `--graph` was not passed. An operator who named a file has already
-    said which one they mean, and re-reading the other would be cost for nothing.
-    """
-    other = counterpart(described)
-    if other is None or not other.is_file():
-        return ""
-    try:
-        other_counts = graph_counts(other)
-    except (OSError, ValueError, EOFError) as error:
-        # EOFError explicitly: a truncated `.gz` raises it and it is neither an
-        # OSError nor a ValueError, so it escaped and took the stage down with it -
-        # over a file the stage was not even asked to describe.
-        # A counterpart that cannot be read is not this stage's business to fail
-        # over - it is describing the file it was pointed at. Say so and move on.
-        return f"  {other.name} exists but could not be read for comparison: {error}"
-    if other_counts == counts:
-        return ""
-    return (
-        f"  MISMATCH: {described.name} has {counts[0]:,} communities over {counts[1]:,} "
-        f"clustered nodes; {other.name} has {other_counts[0]:,} over {other_counts[1]:,}. "
-        f"One of them is stale, and this record describes {described.name}. If the "
-        f"committed artefact is the real one, re-run with --graph {other.name}."
-    )
-
-
 def counterpart(path: Path) -> Path | None:
-    """The store's *other* graph file: the `.gz` beside a `.json`, or vice versa.
-
-    Both directions, because `--graph` may name either. `with_suffix(".json.gz")`
-    handled only one: given `graph.json.gz` it produced `graph.json.json.gz`, a
-    path that never exists, so the note about a stale counterpart went silent in
-    exactly the case where the operator had been explicit about the compressed one.
-    """
-    if path.suffix == ".gz":
-        return path.with_suffix("")
-    if path.suffix == ".json":
-        return path.with_name(path.name + ".gz")
-    return None
+    """The store's other graph file. Lives in `graph_files`; two stages need it."""
+    return graph_files.counterpart(path)
 
 
 def graph_counts(path: Path) -> tuple[int, int]:
-    """(communities, clustered nodes) for one graph file.
+    """(communities, clustered nodes), streamed. Lives in `graph_files`."""
+    return graph_files.graph_counts(path)
 
-    Reads and discards inside this function on purpose. The caller compares two
-    graphs, and holding both node lists at once would double peak memory on an
-    estate where one of them is already the largest thing in the process.
 
-    Measured on the largest estate available - 785,493 nodes, 42,627 communities
-    out of a 40 MB `graph.json.gz`:
+def counterpart_disagreement(described: Path, counts: tuple[int, int]) -> str:
+    """Both files and both counts when they disagree, with this stage's way out.
 
-        streamed   2.2s    0.04 GB peak RSS
-        loaded     5.3s    3.75 GB peak RSS
-
-    An operator measured the loading form at **9.2s and 5.17-6.07 GB** on the box
-    that actually runs their build - twice my time and well over my memory - and
-    that box was already swapping hard enough for one clustering run to take 77
-    minutes against a normal 2.2. On a machine under that pressure a 5 GB peak can
-    cost far more than the seconds it saves, and it would present as "the build is
-    mysteriously slow" rather than as this check being expensive. They asked for
-    streaming rather than a flag to switch the check off, which was the right ask.
-
-    An earlier decision in this module refused to compare the two files at all,
-    because "comparing 1.4 GB of graph is what this refuses to do". That was right
-    about what it refused - a node-by-node *content* diff - and over-broad: counting
-    is a different question, and it turns out not to need the graph in memory at all.
+    The remedy is this stage's rather than the shared module's: `record-clustering`
+    has a `--graph` flag and `summaries` does not, and a message naming a flag the
+    caller lacks sends an operator to a dead end.
     """
-    members: set[str] = set()
-    clustered = 0
-    for node in graph_stream.iter_array(path):
-        community = node.get("community") if isinstance(node, dict) else None
-        if community is not None:
-            members.add(str(community))
-            clustered += 1
-    return len(members), clustered
+    other = graph_files.counterpart(described)
+    remedy = (
+        f"This record describes {described.name}. If the committed artefact is the "
+        f"real one, re-run with --graph {other.name}."
+        if other is not None
+        else ""
+    )
+    return graph_files.disagreement(described, counts, remedy)
 
 
 def hash_randomisation() -> bool:

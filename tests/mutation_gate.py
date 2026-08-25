@@ -70,6 +70,54 @@ MUTATIONS = (
         "record described a stale leftover; every count in it reconciled",
     ),
     Mutation(
+        "summaries snapshot no longer names a stale graph",
+        "build_community_summaries.py",
+        '    print(_graph_disagreement(members), end="", file=sys.stderr)',
+        "    pass",
+        "the same stale-graph class that `record-clustering` already warned about "
+        "reached `summaries snapshot`, where a snapshot keyed to a leftover "
+        "graph.json mis-keys the entire remap carry; reported by a store operator, "
+        "and invisible to `_remap_refusal` because the snapshot and the stale file "
+        "share every node id",
+    ),
+    Mutation(
+        "summaries remap no longer names a stale graph",
+        "build_community_summaries.py",
+        '    print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)',
+        "    pass",
+        "the second call site of the same warning, and the one that rewrites the "
+        "committed summaries file - the snapshot half being covered is exactly how "
+        "a half-wired check reads as done",
+    ),
+    Mutation(
+        "explorer built from a stale graph in silence",
+        "build_explorer.py",
+        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "explorer.html"),\n        end="",\n        file=sys.stderr,\n    )',
+        "    pass",
+        "the page is tracked and ships to readers who have no graph and no CLI to check it against; an operator hit the same shape when a refresh embedded a three-day-stale layer beside a new graph and thirteen gates passed",
+    ),
+    Mutation(
+        "deep dives built from a stale graph in silence",
+        "build_deep_dives.py",
+        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "dives.json"),\n        end="",\n        file=sys.stderr,\n    )',
+        "    pass",
+        "dives.json is a committed artefact, so a stale read is published rather than merely reported",
+    ),
+    Mutation(
+        "semantic layer built from a stale graph in silence",
+        "build_semantic_index.py",
+        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the semantic layer"),\n        end="",\n        file=sys.stderr,\n    )',
+        "    pass",
+        "the layer is committed and the explorer page embeds it, so the stale read reaches the page twice over",
+    ),
+    Mutation(
+        "the estate check runs against a stale graph in silence",
+        "build_community_summaries.py",
+        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),\n        end="",\n        file=sys.stderr,\n    )',
+        "    pass",
+        "the strongest form of the class: a truthfulness gate reading the wrong artefact passes on the wrong data, and its silence then licenses a claim about something it never looked at",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
