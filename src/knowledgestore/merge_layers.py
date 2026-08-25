@@ -108,6 +108,103 @@ def _free_id(candidate: str, taken: set[str]) -> str:
     return f"{candidate}_{suffix}"
 
 
+def repository_of(source_file: str) -> str:
+    """The repository a `source_file` belongs to, or "" when it names none.
+
+    Exact rather than inferred, which is what makes the rewrite below a rewrite
+    and not a guess: the path either carries a `repositories/<name>/` segment or it
+    does not.
+    """
+    parts = Path(str(source_file or "")).parts
+    for index, part in enumerate(parts):
+        if part == "repositories" and index + 1 < len(parts):
+            return parts[index + 1]
+    return ""
+
+
+def namespace_by_repository(
+    nodes: list[dict], edges: list[dict], counters: dict
+) -> tuple[list[dict], list[dict]]:
+    """Prefix AST ids with their repository, and rewrite edges through the remap.
+
+    graphify derives AST ids from the file path but drops the leading
+    `repositories/<repo>/` segment for declarations *inside* a file. So a variable
+    declared at the same relative path in two repositories - say
+    `<repo>/infra/variables.tf` - gets one id in **both**, and in every other
+    repository that follows the same layout.
+
+    Measured on one estate: of M distinct AST ids, several hundred were used more
+    than once, covering thousands of node records, and most of those spanned more
+    than one repository. The worst single id appeared once per repository across
+    most of the estate.
+
+    It is caused by the estate being *well run*. Where every service declares the
+    same variables in the same place because that is the house convention, **the
+    more consistent an organisation's conventions, the worse the collision** - and
+    it scales with repository count rather than with corpus size.
+
+    The consequence is not a duplicate. A build that dedupes by id keeps one record
+    and re-points every edge at it, so one shared declaration becomes a single node
+    adjacent to every service that declares it - immediately the highest-degree
+    node in the graph. Centrality and community detection are both degree-driven,
+    so community detection then reports those independent services as one
+    tightly-coupled cluster, and topics, summaries and the explorer are all
+    generated downstream of clusters.
+
+    **The two conditions that make this exact**, stated because they are what
+    licenses the rewrite and they do not hold for every layer:
+
+    1. `extract()` runs once per repository, so an AST edge is always produced from
+       a single file and both endpoints belong to that file's repository.
+    2. Every node carries a `source_file`.
+
+    Where the second does not hold - a structural node with no `source_file`, which
+    newer graphify emits - the id is left alone and counted rather than guessed at.
+    Where an edge's endpoints resolve to different repositories, condition 1 has
+    been violated for that edge, so it is counted and left pointing at the
+    un-namespaced ids rather than being attributed to one side.
+
+    Never applied to a layer whose edges can legitimately span repositories, and
+    never applied twice: an id already carrying `::` is skipped, because
+    re-namespacing produces `repo::repo::id` and sets every repository attribute to
+    the wrong value - a hazard this estate has already met from running a merge on
+    an already-merged graph.
+    """
+    remap: dict[str, str] = {}
+    renamed: list[dict] = []
+    for node in nodes:
+        node_id = str(node.get("id"))
+        repository = repository_of(node.get("source_file") or "")
+        if not repository or "::" in node_id:
+            counters["ast_not_namespaced"] += 1
+            renamed.append(node)
+            continue
+        new_id = f"{repository}::{node_id}"
+        if new_id != node_id:
+            remap[node_id] = new_id
+            counters["ast_namespaced"] += 1
+        moved = dict(node)
+        moved["id"] = new_id
+        renamed.append(moved)
+
+    rewritten: list[dict] = []
+    for edge in edges:
+        source, target = str(edge.get("source")), str(edge.get("target"))
+        new_source, new_target = remap.get(source, source), remap.get(target, target)
+        source_repo = new_source.split("::", 1)[0] if "::" in new_source else ""
+        target_repo = new_target.split("::", 1)[0] if "::" in new_target else ""
+        if source_repo and target_repo and source_repo != target_repo:
+            # Condition 1 does not hold for this edge. Attributing it to either
+            # side would be the guess this function exists to avoid.
+            counters["ast_edges_spanning_repositories"] += 1
+            rewritten.append(edge)
+            continue
+        moved = dict(edge)
+        moved["source"], moved["target"] = new_source, new_target
+        rewritten.append(moved)
+    return renamed, rewritten
+
+
 def _merge_nodes(
     ast_nodes: list[dict], sem_nodes: list[dict], counters: dict
 ) -> tuple[list[dict], dict[str, dict], dict[str, str]]:
@@ -162,12 +259,18 @@ def merge(ast: dict, semantic: dict) -> tuple[dict, dict]:
     counters = {
         "ast_nodes": len(ast_nodes),
         "semantic_nodes": len(sem_nodes),
+        "ast_namespaced": 0,
+        "ast_not_namespaced": 0,
+        "ast_edges_spanning_repositories": 0,
         "collisions_same_label": 0,
         "collisions_different_label": 0,
         "edges_repointed": 0,
         "edges_dropped": 0,
     }
 
+    # Before merging, because an un-namespaced AST id is what the semantic layer
+    # then collides with, and because a fused hub node cannot be unfused afterwards.
+    ast_nodes, ast_edges = namespace_by_repository(ast_nodes, ast_edges, counters)
     merged_nodes, by_id, renamed = _merge_nodes(ast_nodes, sem_nodes, counters)
 
     merged_edges = list(ast_edges)
@@ -212,6 +315,12 @@ def report(counters: dict) -> str:
         "(two entities under one id - semantic node kept under a new id)",
         f"  {counters['edges_repointed']:,} semantic edges re-pointed to a renamed node",
         f"  {counters['edges_dropped']:,} edges dropped: an endpoint exists in neither layer",
+        f"  {counters.get('ast_namespaced', 0):,} AST ids namespaced by repository "
+        "(graphify drops the repository segment for declarations inside a file)",
+        f"  {counters.get('ast_not_namespaced', 0):,} AST ids left alone: no source_file to attribute, "
+        "or already namespaced",
+        f"  {counters.get('ast_edges_spanning_repositories', 0):,} AST edges span two repositories and "
+        "were left un-namespaced rather than attributed to one side",
     ]
     if counters["collisions_different_label"]:
         lines.append(

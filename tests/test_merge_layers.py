@@ -256,3 +256,149 @@ class MergeLayersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NamespaceByRepositoryTest(unittest.TestCase):
+    """AST ids must not be shared between repositories (#115).
+
+    graphify drops the `repositories/<repo>/` segment for declarations inside a
+    file, so a Terraform variable declared in `<repo>/infrastructure/variables.tf`
+    gets the same id in every repository that has one. On one estate the worst such id
+    appeared once per repository across most of the estate.
+
+    The consequence is not a duplicate: a build that dedupes by id keeps one record
+    and re-points every edge at it, so that node becomes adjacent to every service
+    that declares it and is immediately the highest-degree node in the graph. Community
+    detection then reports those independent services as one cluster, and topics,
+    summaries and the explorer are all generated downstream of clusters.
+    """
+
+    def _counters(self):
+        return {
+            "ast_namespaced": 0,
+            "ast_not_namespaced": 0,
+            "ast_edges_spanning_repositories": 0,
+        }
+
+    def test_the_same_declaration_in_two_repositories_stays_two_nodes(self):
+        """Breaks if the reported defect returns. This is the exact shape measured:
+        one id, many repositories, fused into a false hub by any dedupe."""
+        nodes = [
+            _node(
+                "infra_var_shared",
+                "var.product",
+                source_file="repositories/service-one/infra/variables.tf",
+            ),
+            _node(
+                "infra_var_shared",
+                "var.product",
+                source_file="repositories/service-two/infra/variables.tf",
+            ),
+        ]
+        counters = self._counters()
+
+        renamed, _edges = merge_layers.namespace_by_repository(nodes, [], counters)
+
+        self.assertEqual(
+            {n["id"] for n in renamed},
+            {"service-one::infra_var_shared", "service-two::infra_var_shared"},
+        )
+        self.assertEqual(counters["ast_namespaced"], 2)
+
+    def test_without_namespacing_those_two_ids_are_identical(self):
+        """The precondition, asserted so the test above cannot pass vacuously.
+
+        If graphify ever stops sharing the id, the test above would pass whatever
+        this function did. This states the defect is still reproducible.
+        """
+        nodes = [
+            _node(
+                "infra_var_shared",
+                "var.product",
+                source_file="repositories/service-one/infra/variables.tf",
+            ),
+            _node(
+                "infra_var_shared",
+                "var.product",
+                source_file="repositories/service-two/infra/variables.tf",
+            ),
+        ]
+        self.assertEqual(nodes[0]["id"], nodes[1]["id"])
+
+    def test_a_node_with_no_source_file_is_left_alone_and_counted(self):
+        """Breaks if a repository is guessed for a node that cannot be attributed.
+
+        Newer graphify emits package-hierarchy nodes with neither label nor
+        `source_file`. Attributing one to a repository would be the invention this
+        function exists to prevent, so it is skipped and reported.
+        """
+        counters = self._counters()
+
+        renamed, _edges = merge_layers.namespace_by_repository([_node("pkg", "pkg")], [], counters)
+
+        self.assertEqual(renamed[0]["id"], "pkg")
+        self.assertEqual(counters["ast_not_namespaced"], 1)
+        self.assertEqual(counters["ast_namespaced"], 0)
+
+    def test_an_already_namespaced_id_is_not_namespaced_twice(self):
+        """Breaks if the double-namespacing hazard returns.
+
+        Re-namespacing produces `repo::repo::id` and sets every repository
+        attribute to the wrong value. This estate has already met that from running
+        a merge on an already-merged graph, which is why it is guarded rather than
+        assumed not to happen.
+        """
+        counters = self._counters()
+
+        renamed, _edges = merge_layers.namespace_by_repository(
+            [_node("repo-a::thing", "thing", source_file="repositories/repo-a/x.tf")],
+            [],
+            counters,
+        )
+
+        self.assertEqual(renamed[0]["id"], "repo-a::thing")
+        self.assertEqual(counters["ast_not_namespaced"], 1)
+
+    def test_an_edge_inside_one_repository_is_rewritten(self):
+        """Breaks if nodes are namespaced and edges are not, which would leave every
+        rewritten edge dangling — a worse artefact than the fused hub."""
+        nodes = [
+            _node("a", "A", source_file="repositories/one/x.tf"),
+            _node("b", "B", source_file="repositories/one/y.tf"),
+        ]
+        counters = self._counters()
+
+        _renamed, edges = merge_layers.namespace_by_repository(
+            nodes, [{"source": "a", "target": "b"}], counters
+        )
+
+        self.assertEqual(edges[0]["source"], "one::a")
+        self.assertEqual(edges[0]["target"], "one::b")
+
+    def test_an_edge_spanning_two_repositories_is_left_alone_and_counted(self):
+        """Breaks if a cross-repository AST edge is attributed to one side.
+
+        Condition 1 of the fix — an AST edge is produced from a single file, so both
+        endpoints belong to that file's repository — does not hold for such an edge.
+        Attributing it would be a guess, so it is reported instead.
+        """
+        nodes = [
+            _node("a", "A", source_file="repositories/one/x.tf"),
+            _node("b", "B", source_file="repositories/two/y.tf"),
+        ]
+        counters = self._counters()
+
+        _renamed, edges = merge_layers.namespace_by_repository(
+            nodes, [{"source": "a", "target": "b"}], counters
+        )
+
+        self.assertEqual(edges[0]["source"], "a", "the edge must not be attributed to one side")
+        self.assertEqual(counters["ast_edges_spanning_repositories"], 1)
+
+    def test_repository_of_reads_the_segment_exactly(self):
+        """Breaks if attribution becomes a guess rather than a path read."""
+        self.assertEqual(
+            merge_layers.repository_of("repositories/my-service/infrastructure/x.tf"), "my-service"
+        )
+        self.assertEqual(merge_layers.repository_of("infrastructure/x.tf"), "")
+        self.assertEqual(merge_layers.repository_of(""), "")

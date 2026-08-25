@@ -241,6 +241,25 @@ MUTATIONS = (
         "on",
     ),
     Mutation(
+        "AST ids stop being namespaced by repository",
+        "merge_layers.py",
+        '        new_id = f"{repository}::{node_id}"',
+        "        new_id = node_id",
+        "#115: graphify drops the repositories/<repo>/ segment for declarations "
+        "inside a file, so one estate had one shared id across most of its "
+        "repositories - a dedupe then makes it a single node adjacent to many "
+        "unrelated services and the highest-degree node in the graph",
+    ),
+    Mutation(
+        "a cross-repository AST edge is attributed to one side",
+        "merge_layers.py",
+        "        if source_repo and target_repo and source_repo != target_repo:",
+        "        if False:",
+        "the fix is exact only while both endpoints belong to one repository; "
+        "attributing an edge that spans two is the guess the rewrite exists to "
+        "avoid",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
