@@ -13,10 +13,11 @@ the clone, write nodes and edges back, report what joined and what did not.
 from __future__ import annotations
 
 import json
+import sys
 import re
 from pathlib import Path
 
-from . import config, deploy_values, io
+from . import config, deploy_values, graph_files, io
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -342,6 +343,10 @@ def _report(tally: _Tally, graph: dict) -> None:
 def main() -> int:
     if not config.GRAPH_PATH.exists():
         print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    refusal = graph_files.stale_refusal(config.GRAPH_PATH)
+    if refusal:
+        print(refusal, file=sys.stderr)
         return 1
     if not config.DEPLOY_REPOS:
         print(
