@@ -5,7 +5,7 @@ end — `{product}-shared-infrastructure` and the like. An estate hit that and h
 to write one `repo` line per repository; the omission was invisible beforehand,
 because every rule in the file was working exactly as written (issue #109).
 
-One glob rule rather than a `suffix` rule: `match cpp-*` is what `prefix cpp-`
+One glob rule rather than a `suffix` rule: `match alpha-*` is what `prefix alpha-`
 already does, and `match *-shared-infrastructure` is what was missing, so a glob
 generalises the existing rule instead of adding a third way to say the same
 thing.
@@ -46,9 +46,9 @@ class MatchRuleTest(SettingsIsolated):
 
     def test_it_also_covers_what_prefix_does(self):
         """So it generalises the existing rule rather than sitting beside it."""
-        by_glob = _filters("match cpp-ui-*\n")
-        by_prefix = _filters("prefix cpp-ui-\n")
-        for name in ("cpp-ui-hearing", "cpp-ui-e2e", "cpp-context-hearing", "other"):
+        by_glob = _filters("match alpha-ui-*\n")
+        by_prefix = _filters("prefix alpha-ui-\n")
+        for name in ("alpha-ui-hearing", "alpha-ui-e2e", "alpha-context-hearing", "other"):
             with self.subTest(name=name):
                 self.assertEqual(by_glob.matches(name), by_prefix.matches(name))
 

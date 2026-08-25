@@ -509,6 +509,9 @@ class CliTest(SettingsIsolated):
                 "fetch-tickets",
                 "chunk-plan",
                 "merge-chunks",
+                # the third fan-out seam: merges the AST and semantic layers
+                # without re-pointing edges at unrelated nodes (#129)
+                "merge-layers",
                 "gherkin",
                 "packages",
                 # before clustering, so deployment nodes join communities

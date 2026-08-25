@@ -22,13 +22,14 @@ Run after the graph has been built/merged:
 from __future__ import annotations
 
 import json
+import sys
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import TypedDict
 
 
-from . import config, io, kinds
+from . import config, graph_files, io, kinds
 
 FORMAT = "gherkin"
 
@@ -372,6 +373,10 @@ def write_outputs(graph: dict, labels: dict[str, str]) -> None:
 def main() -> int:
     if not config.GRAPH_PATH.exists():
         print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    refusal = graph_files.stale_refusal(config.GRAPH_PATH)
+    if refusal:
+        print(refusal, file=sys.stderr)
         return 1
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))

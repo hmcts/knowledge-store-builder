@@ -27,8 +27,8 @@ from knowledgestore import build_community_summaries as summaries  # noqa: E402
 def _nodes():
     """Degree is what `community_digest` sorts by, so it decides the label."""
     return [
-        {"id": "a", "label": "MIReportService", "repo": "cp-crime-portal", "source_file": "a.java"},
-        {"id": "b", "label": "ReportRow", "repo": "cp-crime-portal", "source_file": "b.java"},
+        {"id": "a", "label": "MIReportService", "repo": "alpha-portal", "source_file": "a.java"},
+        {"id": "b", "label": "ReportRow", "repo": "alpha-portal", "source_file": "b.java"},
         {"id": "c", "label": "Helper", "repo": "other-repo", "source_file": "c.java"},
     ]
 
@@ -46,7 +46,7 @@ class DerivedLabelTest(SettingsIsolated):
         digest = self._digest({})
         self.assertNotEqual(digest["label"], "Community 42")
         self.assertIn("MIReportService", digest["label"])
-        self.assertIn("cp-crime-portal", digest["label"])
+        self.assertIn("alpha-portal", digest["label"])
 
     def test_the_labels_file_still_wins_where_it_has_one(self):
         """Communities graphify did cluster must be unaffected."""
@@ -61,7 +61,7 @@ class DerivedLabelTest(SettingsIsolated):
 
     def test_the_dominant_repository_is_used_not_a_minority_one(self):
         digest = self._digest({})
-        self.assertIn("cp-crime-portal", digest["label"])
+        self.assertIn("alpha-portal", digest["label"])
         self.assertNotIn("other-repo", digest["label"])
 
     def test_an_ordinal_remains_when_there_is_no_evidence(self):
@@ -72,9 +72,9 @@ class DerivedLabelTest(SettingsIsolated):
 
     def test_a_labelless_node_does_not_produce_a_dangling_separator(self):
         """Repository but no labelled node: name it by repository, not 'repo: '."""
-        nodes = [{"id": "a", "label": "", "repo": "cp-crime-portal", "source_file": None}]
+        nodes = [{"id": "a", "label": "", "repo": "alpha-portal", "source_file": None}]
         digest = summaries.community_digest(42, nodes, {}, {}, {"a": 1})
-        self.assertEqual(digest["label"], "cp-crime-portal")
+        self.assertEqual(digest["label"], "alpha-portal")
 
 
 if __name__ == "__main__":

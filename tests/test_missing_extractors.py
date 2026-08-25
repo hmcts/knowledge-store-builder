@@ -222,7 +222,7 @@ class DuplicatingSymlinkTest(SettingsIsolated):
         )
 
     def test_one_repository_is_reported_without_repeating_its_count(self):
-        """A released version printed "60 in cpp-terraform-azurerm-idam (60)"."""
+        """A released version printed the count twice - "60 in <repo> (60)"."""
         text = self._reported({"repo-a": 60})
         self.assertIn("60 in repo-a.", text)
         self.assertNotIn("(60)", text, "the per-repository count repeats the total")
