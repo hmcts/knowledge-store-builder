@@ -366,6 +366,87 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
+    Mutation(
+        "fan-out progress derived from the dispatch log again",
+        "chunk_status.py",
+        "    done = sorted(plan_ids & on_disk)",
+        "    done = sorted(plan_ids & dispatched)",
+        "#131: the defect this stage exists to remove, and it happened in an "
+        "operator's own tally rather than here - a coverage gap of ninety-odd chunks "
+        "announced by diffing the plan against a log that did not cover the early "
+        "rounds, and a redundant round of a dozen agents launched for it. Every "
+        "extraction was on disk the whole time",
+    ),
+    Mutation(
+        "never-sent folded back into in-flight",
+        "chunk_status.py",
+        "    never_sent = sorted(outstanding - dispatched)",
+        "    never_sent = []",
+        "#131: the concurrency ceiling rejects rather than queues, so the two causes "
+        "of 'no output' need opposite responses - and merging them is what left a run "
+        "of rejected low-numbered chunks sitting behind ninety higher-numbered ids "
+        "under plan-ordered dispatch",
+    ),
+    Mutation(
+        "corrupt log tokens counted rather than reported",
+        "chunk_status.py",
+        "        if candidate in plan_ids:",
+        "        if True:",
+        "#131: appending batch files that carried no trailing newline fused the last "
+        "id of one onto the first of the next; counted, those tokens inflated `in "
+        "flight` and deflated `NEVER SENT` for several rounds while every total "
+        "stayed plausible. A status tool that launders a corrupt log into a confident "
+        "number is worse than no tool, because it is trusted",
+    ),
+    Mutation(
+        "never-sent asserted where it cannot be known",
+        "chunk_status.py",
+        "    if not had_log:",
+        "    if False:",
+        "written in this change and caught by its own test before review: with no "
+        "log every outstanding chunk falls out of `classify` as never-sent, and "
+        "printing that as a finding tells an operator to redispatch work in progress "
+        "- the opposite error, and equally expensive",
+    ),
+    Mutation(
+        "an unusable chunk file counted as progress",
+        "chunk_status.py",
+        '        if "nodes" not in payload:',
+        "        if False:",
+        "#131: an agent killed mid-write and an agent that hit the output limit both "
+        "leave a file, so a reader that counts files reports the chunk extracted and "
+        "it is never redone. `merge-chunks` refuses the same file, so the gap would "
+        "surface only once the archive had been assembled",
+    ),
+    Mutation(
+        "a truncated chunk file aborts the report",
+        "chunk_status.py",
+        "        except (json.JSONDecodeError, UnicodeDecodeError, OSError):",
+        "        except (KeyError,):",
+        "`io.read_json_dict` raises on malformed JSON - correct for a stage that "
+        "cannot proceed, fatal for the one stage whose job is to describe the mess. "
+        "One truncated file would take the whole progress report with it, at the "
+        "moment it is most needed",
+    ),
+    Mutation(
+        "the chunk plan counted as an extraction",
+        "chunk_status.py",
+        '        if path.name.endswith("_plan.json"):',
+        "        if False:",
+        "`.graphify_chunk_plan.json` matches `.graphify_chunk_*.json`, so the stage's "
+        "own denominator would arrive as a completed chunk - a wrong numerator and a "
+        "wrong denominator at once. `merge-chunks` carries the same guard, which is "
+        "why it is worth having twice",
+    ),
+    Mutation(
+        "progress estimated with no plan to measure against",
+        "chunk_status.py",
+        "    if not plan:",
+        "    if False:",
+        "the plan is the only map from chunk number to file list, so without it "
+        "there is no denominator and nothing to name as missing. Reporting `0 of 0` "
+        "reads as a finished fan-out",
+    ),
 )
 
 

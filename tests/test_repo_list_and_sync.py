@@ -508,6 +508,9 @@ class CliTest(SettingsIsolated):
                 # rather than import an export of it
                 "fetch-tickets",
                 "chunk-plan",
+                # reads fan-out progress off the extractions on disk, between the
+                # plan that names the work and the merge that consumes it (#131)
+                "chunk-status",
                 "merge-chunks",
                 # the third fan-out seam: merges the AST and semantic layers
                 # without re-pointing edges at unrelated nodes (#129)
