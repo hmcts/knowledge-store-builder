@@ -428,6 +428,62 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
+    Mutation(
+        "only the store root's output is refused",
+        "extract_ast.py",
+        "        elif name and name in candidate.parts[:-1]:",
+        "        elif False:",
+        "the first version of the refusal above, written and caught the same hour by "
+        "reading this library's own build notes: `sync` ends with "
+        "`git clean -fd -e graphify-out`, so that directory is the one thing in a "
+        "clone sync deliberately preserves and every repository in the corpus can "
+        "hold one. A refusal anchored at the store root alone passes the corpus copies "
+        "through, which is where most of them are",
+    ),
+    Mutation(
+        "the pipeline parses its own output again",
+        "extract_ast.py",
+        "    if artefacts:",
+        "    if False:",
+        "a store driving extraction itself excluded dependency bundles, build output "
+        "and state files from its hand-written list, and not the directory this "
+        "pipeline writes - so several hundred of the pipeline's own artefacts were "
+        "handed to the parser as source. Found by watching a run parse a graph file, "
+        "because an exclusion list has no failing case: correct the day it is written "
+        "and silently wrong at the next new artefact",
+    ),
+    Mutation(
+        "one repository's failure loses the estate again",
+        "extract_ast.py",
+        "except Exception as error:  # a parser raises whatever the grammar raises",
+        "except KeyboardInterrupt as error:",
+        "the reported failure this stage exists for: a whole-corpus call on a "
+        "several-hundred-repository estate ran over eight minutes at full CPU and "
+        "produced no output at all, with nothing to attribute it to. Reverting to an "
+        "unisolated loop restores exactly that, and the run reads as a parser problem "
+        "rather than as one repository's",
+    ),
+    Mutation(
+        "a partial layer reports success",
+        "extract_ast.py",
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 1',
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 0',
+        "the layer is written even when repositories failed, on purpose, so the exit "
+        "code is the only thing carrying the failure. Returning 0 takes a CI build "
+        "green over a layer missing whole repositories - the shape of every escape "
+        "found in this library, a check that reads one artefact and is silent about "
+        "the one that matters",
+    ),
+    Mutation(
+        "an empty layer looks like a successful extraction",
+        "extract_ast.py",
+        "    if not files:",
+        "    if False:",
+        "mirrors `merge-layers`, which carries the same refusal for an observed "
+        "reason: an empty layer merged silently produces a smaller graph that reads "
+        "as a successful run. Without it here the symptom surfaces two stages later "
+        "as a merge failure rather than at the stage that produced it",
+    ),
 )
 
 

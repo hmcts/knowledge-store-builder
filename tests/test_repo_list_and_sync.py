@@ -500,6 +500,10 @@ class CliTest(SettingsIsolated):
                 "discover",
                 "sync",
                 "convert",
+                # produces the AST layer `merge-layers` consumes, and runs after
+                # `convert` because conversion is what makes an Office document
+                # visible to a parser at all
+                "extract-ast",
                 "export-history",
                 "context",
                 "intent",
