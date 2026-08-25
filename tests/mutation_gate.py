@@ -94,7 +94,9 @@ MUTATIONS = (
         "build_explorer.py",
         '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "explorer.html"),\n        end="",\n        file=sys.stderr,\n    )',
         "    pass",
-        "the page is tracked and ships to readers who have no graph and no CLI to check it against; an operator hit the same shape when a refresh embedded a three-day-stale layer beside a new graph and thirteen gates passed",
+        "the page is tracked and ships to readers who have no graph and no CLI to "
+        "check it against; an operator hit the same shape when a refresh embedded a "
+        "stale semantic layer beside a newly built graph and every gate passed",
     ),
     Mutation(
         "deep dives built from a stale graph in silence",
@@ -125,6 +127,82 @@ MUTATIONS = (
         "reported by SonarCloud as pythonsecurity:S8707 on write_json: a path "
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
+    ),
+    Mutation(
+        "deployments overwrites the committed graph from a stale one",
+        "build_deployments.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
+    ),
+    Mutation(
+        "packages overwrites the committed graph from a stale one",
+        "build_package_edges.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
+    ),
+    Mutation(
+        "gherkin overwrites the committed graph from a stale one",
+        "extract_gherkin.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
+    ),
+    Mutation(
+        "layer merge re-points edges at unrelated nodes",
+        "merge_layers.py",
+        "        renamed[node_id] = new_id",
+        "        renamed[node_id] = node_id",
+        "#129: the documented route discards the semantic node on an id collision "
+        "and concatenates its edges anyway, so every relationship it asserted about "
+        "one entity becomes an assertion about another - 98 collisions carrying 311 "
+        "edges on one estate, and the graph builds cleanly",
+    ),
+    Mutation(
+        "layer merge keeps an edge whose endpoint is in neither layer",
+        "merge_layers.py",
+        '        if str(moved["source"]) not in by_id or str(moved["target"]) not in by_id:',
+        "        if False:",
+        "guessing at a dangling endpoint is how a concatenation invents "
+        "relationships; dropping it silently would be the same defect one step on, "
+        "which is why the count is asserted too",
+    ),
+    Mutation(
+        "layer merge accepts an empty layer",
+        "merge_layers.py",
+        "    if not ast_nodes or not sem_nodes:",
+        "    if False:",
+        "every stage in this library that shipped doing nothing did so with a "
+        "passing suite, and an empty input layer merges to a smaller graph that "
+        "looks like a successful run",
+    ),
+    Mutation(
+        "most-connected report unwired",
+        "status.py",
+        "    _report_central(arguments.central)",
+        "    pass",
+        "#112: reporting through the function while nothing drives the CLI is the "
+        "most repeated escape in this repository, and three existing entries in this "
+        "module are the same shape",
+    ),
+    Mutation(
+        "most-connected loses its edge-key fallback",
+        "graph_files.py",
+        "    if not found:",
+        "    if False:",
+        "graphify writes `links` in node-link JSON and `edges` in its extract files, "
+        "so reading one key silently ranks nothing on half the artefacts this is "
+        "pointed at - indistinguishable from a graph with no edges",
     ),
     Mutation(
         "the stem basis option stops affecting ids",

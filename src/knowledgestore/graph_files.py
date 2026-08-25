@@ -153,3 +153,119 @@ def stale_note(described, nodes, artefact: str) -> str:
     )
     note = disagreement(described, counts_from_nodes(nodes), remedy)
     return f"{note}\n" if note else ""
+
+
+def most_connected(path: Path, top: int = 10) -> list[tuple[str, str, int]]:
+    """The `top` most connected nodes as (id, label, degree), most connected first.
+
+    The check #112 asked for, and the reason it is worth a stage: after the first
+    build of one estate the most central entities were `c()`, `push()`, `s()` and
+    `a()` - minified helpers from two committed dependency bundles, which supplied
+    36% of the AST nodes and 60% of the AST edges and formed the two largest
+    communities. Centrality and community detection are both degree-driven, so a
+    dense blob of interlinked vendored helpers wins every ranking, and topics,
+    summaries and the explorer are all generated downstream of clusters.
+
+    Nothing upstream catches it: graphify's `detect` honours `.gitignore`, and a
+    zero-install dependency bundle is *deliberately committed*, so it is not
+    ignored anywhere.
+
+    This does not decide what is vendored, because size is not the signal -
+    `values.schema.json`, `variables.tf` and `package.json` are all high
+    node-count and are real declarations of an estate's own surface. Provenance is
+    the signal, and a person reading ten names can tell in seconds what a rule
+    cannot: whether these are things you would name if asked what the estate is
+    built from.
+
+    Two streamed passes, never a load. The first counts endpoints and holds one
+    integer per id that appears in an edge; the second reads labels for the `top`
+    ids only. Measured against a loaded read on the largest estate available, the
+    streamed form was 2.2s and 0.04 GB where loading was 5.3s and 3.75 GB, which is
+    why `status` can afford this behind a flag and could not afford it otherwise.
+    """
+    degree: dict[str, int] = {}
+    for edge in iter_edges(path):
+        for end in ("source", "target"):
+            value = edge.get(end)
+            if value is not None:
+                key = str(value)
+                degree[key] = degree.get(key, 0) + 1
+    if not degree:
+        return []
+    # Sort by degree then id: two nodes of equal degree must not swap between runs.
+    ranked = sorted(degree.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    wanted = {node_id for node_id, _ in ranked}
+    labels: dict[str, str] = {}
+    for node in graph_stream.iter_array(path, key="nodes"):
+        node_id = str(node.get("id"))
+        if node_id in wanted:
+            labels[node_id] = str(node.get("label") or "")
+            if len(labels) == len(wanted):
+                break
+    return [(node_id, labels.get(node_id, ""), count) for node_id, count in ranked]
+
+
+def iter_edges(path: Path):
+    """Stream a graph's edges, from either key.
+
+    graphify writes `links` in node-link JSON and `edges` in its extract files.
+    Reading one and silently finding none is indistinguishable from a graph with no
+    edges, which would make every caller of this report an empty ranking.
+    """
+    found = False
+    for edge in graph_stream.iter_array(path, key="links"):
+        found = True
+        yield edge
+    if not found:
+        yield from graph_stream.iter_array(path, key="edges")
+
+
+def stale_refusal(described: Path) -> str:
+    """Why a stage that writes the graph back must not run, or "" when it may.
+
+    Three stages read the uncompressed graph, add a layer, and write **both**
+    files back. If the plain file is stale, the committed `.gz` is overwritten
+    from it and whatever the newer clustering produced is gone. That is the only
+    failure in this class that destroys an artefact rather than describing one
+    wrongly, so it refuses instead of reporting: by the time a `MISMATCH` line
+    reaches a log, the write has already happened.
+
+    **Refuses on the two files disagreeing, not on their timestamps.** An mtime
+    comparison was written first and was wrong for a reason the suite caught: these
+    stages write the plain file and then the archive, so the plain file is *always*
+    older afterwards. "Plain file older than the archive" is the normal state after
+    every successful run, not the defect state, and a guard on it refused every
+    re-run.
+
+    Disagreeing counts is the signal that actually separates the two cases. After a
+    successful run both files hold the same graph and agree. A leftover from an
+    earlier run disagrees with an archive that has been refreshed since. It reuses
+    the predicate `disagreement` reports on, so this refuses exactly where #197
+    reports - which is the intended relationship between them.
+
+    Costs a streamed pass over both files. These stages load the whole graph
+    anyway, and `graph_counts` streams rather than loading, so it is the cheaper
+    half of what the stage is about to do.
+
+    Two graphs with identical community and clustered-node counts would pass. That
+    is weaker than a content hash and much stronger than a timestamp; the counts
+    are the same quantities `record-clustering` has compared since this class of
+    defect was first reported.
+    """
+    other = counterpart(described)
+    if other is None or not other.is_file() or not described.is_file():
+        return ""
+    try:
+        mine = graph_counts(described)
+        theirs = graph_counts(other)
+    except (OSError, ValueError, EOFError):
+        return ""  # an unreadable counterpart is not this stage's business to fail over
+    if mine == theirs:
+        return ""
+    return (
+        f"Refusing to run: {described.name} has {mine[0]:,} communities over {mine[1]:,} "
+        f"clustered nodes and {other.name} has {theirs[0]:,} over {theirs[1]:,}, so one is "
+        f"stale. This stage rewrites both from {described.name}, which would overwrite "
+        f"{other.name} and lose its clustering. Decompress the committed graph over "
+        f"{described.name} (gunzip -kf {other.name}) and re-run, or remove {described.name}."
+    )

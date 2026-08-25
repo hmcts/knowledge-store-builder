@@ -23,9 +23,10 @@ Re-running replaces the layer wholesale (idempotent by reconstruction).
 from __future__ import annotations
 
 import json
+import sys
 import re
 
-from . import config, io
+from . import config, graph_files, io
 
 FORMAT = "packages"
 MANIFEST = "package.json"
@@ -341,6 +342,10 @@ def _add_package_layer(graph: dict, clones: list, providers: dict) -> tuple[int,
 def main() -> int:
     if not config.GRAPH_PATH.exists():
         print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    refusal = graph_files.stale_refusal(config.GRAPH_PATH)
+    if refusal:
+        print(refusal, file=sys.stderr)
         return 1
     if not config.REPOSITORIES_DIR.is_dir():
         print(f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first")
