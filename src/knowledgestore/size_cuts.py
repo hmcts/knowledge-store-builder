@@ -552,6 +552,12 @@ def measurements(sizing: Sizing, cuts: Sequence[Cut]) -> dict[str, int]:
     refresh is the only thing a layer size can be compared against. `layer_graphs`
     is there because a layer that halved because a re-sync deleted per-repository
     graphs looks exactly like a layer that halved because an estate shrank.
+
+    Renaming a candidate leaves its old pair of metrics in the record, because the
+    record carries forward everything it holds - each stage writing it must not
+    erase another's. Delete those two lines in the same commit as the rename: the
+    artefact is committed precisely so that its diff is reviewable, and a metric
+    nothing writes any more is one whose last value nobody can date.
     """
     recorded = {
         "size_cuts.layer_graphs": len(sizing.graphs),
