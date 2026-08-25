@@ -185,6 +185,17 @@ How that looks in this codebase:
   in a table's column headings stopped two quantities looking comparable, and
   would not have noticed the same substitution returning. If a change explains
   what was wrong, it should also fail when that thing is wrong again.
+- **An issue body is the opening claim, not the current state. Read the comments
+  before acting on any number in it.** The operators reporting into this tracker
+  retract their own figures in comments, promptly and unprompted — which is the
+  best thing about working with them and exactly why a body-only read is unsafe.
+  #129's body reported zero collisions between the AST and semantic layers; its
+  first comment retracts that in the opening sentence, because the zero had been
+  measured against an already-namespaced layer which cannot collide by
+  construction, and the real figure is 98 collisions re-pointing 311 edges. A
+  handover written from that body sent the next reader at the reporting gap when
+  the fabrication was the finding. #131's body over-scopes its own issue and says
+  so in its only comment. Cost of the check: one `--comments` flag.
 - **A claim about your own artefact needs the same treatment as a claim about
   your own numbers, and gets it less often.** Between two operators and this
   repository, one week produced seven corrections of the form "I described
