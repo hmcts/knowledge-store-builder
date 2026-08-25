@@ -260,6 +260,20 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "iter_array matches a nested key again",
+        "graph_stream.py",
+        "        if self.depth == 1 and self.token_start >= 0:",
+        "        if self.token_start >= 0:",
+        "the depth test was repeated in three places and every one-line mutation of "
+        "each survived, because the other two still blocked - so it is now one "
+        "guard, which is what makes it testable. #210: a merged graph carries `graph.hyperedges[].nodes`, a list of id "
+        "strings, before its top-level node array - so the iterator yielded strings, "
+        "type-checking consumers saw nothing, and graph_counts returned (0, 0) on a "
+        "fully clustered graph. Two guards built on those counts then read (0, 0) "
+        "against (0, 0) as agreement, and one of them was a refusal protecting an "
+        "irreversible overwrite. Shipped in v0.14.0",
+    ),
+    Mutation(
         "a stale graph is ranked rather than refused",
         "build_community_summaries.py",
         "    if stale:",
@@ -269,6 +283,53 @@ MUTATIONS = (
         "re-take the snapshot and re-author what the report names - which on that "
         "store would have destroyed five thousand correct summaries. A read failure "
         "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
     ),
     Mutation(
         "graph-report check unwired",
@@ -371,51 +432,52 @@ MUTATIONS = (
         "a reader then guesses which of a store's two graph files it refers to",
     ),
     Mutation(
-        "nothing compares the snapshot to the graph",
-        "build_community_summaries.py",
-        '        if entry["share"] < bar:',
-        "        if False:",
-        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
-        "reports counts derived from it, and nothing checked that it still described the "
-        "graph - so every summary could sit on a community it no longer describes with "
-        "`status` reporting the same coverage either way",
-    ),
-    Mutation(
-        "summaries with no snapshot entry silently excluded",
-        "build_community_summaries.py",
-        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
-        '        "unsnapshotted": [],',
-        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
-        "remap cannot even withdraw it - dropped from the population, after which the count "
-        "reads as though it had covered everything",
-    ),
-    Mutation(
-        "a graph carrying no membership reported as total drift",
-        "build_community_summaries.py",
-        "    if clustered / total < coverage:",
-        "    if False:",
-        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
-        "that printed success without writing its result makes every comparison fail; read as "
-        "drift that would send someone re-authoring an entire store over a one-line read "
-        "failure",
-    ),
-    Mutation(
-        "an id-space mismatch reported as moved membership",
-        "build_community_summaries.py",
-        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
-        "    if True:",
-        "a first implementation of this check elsewhere reported 58 communities adrift of "
-        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
-        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
-    ),
-    Mutation(
-        "status leaves its summary count to be read as a verdict",
+        "absolute-path check unwired",
         "status.py",
-        "    pointer = snapshot_pointer()",
-        '    pointer = ""',
-        "the count is identical whether the prose still describes its community or not, and an "
-        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
-        "the blind spot is the only honest thing it can do there",
+        "    _report_absolute_paths(arguments.paths)",
+        "    pass",
+        "#176: the fifth instance of this repository's most repeated escape - four "
+        "entries above are the same shape, in the same module, and each was written "
+        "after the previous one was fixed",
+    ),
+    Mutation(
+        "absolute-path check reports every absolute path",
+        "status.py",
+        "    return store_paths.relative(candidate) != candidate",
+        "    return True",
+        "the neighbouring-quantity failure this codebase has shipped repeatedly: "
+        "'every absolute path' rather than 'every path this store wrote absolute' "
+        "makes /etc/hosts and an API route findings, and a check whose first run is "
+        "mostly false positives is switched off before it reports a real one",
+    ),
+    Mutation(
+        "unreadable tracked files reported as a clean store",
+        "status.py",
+        '    if not scan["files"]:',
+        "    if False:",
+        "the '0 checked, none dangling' defect the corpus-citation check in this same "
+        "module already shipped once - a measurement of nothing paired with a clean "
+        "verdict, which reads as a pass",
+    ),
+    Mutation(
+        "absolute paths lost at a read-block boundary",
+        "status.py",
+        "        if match.end() > end:",
+        "        if False:",
+        "the scan streams because a store's tracked artefacts run to gigabytes "
+        "decompressed, and a path cut in half by a block boundary is the silent half "
+        "of that trade: no count can show what it failed to see",
+    ),
+    Mutation(
+        "the deferred path's own start is not resumed from",
+        "status.py",
+        "            resume = min(resume, match.start())",
+        "            resume = min(resume, match.end())",
+        "written and shipped wrong inside the change that added this check, and found "
+        "only by reconciling a 2.4 MB fixture's 12,000 written paths against the 11,997 "
+        "the scan reported - the ones spanning the hold-back point lost their head, the "
+        "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
+        "in the direction that reads as clean",
     ),
     Mutation(
         "retained failure double-counted",
