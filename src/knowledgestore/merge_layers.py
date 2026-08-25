@@ -67,7 +67,6 @@ whose endpoint exists in neither layer cannot be re-pointed and is not guessed a
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -109,29 +108,20 @@ def _free_id(candidate: str, taken: set[str]) -> str:
     return f"{candidate}_{suffix}"
 
 
-def merge(ast: dict, semantic: dict) -> tuple[dict, dict]:
-    """The merged graph and the counters describing what was decided.
+def _merge_nodes(
+    ast_nodes: list[dict], sem_nodes: list[dict], counters: dict
+) -> tuple[list[dict], dict[str, dict], dict[str, str]]:
+    """The merged node list, an id index, and the ids that moved.
 
-    Deterministic: layers are walked in the order they were written and renames
-    take the lowest free suffix, so two runs on the same inputs produce identical
-    bytes.
+    Split out of `merge` because Sonar measured its cognitive complexity at 16
+    against a limit of 15. The node walk is the separable half: it decides what
+    exists, and the edge walk then decides what resolves.
+
+    `renamed` holds only ids that moved, so an unchanged endpoint costs no lookup.
     """
-    ast_nodes, ast_edges = _nodes_and_edges(ast)
-    sem_nodes, sem_edges = _nodes_and_edges(semantic)
-
-    counters = {
-        "ast_nodes": len(ast_nodes),
-        "semantic_nodes": len(sem_nodes),
-        "collisions_same_label": 0,
-        "collisions_different_label": 0,
-        "edges_repointed": 0,
-        "edges_dropped": 0,
-    }
-
     by_id = {str(n.get("id")): n for n in ast_nodes if n.get("id") is not None}
     taken = set(by_id)
     merged_nodes = list(ast_nodes)
-    # Only ids that moved appear here, so an unchanged endpoint costs no lookup.
     renamed: dict[str, str] = {}
 
     for node in sem_nodes:
@@ -156,6 +146,29 @@ def merge(ast: dict, semantic: dict) -> tuple[dict, dict]:
         taken.add(new_id)
         by_id[new_id] = moved
         merged_nodes.append(moved)
+    return merged_nodes, by_id, renamed
+
+
+def merge(ast: dict, semantic: dict) -> tuple[dict, dict]:
+    """The merged graph and the counters describing what was decided.
+
+    Deterministic: layers are walked in the order they were written and renames
+    take the lowest free suffix, so two runs on the same inputs produce identical
+    bytes.
+    """
+    ast_nodes, ast_edges = _nodes_and_edges(ast)
+    sem_nodes, sem_edges = _nodes_and_edges(semantic)
+
+    counters = {
+        "ast_nodes": len(ast_nodes),
+        "semantic_nodes": len(sem_nodes),
+        "collisions_same_label": 0,
+        "collisions_different_label": 0,
+        "edges_repointed": 0,
+        "edges_dropped": 0,
+    }
+
+    merged_nodes, by_id, renamed = _merge_nodes(ast_nodes, sem_nodes, counters)
 
     merged_edges = list(ast_edges)
     for edge in sem_edges:
@@ -250,8 +263,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     merged, counters = merge(ast, semantic)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
+    # Through `io.write_json` rather than a raw write: it validates the target and
+    # is the one place in this library that writes JSON, so a second raw write site
+    # would need its own guard and would drift from that one.
+    io.write_json(destination, merged)
     print(report(counters))
     print(f"-> {destination}")
     return 0
