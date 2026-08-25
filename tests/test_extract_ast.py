@@ -388,6 +388,49 @@ class MovementTest(_StoreCase, unittest.TestCase):
         self.assertEqual(self._counts(), {"repo-a": 1})
         self.assertNotIn("repo-bad", self._counts())
 
+    def test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against(self):
+        """A failed run destroying the record of what the failure cost is self-concealing.
+
+        Dropping a failed repository from the sidecar reads as "absent from the
+        content set" next run and "new" the run after - two false movements from
+        one failure - and throws away the count its recovery would be compared to.
+        """
+        good = self._repo_file("repo-a", "a.py")
+        flaky = self._repo_file("repo-flaky", "b.py")
+        detect = self._detect([good, flaky])
+        self._run(_Extractor(nodes_per_file=4), ["--detect", str(detect)])
+        self.assertEqual(self._counts(), {"repo-a": 4, "repo-flaky": 4})
+
+        code, _, _ = self._run(_Extractor(raise_for=("repo-flaky",)), ["--detect", str(detect)])
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self._counts()["repo-flaky"],
+            4,
+            "the failed repository's last known count was discarded",
+        )
+
+        # And the recovery is measured against it rather than reported as brand new.
+        code, out, _ = self._run(_Extractor(nodes_per_file=1), ["--detect", str(detect)])
+        self.assertEqual(code, 0)
+        self.assertIn("repo-flaky", out)
+        self.assertIn("4 -> 1", out)
+        self.assertNotIn("new since the last run", out)
+
+    def test_a_run_where_everything_fails_leaves_the_baseline_standing(self):
+        """The degenerate case: an empty write makes the next run report no history.
+
+        With every repository failing, an unfiltered write replaces the baseline
+        with nothing, and the following run says there is no previous run at all -
+        a failure erasing the evidence of itself.
+        """
+        first = self._repo_file("repo-a", "a.py")
+        detect = self._detect([first])
+        self._run(_Extractor(nodes_per_file=7), ["--detect", str(detect)])
+
+        code, _, _ = self._run(_Extractor(raise_for=("repo-a",)), ["--detect", str(detect)])
+        self.assertEqual(code, 1)
+        self.assertEqual(self._counts(), {"repo-a": 7}, "the whole baseline was wiped")
+
     def test_gone_and_new_are_reported_as_different_things(self):
         """One "changed" number cannot tell three events apart, and responses differ.
 

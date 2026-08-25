@@ -273,6 +273,30 @@ def movement(before: "dict[str, int]", after: "dict[str, int]") -> "dict[str, li
     }
 
 
+def carry_forward(
+    before: "dict[str, int]", counts: "dict[str, int]", failures: "list"
+) -> "dict[str, int]":
+    """Keep a failed repository's last known count rather than dropping it.
+
+    Recording nothing for a repository that failed is not neutral. It reads as
+    *absent from the content set* on the next run and as *new* on the one after -
+    two false movement reports from one failure - and it discards the baseline
+    that would have shown a decrease when the repository comes back.
+
+    The degenerate case is the one that matters: if every repository fails, an
+    unfiltered write replaces the whole baseline with nothing, so the next run
+    reports that there is no previous run at all. A failed run would have erased
+    the record that shows what the failure cost, which is the same shape as every
+    other silent-empty defect this stage guards against.
+
+    A carried count is deliberately stale: comparing the next successful run
+    against the last one that actually extracted is what a decrease check is for.
+    """
+    failed = {label for label, _ in failures}
+    carried = {name: value for name, value in before.items() if name in failed}
+    return {**carried, **counts}
+
+
 def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     """Group the content set by the repository directory each file sits under.
 
@@ -471,9 +495,11 @@ def main(argv: "list[str] | None" = None) -> int:
     # more than a traceback. The exit code carries the failure instead, because a
     # partial layer reporting success is how a store commits a hole.
     io.write_json(destination, layer)
-    # Only repositories that actually extracted are recorded, so a failure does not
-    # write a 0 that the next run would read as a legitimate decrease to nothing.
-    io.write_json(sidecar, counts)
+    # Only repositories that actually extracted get a fresh count, so a failure does
+    # not write a 0 that the next run would read as a legitimate decrease to nothing -
+    # and a failed repository keeps its previous one rather than vanishing from the
+    # baseline, which would erase the record that shows what the failure cost.
+    io.write_json(sidecar, carry_forward(before, counts, failures))
     print(
         f"\nnodes {len(layer['nodes']):,}  edges {len(layer['edges']):,}  "
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"

@@ -496,6 +496,17 @@ MUTATIONS = (
         "disguise for a check that does not",
     ),
     Mutation(
+        "a failed repository is dropped from the baseline",
+        "extract_ast.py",
+        "    return {**carried, **counts}",
+        "    return dict(counts)",
+        "found by re-reading this stage after its own review passed: a repository that "
+        "failed vanished from the sidecar, so it read as absent from the content set on "
+        "the next run and new on the one after, and the count its recovery would be "
+        "compared against was gone. With every repository failing, the whole baseline was "
+        "replaced with nothing - a failed run erasing the record of what it cost",
+    ),
+    Mutation(
         "the per-repository bound never fires",
         "extract_ast.py",
         "signal.alarm(seconds)",
