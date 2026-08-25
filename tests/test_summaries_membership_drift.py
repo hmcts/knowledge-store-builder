@@ -400,19 +400,65 @@ class AdriftStage(SettingsIsolated):
         self.assertIn("Cannot check membership", err)
         self.assertNotIn("Adrift", out)
 
-    def test_a_stale_counterpart_graph_is_named(self):
-        """Catches this check reporting on communities the store does not ship.
+    def test_a_stale_counterpart_graph_refuses_rather_than_ranking(self):
+        """Catches a read failure being answered by rewriting an estate's prose.
 
-        The uncompressed graph is a leftover from a discarded run; the committed
-        `.gz` holds a different clustering. Every count reconciles and describes
-        the wrong artefact.
+        Reported from a real store: the check printed "One of them is stale" and
+        then returned a verdict with exit 1 — whose documented response is to
+        re-take the snapshot and remap or re-author what the report names. On that
+        store the instruction would have destroyed five thousand correct summaries.
+
+        A disagreeing counterpart is a fourth blocking cause, not drift. The
+        uncompressed graph is a leftover from a discarded run; the committed
+        archive holds a different clustering, and every count reconciles while
+        describing the wrong artefact.
         """
         self.write_summaries({"1": "prose"})
         self.write_snapshot({"1": ["a", "b", "c", "d"]})
         self.write_graph({"1": ["a", "b", "c", "d"]})
         self.write_gzipped_graph({"1": ["a", "b"], "2": ["c", "d"]})
-        _, out, _ = self.run_adrift()
-        self.assertIn("MISMATCH", out)
+
+        code, out, err = self.run_adrift()
+
+        self.assertEqual(code, 2, "a disagreeing counterpart is not drift")
+        self.assertIn("MISMATCH", err)
+        self.assertIn("Cannot check membership", err)
+        self.assertIn("do not re-author prose", err.lower())
+        self.assertNotIn("Adrift", out)
+        self.assertNotIn("Membership:", out)
+
+    def test_no_count_is_stated_before_the_staleness_check(self):
+        """Catches a count from the wrong file being asserted as the store's.
+
+        The original ordering printed "Read N nodes and M communities" from the
+        stale graph and only then reported the disagreement — so the first thing an
+        operator read was a figure describing an artefact the store may not ship.
+        """
+        self.write_summaries({"1": "prose"})
+        self.write_snapshot({"1": ["a", "b", "c", "d"]})
+        self.write_graph({"1": ["a", "b", "c", "d"]})
+        self.write_gzipped_graph({"1": ["a", "b"], "2": ["c", "d"]})
+
+        _code, out, _err = self.run_adrift()
+
+        self.assertNotIn("Read ", out, "a count was stated before the file was trusted")
+
+    def test_the_disagreement_line_ends_with_a_newline(self):
+        """Catches the refusal running into the next line.
+
+        Reported as `...One of them is stale.Membership: 0 of 5112`, which reads as
+        one sentence and buries the refusal in the verdict it was meant to prevent.
+        """
+        self.write_summaries({"1": "prose"})
+        self.write_snapshot({"1": ["a", "b", "c", "d"]})
+        self.write_graph({"1": ["a", "b", "c", "d"]})
+        self.write_gzipped_graph({"1": ["a", "b"], "2": ["c", "d"]})
+
+        _code, _out, err = self.run_adrift()
+
+        stale_line = next(line for line in err.splitlines() if "MISMATCH" in line)
+        self.assertTrue(stale_line.endswith("."), stale_line)
+        self.assertNotIn("Membership", stale_line)
 
     def test_the_subcommand_is_reachable_and_takes_its_flags(self):
         """Catches a check that exists and is wired to nothing.

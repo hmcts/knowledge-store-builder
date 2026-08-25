@@ -351,7 +351,7 @@ def membership_drift(
     merges distinct nodes into one member. Where the two sides are in different id
     spaces, that is named as its own cause or note rather than reported as drift.
 
-    Three causes stop the comparison instead of returning a verdict, because each
+    Four causes stop the comparison instead of returning a verdict, because each
     makes *every* summary compare as adrift and each needs the opposite response
     to "membership moved":
 
@@ -359,6 +359,10 @@ def membership_drift(
     - `no-membership` - the nodes carry no `community`. graphify holds the
       assignment in that key, so a renamed key, or a clustering step that printed
       success without persisting its result, reads as total drift.
+    - `stale-graph` - the graph read disagrees with its committed counterpart, so
+      the community ids it carries may not be the ones the store ships. Checked
+      before any count is printed, because stating a count from the wrong file as
+      though it were the store's is the same error one step earlier.
     - `wrong-snapshot` - the snapshot and the graph share no node ids, the same
       condition `_remap_refusal` refuses on.
 
@@ -628,19 +632,38 @@ def adrift(
         coverage=coverage,
         described=graph.name,
     )
+    # A disagreeing counterpart is the fourth blocking cause, and it is checked
+    # before any count is stated - reported by an operator whose run printed "One of
+    # them is stale" and then returned a verdict of `1`, whose documented response
+    # is to re-take the snapshot and re-author. On their store that instruction
+    # would have destroyed five thousand correct summaries.
+    #
+    # It is the cause an operator is most likely to meet, because `_graph_to_check`
+    # prefers the gitignored file - the one most likely to be a stale leftover -
+    # over the committed archive, which by definition is not.
+    stale = graph_files.disagreement(
+        graph,
+        (result["communities"], result["clustered"]),
+        "Community ids are positional, so every summary would be compared against "
+        "communities from a graph the store may not ship.",
+    )
+    if stale:
+        print(
+            f"Cannot check membership: {graph.name} and its counterpart hold different "
+            "graphs, so the counts read here may not describe what this store ships.",
+            file=sys.stderr,
+        )
+        print(stale.rstrip("\n"), file=sys.stderr)
+        print(
+            "Do not re-take the snapshot and do not re-author prose on this result - both "
+            "would answer a read failure by rewriting an estate's prose. Read the graph the "
+            "store ships and run again.",
+            file=sys.stderr,
+        )
+        return 2
     print(
         f"Read {result['nodes']} nodes and {result['communities']} communities from "
         f"{graph.name}; the snapshot holds {len(snapshot)} communities."
-    )
-    print(
-        graph_files.disagreement(
-            graph,
-            (result["communities"], result["clustered"]),
-            "Community ids are positional, so a check against the wrong graph reports on "
-            "communities the store does not ship. Decompress the committed graph over "
-            "graph.json, or remove the stale graph.json, and re-run.",
-        ),
-        end="",
     )
     if result["cause"]:
         print(result["message"], file=sys.stderr)

@@ -260,6 +260,17 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
