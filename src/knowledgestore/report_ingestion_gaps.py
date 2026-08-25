@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -531,13 +532,35 @@ def _built_line(evidence: Evidence) -> str:
     return line
 
 
-def _membership_lines(declared: boundary.Boundary | None) -> list[str]:
+def _declaration() -> tuple[boundary.Boundary | None, str]:
+    """The declaration, or the reason it could not be read - never neither.
+
+    A declaration that fails to parse must not reach the report as an estate
+    that declared nothing: that is the false-completeness failure the
+    declaration exists to remove, reappearing one level in. It also must not
+    end the run in a traceback, because the ranking below does not depend on
+    it - only the rulings and the aliases do.
+    """
+    try:
+        return boundary.read(), ""
+    except ValueError as error:
+        return None, str(error)
+
+
+def _membership_lines(declared: boundary.Boundary | None, unreadable: str) -> list[str]:
     """Why an unbuilt coordinate is not the same thing as a missing repository."""
     lines = [
         "Derived only from the repositories this store holds. A coordinate unbuilt here "
         "may be built somewhere nobody has read."
     ]
-    if declared is None:
+    if unreadable:
+        lines.append(
+            "**The boundary declaration could not be read**, so no ruling and no alias "
+            "below has been applied: a repository the estate has already ruled out may "
+            "appear as a candidate, and one it holds under another name may appear "
+            "absent. Fix `config/estate-boundary.txt` and re-run."
+        )
+    elif declared is None:
         lines.append(
             "No boundary is declared (`config/estate-boundary.txt`), so nothing records "
             "whether a repository is outside this estate by decision or merely unlocated."
@@ -576,12 +599,17 @@ FOOTER = (
 )
 
 
-def report(evidence: Evidence, declared: boundary.Boundary | None, limit: int) -> list[str]:
+def report(
+    evidence: Evidence,
+    declared: boundary.Boundary | None,
+    limit: int,
+    unreadable: str = "",
+) -> list[str]:
     """The whole report as lines. Deterministic: every collection is sorted."""
     namespaces = internal_namespaces(evidence.built)
     rows, consumed = unbuilt(evidence, namespaces)
     lines = ["Ingestion candidates from dependency evidence.", ""]
-    lines += _membership_lines(declared)
+    lines += _membership_lines(declared, unreadable)
     lines += ["", _scope_line(evidence), _built_line(evidence)]
     if namespaces:
         lines.append(
@@ -644,10 +672,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first")
         return 1
 
-    print("\n".join(report(read_estate(clones), boundary.read(), arguments.limit)))
+    declared, unreadable = _declaration()
+    print("\n".join(report(read_estate(clones), declared, arguments.limit, unreadable)))
+    if unreadable:
+        print(f"\n{unreadable}", file=sys.stderr)
+        return 1
     # Findings are the normal state of an estate, so this stage reports and
     # stops. A non-zero exit would make "you depend on something you do not
-    # hold" a build failure, when it is a decision for an operator.
+    # hold" a build failure, when it is a decision for an operator. An
+    # unreadable declaration is different in kind: the store is misconfigured,
+    # and the rulings the report would have applied are missing from it.
     return 0
 
 

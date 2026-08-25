@@ -277,9 +277,16 @@ class GapsTestCase(SettingsIsolated):
         return gaps.read_estate(clones)
 
     def rendered(self, limit: int = 0) -> str:
-        from knowledgestore import boundary
+        """The report as the stage prints it, through the stage's own main.
 
-        return "\n".join(gaps.report(self.evidence(), boundary.read(), limit))
+        Not through `report()` directly: a helper that assembles the report
+        itself would keep passing while nothing a user can run reaches it,
+        which is the unwired-check class this repository keeps shipping.
+        """
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            self.code = gaps.main(["--limit", str(limit)])
+        return captured.getvalue()
 
 
 class PomReading(unittest.TestCase):
@@ -584,6 +591,26 @@ class BoundaryIntegration(GapsTestCase):
         rendered = self.rendered()
         self.assertIn("No boundary is declared", rendered)
         self.assertIn("may be built somewhere nobody has read", rendered)
+
+    def test_an_unreadable_declaration_is_reported_not_read_as_no_boundary(self):
+        """Break: let `boundary.read()` raise out of the stage, or swallow the error
+        and carry on. The traceback kills a report that does not need the
+        declaration; swallowing it is worse, because the report then reads as an
+        estate that declared nothing while a repository it already ruled out is
+        ranked as a candidate and one it holds under another name is reported
+        absent - the false absence, one level in."""
+        self.estate()
+        self.declare("active one two three\n")
+        rendered = self.rendered()
+        self.assertIn("boundary declaration could not be read", rendered)
+        self.assertNotIn("No boundary is declared", rendered)
+        self.assertIn(
+            "payments.api",
+            rendered,
+            "with no aliases applied the off-host name shows as a gap, which is why "
+            "this run is a setup error rather than a clean report",
+        )
+        self.assertEqual(self.code, 1)
 
     def test_sources_declared_unsearched_are_named_in_the_report(self):
         """Break: ignore `unsearched`. An artefact built on a host nobody read is

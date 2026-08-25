@@ -569,6 +569,16 @@ MUTATIONS = (
         "a check that cannot fire on Maven and fires on everything under npm",
     ),
     Mutation(
+        "an unreadable declaration reads as an estate that declared nothing",
+        "report_ingestion_gaps.py",
+        "        return None, str(error)",
+        '        return None, ""',
+        "the false absence the declaration exists to remove, one level in: a "
+        "declaration that fails to parse is indistinguishable from an estate that "
+        "wrote none, so a repository already ruled out is ranked as a candidate and "
+        "one held under another name is reported absent - and the run still exits 0",
+    ),
+    Mutation(
         "the refusal to resolve a coordinate stops reaching the reader",
         "report_ingestion_gaps.py",
         '    lines += ["", FOOTER]',
