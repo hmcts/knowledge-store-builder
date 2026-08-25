@@ -299,6 +299,9 @@ class PomReading(unittest.TestCase):
         self.assertEqual(built, gaps.Coordinate("com.example.platform.orders", "orders-app"))
 
     def test_a_flat_pom_uses_its_own_group(self):
+        """The other half of the inheritance rule. Break: always read the parent's
+        group. A pom with no `<parent>` would then build nothing at all, and every
+        artefact it publishes would rank as something to ingest."""
         built, _, _ = gaps.pom_coordinates(PARENT_POM)
         self.assertEqual(built, gaps.Coordinate("com.example.platform.orders", "orders-parent"))
 
@@ -445,6 +448,10 @@ class Classification(unittest.TestCase):
         )
 
     def test_a_framework_namespace_is_framework_whatever_it_holds(self):
+        """Break: classify on the artefacts only. A namespace named for plumbing is
+        plumbing however innocuous one artefact under it sounds, and a single
+        domain-shaped name in it would promote the whole row above real domain
+        rows."""
         self.assertEqual(
             gaps.classify("com.example.platform.framework", ("orders-model",)), "framework"
         )
