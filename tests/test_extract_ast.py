@@ -32,6 +32,7 @@ import io as _io
 import json
 import sys
 import tempfile
+import time
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -43,19 +44,32 @@ from knowledgestore import config, extract_ast  # noqa: E402
 
 
 class _Extractor:
-    """Stands in for the parser: records what it was given, raises where told to."""
+    """Stands in for the parser: records what it was given, raises where told to.
 
-    def __init__(self, raise_for=()):
+    `nodes_per_file` lets a second run yield fewer nodes for the same input, which
+    is the whole point of the movement check - the input reconciles, the output
+    shrank.  `hang_for` sleeps, so a real per-repository bound has to fire.
+    """
+
+    def __init__(self, raise_for=(), nodes_per_file=1, hang_for=()):
         self.calls: list[list[Path]] = []
         self.raise_for = tuple(raise_for)
+        self.nodes_per_file = nodes_per_file
+        self.hang_for = tuple(hang_for)
 
     def __call__(self, files, cache_root=None):
         self.calls.append(list(files))
         for path in files:
             if any(name in str(path) for name in self.raise_for):
                 raise RuntimeError("unparseable grammar")
+            if any(name in str(path) for name in self.hang_for):
+                time.sleep(5)
         return {
-            "nodes": [{"id": str(path), "label": path.name} for path in files],
+            "nodes": [
+                {"id": f"{path}#{n}", "label": path.name}
+                for path in files
+                for n in range(self.nodes_per_file)
+            ],
             "edges": [{"source": str(files[0]), "target": str(path)} for path in files[1:]],
         }
 
@@ -64,7 +78,11 @@ class _Extractor:
         return {str(path) for call in self.calls for path in call}
 
 
-class ExtractAstTest(unittest.TestCase):
+class _StoreCase:
+    """Shared fixture. Deliberately not a TestCase: unittest collects every TestCase
+    subclass, so a shared base that *was* one re-ran the whole parent suite inside
+    each child - 41 tests for 18, and three duplicate failures pointing at one bug."""
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -110,6 +128,8 @@ class ExtractAstTest(unittest.TestCase):
             (self.root / "graphify-out" / ".graphify_ast.json").read_text(encoding="utf-8")
         )
 
+
+class ExtractAstTest(_StoreCase, unittest.TestCase):
     # ---- parsing the pipeline's own output -------------------------------------
 
     def test_the_pipelines_own_output_is_refused(self):
@@ -232,8 +252,8 @@ class ExtractAstTest(unittest.TestCase):
         code, out, err = self._run(extractor, ["--detect", str(detect)])
         self.assertIn("repo-bad", err, "the failing repository was not named")
         labels = {node["id"] for node in self._layer()["nodes"]}
-        self.assertIn(str(good), labels)
-        self.assertIn(str(other), labels)
+        self.assertIn(f"{good}#0", labels)
+        self.assertIn(f"{other}#0", labels)
         self.assertIn("repo-c", out, "extraction stopped at the failure instead of continuing")
         self.assertEqual(code, 1)
 
@@ -302,3 +322,147 @@ class ExtractAstTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MovementTest(_StoreCase, unittest.TestCase):
+    """Nodes-per-repository against the previous run - the check the other tests cannot make.
+
+    Reconciling a run against the content set it was handed catches input dropped
+    *within* a run. It cannot catch a repository extracting materially less than it
+    did last time: a parser version moves, a file is renamed, language detection
+    changes, and the stage succeeds with its own counts reconciling perfectly while
+    the store loses a repository's worth of structure.
+    """
+
+    def _counts(self):
+        return json.loads(
+            (self.root / "graphify-out" / ".graphify_ast_counts.json").read_text(encoding="utf-8")
+        )
+
+    def test_a_repository_that_shrank_is_named_and_does_not_fail_the_run(self):
+        """A quiet decrease is the common case, and neither empty nor partial covers it.
+
+        The existing refusals fire on an empty layer and on a repository that did
+        not extract. A repository that extracted *less* is neither: every count
+        reconciles against the input it was given. Naming it is the only way an
+        operator sees it, and failing on it would be wrong - deleted code is a
+        legitimate decrease, so the judgement is a person's.
+        """
+        detect = self._detect([self._repo_file("repo-a", "a.py")])
+        first, _, _ = self._run(_Extractor(nodes_per_file=3), ["--detect", str(detect)])
+        self.assertEqual(first, 0)
+        self.assertEqual(self._counts(), {"repo-a": 3})
+
+        code, out, err = self._run(_Extractor(nodes_per_file=1), ["--detect", str(detect)])
+        self.assertEqual(code, 0, f"a decrease must not fail the run: {err}")
+        self.assertIn("repo-a", out)
+        self.assertIn("3 -> 1", out)
+        self.assertIn("-2", out)
+
+    def test_nothing_moving_says_so_rather_than_printing_a_movement_report(self):
+        """The guard on the instrument: a report that always prints proves nothing.
+
+        The test above asserts a name appears in the output. A movement report
+        that listed every repository unconditionally would satisfy it while
+        detecting nothing, so the unchanged case has to be silent.
+        """
+        detect = self._detect([self._repo_file("repo-a", "a.py")])
+        self._run(_Extractor(nodes_per_file=2), ["--detect", str(detect)])
+        code, out, _ = self._run(_Extractor(nodes_per_file=2), ["--detect", str(detect)])
+        self.assertEqual(code, 0)
+        self.assertIn("no per-repository movement", out)
+        self.assertNotIn("->", out.split("no per-repository movement")[-1])
+
+    def test_a_failed_repository_is_not_recorded_as_zero(self):
+        """Recording a failure as 0 poisons the next run's baseline in both directions.
+
+        A 0 would make the next successful run look like a large increase, and a
+        second consecutive failure look unchanged. Neither is true, and both hide
+        the failure behind a movement number that reconciles.
+        """
+        good = self._repo_file("repo-a", "a.py")
+        self._repo_file("repo-bad", "broken.py")
+        detect = self._detect([good, self.root / "repositories" / "repo-bad" / "broken.py"])
+        code, _, _ = self._run(_Extractor(raise_for=("repo-bad",)), ["--detect", str(detect)])
+        self.assertEqual(code, 1)
+        self.assertEqual(self._counts(), {"repo-a": 1})
+        self.assertNotIn("repo-bad", self._counts())
+
+    def test_gone_and_new_are_reported_as_different_things(self):
+        """One "changed" number cannot tell three events apart, and responses differ.
+
+        A repository that shrank, one that is gone from the content set, and one
+        that is new need different actions. Collapsing them into a single delta is
+        what makes a movement report ignorable.
+        """
+        first_file = self._repo_file("repo-a", "a.py")
+        detect_one = self._detect([first_file])
+        self._run(_Extractor(), ["--detect", str(detect_one)])
+
+        second_file = self._repo_file("repo-b", "b.py")
+        detect_two = self._detect([second_file])
+        code, out, _ = self._run(_Extractor(), ["--detect", str(detect_two)])
+        self.assertEqual(code, 0)
+        self.assertIn("repo-a", out)
+        self.assertIn("absent from the content set", out)
+        self.assertIn("repo-b", out)
+        self.assertIn("new since the last run", out)
+
+    def test_the_first_run_says_there_is_no_baseline_rather_than_inventing_one(self):
+        """An absent baseline read as "nothing changed" is a clean report of nothing.
+
+        This is the same class as every other silent-empty failure: with no
+        previous run, a movement check has nothing to say, and saying "no movement"
+        would be indistinguishable from a real all-clear.
+        """
+        detect = self._detect([self._repo_file("repo-a", "a.py")])
+        code, out, _ = self._run(_Extractor(), ["--detect", str(detect)])
+        self.assertEqual(code, 0)
+        self.assertIn("no previous run recorded", out)
+
+
+class TimeLimitTest(_StoreCase, unittest.TestCase):
+    """A pathological repository is only identifiable by name if the run ends."""
+
+    def test_a_repository_that_hangs_is_timed_out_named_and_counted(self):
+        """Per-repository attribution without a bound still loses the night.
+
+        The motivation for this stage is that a whole-corpus call gave no way to
+        tell a hung run from a slow one. Naming the repository that is hanging is
+        no use to an operator who is asleep: the run has to end, the partial layer
+        has to survive, and the exit code has to carry it.
+        """
+        good = self._repo_file("repo-a", "a.py")
+        self._repo_file("repo-slow", "huge.min.js")
+        detect = self._detect([good, self.root / "repositories" / "repo-slow" / "huge.min.js"])
+        extractor = _Extractor(hang_for=("repo-slow",))
+        code, out, err = self._run(extractor, ["--detect", str(detect), "--timeout", "1"])
+        self.assertEqual(code, 1)
+        self.assertIn("repo-slow", err)
+        self.assertIn("TIMED OUT", err)
+        self.assertIn("repo-a", out, "the run stopped at the timeout instead of continuing")
+        self.assertEqual(len(self._layer()["nodes"]), 1)
+
+    def test_the_limit_is_off_when_asked_and_the_run_still_completes(self):
+        """The guard on the bound: one that fired always would pass the test above.
+
+        `--timeout 0` is the documented escape for a store with a genuinely slow
+        repository, and it has to actually extract rather than time out at zero.
+        """
+        detect = self._detect([self._repo_file("repo-a", "a.py")])
+        code, _, err = self._run(_Extractor(), ["--detect", str(detect), "--timeout", "0"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self._layer()["nodes"]), 1)
+
+    def test_the_alarm_is_cleared_afterwards(self):
+        """A left-armed alarm fires during an unrelated later stage, far from its cause.
+
+        `signal.alarm` is process-wide. Leaving it set means a subsequent stage in
+        the same process dies with a timeout naming a repository it never touched -
+        the hardest possible failure to attribute.
+        """
+        import signal as _signal
+
+        with extract_ast.repository_time_limit(30) as bounded:
+            self.assertTrue(bounded)
+        self.assertEqual(_signal.alarm(0), 0, "an alarm was left armed after the block")

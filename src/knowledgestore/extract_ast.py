@@ -23,9 +23,11 @@ seconds.
 The speed is not the point and is not what this stage is for. Three properties
 are:
 
-**A pathological repository is identifiable by name.** One multi-megabyte
-minified bundle can dominate a whole-corpus parse, and in a single call there is
-nothing to attribute it to.
+**A pathological repository is identifiable by name, and the run ends.** One
+multi-megabyte minified bundle can dominate a whole-corpus parse, and in a single
+call there is nothing to attribute it to. `--timeout` bounds each repository,
+because a name nobody is awake to read is not an improvement on no name - see
+`repository_time_limit` for what that bound does and does not cover.
 
 **One repository blowing up does not lose the run.** Failures are caught, named,
 and counted; the remaining repositories still extract.
@@ -36,26 +38,60 @@ it is written even when repositories failed - and the exit code is still
 non-zero, because a partial layer that reports success is how a store commits a
 hole.
 
+## Nodes per repository, against the last run
+
+Reconciling this stage's own count against the content set it was handed catches
+input dropped *within* a run. It cannot catch a repository extracting materially
+less than it did last time - a parser version moves, a file is renamed, language
+detection changes - where the stage succeeds, every count reconciles against the
+input it was given, the layer is written, and the store loses a repository's worth
+of structure quietly. An empty layer and a partial layer are both refused above;
+**a smaller layer is neither of those**, and it is the common case.
+
+So the per-repository counts go to a sidecar beside the layer, and the next run
+reports what moved: decreased, absent, new. Those are three events needing three
+responses, which a single delta cannot express.
+
+**Reported, never refused on.** A decrease can be entirely legitimate - code was
+deleted - so the judgement is a person's. Refusing would also make this stage
+unusable in a chain, which is where it is most useful, and would train an operator
+to pass whatever silences it. Non-zero stays reserved for a repository that did not
+extract at all.
+
+The sidecar is a working file beside the layer, deliberately not a committed
+artefact: it is the same class of thing as `.graphify_ast.json` itself, so it needs
+no decision from a store's owner about what the store commits. If the estate-wide
+build stamp grows a per-repository series, this should move there rather than
+persist as a second convention - but that artefact cannot hold a per-repository
+series today, and a working file is the option that does not block on it.
+
 ## It does not carry an exclusion list, and that is the design
 
 Every store that has driven extraction per repository has hand-written a
 vendored-path exclusion regex to keep dependency bundles and build output away
-from the parser. Those lists are the wrong shape twice over.
+from the parser. Those lists are wrong in shape, and only incidentally wrong in
+fact - which is the order that matters, because the second invites the answer
+"then maintain the list better" and the first does not.
 
-They are wrong in fact. One store's list excluded dependency bundles, build
-output and state files - and not the pipeline's own output directory, so several
-hundred of the pipeline's own JSON artefacts were being handed back to the
-extractor as though they were source. That was found by watching a run parse a
-graph file, not by any check, because an exclusion list has no failing case: it
-is correct on the day it is written and silently wrong the next time the
-pipeline emits a new kind of artefact. It fails by omission, which is invisible.
+**Wrong in shape: an exclusion list is a check with no failing case.** It is a
+second, hand-maintained model of what the tool produces, and it drifts from the
+first by construction. No test can catch the drift, because a test would have to
+already know the artefact existed - which is the same thing the list would have
+to know. It fails by omission, and omission is exactly what neither a list nor a
+test of a list can see. That is the shape of a vacuous gate, and it cannot be
+fixed by being more careful.
 
-They are wrong in shape. An exclusion list is a second, hand-maintained model of
-what the tool produces, and it drifts from the first one by construction. The
-extractor already computes the content set and writes it to
+The extractor already computes the content set and writes it to
 `.graphify_detect.json`. This stage consumes that, so there is one model.
 Anything derived from what the pipeline actually wrote cannot drift, because the
 pipeline knows what it wrote.
+
+Wrong in fact, as the instance that made it visible: one store's list excluded
+dependency bundles, build output and state files - and not the pipeline's own
+output directory, so several hundred of the pipeline's own JSON artefacts were
+handed back to the extractor as source, and nodes in that store's committed graph
+describe the graph itself. Found by watching a run parse a graph file. Not by any
+check, because there was no check that could have failed.
 
 So this stage takes its file list and does not derive one. `--files` accepts an
 explicit list for a caller that has computed its own; the default reads the
@@ -70,11 +106,23 @@ It checks for that directory anywhere in the path rather than only at the store
 root, because `sync` ends with `git clean -fd -e graphify-out` - so that
 directory is the one thing in a clone sync deliberately preserves, and every
 repository in the corpus can hold one.
+
+**Which cleanliness this claims, precisely.** The content set is clean of *this
+pipeline's own output*, by construction, and that is the whole of the claim. It
+is not a claim about symlinks, which are the other way a repository walk reads
+content that is not that repository's - whether the content set is symlink-aware
+is a property of the extractor's detection, and this stage's default inherits
+whatever that is rather than improving on it. A store relying on a per-repository
+ignore file for symlinked trees should note that `git clean -fd -e graphify-out`
+deletes it every sync, so it has to be re-applied before this stage runs and
+nothing here fails if it was not.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import signal
 import sys
 import time
 from pathlib import Path
@@ -145,6 +193,86 @@ def pipeline_artefacts(files: "list[Path]", graph_directory: Path) -> "list[Path
     return inside
 
 
+@contextlib.contextmanager
+def repository_time_limit(seconds: int):
+    """Bound one repository's parse, so a pathological one names itself and ends.
+
+    Per-repository extraction gives you the *name* of the repository that is
+    hanging. It does not end the run, and a name nobody is awake to read is not
+    an improvement on no name. This is what makes "one bundle can dominate a
+    parse" an observation rather than a night lost.
+
+    Yields True when a bound is actually in force, so a caller can report which
+    it got rather than assuming. It is not in force in two cases, and both are
+    reported rather than silently downgraded: a platform with no `SIGALRM`, and
+    a call from any thread but the main one, where installing a handler raises.
+
+    **What this does not bound.** Python runs signal handlers between bytecode
+    instructions, so a single long call inside a C extension - which is where a
+    minified bundle's parse actually goes - may not be interrupted until it
+    returns. This bounds the loop and any pathology at Python level, and it is
+    not the guarantee a subprocess per repository would give. That is deliberate
+    and deferred: a subprocess forfeits running in one interpreter, which is what
+    makes the parser's version recordable and stops it resolving to a different
+    executable than the one the lock names. Stated here rather than discovered,
+    because a bound that is claimed and does not hold is worse than none.
+    """
+    if seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        yield False
+        return
+
+    def _expire(signum, frame):
+        raise TimeoutError(f"exceeded the {seconds}s per-repository limit")
+
+    try:
+        previous = signal.signal(signal.SIGALRM, _expire)
+    except ValueError:  # not the main thread, so no handler can be installed
+        yield False
+        return
+    signal.alarm(seconds)
+    try:
+        yield True
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def counts_path(layer: Path) -> Path:
+    """Where the per-repository node counts sit: beside the layer, not committed."""
+    return layer.with_name(f"{layer.stem}_counts.json")
+
+
+def previous_counts(path: Path) -> "dict[str, int]":
+    """Last run's nodes-per-repository, or empty when there was no last run."""
+    stored = io.read_json(path, default={}) or {}
+    if not isinstance(stored, dict):
+        return {}
+    return {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
+
+
+def movement(before: "dict[str, int]", after: "dict[str, int]") -> "dict[str, list]":
+    """Three things a changed count can mean, kept apart because responses differ.
+
+    A repository that shrank, one that is gone, and one that is new are not the
+    same event, and a single "changed" number cannot tell them apart. Reconciling
+    a run against the content set it was handed is a different check and already
+    here: it catches input dropped *within* a run. It cannot catch a repository
+    extracting materially less than it did last time - a parser version moves, a
+    file is renamed, language detection changes - where the stage succeeds, the
+    count reconciles against its own input, and the store loses a repository's
+    worth of structure quietly.
+    """
+    return {
+        "decreased": sorted(
+            (name, before[name], after[name])
+            for name in set(before) & set(after)
+            if after[name] < before[name]
+        ),
+        "absent": sorted(name for name in set(before) - set(after)),
+        "new": sorted(name for name in set(after) - set(before)),
+    }
+
+
 def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     """Group the content set by the repository directory each file sits under.
 
@@ -167,22 +295,49 @@ def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     return groups
 
 
-def extract_estate(groups: "dict[str, list[Path]]", extractor, root: Path) -> "tuple[dict, list]":
-    """Extract each repository in turn. Returns the merged layer and the failures.
+def extract_estate(
+    groups: "dict[str, list[Path]]", extractor, root: Path, timeout: int = 0
+) -> "tuple[dict, list, dict]":
+    """Extract each repository in turn. Returns the layer, the failures and the counts.
 
     `extractor` is `graphify.extract.extract`, injected rather than imported here
     so the loop, the reporting and the isolation are testable without the parser
     and without a corpus.
+
+    The per-repository node counts are returned rather than derived from the layer
+    afterwards, because a node need not carry a repository attribute - deriving
+    them would make this measurement depend on a property of the extraction the
+    rest of this stage does not require.
     """
     nodes: list = []
     edges: list = []
     failures: list[tuple[str, str]] = []
+    counts: dict[str, int] = {}
     width = max((len(name) for name in groups), default=1)
+    unbounded_reported = False
     for name, files in sorted(groups.items()):
         label = name or "(corpus root)"
         started = time.monotonic()
         try:
-            result = extractor(files, cache_root=root)
+            with repository_time_limit(timeout) as bounded:
+                if timeout > 0 and not bounded and not unbounded_reported:
+                    # Once, not per repository: a limit that could not be installed
+                    # is a fact about the platform, and repeating it per repository
+                    # buries the failures it sits among.
+                    print(
+                        f"  (no per-repository time limit available here; --timeout "
+                        f"{timeout} is not in force)",
+                        file=sys.stderr,
+                    )
+                    unbounded_reported = True
+                result = extractor(files, cache_root=root)
+        except TimeoutError as error:
+            # A timeout is a failure, not a separate outcome: named, counted, the
+            # partial layer kept, and the exit code carries it. The only reason to
+            # tell them apart at all is that the operator's next action differs.
+            failures.append((label, f"TIMED OUT: {error}"))
+            print(f"  {label:<{width}}  TIMED OUT  {error}", file=sys.stderr)
+            continue
         except Exception as error:  # a parser raises whatever the grammar raises
             # Named and counted, never fatal: on a large estate one unparseable
             # repository must not cost the other several hundred.
@@ -193,12 +348,33 @@ def extract_estate(groups: "dict[str, list[Path]]", extractor, root: Path) -> "t
         relations = result.get("edges") or []
         nodes.extend(found)
         edges.extend(relations)
+        counts[label] = len(found)
         elapsed = time.monotonic() - started
         print(
             f"  {label:<{width}}  {len(files):>6,} files  {len(found):>7,} nodes  "
             f"{len(relations):>7,} edges  {elapsed:6.1f}s"
         )
-    return {"nodes": nodes, "edges": edges}, failures
+    return {"nodes": nodes, "edges": edges}, failures, counts
+
+
+def report_movement(moved: "dict[str, list]") -> str:
+    """Every decrease named. Never an exit code - the judgement is a person's.
+
+    A decrease can be legitimate: code was deleted. Refusing on one would make
+    this stage unusable in a chain, which is where it is most useful, and would
+    train an operator to pass whatever silences it. So it reports and returns 0,
+    and non-zero stays reserved for a repository that did not extract at all.
+    """
+    lines = []
+    for name, before, after in moved["decreased"]:
+        lines.append(f"  {name}: {before:,} -> {after:,} nodes  ({after - before:+,})")
+    for name in moved["absent"]:
+        lines.append(f"  {name}: extracted last run, absent from the content set now")
+    for name in moved["new"]:
+        lines.append(f"  {name}: new since the last run")
+    if not lines:
+        return ""
+    return "\nper-repository movement since the last run:\n" + "\n".join(lines)
 
 
 def parse_args(argv: "list[str] | None") -> argparse.Namespace:
@@ -217,6 +393,13 @@ def parse_args(argv: "list[str] | None") -> argparse.Namespace:
         help="a newline-delimited path list to extract instead of the content set",
     )
     parser.add_argument("--out", type=Path, help="destination layer (default: .graphify_ast.json)")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="seconds any one repository may take before it is timed out and named "
+        "(0 disables; see repository_time_limit for what it does and does not bound)",
+    )
     return parser.parse_args(argv)
 
 
@@ -275,18 +458,31 @@ def main(argv: "list[str] | None" = None) -> int:
         return 1
 
     groups = by_repository(files, config.REPOSITORIES_DIR)
+    # Read before anything is written: the sidecar is the only record of the last
+    # run, and writing the layer first would leave a half-updated pair if the
+    # write failed between them.
+    sidecar = counts_path(destination)
+    before = previous_counts(sidecar)
+
     print(f"Extracting {len(files):,} file(s) across {len(groups):,} repository group(s):")
-    layer, failures = extract_estate(groups, extract, config.ROOT)
+    layer, failures, counts = extract_estate(groups, extract, config.ROOT, arguments.timeout)
 
     # Written even when repositories failed: a layer covering the rest is worth
     # more than a traceback. The exit code carries the failure instead, because a
     # partial layer reporting success is how a store commits a hole.
     io.write_json(destination, layer)
+    # Only repositories that actually extracted are recorded, so a failure does not
+    # write a 0 that the next run would read as a legitimate decrease to nothing.
+    io.write_json(sidecar, counts)
     print(
         f"\nnodes {len(layer['nodes']):,}  edges {len(layer['edges']):,}  "
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"
     )
     print(f"-> {destination}")
+    if before:
+        print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
+    else:
+        print(f"\nno previous run recorded in {sidecar.name}; movement starts next run.")
     if failures:
         print(
             f"\n{len(failures)} repository group(s) failed to extract and are absent from the "

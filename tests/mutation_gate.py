@@ -475,6 +475,47 @@ MUTATIONS = (
         "the one that matters",
     ),
     Mutation(
+        "a repository that shrank is never named",
+        "extract_ast.py",
+        "    if before:",
+        "    if False:",
+        "the gap a reviewing operator found in the first version of this stage, and the "
+        "only one of their four controls that had caught anything real - two genuine "
+        "decreases on one refresh. Reconciling a run against its own input catches input "
+        "dropped within a run; it cannot catch a repository extracting less than last "
+        "time, where every count reconciles and the store loses structure quietly",
+    ),
+    Mutation(
+        "a decrease is reported as no movement",
+        "extract_ast.py",
+        "            if after[name] < before[name]",
+        "            if False",
+        "the narrower half of the same gap: with the report still printing for gone and "
+        "new repositories, an operator sees a movement section and reads its silence on "
+        "decreases as an all-clear. A report that runs is the strongest possible "
+        "disguise for a check that does not",
+    ),
+    Mutation(
+        "the per-repository bound never fires",
+        "extract_ast.py",
+        "signal.alarm(seconds)",
+        "signal.alarm(0)",
+        "per-repository extraction names the repository that is hanging, which is no use "
+        "to an operator who is asleep - the run has to end. The first version of this "
+        "stage had the attribution and no bound, so a pathological parse was identifiable "
+        "and still unbounded",
+    ),
+    Mutation(
+        "the alarm is left armed for a later stage",
+        "extract_ast.py",
+        "        signal.alarm(0)\n        signal.signal(signal.SIGALRM, previous)",
+        "        signal.signal(signal.SIGALRM, previous)",
+        "`signal.alarm` is process-wide, so an alarm left set fires inside whatever stage "
+        "runs next in the same process and names a repository that stage never touched. "
+        "The hardest class of failure to attribute, introduced by the fix for the one "
+        "above",
+    ),
+    Mutation(
         "an empty layer looks like a successful extraction",
         "extract_ast.py",
         "    if not files:",
