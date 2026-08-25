@@ -70,6 +70,26 @@ MUTATIONS = (
         "record described a stale leftover; every count in it reconciled",
     ),
     Mutation(
+        "summaries snapshot no longer names a stale graph",
+        "build_community_summaries.py",
+        '    print(_graph_disagreement(members), end="", file=sys.stderr)',
+        "    pass",
+        "the same stale-graph class that `record-clustering` already warned about "
+        "reached `summaries snapshot`, where a snapshot keyed to a leftover "
+        "graph.json mis-keys the entire remap carry; reported by a store operator, "
+        "and invisible to `_remap_refusal` because the snapshot and the stale file "
+        "share every node id",
+    ),
+    Mutation(
+        "summaries remap no longer names a stale graph",
+        "build_community_summaries.py",
+        '    print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)',
+        "    pass",
+        "the second call site of the same warning, and the one that rewrites the "
+        "committed summaries file - the snapshot half being covered is exactly how "
+        "a half-wired check reads as done",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",

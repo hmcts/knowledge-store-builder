@@ -40,6 +40,7 @@ from pathlib import Path
 
 
 from . import config
+from . import graph_files
 from . import io
 from . import kinds
 
@@ -235,10 +236,37 @@ def _membership(graph: dict) -> dict[str, list[str]]:
     return members
 
 
+def _graph_disagreement(members: dict[str, list[str]]) -> str:
+    """A trailing-newline note when the store's other graph file disagrees with this one.
+
+    `config.GRAPH_PATH` is the *uncompressed* graph, which every store gitignores
+    while committing the `.gz`. So the file these two stages read is either absent
+    or whatever a discarded run left behind, and both stages used to say nothing
+    about which one they got. `record-clustering` already carried this warning; the
+    same class reached here, where it costs more - a snapshot is the remap's
+    baseline, and `_remap_refusal` cannot catch it because a snapshot taken from
+    the stale file shares every node id with that same stale file. Consistent and
+    wrong is the one case that guard is blind to.
+
+    Reports, never refuses: the `.gz` is tracked, so both files exist on every
+    refresh after the first, and refusing would fire on the normal case.
+    """
+    counts = (len(members), sum(len(ids) for ids in members.values()))
+    note = graph_files.disagreement(
+        config.GRAPH_PATH,
+        counts,
+        "Snapshots key the remap, so a snapshot of the wrong graph mis-keys every "
+        "carried summary. Decompress the committed graph over graph.json, or remove "
+        "the stale graph.json, and re-run.",
+    )
+    return f"{note}\n" if note else ""
+
+
 def snapshot() -> int:
     """Record community membership before a re-cluster moves the ids."""
     graph = io.read_json_dict(config.GRAPH_PATH)
     members = _membership(graph)
+    print(_graph_disagreement(members), end="", file=sys.stderr)
     if not members:
         print(
             f"No communities in {config.GRAPH_PATH}. Cluster the graph before snapshotting - "
@@ -438,6 +466,7 @@ def remap(
         old_members: dict[str, list[str]] = json.load(handle)
     summaries = io.read_json_dict(config.SUMMARIES_PATH)
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
+    print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
     new_community = {
         node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
     }
