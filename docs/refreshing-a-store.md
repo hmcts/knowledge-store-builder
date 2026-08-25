@@ -98,11 +98,18 @@ Recompress the graph, rebuild the page and check store health and source drift:
 
 ```bash
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
+knowledgestore content-set
 knowledgestore explorer
 knowledgestore check-evidence
 knowledgestore status
 knowledgestore status --drift
 ```
+
+`content-set` rewrites `knowledge/corpus/content-files.txt`, the list a corpus
+search reads instead of the raw tree. A refresh changes which files exist, so a
+list carried over from the previous build names the previous build's corpus —
+`status` says when it was built from a different detect result than the one on
+disk.
 
 `intent` reports how many mined values it withheld as identifying a case or a
 person, and `check-evidence` fails if any remain in the committed artefact —

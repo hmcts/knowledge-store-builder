@@ -139,6 +139,13 @@ SUMMARIES_SNAPSHOT_PATH = ROOT / "knowledge" / "summaries" / "membership-snapsho
 # itself - the backfill's raw material for revise-rather-than-rewrite.
 REMAP_REPORT_PATH = ROOT / "knowledge" / "summaries" / "remap-report.json"
 SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
+# The content set: which corpus files the pipeline decided were content, as a
+# path list a search can consume directly, plus the measurement that says why
+# searching the raw tree instead is a bad idea. Written by `content-set` (#213).
+# A path list rather than only a JSON manifest because the consumer is `grep`,
+# and a consumer that has to parse JSON first re-derives the set badly instead.
+CONTENT_FILES_PATH = ROOT / "knowledge" / "corpus" / "content-files.txt"
+CONTENT_SET_PATH = ROOT / "knowledge" / "corpus" / "content-set.json"
 # What each repository's clone pointed at when the store was last built.
 # Written by the sync stage; read by status, the manifest and the explorer.
 PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
@@ -455,6 +462,8 @@ def _recompute_paths() -> None:
         SUMMARIES_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-snapshot.json.gz",
         REMAP_REPORT_PATH=root / "knowledge" / "summaries" / "remap-report.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
+        CONTENT_FILES_PATH=root / "knowledge" / "corpus" / "content-files.txt",
+        CONTENT_SET_PATH=root / "knowledge" / "corpus" / "content-set.json",
         PROVENANCE_PATH=root / "knowledge" / "provenance.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",

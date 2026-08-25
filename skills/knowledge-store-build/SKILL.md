@@ -70,6 +70,40 @@ Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
 attribute.
 
+### Expose the content set, and read what it measures
+
+Run this as soon as graphify has scanned the corpus, before extraction:
+
+```bash
+knowledgestore content-set     # -> knowledge/corpus/content-files.txt
+                               #    knowledge/corpus/content-set.json
+```
+
+Two things come out of it, and both are committed.
+
+**The path list is what a corpus search must read.** Anyone who falls back from the
+graph to `grep` otherwise searches the raw tree, and the tree holds each clone's
+extraction cache and graph, its VCS pack files and any vendored bundles alongside
+the corpus. Measured on two estates, a naive search sees several times as many
+files as the store considers content. Do not hand-maintain an exclusion list to
+work around it: a list is a second model of what the tool produces, correct the day
+it is written and silently wrong the next time the pipeline emits something new.
+One store's list covered dependency bundles, build output and state files and not
+the pipeline's own directory, so hundreds of its own artefacts were being fed back
+to the extractor.
+
+**The report names where the noise is, and now is when that is cheap to act on.**
+Each row is the shallowest directory in a repository under which the store found no
+content at all, aggregated across every repository holding one — so the estate-wide
+magnitude of a single cause reads as one line. Excluding those with a
+`.graphifyignore` **before** extracting is far cheaper than filtering afterwards:
+extract a file once and its derived content persists in the extraction cache and in
+that clone's own graph, neither of which a later filter touches.
+
+Nothing here is classified against a list of directory names. The rows are derived
+from the content set, so an estate whose dominant cause is something nobody has
+seen before still gets it named.
+
 ### Before dispatching semantic extraction
 
 If the estate carries documents, papers or images, write the chunk plan first:

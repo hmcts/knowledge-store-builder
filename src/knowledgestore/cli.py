@@ -29,6 +29,7 @@ SELF_PARSING = frozenset(
         "check-answers",
         "check-corpus",
         "chunk-plan",
+        "content-set",
         "merge-chunks",
         "merge-layers",
         "record-clustering",
@@ -66,6 +67,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "chunk-plan": (
         "build_chunk_plan",
         "write the semantic fan-out's chunk plan (run before dispatching extraction)",
+    ),
+    "content-set": (
+        "build_content_set",
+        "expose the content set a corpus search should read instead of the raw tree",
     ),
     "merge-chunks": (
         "merge_chunks",

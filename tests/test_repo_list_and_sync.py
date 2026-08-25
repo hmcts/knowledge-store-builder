@@ -508,6 +508,11 @@ class CliTest(SettingsIsolated):
                 # rather than import an export of it
                 "fetch-tickets",
                 "chunk-plan",
+                # beside chunk-plan because both read graphify's detect result,
+                # and deliberately before extraction: the noise it measures is
+                # only cheap to act on while a .graphifyignore can still change
+                # what gets extracted (#213)
+                "content-set",
                 "merge-chunks",
                 # the third fan-out seam: merges the AST and semantic layers
                 # without re-pointing edges at unrelated nodes (#129)
