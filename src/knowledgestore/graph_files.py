@@ -155,6 +155,71 @@ def stale_note(described, nodes, artefact: str) -> str:
     return f"{note}\n" if note else ""
 
 
+def most_connected(path: Path, top: int = 10) -> list[tuple[str, str, int]]:
+    """The `top` most connected nodes as (id, label, degree), most connected first.
+
+    The check #112 asked for, and the reason it is worth a stage: after the first
+    build of one estate the most central entities were `c()`, `push()`, `s()` and
+    `a()` - minified helpers from two committed dependency bundles, which supplied
+    36% of the AST nodes and 60% of the AST edges and formed the two largest
+    communities. Centrality and community detection are both degree-driven, so a
+    dense blob of interlinked vendored helpers wins every ranking, and topics,
+    summaries and the explorer are all generated downstream of clusters.
+
+    Nothing upstream catches it: graphify's `detect` honours `.gitignore`, and a
+    zero-install dependency bundle is *deliberately committed*, so it is not
+    ignored anywhere.
+
+    This does not decide what is vendored, because size is not the signal -
+    `values.schema.json`, `variables.tf` and `package.json` are all high
+    node-count and are real declarations of an estate's own surface. Provenance is
+    the signal, and a person reading ten names can tell in seconds what a rule
+    cannot: whether these are things you would name if asked what the estate is
+    built from.
+
+    Two streamed passes, never a load. The first counts endpoints and holds one
+    integer per id that appears in an edge; the second reads labels for the `top`
+    ids only. Measured against a loaded read on the largest estate available, the
+    streamed form was 2.2s and 0.04 GB where loading was 5.3s and 3.75 GB, which is
+    why `status` can afford this behind a flag and could not afford it otherwise.
+    """
+    degree: dict[str, int] = {}
+    for edge in iter_edges(path):
+        for end in ("source", "target"):
+            value = edge.get(end)
+            if value is not None:
+                key = str(value)
+                degree[key] = degree.get(key, 0) + 1
+    if not degree:
+        return []
+    # Sort by degree then id: two nodes of equal degree must not swap between runs.
+    ranked = sorted(degree.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    wanted = {node_id for node_id, _ in ranked}
+    labels: dict[str, str] = {}
+    for node in graph_stream.iter_array(path, key="nodes"):
+        node_id = str(node.get("id"))
+        if node_id in wanted:
+            labels[node_id] = str(node.get("label") or "")
+            if len(labels) == len(wanted):
+                break
+    return [(node_id, labels.get(node_id, ""), count) for node_id, count in ranked]
+
+
+def iter_edges(path: Path):
+    """Stream a graph's edges, from either key.
+
+    graphify writes `links` in node-link JSON and `edges` in its extract files.
+    Reading one and silently finding none is indistinguishable from a graph with no
+    edges, which would make every caller of this report an empty ranking.
+    """
+    found = False
+    for edge in graph_stream.iter_array(path, key="links"):
+        found = True
+        yield edge
+    if not found:
+        yield from graph_stream.iter_array(path, key="edges")
+
+
 def stale_refusal(described: Path) -> str:
     """Why a stage that writes the graph back must not run, or "" when it may.
 
