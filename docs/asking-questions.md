@@ -120,13 +120,25 @@ From the root of a store clone:
 
 ```bash
 pip install graphifyy                    # or: uv tool install graphifyy
-gunzip -k graphify-out/graph.json.gz     # stores commit the graph compressed
+gunzip -kf graphify-out/graph.json.gz    # stores commit the graph compressed
 graphify query "<question>"
 ```
 
-Run `gunzip` before the query when `graphify-out/graph.json` is absent. The
-command reads the uncompressed graph and accepts a question in ordinary
+`graphify query` reads the uncompressed graph and accepts a question in ordinary
 language.
+
+**Decompress whenever the `.gz` is newer, not only when `graph.json` is absent.**
+`graph.json` is gitignored, so nothing updates it: decompressing only when it is
+missing leaves every later question answered from the first copy, however old it
+has become. `git pull` makes that worse rather than better, because it moves the
+`.gz` and leaves the stale plain file in place. Use `-f`, or `gunzip` refuses to
+overwrite:
+
+```bash
+[ -f graphify-out/graph.json.gz ] \
+  && [ ! graphify-out/graph.json -nt graphify-out/graph.json.gz ] \
+  && gunzip -kf graphify-out/graph.json.gz
+```
 
 ## Other knowledge-store tasks
 

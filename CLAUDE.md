@@ -294,11 +294,12 @@ Before writing or reworking any of them, use the `technical-writer` skill in
 prose, the banned-word list) and the verification steps, and it names its
 source. Two hard rules from it:
 
-- **Inbound deep links are load-bearing.** `hmcts/cp-knowledge-store` links
-  into this repository's docs, so renaming a heading it targets breaks a
-  consumer's README silently. Grep the consuming repository for the anchor
-  before renaming or removing any heading — that check is what caught the
-  README's install sections being removed while CP-KS still pointed at them.
+- **Inbound deep links are load-bearing.** A consuming store repository links
+  into this repository's docs, so renaming a heading it targets breaks that
+  consumer's README silently. Grep the consuming repository for the anchor before
+  renaming or removing any heading — that check is what caught the README's
+  install sections being removed while a consumer still pointed at them. (The
+  consumers are not named here: this repository is public and they are not.)
 - **Install detail lives in the guides, not the README.** `docs/asking-questions.md`
   owns the plugin install and `docs/creating-a-store.md` owns the library
   install. The README routes to them and carries no install commands of its own,
