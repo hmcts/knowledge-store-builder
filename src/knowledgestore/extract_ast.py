@@ -343,8 +343,8 @@ def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
 
 def extract_estate(
     groups: "dict[str, list[Path]]", extractor, root: Path, timeout: int = 0
-) -> "tuple[dict, list, dict]":
-    """Extract each repository in turn. Returns the layer, the failures and the counts.
+) -> "tuple[dict, list, dict, list]":
+    """Extract each repository in turn: the layer, the failures, the counts, the unread.
 
     `extractor` is `graphify.extract.extract`, injected rather than imported here
     so the loop, the reporting and the isolation are testable without the parser
@@ -359,6 +359,7 @@ def extract_estate(
     edges: list = []
     failures: list[tuple[str, str]] = []
     counts: dict[str, int] = {}
+    skipped: list[str] = []
     width = max((len(name) for name in groups), default=1)
     unbounded_reported = False
     for name, files in sorted(groups.items()):
@@ -392,15 +393,41 @@ def extract_estate(
             continue
         found = result.get("nodes") or []
         relations = result.get("edges") or []
+        # The extractor names every file it could not read, and until this line the
+        # stage discarded that. A repository can return successfully having parsed
+        # none of its files: the per-file handler catches, records, and carries on,
+        # so "extracted" and "extracted anything" are different facts and only one
+        # of them was being reported.
+        unread = [str(f) for f in (result.get("failed_sources") or [])]
+        skipped.extend(unread)
         nodes.extend(found)
         edges.extend(relations)
         counts[label] = len(found)
         elapsed = time.monotonic() - started
+        note = f"  {len(unread):>4,} unread" if unread else ""
         print(
             f"  {label:<{width}}  {len(files):>6,} files  {len(found):>7,} nodes  "
-            f"{len(relations):>7,} edges  {elapsed:6.1f}s"
+            f"{len(relations):>7,} edges  {elapsed:6.1f}s{note}"
         )
-    return {"nodes": nodes, "edges": edges}, failures, counts
+    return {"nodes": nodes, "edges": edges}, failures, counts, skipped
+
+
+def report_unread(skipped: "list[str]", total: int) -> str:
+    """Files the extractor could not read. Reported, not refused on.
+
+    The extractor has already decided to continue past them; this stage surfaces
+    that decision rather than overriding it, for the same reason a decrease is
+    reported and not refused. What it must not do is stay silent, because a
+    repository that parsed none of its files still reports as extracted.
+    """
+    if not skipped:
+        return ""
+    shown = "\n".join(f"  {name}" for name in skipped[:5])
+    more = f"\n  ... and {len(skipped) - 5:,} more" if len(skipped) > 5 else ""
+    return (
+        f"\n{len(skipped):,} of {total:,} file(s) were handed to the extractor and could "
+        f"not be read:\n{shown}{more}"
+    )
 
 
 def report_movement(moved: "dict[str, list]") -> str:
@@ -529,7 +556,9 @@ def main(argv: "list[str] | None" = None) -> int:
     before = previous_counts(sidecar)
 
     print(f"Extracting {len(files):,} file(s) across {len(groups):,} repository group(s):")
-    layer, failures, counts = extract_estate(groups, extract, config.ROOT, arguments.timeout)
+    layer, failures, counts, skipped = extract_estate(
+        groups, extract, config.ROOT, arguments.timeout
+    )
 
     # Written even when repositories failed: a layer covering the rest is worth
     # more than a traceback. The exit code carries the failure instead, because a
@@ -545,6 +574,7 @@ def main(argv: "list[str] | None" = None) -> int:
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"
     )
     print(f"-> {destination}")
+    print(report_unread(skipped, len(files)), end="" if not skipped else "\n")
     if before:
         print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
     else:

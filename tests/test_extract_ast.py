@@ -51,7 +51,7 @@ class _Extractor:
     shrank.  `hang_for` sleeps, so a real per-repository bound has to fire.
     """
 
-    def __init__(self, raise_for=(), nodes_per_file=1, hang_for=(), swallows=False):
+    def __init__(self, raise_for=(), nodes_per_file=1, hang_for=(), swallows=False, unreadable=()):
         self.calls: list[list[Path]] = []
         self.raise_for = tuple(raise_for)
         self.nodes_per_file = nodes_per_file
@@ -61,6 +61,9 @@ class _Extractor:
         # TimeoutError raised by the bound was caught there and the call returned
         # successfully with the file skipped.
         self.swallows = swallows
+        # The real extractor returns `failed_sources` naming every file it could
+        # not read, and returns *successfully* while doing so.
+        self.unreadable = tuple(unreadable)
 
     def _per_file(self, path):
         if any(name in str(path) for name in self.raise_for):
@@ -79,6 +82,9 @@ class _Extractor:
             else:
                 self._per_file(path)
         return {
+            "failed_sources": [
+                str(path) for path in files if any(name in str(path) for name in self.unreadable)
+            ],
             "nodes": [
                 {"id": f"{path}#{n}", "label": path.name}
                 for path in files
@@ -546,3 +552,38 @@ class TimeLimitTest(_StoreCase, unittest.TestCase):
         with extract_ast.repository_time_limit(30) as bounded:
             self.assertTrue(bounded)
         self.assertEqual(_signal.alarm(0), 0, "an alarm was left armed after the block")
+
+
+class UnreadFilesTest(_StoreCase, unittest.TestCase):
+    """The extractor names what it could not read, and this stage used to discard it."""
+
+    def test_files_the_extractor_could_not_read_are_named(self):
+        """A repository can return successfully having parsed none of its files.
+
+        Measured against the real extractor: it catches per file, records the path
+        in `failed_sources`, and returns success. So "extracted" and "extracted
+        anything" are different facts, and only the first was being reported - a
+        repository whose every file failed printed a node count of zero and no
+        explanation at all.
+        """
+        readable = self._repo_file("repo-a", "a.py")
+        broken = self._repo_file("repo-a", "broken.py")
+        detect = self._detect([readable, broken])
+        extractor = _Extractor(unreadable=("broken.py",))
+        code, out, _ = self._run(extractor, ["--detect", str(detect)])
+        self.assertEqual(code, 0)
+        self.assertIn("could not be read", out)
+        self.assertIn("broken.py", out)
+        self.assertIn("1 unread", out, "the per-repository line did not carry the count")
+
+    def test_nothing_unread_prints_nothing(self):
+        """The guard on the instrument: a notice that always prints detects nothing.
+
+        The test above asserts a phrase appears. A report emitted unconditionally
+        would satisfy it while distinguishing no case at all.
+        """
+        detect = self._detect([self._repo_file("repo-a", "a.py")])
+        code, out, _ = self._run(_Extractor(), ["--detect", str(detect)])
+        self.assertEqual(code, 0)
+        self.assertNotIn("could not be read", out)
+        self.assertNotIn("unread", out)

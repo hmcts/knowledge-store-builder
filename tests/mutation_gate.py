@@ -517,6 +517,17 @@ MUTATIONS = (
         "and still unbounded",
     ),
     Mutation(
+        "files the extractor could not read are discarded again",
+        "extract_ast.py",
+        'unread = [str(f) for f in (result.get("failed_sources") or [])]',
+        "unread = []",
+        "found by asking the real extractor what it returns rather than trusting the "
+        "stub: it names every file it could not read and returns *successfully* while "
+        "doing so, and this stage dropped that field on the floor. A repository that "
+        "parsed none of its files reported as extracted with a node count of zero and "
+        "no explanation - the information existed, was handed over, and was not read",
+    ),
+    Mutation(
         "the bound is swallowed by the extractor's own error handling",
         "extract_ast.py",
         "class RepositoryTimeout(BaseException):",
