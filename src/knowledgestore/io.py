@@ -90,7 +90,7 @@ def read_json_dict(path: Path) -> dict:
 def write_json(path: Path, data, indent: int | None = None) -> None:
     checked_write_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(  # NOSONAR(S8707) - checked_write_target rejects upward traversal above
+    path.write_text(  # NOSONAR(S2083, S8707) - validated by checked_write_target above
         json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8"
     )
 
@@ -123,7 +123,7 @@ def gzip_text(path: Path, compresslevel: int = 9):
     checked_write_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with (
-        open(path, "wb") as raw,  # NOSONAR(S8707) - validated above
+        open(path, "wb") as raw,  # NOSONAR(S2083, S8707) - validated above
         # filename="" explicitly: GzipFile otherwise lifts raw.name into the
         # header's FNAME field, which is the other source of byte churn.
         gzip.GzipFile(
