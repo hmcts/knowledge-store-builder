@@ -684,6 +684,31 @@ class TheStageAsRun(SettingsIsolated):
         self.assertIn("nothing was recorded", err)
         self.assertEqual(telemetry.read()["size_cuts.layer_nodes"], 41)
 
+    def test_a_cuts_file_outside_the_store_is_refused_and_one_inside_is_read(self):
+        """Breaks if `--cuts` can open any file on the machine, and if it opens none.
+
+        Both halves in one test on purpose: a confinement that refused everything
+        would pass the refusal half and be useless, which is how a guard goes
+        vacuous. The boundary is enforced here rather than in `read_cuts` because
+        this is the only place the store's root is known - the same argument
+        `io.checked_write_target` makes for the write side.
+        """
+        self._repo_graph("orchard-api", [_node("a", "main.tf")], [])
+        elsewhere = Path(self._tmp.name).parent / "outside-the-store.txt"
+        elsewhere.write_text("cut iac\nfile *.tf\n", encoding="utf-8")
+        self.addCleanup(elsewhere.unlink)
+        inside = self.root / "config" / "alternative-cuts.txt"
+        inside.parent.mkdir(parents=True, exist_ok=True)
+        inside.write_text("cut iac\nfile *.tf\n", encoding="utf-8")
+
+        refused, _, err = self._run("--cuts", str(elsewhere), "--no-record")
+        accepted, out, _ = self._run("--cuts", str(inside), "--no-record")
+
+        self.assertEqual(refused, 1)
+        self.assertIn("outside the store", err)
+        self.assertEqual(accepted, 0)
+        self.assertIn("iac", out, "the cuts file inside the store was not read")
+
     def test_a_named_file_that_does_not_exist_refuses(self):
         """Breaks if a mistyped argument is measured as a graph with no nodes.
 

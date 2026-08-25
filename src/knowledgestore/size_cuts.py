@@ -621,7 +621,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
 
-    where = arguments.cuts or config.CONTENT_CUTS_PATH
+    where = config.CONTENT_CUTS_PATH
+    if arguments.cuts is not None:
+        # Confined to the store, at the CLI boundary rather than inside the reader.
+        # `--cuts` is where an operator, a script or an agent chooses which file
+        # this process opens, and this is the one place the boundary is known -
+        # `io.checked_write_target` says the same thing about the write side, and
+        # says why it could not enforce it there. Resolved before comparing,
+        # because the check is about where the file *is*, not how it was spelled.
+        named = Path(arguments.cuts).resolve()
+        root = Path(config.ROOT).resolve()
+        if not named.is_relative_to(root):
+            print(
+                f"refusing to read a cuts file outside the store: {named} is not under "
+                f"{root}. A store's candidate cuts are its own configuration; use --root to "
+                "name a different store.",
+                file=sys.stderr,
+            )
+            return 1
+        where = named
+
     try:
         cuts = read_cuts(where)
     except CutError as refusal:
