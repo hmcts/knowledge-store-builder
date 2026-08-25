@@ -260,6 +260,20 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "iter_array matches a nested key again",
+        "graph_stream.py",
+        "        if self.depth == 1 and self.token_start >= 0:",
+        "        if self.token_start >= 0:",
+        "the depth test was repeated in three places and every one-line mutation of "
+        "each survived, because the other two still blocked - so it is now one "
+        "guard, which is what makes it testable. #210: a merged graph carries `graph.hyperedges[].nodes`, a list of id "
+        "strings, before its top-level node array - so the iterator yielded strings, "
+        "type-checking consumers saw nothing, and graph_counts returned (0, 0) on a "
+        "fully clustered graph. Two guards built on those counts then read (0, 0) "
+        "against (0, 0) as agreement, and one of them was a refusal protecting an "
+        "irreversible overwrite. Shipped in v0.14.0",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
