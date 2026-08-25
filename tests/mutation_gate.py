@@ -532,7 +532,7 @@ MUTATIONS = (
     Mutation(
         "test scope is blended into the main column",
         "report_ingestion_gaps.py",
-        '        if scope == "test":',
+        '        if declaration.scope == "test":',
         "        if False:",
         "the strongest argument for the report-not-action framing, removed: a "
         "test-scope dependency counted as main says the estate's product needs "

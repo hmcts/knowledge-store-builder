@@ -227,7 +227,7 @@ class GapsTestCase(SettingsIsolated):
         (clone / ".git").mkdir(parents=True, exist_ok=True)
         return clone
 
-    def estate(self) -> None:
+    def _estate(self) -> None:
         """The fixture estate: Maven, Gradle, npm and Terraform in one store.
 
         Built by hand so every count below can be re-derived from these files
@@ -272,7 +272,7 @@ class GapsTestCase(SettingsIsolated):
     def declare(self, text: str = DECLARATION) -> None:
         _write(config.BOUNDARY_PATH, text)
 
-    def evidence(self) -> gaps.Evidence:
+    def _evidence(self) -> gaps.Evidence:
         clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
         return gaps.read_estate(clones)
 
@@ -469,8 +469,8 @@ class RankingAndSubtraction(GapsTestCase):
         """The floor under every count below. A reader that silently matched nothing
         would let the subtraction tests pass over an empty estate - and a report
         derived from nothing reads exactly like an estate with no gaps."""
-        self.estate()
-        evidence = self.evidence()
+        self._estate()
+        evidence = self._evidence()
         self.assertEqual(
             dict(evidence.scanned), {"pom.xml": 2, "build.gradle": 1, "package.json": 2, ".tf": 1}
         )
@@ -485,7 +485,7 @@ class RankingAndSubtraction(GapsTestCase):
         holds someone else's declarations - a generated pom, every dependency's own
         manifest, and copies of the upstream Terraform modules - so the report would
         rank another project's dependencies as this estate's gaps."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         for invented in ("generated-only", "must-not-appear", "cached"):
             self.assertNotIn(invented, rendered, f"{invented} came from a directory of copies")
@@ -494,8 +494,8 @@ class RankingAndSubtraction(GapsTestCase):
         """Break: skip the subtraction. Every internal dependency would be reported
         as something to ingest, including the artefacts the estate publishes itself -
         which is a list nobody can act on and the whole point of this stage."""
-        self.estate()
-        evidence = self.evidence()
+        self._estate()
+        evidence = self._evidence()
         rows, consumed = gaps.unbuilt(evidence, gaps.internal_namespaces(evidence.built))
         self.assertEqual(
             consumed,
@@ -518,8 +518,8 @@ class RankingAndSubtraction(GapsTestCase):
         than files. A namespace referenced only by test utilities would then outrank
         one the product depends on, and the reader could not see which question the
         number answered."""
-        self.estate()
-        evidence = self.evidence()
+        self._estate()
+        evidence = self._evidence()
         rows, _ = gaps.unbuilt(evidence, gaps.internal_namespaces(evidence.built))
         by_group = {row.group: row for row in rows}
         domain = by_group["com.example.platform.core.domain"]
@@ -533,14 +533,14 @@ class RankingAndSubtraction(GapsTestCase):
         thirds of all reference weight was framework plumbing, so a weight-ordered
         ranking puts test utilities at the top and the repository worth adding
         somewhere below the fold."""
-        self.estate()
+        self._estate()
         # Make the framework namespace outweigh everything by main-scope files.
         for index in range(9):
             _write(
                 config.REPOSITORIES_DIR / "orders-service" / f"mod{index}" / "pom.xml",
                 FRAMEWORK_ONLY_POM.format(index=index),
             )
-        evidence = self.evidence()
+        evidence = self._evidence()
         rows, _ = gaps.unbuilt(evidence, gaps.internal_namespaces(evidence.built))
         self.assertEqual(rows[0].kind, "domain")
         framework = next(row for row in rows if row.kind == "framework")
@@ -554,7 +554,8 @@ class RankingAndSubtraction(GapsTestCase):
         # Inserted worst-name-first, so a ranking that kept insertion order would
         # produce the opposite answer and this test would notice.
         for group in ("com.example.platform.zebra", "com.example.platform.alpha"):
-            evidence.declared[(gaps.Coordinate(group, "thing"), "main")] = {("a-repo", "pom.xml")}
+            key = gaps.Declaration(gaps.Coordinate(group, "thing"), "main")
+            evidence.declared[key] = {("a-repo", "pom.xml")}
         rows, _ = gaps.unbuilt(evidence, ("com.example.platform",))
         self.assertEqual(
             [row.group for row in rows],
@@ -568,11 +569,11 @@ class BoundaryIntegration(GapsTestCase):
         off-host name of a repository the store *does* hold would be reported as
         something to ingest - a false absence invented inside the report whose whole
         subject is false absence."""
-        self.estate()
+        self._estate()
         self.declare()
         from knowledgestore import boundary
 
-        found = dict(gaps.module_gaps(self.evidence(), boundary.read()))
+        found = dict(gaps.module_gaps(self._evidence(), boundary.read()))
         self.assertNotIn("payments-api", found)
         self.assertNotIn("payments.api", found)
 
@@ -581,11 +582,11 @@ class BoundaryIntegration(GapsTestCase):
         ruled `decommissioned` is a decision, one ruled `active` and not held is the
         exact shape of the published finding that was drawn honestly and was false,
         and telling an operator to weigh them the same wastes the ranking."""
-        self.estate()
+        self._estate()
         self.declare()
         from knowledgestore import boundary
 
-        found = dict(gaps.module_gaps(self.evidence(), boundary.read()))
+        found = dict(gaps.module_gaps(self._evidence(), boundary.read()))
         self.assertIn("declared active and not held", found["tf-module-network"])
         self.assertIn("not a gap", found["tf-module-legacy-dns"])
 
@@ -594,7 +595,7 @@ class BoundaryIntegration(GapsTestCase):
         in a store is a fact about the store's membership, and a report that ranks
         what is missing without saying what was never searched invites the reader to
         treat its silence as the estate's."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         self.assertIn("No boundary is declared", rendered)
         self.assertIn("may be built somewhere nobody has read", rendered)
@@ -606,7 +607,7 @@ class BoundaryIntegration(GapsTestCase):
         estate that declared nothing while a repository it already ruled out is
         ranked as a candidate and one it holds under another name is reported
         absent - the false absence, one level in."""
-        self.estate()
+        self._estate()
         self.declare("active one two three\n")
         rendered = self.rendered()
         self.assertIn("boundary declaration could not be read", rendered)
@@ -623,7 +624,7 @@ class BoundaryIntegration(GapsTestCase):
         """Break: ignore `unsearched`. An artefact built on a host nobody read is
         unbuilt here by construction, so ranking it as a candidate without saying so
         sends an operator hunting a repository the estate already knows about."""
-        self.estate()
+        self._estate()
         self.declare(DECLARATION + "unsearched an internal forge no build machine reaches\n")
         rendered = self.rendered()
         self.assertIn("1 source nobody read (an internal forge no build machine reaches)", rendered)
@@ -635,7 +636,7 @@ class TheReport(GapsTestCase):
         """Break: print the ranking without the funnel. A number whose scope the
         reader cannot see is worse than no number - they cannot tell a small list
         from a parser that read almost nothing."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         self.assertIn("Read 1 .tf, 1 build.gradle, 2 package.json, 2 pom.xml", rendered)
         self.assertIn("across 4 repositories", rendered)
@@ -646,7 +647,7 @@ class TheReport(GapsTestCase):
         manufactures a candidate, and Gradle's publication name is a convention
         rather than a declaration - so a reader who cannot see the Gradle share
         cannot tell a real candidate from a weakly-subtracted one."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         self.assertIn("2 from gradle convention", rendered)
         self.assertIn("2 from pom.xml", rendered)
@@ -657,7 +658,7 @@ class TheReport(GapsTestCase):
         """Break: drop them silently. Both are declarations this stage cannot
         classify, and a report that omits what it could not read implies it read
         everything."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         self.assertIn("Not counted: 1 declaration naming a build property", rendered)
         self.assertIn("Not classified: 2 npm dependencies carrying no scope", rendered)
@@ -667,7 +668,7 @@ class TheReport(GapsTestCase):
         large organisation returns confident nonsense from unrelated programmes, and
         an operator who does not know a coordinate is unresolved will read the
         namespace as a repository name."""
-        self.estate()
+        self._estate()
         rendered = self.rendered()
         self.assertIn("never resolved to a repository", rendered)
         self.assertIn("<scm> URL", rendered)
@@ -695,7 +696,7 @@ class TheReport(GapsTestCase):
         """Break: truncate silently. A list cut at 20 rows with no note reads as the
         whole answer, and on a real estate the tail is where the unexpected
         repository was."""
-        self.estate()
+        self._estate()
         self.assertIn("... and 2 further namespaces", self.rendered(limit=1))
         self.assertNotIn("further namespaces", self.rendered(limit=0))
 
@@ -707,7 +708,7 @@ class TheStageIsWired(GapsTestCase):
         tested, the report is right, and nothing a user can type reaches it. And a
         non-zero exit turns "you depend on something you do not hold" into a build
         failure, when it is a decision for an operator."""
-        self.estate()
+        self._estate()
         self.declare()
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
@@ -739,7 +740,7 @@ class TheStageIsWired(GapsTestCase):
         """Break: iterate a set or a dict keyed by coordinate without sorting. Run in
         subprocesses on purpose: PYTHONHASHSEED is fixed at interpreter start, so a
         same-process comparison cannot see the defect at all."""
-        self.estate()
+        self._estate()
         self.declare()
         renders = {seed: _render_in_subprocess(self.tmp, seed) for seed in ("0", "1")}
         self.assertIn("shared-schema-model", renders["0"], "the render must not be empty")

@@ -86,6 +86,8 @@ SKIP_DIRS = frozenset(
     {".git", ".gradle", ".terraform", "node_modules", "target", "build", "out", "dist"}
 )
 
+POM = "pom.xml"
+PACKAGE_JSON = "package.json"
 GRADLE_BUILD_FILES = ("build.gradle", "build.gradle.kts")
 GRADLE_SETTINGS_FILES = ("settings.gradle", "settings.gradle.kts")
 
@@ -100,9 +102,13 @@ _POM_BLOCKS = ("dependency", "plugin", "parent", "exclusion", "extension")
 # version-catalog accessors (`libs.foo`) name no coordinate that can be read
 # here, so they are skipped rather than guessed at.
 _GRADLE_DEP = re.compile(r"""["'](?P<group>[\w.\-]+):(?P<artefact>[\w.\-]+)(?::[^"']*)?["']""")
-_GRADLE_GROUP = re.compile(r"""\bgroup\s*=?\s*["']([\w.\-]+)["']""")
+# `\s*(?:=\s*)?` rather than `\s*=?\s*`: two adjacent `\s*` either side of an
+# optional character can split a run of whitespace in many ways, which is
+# super-linear on a long one. Grouping the `=` with the space after it leaves
+# exactly one way to match.
+_GRADLE_GROUP = re.compile(r"""\bgroup\s*(?:=\s*)?["']([\w.\-]+)["']""")
 _GRADLE_ROOT_NAME = re.compile(r"""rootProject\.name\s*=\s*["']([\w.\-]+)["']""")
-_GRADLE_INCLUDE = re.compile(r"""include\s*\(?\s*["']:?([\w.\-]+)["']""")
+_GRADLE_INCLUDE = re.compile(r"""include\s*(?:\(\s*)?["']:?([\w.\-]+)["']""")
 _PROPERTIES_GROUP = re.compile(r"""^\s*group\s*=\s*["']?([\w.\-]+)["']?\s*$""", re.MULTILINE)
 
 # What the declaration already says about a repository this estate consumes and
@@ -126,6 +132,19 @@ class Coordinate:
         return f"{self.group}:{self.artefact}" if self.group else self.artefact
 
 
+@dataclass(frozen=True, order=True)
+class Declaration:
+    """One coordinate as declared at one scope - the key weights are kept by.
+
+    A named pair rather than a bare tuple, because `main` and `test` are two
+    columns that are never summed, and the thing that keeps them apart should
+    be readable at every site that touches it.
+    """
+
+    coordinate: Coordinate
+    scope: str
+
+
 @dataclass
 class Evidence:
     """Everything read off disk, before any subtraction."""
@@ -135,10 +154,10 @@ class Evidence:
     # than a declaration, so a reader has to be able to see how much of the
     # subtraction rests on one.
     built_from: Counter = field(default_factory=Counter)
-    # (coordinate, scope) -> the (repository, file) pairs declaring it. A set,
-    # so one file declaring the same dependency twice weighs one, and the
-    # consuming repositories are countable without a second pass.
-    declared: dict[tuple[Coordinate, str], set[tuple[str, str]]] = field(default_factory=dict)
+    # Declaration -> the (repository, file) pairs declaring it. A set, so one
+    # file declaring the same dependency twice weighs one, and the consuming
+    # repositories are countable without a second pass.
+    declared: dict[Declaration, set[tuple[str, str]]] = field(default_factory=dict)
     scanned: Counter = field(default_factory=Counter)
     # Declarations whose coordinate is a build property (`${project.groupId}`).
     # Counted, not resolved: resolving properties means implementing Maven.
@@ -305,14 +324,14 @@ def npm_coordinate(name: str) -> Coordinate:
 
 
 def _record(evidence: Evidence, coordinate: Coordinate, scope: str, repo: str, rel: str) -> None:
-    evidence.declared.setdefault((coordinate, scope), set()).add((repo, rel))
+    evidence.declared.setdefault(Declaration(coordinate, scope), set()).add((repo, rel))
 
 
 def _read_pom(evidence: Evidence, repo: str, rel: str, text: str) -> None:
     built, consumed, unresolved = pom_coordinates(text)
     if built:
         evidence.built.add(built)
-        evidence.built_from["pom.xml"] += 1
+        evidence.built_from[POM] += 1
     for coordinate, scope in consumed:
         _record(evidence, coordinate, scope, repo, rel)
     evidence.unresolved += unresolved
@@ -328,7 +347,7 @@ def _read_package_json(evidence: Evidence, repo: str, rel: str, text: str) -> No
     name = data.get("name")
     if isinstance(name, str) and name:
         evidence.built.add(npm_coordinate(name))
-        evidence.built_from["package.json"] += 1
+        evidence.built_from[PACKAGE_JSON] += 1
     for key, scope in (("dependencies", "main"), ("devDependencies", "test")):
         declared = data.get(key)
         if not isinstance(declared, dict):
@@ -362,15 +381,15 @@ def read_clone(evidence: Evidence, clone: Path) -> None:
     evidence.built_from["gradle convention"] += len(published)
     for path in _walk(clone):
         rel = str(path.relative_to(clone))
-        if path.name == "pom.xml":
-            evidence.scanned["pom.xml"] += 1
+        if path.name == POM:
+            evidence.scanned[POM] += 1
             _read_pom(evidence, repo, rel, _read(path))
         elif path.name in GRADLE_BUILD_FILES:
             evidence.scanned["build.gradle"] += 1
             for coordinate, scope in gradle_dependencies(_read(path)):
                 _record(evidence, coordinate, scope, repo, rel)
-        elif path.name == "package.json":
-            evidence.scanned["package.json"] += 1
+        elif path.name == PACKAGE_JSON:
+            evidence.scanned[PACKAGE_JSON] += 1
             _read_package_json(evidence, repo, rel, _read(path))
         elif path.suffix == build_package_edges.TERRAFORM_SUFFIX:
             evidence.scanned[".tf"] += 1
@@ -436,10 +455,10 @@ def _weights(evidence: Evidence, coordinates: set[Coordinate]) -> tuple[int, int
     """(main-scope declaring files, test-scope declaring files, consuming repositories)."""
     main = test = 0
     repos: set[str] = set()
-    for (coordinate, scope), sites in evidence.declared.items():
-        if coordinate not in coordinates:
+    for declaration, sites in evidence.declared.items():
+        if declaration.coordinate not in coordinates:
             continue
-        if scope == "test":
+        if declaration.scope == "test":
             test += len(sites)
         else:
             main += len(sites)
@@ -457,9 +476,9 @@ def unbuilt(evidence: Evidence, namespaces: tuple[str, ...]) -> tuple[list[Row],
     store would disagree.
     """
     consumed = {
-        coordinate
-        for coordinate, _ in evidence.declared
-        if is_internal(coordinate.group, namespaces)
+        declaration.coordinate
+        for declaration in evidence.declared
+        if is_internal(declaration.coordinate.group, namespaces)
     }
     # Grouped by walking the declarations in the order they were read - clones
     # sorted, files sorted - rather than by iterating the set difference above.
@@ -469,7 +488,8 @@ def unbuilt(evidence: Evidence, namespaces: tuple[str, ...]) -> tuple[list[Row],
     # the dict instead means the tiebreak is the *single* place order is
     # decided, which is also what makes removing it observable.
     by_group: dict[str, set[Coordinate]] = {}
-    for coordinate, _ in evidence.declared:
+    for declaration in evidence.declared:
+        coordinate = declaration.coordinate
         if coordinate in consumed and coordinate not in evidence.built:
             by_group.setdefault(coordinate.group, set()).add(coordinate)
 
