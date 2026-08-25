@@ -398,6 +398,43 @@ STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
     },
 }
 
+# --- ingestion candidates (`gaps`) ---------------------------------------
+# Tokens that mark a consumed artefact as framework plumbing rather than domain
+# knowledge. `gaps` reports domain namespaces first whatever their weight,
+# because most reference weight is plumbing and a reference to a test utility
+# says the estate writes tests, not how its business works.
+#
+# Matched as whole tokens, never as substrings, so `attestation-service` is not
+# read as `test`. `common` is deliberately absent: a shared domain library is
+# routinely named that, and demoting it hides the rows worth reading.
+#
+# KSB_FRAMEWORK_MARKERS replaces this list rather than extending it. An estate
+# whose plumbing is named differently needs its own vocabulary, and inheriting
+# these would leave it classifying its own domain artefacts as framework.
+FRAMEWORK_MARKERS = _env_set(
+    "KSB_FRAMEWORK_MARKERS",
+    {
+        "framework",
+        "starter",
+        "parent",
+        "bom",
+        "plugin",
+        "archetype",
+        "test",
+        "tests",
+        "testing",
+        "mock",
+        "mocks",
+        "fixture",
+        "fixtures",
+        "util",
+        "utils",
+        "lint",
+        "checkstyle",
+        "codestyle",
+    },
+)
+
 # --- community summaries -------------------------------------------------
 MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
 

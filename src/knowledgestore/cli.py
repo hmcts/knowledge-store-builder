@@ -32,6 +32,7 @@ SELF_PARSING = frozenset(
         "merge-chunks",
         "merge-layers",
         "record-clustering",
+        "gaps",
     }
 )
 
@@ -108,6 +109,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "status": (
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",
+    ),
+    "gaps": (
+        "report_ingestion_gaps",
+        "rank what this estate depends on and does not hold (a report, not an action)",
     ),
     "check-install-docs": (
         "check_install_docs",
