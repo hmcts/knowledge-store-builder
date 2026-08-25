@@ -51,19 +51,33 @@ class _Extractor:
     shrank.  `hang_for` sleeps, so a real per-repository bound has to fire.
     """
 
-    def __init__(self, raise_for=(), nodes_per_file=1, hang_for=()):
+    def __init__(self, raise_for=(), nodes_per_file=1, hang_for=(), swallows=False):
         self.calls: list[list[Path]] = []
         self.raise_for = tuple(raise_for)
         self.nodes_per_file = nodes_per_file
         self.hang_for = tuple(hang_for)
+        # `swallows` reproduces the real extractor: it wraps each file in its own
+        # `except Exception`, warns, and carries on. Measured, not assumed - a
+        # TimeoutError raised by the bound was caught there and the call returned
+        # successfully with the file skipped.
+        self.swallows = swallows
+
+    def _per_file(self, path):
+        if any(name in str(path) for name in self.raise_for):
+            raise RuntimeError("unparseable grammar")
+        if any(name in str(path) for name in self.hang_for):
+            time.sleep(5)
 
     def __call__(self, files, cache_root=None):
         self.calls.append(list(files))
         for path in files:
-            if any(name in str(path) for name in self.raise_for):
-                raise RuntimeError("unparseable grammar")
-            if any(name in str(path) for name in self.hang_for):
-                time.sleep(5)
+            if self.swallows:
+                try:
+                    self._per_file(path)
+                except Exception:  # noqa: BLE001 - the behaviour under test
+                    continue
+            else:
+                self._per_file(path)
         return {
             "nodes": [
                 {"id": f"{path}#{n}", "label": path.name}
@@ -485,6 +499,29 @@ class TimeLimitTest(_StoreCase, unittest.TestCase):
         self.assertIn("TIMED OUT", err)
         self.assertIn("repo-a", out, "the run stopped at the timeout instead of continuing")
         self.assertEqual(len(self._layer()["nodes"]), 1)
+
+    def test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound(self):
+        """The real extractor catches Exception per file, warns, and returns success.
+
+        Measured against it: a `TimeoutError` raised by the alarm was caught there,
+        the file was skipped, and the call returned *successfully* with fewer
+        nodes. The bound then did the opposite of its job - instead of naming a
+        repository and failing, it silently converted a hang into a smaller layer,
+        which the movement check would not surface until a whole run later.
+
+        `RepositoryTimeout` derives from BaseException for exactly this reason, the
+        same one `KeyboardInterrupt` does. This test fails if it is ever "tidied"
+        back to Exception, which reads like a correctness fix.
+        """
+        good = self._repo_file("repo-a", "a.py")
+        self._repo_file("repo-slow", "huge.min.js")
+        detect = self._detect([good, self.root / "repositories" / "repo-slow" / "huge.min.js"])
+        extractor = _Extractor(hang_for=("repo-slow",), swallows=True)
+        code, out, err = self._run(extractor, ["--detect", str(detect), "--timeout", "1"])
+        self.assertEqual(code, 1, "a swallowed bound reports the run as a success")
+        self.assertIn("TIMED OUT", err)
+        self.assertIn("repo-slow", err)
+        self.assertIn("repo-a", out)
 
     def test_the_limit_is_off_when_asked_and_the_run_still_completes(self):
         """The guard on the bound: one that fired always would pass the test above.

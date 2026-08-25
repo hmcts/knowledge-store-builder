@@ -193,6 +193,22 @@ def pipeline_artefacts(files: "list[Path]", graph_directory: Path) -> "list[Path
     return inside
 
 
+class RepositoryTimeout(BaseException):
+    """The per-repository bound, deriving from BaseException on purpose.
+
+    Measured against the real extractor, not reasoned about: it wraps each file in
+    its own `except Exception`, logs a warning and moves on. A `TimeoutError` - or
+    anything else below `Exception` - is therefore **caught by the extractor and
+    swallowed**, and the call returns *successfully* with the file skipped. The
+    bound then does the opposite of its job: instead of naming a repository and
+    failing, it silently converts a hang into a smaller layer, which is precisely
+    the failure the movement check exists to catch a whole run later.
+
+    Deriving from BaseException is what makes the bound survive a per-file handler
+    that was written to be robust, for the same reason `KeyboardInterrupt` does.
+    """
+
+
 @contextlib.contextmanager
 def repository_time_limit(seconds: int):
     """Bound one repository's parse, so a pathological one names itself and ends.
@@ -207,22 +223,28 @@ def repository_time_limit(seconds: int):
     reported rather than silently downgraded: a platform with no `SIGALRM`, and
     a call from any thread but the main one, where installing a handler raises.
 
-    **What this does not bound.** Python runs signal handlers between bytecode
-    instructions, so a single long call inside a C extension - which is where a
-    minified bundle's parse actually goes - may not be interrupted until it
-    returns. This bounds the loop and any pathology at Python level, and it is
-    not the guarantee a subprocess per repository would give. That is deliberate
-    and deferred: a subprocess forfeits running in one interpreter, which is what
-    makes the parser's version recordable and stops it resolving to a different
-    executable than the one the lock names. Stated here rather than discovered,
-    because a bound that is claimed and does not hold is worse than none.
+    **What this bounds, measured rather than reasoned about.** The concern worth
+    having was that Python runs signal handlers between bytecode instructions, so
+    a long call inside a C extension - which is where a minified bundle's parse
+    goes - might not be interrupted. Run against a real multi-megabyte bundle whose
+    unbounded parse takes several seconds, a one-second limit raised at 1.01s. The
+    alarm lands, and it lands on the case that motivated it.
+
+    What the measurement did find is the reason for `RepositoryTimeout` above: with
+    an ordinary `TimeoutError`, the extractor's own per-file handler caught it,
+    skipped the file and returned *successfully* with fewer nodes.
+
+    A subprocess per repository would be a harder bound still, and is not taken:
+    it forfeits running in one interpreter, which is what makes the parser's
+    version recordable and stops it resolving to a different executable than the
+    one the lock names.
     """
     if seconds <= 0 or not hasattr(signal, "SIGALRM"):
         yield False
         return
 
     def _expire(signum, frame):
-        raise TimeoutError(f"exceeded the {seconds}s per-repository limit")
+        raise RepositoryTimeout(f"exceeded the {seconds}s per-repository limit")
 
     try:
         previous = signal.signal(signal.SIGALRM, _expire)
@@ -355,7 +377,7 @@ def extract_estate(
                     )
                     unbounded_reported = True
                 result = extractor(files, cache_root=root)
-        except TimeoutError as error:
+        except RepositoryTimeout as error:
             # A timeout is a failure, not a separate outcome: named, counted, the
             # partial layer kept, and the exit code carries it. The only reason to
             # tell them apart at all is that the operator's next action differs.

@@ -517,6 +517,19 @@ MUTATIONS = (
         "and still unbounded",
     ),
     Mutation(
+        "the bound is swallowed by the extractor's own error handling",
+        "extract_ast.py",
+        "class RepositoryTimeout(BaseException):",
+        "class RepositoryTimeout(Exception):",
+        "found by running the bound against the real extractor rather than reasoning "
+        "about it: it wraps each file in its own `except Exception`, so a TimeoutError "
+        "was caught there, the file skipped, and the call returned successfully with "
+        "fewer nodes. The bound silently converted a hang into a smaller layer - the "
+        "exact failure the movement check exists to catch a whole run later - while "
+        "reporting the repository as extracted. Deriving from Exception reads like a "
+        "tidy-up",
+    ),
+    Mutation(
         "the alarm is left armed for a later stage",
         "extract_ast.py",
         "        signal.alarm(0)\n        signal.signal(signal.SIGALRM, previous)",
