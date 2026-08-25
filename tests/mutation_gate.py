@@ -127,6 +127,24 @@ MUTATIONS = (
         "built those arguments chose where the process wrote",
     ),
     Mutation(
+        "most-connected report unwired",
+        "status.py",
+        "    _report_central(arguments.central)",
+        "    pass",
+        "#112: reporting through the function while nothing drives the CLI is the "
+        "most repeated escape in this repository, and three existing entries in this "
+        "module are the same shape",
+    ),
+    Mutation(
+        "most-connected loses its edge-key fallback",
+        "graph_files.py",
+        "    if not found:",
+        "    if False:",
+        "graphify writes `links` in node-link JSON and `edges` in its extract files, "
+        "so reading one key silently ranks nothing on half the artefacts this is "
+        "pointed at - indistinguishable from a graph with no edges",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
