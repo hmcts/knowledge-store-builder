@@ -171,9 +171,10 @@ class NoiseAttributionTest(unittest.TestCase):
         prints the reconciliation rather than assuming it.
         """
         roots = content_set.noise_roots(self.TREE, self.CONTENT)
-        expected = len([p for p in self.TREE if p not in self.CONTENT])
-        self.assertEqual(sum(root.files for root in roots), expected)
-        self.assertEqual(expected, 7)
+        noise = [p for p in self.TREE if p not in self.CONTENT]
+        # Ten files in the tree, three of them content: seven, counted by hand.
+        self.assertEqual(len(noise), 7)
+        self.assertEqual(sum(root.files for root in roots), len(noise))
 
     def test_a_content_file_is_never_counted_as_noise(self):
         """Break it catches: testing membership of the directory set, not the content set.
