@@ -186,16 +186,27 @@ How that looks in this codebase:
   would not have noticed the same substitution returning. If a change explains
   what was wrong, it should also fail when that thing is wrong again.
 - **An issue body is the opening claim, not the current state. Read the comments
-  before acting on any number in it.** The operators reporting into this tracker
-  retract their own figures in comments, promptly and unprompted — which is the
-  best thing about working with them and exactly why a body-only read is unsafe.
-  #129's body reported zero collisions between the AST and semantic layers; its
-  first comment retracts that in the opening sentence, because the zero had been
-  measured against an already-namespaced layer which cannot collide by
-  construction, and the real figure is 98 collisions re-pointing 311 edges. A
-  handover written from that body sent the next reader at the reporting gap when
-  the fabrication was the finding. #131's body over-scopes its own issue and says
-  so in its only comment. Cost of the check: one `--comments` flag.
+  before acting on any number in it, or on its account of what the finding is.**
+  The operators reporting into this tracker retract their own figures in comments,
+  promptly and unprompted — which is the best thing about working with them and
+  exactly why a body-only read is unsafe. #129's body reported zero collisions
+  between the AST and semantic layers; its first comment retracts that in the
+  opening sentence, because the zero had been measured against an
+  already-namespaced layer that cannot collide by construction, and the real figure
+  is 98 collisions re-pointing 311 edges.
+
+  **The framing was the more expensive half.** That body named the reporting gap as
+  the actionable finding, so a handover written from it sent the next reader at the
+  cheap fix — and a reader who diligently checked every numeral against the
+  comments would have inherited that anyway. #131 is a second and unrelated
+  instance: its body over-scopes its own issue and says so in its only comment. Two
+  unrelated issues makes this a property of the tracker rather than one bad body.
+  And a body summarising a comment is still a body — a fix built from one worked
+  only because the summary happened to be faithful.
+
+  Unlike most rules here this one has no gate behind it. Nothing fails when it is
+  broken, which is why it is written where it will be read. Cost of the check: one
+  `--comments` flag.
 - **A claim about your own artefact needs the same treatment as a claim about
   your own numbers, and gets it less often.** Between two operators and this
   repository, one week produced seven corrections of the form "I described
