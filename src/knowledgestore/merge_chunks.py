@@ -268,6 +268,45 @@ def _collect(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict, dict]:
     return by_identity, labels_for_id, origin, counters
 
 
+def _namespaced_id(
+    node: dict, original: str, label: str, keep_extension: bool, counters: dict
+) -> str:
+    """The id for a node whose original id carried more than one label.
+
+    Split out of `merge_nodes` because Sonar measured its cognitive complexity at
+    17 against a limit of 15 after #115 added the basis comparison. Behaviour is
+    unchanged: the stem is the source file's when there is one and the label's
+    otherwise, and an empty stem leaves the original id alone.
+    """
+    basis = node["source_files"][0] if node["source_files"] else label
+    stem = spec_stem(basis, keep_extension=keep_extension)
+    # The migration cost of #115, measured here rather than estimated elsewhere:
+    # how many of this run's namespaced ids the other basis would spell
+    # differently. Counted on every run, including the default, so a store learns
+    # its own number without adopting anything.
+    if spec_stem(basis, keep_extension=not keep_extension) != stem:
+        counters["basis_would_change"] += 1
+    return f"{stem}_{original}" if stem else original
+
+
+def _free_id(candidate: str, taken: dict) -> str:
+    """`candidate` with the lowest numeric suffix not already used.
+
+    The collision this resolves is the one the namespacing exists to prevent,
+    reintroduced by the step that resolves it: two identities differing only in
+    label share `stem` and `original`, so the namespaced form collides. A plain
+    assignment dropped 13 of 47,653 nodes on a real estate while the `namespaced`
+    counter reported 367 kept apart - a counter overstating success, which is the
+    reassuring direction and so the dangerous one.
+    """
+    if candidate not in taken:
+        return candidate
+    suffix = 2
+    while f"{candidate}_{suffix}" in taken:
+        suffix += 1
+    return f"{candidate}_{suffix}"
+
+
 def merge_nodes(
     chunks: list[tuple[str, dict]], keep_extension: bool = False
 ) -> tuple[dict, dict, dict]:
@@ -295,16 +334,8 @@ def merge_nodes(
         original, label, _kind = identity
         if len(labels_for_id[original]) > 1:
             counters["namespaced"] += 1
-            basis = node["source_files"][0] if node["source_files"] else label
-            stem = spec_stem(basis, keep_extension=keep_extension)
-            # The migration cost of #115, measured here rather than estimated
-            # elsewhere: how many of this run's namespaced ids the other basis
-            # would spell differently. Computed on every run, including the
-            # default, so a store learns its own number without adopting anything.
-            if spec_stem(basis, keep_extension=not keep_extension) != stem:
-                counters["basis_would_change"] += 1
             node["original_id"] = original
-            node["id"] = f"{stem}_{original}" if stem else original
+            node["id"] = _namespaced_id(node, original, label, keep_extension, counters)
         # Two identities differing only in label share `stem` and `original`, so the
         # namespaced form collides and a plain assignment drops one. That lost 13 of
         # 47,653 nodes on a real estate while `namespaced` reported 367 kept apart -
@@ -313,10 +344,7 @@ def merge_nodes(
         # resolve, reintroduced by the step that resolves it.
         if node["id"] in nodes:
             counters["disambiguated"] += 1
-            base, suffix = node["id"], 2
-            while f"{base}_{suffix}" in nodes:
-                suffix += 1
-            node["id"] = f"{base}_{suffix}"
+            node["id"] = _free_id(node["id"], nodes)
         final_for[identity] = node["id"]
         nodes[node["id"]] = node
 
