@@ -159,6 +159,34 @@ MUTATIONS = (
         "artefact rather than describing one wrongly",
     ),
     Mutation(
+        "layer merge re-points edges at unrelated nodes",
+        "merge_layers.py",
+        "        renamed[node_id] = new_id",
+        "        renamed[node_id] = node_id",
+        "#129: the documented route discards the semantic node on an id collision "
+        "and concatenates its edges anyway, so every relationship it asserted about "
+        "one entity becomes an assertion about another - 98 collisions carrying 311 "
+        "edges on one estate, and the graph builds cleanly",
+    ),
+    Mutation(
+        "layer merge keeps an edge whose endpoint is in neither layer",
+        "merge_layers.py",
+        '        if str(moved["source"]) not in by_id or str(moved["target"]) not in by_id:',
+        "        if False:",
+        "guessing at a dangling endpoint is how a concatenation invents "
+        "relationships; dropping it silently would be the same defect one step on, "
+        "which is why the count is asserted too",
+    ),
+    Mutation(
+        "layer merge accepts an empty layer",
+        "merge_layers.py",
+        "    if not ast_nodes or not sem_nodes:",
+        "    if False:",
+        "every stage in this library that shipped doing nothing did so with a "
+        "passing suite, and an empty input layer merges to a smaller graph that "
+        "looks like a successful run",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
