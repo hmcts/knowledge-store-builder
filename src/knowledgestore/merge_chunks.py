@@ -146,12 +146,31 @@ def is_global_identifier(label: str) -> bool:
     return any(sep in text for sep in "/:@")
 
 
-def spec_stem(source_file: str) -> str:
-    """The id stem the extraction spec mandates: the path, extension dropped,
-    every segment kept, non-alphanumerics collapsed to underscores."""
+def spec_stem(source_file: str, keep_extension: bool = False) -> str:
+    """The id stem: the path, every segment kept, non-alphanumerics underscored.
+
+    `keep_extension=False` is the extraction spec's rule and the default, because
+    it is what every committed store's ids were generated with.
+
+    **Dropping the extension is also the root of #115 and #129.** Two files sharing
+    a path stem - a component and its template, a doc and its config sibling - are
+    assigned one id by design. Measured on one estate: 98 collisions between the
+    AST and semantic layers, all with disagreeing labels, all describing different
+    files, carrying 311 edges; 92 of the 98 were an extension pair. Reproduced to
+    the unit across two semantic id schemes, because the mechanism is the format
+    rather than the scheme.
+
+    `keep_extension=True` removes that class rather than resolving instances of it.
+    It is opt-in and not the default, because it changes ids that stores have
+    committed, and adopting it is a re-archive rather than an upgrade. What the
+    default run reports is the *cost* of adopting: see `basis_would_change` in the
+    counters, which is that number measured on the operator's own corpus rather
+    than estimated from someone else's.
+    """
     path = Path((source_file or "").strip())
-    without_extension = path.with_suffix("") if path.suffix else path
-    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", str(without_extension).lower())).strip("_")
+    if not keep_extension:
+        path = path.with_suffix("") if path.suffix else path
+    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", str(path).lower())).strip("_")
 
 
 def read_chunks(directory: Path) -> tuple[list[tuple[str, dict]], list[str]]:
@@ -188,6 +207,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--out", type=Path, help="default: graphify-out/.graphify_semantic_new.json"
     )
     parser.add_argument(
+        "--stem-basis",
+        choices=("path", "path-with-extension"),
+        default="path",
+        help="how an id stem is derived. 'path' is the extraction spec's rule and what "
+        "every committed store used; 'path-with-extension' removes the collision class "
+        "in #115/#129 and changes ids, so adopting it is a re-archive. The cost is "
+        "reported either way as `basis_would_change`",
+    )
+    parser.add_argument(
         "--no-consolidate",
         action="store_true",
         help="leave fragmented global identifiers scattered rather than collapsing them; "
@@ -211,6 +239,9 @@ def _collect(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict, dict]:
         "seen": 0,
         "consolidated": 0,
         "fragmented_left": 0,
+        # Seeded like the rest: a caller that skips `main` must not get a KeyError,
+        # which is exactly the defect #194 fixed for two of these keys.
+        "basis_would_change": 0,
     }
 
     for chunk_name, payload in chunks:
@@ -237,7 +268,9 @@ def _collect(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict, dict]:
     return by_identity, labels_for_id, origin, counters
 
 
-def merge_nodes(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict]:
+def merge_nodes(
+    chunks: list[tuple[str, dict]], keep_extension: bool = False
+) -> tuple[dict, dict, dict]:
     """(nodes by final id, id remap, counters).
 
     The remap is keyed `(chunk name, original id)`, because the same original id in
@@ -262,7 +295,14 @@ def merge_nodes(chunks: list[tuple[str, dict]]) -> tuple[dict, dict, dict]:
         original, label, _kind = identity
         if len(labels_for_id[original]) > 1:
             counters["namespaced"] += 1
-            stem = spec_stem(node["source_files"][0] if node["source_files"] else label)
+            basis = node["source_files"][0] if node["source_files"] else label
+            stem = spec_stem(basis, keep_extension=keep_extension)
+            # The migration cost of #115, measured here rather than estimated
+            # elsewhere: how many of this run's namespaced ids the other basis
+            # would spell differently. Computed on every run, including the
+            # default, so a store learns its own number without adopting anything.
+            if spec_stem(basis, keep_extension=not keep_extension) != stem:
+                counters["basis_would_change"] += 1
             node["original_id"] = original
             node["id"] = f"{stem}_{original}" if stem else original
         # Two identities differing only in label share `stem` and `original`, so the
@@ -436,7 +476,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No chunk extractions in {directory}. Nothing merged.", flush=True)
         return 2
 
-    nodes, remap, counters = merge_nodes(chunks)
+    nodes, remap, counters = merge_nodes(
+        chunks, keep_extension=arguments.stem_basis == "path-with-extension"
+    )
     if not arguments.no_consolidate:
         consolidate(nodes, remap, counters)
     edges, edge_counters = resolve_edges(chunks, nodes, remap)
@@ -483,6 +525,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "  Every namespaced node carries `original_id`, so a consumer meeting two "
             "nodes that were once one slug can see that and go and look.",
+            flush=True,
+        )
+    if counters["basis_would_change"]:
+        other = "path" if arguments.stem_basis == "path-with-extension" else "path-with-extension"
+        print(
+            f"  {counters['basis_would_change']:,} of these ids would be spelled differently "
+            f"under --stem-basis {other}. That is this corpus's migration cost for #115, "
+            "measured here rather than estimated: adopting the other basis re-keys that "
+            "many ids and is a re-archive, not an upgrade.",
             flush=True,
         )
     return 0

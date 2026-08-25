@@ -187,6 +187,60 @@ MUTATIONS = (
         "looks like a successful run",
     ),
     Mutation(
+        "most-connected report unwired",
+        "status.py",
+        "    _report_central(arguments.central)",
+        "    pass",
+        "#112: reporting through the function while nothing drives the CLI is the "
+        "most repeated escape in this repository, and three existing entries in this "
+        "module are the same shape",
+    ),
+    Mutation(
+        "most-connected loses its edge-key fallback",
+        "graph_files.py",
+        "    if not found:",
+        "    if False:",
+        "graphify writes `links` in node-link JSON and `edges` in its extract files, "
+        "so reading one key silently ranks nothing on half the artefacts this is "
+        "pointed at - indistinguishable from a graph with no edges",
+    ),
+    Mutation(
+        "estate check stops matching name segments",
+        "build_community_summaries.py",
+        "            if len(normalised) >= MIN_SEGMENT_MATCH and normalised in segments:",
+        "            if False:",
+        "#179: a whole-label match reported `NgRx` absent while the estate held it "
+        "under eight scoped package names across 228 labels - a check that fires on "
+        "an entire ecosystem's naming convention gets switched off",
+    ),
+    Mutation(
+        "the segment floor is removed",
+        "build_community_summaries.py",
+        "MIN_SEGMENT_MATCH = 3",
+        "MIN_SEGMENT_MATCH = 1",
+        "without a floor the looser match becomes a substring match in effect, and "
+        "a two-character segment would corroborate a two-character claim - the "
+        "false-negative direction, which fails reassuringly",
+    ),
+    Mutation(
+        "the stem basis option stops affecting ids",
+        "merge_chunks.py",
+        "            stem = spec_stem(basis, keep_extension=keep_extension)",
+        "            stem = spec_stem(basis)",
+        "#115: threading an option through and having it change nothing is the "
+        "wiring escape this gate already records four times, and here it would "
+        "leave a store believing it had adopted the extension basis",
+    ),
+    Mutation(
+        "the migration cost stops being counted",
+        "merge_chunks.py",
+        "            if spec_stem(basis, keep_extension=not keep_extension) != stem:",
+        "            if False:",
+        "#115 can only be decided on each estate's own number; the issue's figures "
+        "are one estate's, and a cost nobody can measure locally is one nobody acts "
+        "on",
+    ),
+    Mutation(
         "AST ids stop being namespaced by repository",
         "merge_layers.py",
         '        new_id = f"{repository}::{node_id}"',
@@ -257,9 +311,11 @@ MUTATIONS = (
     Mutation(
         "estate pass never narrows anything",
         "build_community_summaries.py",
-        "missing = {term for term in terms if _normalise(term) not in estate}",
-        "missing = set(terms)",
-        "the wider check exists to narrow; a pass-through would look identical",
+        "            if normalised in estate:\n                continue",
+        "            if True:\n                continue",
+        "the wider check exists to narrow; a pass-through would look identical. "
+        "Retargeted when #179 replaced the comprehension with an explicit loop - "
+        "the gate refused to run rather than quietly stop testing this",
     ),
     Mutation(
         "partitioner check unwired",

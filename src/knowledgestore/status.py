@@ -17,7 +17,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config, io, provenance, record_clustering
+from . import config, graph_files, io, provenance, record_clustering
 from .build_topic_briefs import read_topics
 
 
@@ -852,6 +852,28 @@ def _report_clustering() -> None:
     print(partitioner_verdict(record_clustering.recorded_partitioner(), here, how))
 
 
+def _report_central(enabled: bool) -> None:
+    """What dominates the graph, for a person to judge rather than a rule.
+
+    Opt-in because it streams the whole graph. Reports and never refuses: whether
+    a name belongs in an estate is a judgement about provenance, and a stage that
+    guessed would exclude an estate's own declarations as readily as a vendored
+    bundle.
+    """
+    if not enabled:
+        return
+    if not config.GRAPH_PATH.is_file():
+        print(f"Most connected: no graph at {config.GRAPH_PATH}")
+        return
+    ranked = graph_files.most_connected(config.GRAPH_PATH)
+    if not ranked:
+        print("Most connected: the graph holds no edges")
+        return
+    print("Most connected nodes (would you name these if asked what the estate is built from?):")
+    for node_id, label, degree in ranked:
+        print(f"  {degree:>7,}  {label or node_id}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -860,12 +882,18 @@ def main(argv=None) -> int:
         help="also load the graph to compare its size against GRAPH_REPORT.md (slow)",
     )
     parser.add_argument(
+        "--central",
+        action="store_true",
+        help="also report the most connected nodes, to show what dominates the graph (slow)",
+    )
+    parser.add_argument(
         "--drift",
         action="store_true",
         help="also check GitHub for commits since the build (one API call per repository)",
     )
     arguments = parser.parse_args(argv)
 
+    _report_central(arguments.central)
     recorded = provenance.read()
     print(
         f"Provenance: {len(recorded)} repositories recorded"

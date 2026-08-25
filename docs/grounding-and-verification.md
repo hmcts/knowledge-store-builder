@@ -161,6 +161,23 @@ both count as grounded, while a longer or different name still differs. English
 compound adjectives ("police-to-courtroom") are excluded from identifier
 detection, because flagging them trains readers to ignore the report.
 
+**`--estate` and name segments.** The estate pass reports `[not in graph]`, which
+is deliberately narrower than "not in the estate": the graph is narrower than the
+corpus. A cited term is corroborated by a whole identifier **or by one of its name
+segments** — `NgRx` against `@ngrx/store`, a class against a Java package that
+contains it, a resource against a Terraform module address. A whole-label match
+alone could never match a scoped package name, and scoped names are the norm in
+JS/TS, so that check fired on an entire ecosystem's naming convention.
+
+Segment matching loosens a check whose job is not lying, so it trades false
+positives for false **negatives**, which fail in the reassuring direction. Two
+things keep that visible. Segments shorter than three characters are not matched,
+because segments are short and common (`api`, `ui`, `db`) and without a floor the
+rule becomes a substring match in effect. And the run reports **how many terms
+matched a segment rather than a whole identifier** — a count close to the total
+finding count means the looser rule is doing most of the work and the sample
+deserves a read.
+
 **Calibrating on a real store.** Tuned against ~5,300 authored summaries:
 summaries written directly against their own digest flagged at 9%, while
 summaries carried across a re-cluster by `summaries remap` flagged at 37%. Two
