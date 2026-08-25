@@ -152,8 +152,9 @@ knowledgestore size-cuts --no-record        # while you are still trying candida
 ```
 
 Each per-repository graph is named with its own node and edge counts, then every
-candidate declared in `config/content-cuts.txt` is sized, and the layer's totals
-go to `knowledge/telemetry.json` so the next refresh can say what moved. Run it
+candidate declared in `config/content-cuts.txt` is sized. The layer's totals and
+each candidate's two counts go to `knowledge/telemetry.json` — which your store
+commits, so they appear in its diff — and the next refresh reports what moved. Run it
 after extraction and before the layers are merged — the per-repository graphs are
 the only place the AST layer can still be measured on its own terms.
 
