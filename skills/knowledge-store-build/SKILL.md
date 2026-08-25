@@ -151,6 +151,32 @@ Every renamed node carries `original_id`, and the stage refuses to write an id
 carrying a chunk-derived suffix - the extraction spec forbids those outright, and
 such an id changes on any re-plan.
 
+### Merging the two layers
+
+Replace the skill's concatenation of the AST and semantic layers with:
+
+```bash
+knowledgestore merge-layers        # -> graphify-out/.graphify_extract.json
+```
+
+Concatenation keeps the AST node when the two layers share an id and **keeps the
+semantic layer's edges anyway**. Those edges still name the discarded id, which
+now resolves to the AST node, so every relationship the semantic layer asserted
+about one entity becomes an assertion about another. Nothing dangles and nothing
+errors, because the id exists.
+
+The extraction spec drops the file extension from the id stem, so a component and
+its template are assigned one id by design - which is why this scales with how
+much of a corpus is authored in paired files rather than occurring at random. One
+estate measured 98 such collisions carrying 311 edges, every one between files
+with different labels.
+
+Read both collision counts, not the node total. `same label` is one entity both
+layers found and is benign; `DIFFERENT labels` is the dangerous case, and the
+stage keeps that semantic node under a new id rather than discarding it - so no
+evidence is lost and no edge resolves against an entity it was never about. Every
+renamed node carries `original_id`.
+
 **Do not add `--no-cluster` here, however wasteful per-repository clustering
 looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol

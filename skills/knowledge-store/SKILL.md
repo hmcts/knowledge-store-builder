@@ -77,14 +77,23 @@ grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
 Mention that `KNOWLEDGE_STORE` in their shell profile pins a default, which is
 worth doing if they mostly query one estate.
 
-## Step 2 — Prepare the store (run silently, only what is missing)
+## Step 2 — Prepare the store (run silently, only what is stale or missing)
 
 ```bash
-[ -f graphify-out/graph.json ] || gunzip -k graphify-out/graph.json.gz
+[ -f graphify-out/graph.json.gz ] \
+  && [ ! graphify-out/graph.json -nt graphify-out/graph.json.gz ] \
+  && gunzip -kf graphify-out/graph.json.gz
 command -v graphify >/dev/null 2>&1 \
   || uv tool install graphifyy -q 2>/dev/null \
   || pip install graphifyy -q
 ```
+
+**Decompress when the archive is newer, not when the plain file is absent.**
+`graph.json` is gitignored and the `.gz` is committed, so `[ -f … ] ||` would
+decompress once and leave every later ask querying that first copy however old it
+had become. A `git pull` made it worse: it moves the `.gz` and leaves the stale
+plain file, so the step taken to get current data guaranteed stale data. `-f` is
+required, because without it `gunzip` refuses to overwrite.
 
 Offer `git pull` when the question concerns recent changes: a clone goes stale
 silently, and `graphify-out/GRAPH_REPORT.md` records the commit the graph was
