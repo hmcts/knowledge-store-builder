@@ -94,7 +94,9 @@ MUTATIONS = (
         "build_explorer.py",
         '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "explorer.html"),\n        end="",\n        file=sys.stderr,\n    )',
         "    pass",
-        "the page is tracked and ships to readers who have no graph and no CLI to check it against; an operator hit the same shape when a refresh embedded a three-day-stale layer beside a new graph and thirteen gates passed",
+        "the page is tracked and ships to readers who have no graph and no CLI to "
+        "check it against; an operator hit the same shape when a refresh embedded a "
+        "stale semantic layer beside a newly built graph and every gate passed",
     ),
     Mutation(
         "deep dives built from a stale graph in silence",
@@ -125,6 +127,36 @@ MUTATIONS = (
         "reported by SonarCloud as pythonsecurity:S8707 on write_json: a path "
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
+    ),
+    Mutation(
+        "deployments overwrites the committed graph from a stale one",
+        "build_deployments.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
+    ),
+    Mutation(
+        "packages overwrites the committed graph from a stale one",
+        "build_package_edges.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
+    ),
+    Mutation(
+        "gherkin overwrites the committed graph from a stale one",
+        "extract_gherkin.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
+        '    refusal = ""',
+        "#198: this stage reads the uncompressed graph and writes both files "
+        "back, so a leftover graph.json overwrites the committed archive and "
+        "loses its clustering - the only failure in this class that destroys an "
+        "artefact rather than describing one wrongly",
     ),
     Mutation(
         "layer merge re-points edges at unrelated nodes",

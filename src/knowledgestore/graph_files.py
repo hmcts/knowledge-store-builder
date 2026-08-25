@@ -153,3 +153,54 @@ def stale_note(described, nodes, artefact: str) -> str:
     )
     note = disagreement(described, counts_from_nodes(nodes), remedy)
     return f"{note}\n" if note else ""
+
+
+def stale_refusal(described: Path) -> str:
+    """Why a stage that writes the graph back must not run, or "" when it may.
+
+    Three stages read the uncompressed graph, add a layer, and write **both**
+    files back. If the plain file is stale, the committed `.gz` is overwritten
+    from it and whatever the newer clustering produced is gone. That is the only
+    failure in this class that destroys an artefact rather than describing one
+    wrongly, so it refuses instead of reporting: by the time a `MISMATCH` line
+    reaches a log, the write has already happened.
+
+    **Refuses on the two files disagreeing, not on their timestamps.** An mtime
+    comparison was written first and was wrong for a reason the suite caught: these
+    stages write the plain file and then the archive, so the plain file is *always*
+    older afterwards. "Plain file older than the archive" is the normal state after
+    every successful run, not the defect state, and a guard on it refused every
+    re-run.
+
+    Disagreeing counts is the signal that actually separates the two cases. After a
+    successful run both files hold the same graph and agree. A leftover from an
+    earlier run disagrees with an archive that has been refreshed since. It reuses
+    the predicate `disagreement` reports on, so this refuses exactly where #197
+    reports - which is the intended relationship between them.
+
+    Costs a streamed pass over both files. These stages load the whole graph
+    anyway, and `graph_counts` streams rather than loading, so it is the cheaper
+    half of what the stage is about to do.
+
+    Two graphs with identical community and clustered-node counts would pass. That
+    is weaker than a content hash and much stronger than a timestamp; the counts
+    are the same quantities `record-clustering` has compared since this class of
+    defect was first reported.
+    """
+    other = counterpart(described)
+    if other is None or not other.is_file() or not described.is_file():
+        return ""
+    try:
+        mine = graph_counts(described)
+        theirs = graph_counts(other)
+    except (OSError, ValueError, EOFError):
+        return ""  # an unreadable counterpart is not this stage's business to fail over
+    if mine == theirs:
+        return ""
+    return (
+        f"Refusing to run: {described.name} has {mine[0]:,} communities over {mine[1]:,} "
+        f"clustered nodes and {other.name} has {theirs[0]:,} over {theirs[1]:,}, so one is "
+        f"stale. This stage rewrites both from {described.name}, which would overwrite "
+        f"{other.name} and lose its clustering. Decompress the committed graph over "
+        f"{described.name} (gunzip -kf {other.name}) and re-run, or remove {described.name}."
+    )
