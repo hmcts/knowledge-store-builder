@@ -121,3 +121,35 @@ def disagreement(described: Path, counts: tuple[int, int], remedy: str) -> str:
         f"clustered nodes; {other.name} has {other_counts[0]:,} over {other_counts[1]:,}. "
         f"One of them is stale. {remedy}"
     )
+
+
+def counts_from_nodes(nodes) -> tuple[int, int]:
+    """(communities, clustered nodes) from an already-loaded node list.
+
+    `graph_counts` streams, which is right when the file is not otherwise being
+    read. A stage that has already loaded the graph would be paying twice, and on
+    the largest estate available the streamed read is 2.2s - not free. Same
+    quantity, different source.
+    """
+    members = set()
+    clustered = 0
+    for node in nodes:
+        community = node.get("community") if isinstance(node, dict) else None
+        if community is not None:
+            members.add(str(community))
+            clustered += 1
+    return len(members), clustered
+
+
+def stale_note(described, nodes, artefact: str) -> str:
+    """The disagreement line for a stage that reads the graph and writes `artefact`.
+
+    One phrasing for every artefact-writing stage, because the operator's way out
+    is the same in all of them and only the thing at risk differs.
+    """
+    remedy = (
+        f"{artefact} will be built from {described.name}. Decompress the committed "
+        f"graph over it, or remove the stale file, and re-run."
+    )
+    note = disagreement(described, counts_from_nodes(nodes), remedy)
+    return f"{note}\n" if note else ""

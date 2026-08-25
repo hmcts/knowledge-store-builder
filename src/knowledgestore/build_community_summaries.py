@@ -840,6 +840,11 @@ def estate_identifiers() -> set[str]:
     stage is already an authoring-time check and can afford it.
     """
     graph = io.read_json_dict(config.GRAPH_PATH)
+    print(
+        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),
+        end="",
+        file=sys.stderr,
+    )
     identifiers: set[str] = set()
     for node in graph.get("nodes", []):
         for field in ("label", "local_id"):

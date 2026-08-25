@@ -46,8 +46,16 @@ def _graph(members: dict[str, list[str]]) -> dict:
     return {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "links": []}
 
 
-class GraphAmbiguityTest(SettingsIsolated):
+class GraphPair:
+    """Setup shared by both classes: a store holding two disagreeing graph files.
+
+    A mixin rather than a base test class. Inheriting the tests as well as the
+    helpers ran the no-other-graph case under a setUp that writes both files,
+    which failed for the right reason and the wrong cause.
+    """
+
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         (self.root / "knowledge" / "summaries").mkdir(parents=True)
@@ -58,6 +66,7 @@ class GraphAmbiguityTest(SettingsIsolated):
     def tearDown(self):
         config.configure(root=str(self._old_root))
         self._tmp.cleanup()
+        super().tearDown()
 
     # --- helpers -------------------------------------------------------------
 
@@ -76,7 +85,9 @@ class GraphAmbiguityTest(SettingsIsolated):
             code = summaries.snapshot()
         return code, out.getvalue()
 
-    # --- the tests -----------------------------------------------------------
+
+class GraphAmbiguityTest(GraphPair, SettingsIsolated):
+    """`summaries snapshot` and `remap` must say which graph file they read."""
 
     def test_snapshot_names_the_other_graph_file_when_both_exist(self):
         """Breaks if `snapshot` reads `graph.json` without disclosing that a
@@ -175,6 +186,65 @@ class GraphAmbiguityTest(SettingsIsolated):
         self.assertEqual(code, 0, output)
         self.assertIn("graph.json.gz", output, "remap must name the other graph file")
         self.assertIn("MISMATCH", output)
+
+
+class ArtefactWritersNameTheGraphTest(GraphPair, SettingsIsolated):
+    """Every stage that reads the graph and writes a committed artefact.
+
+    Scoped here after a store operator showed the distinction I had used to leave
+    them out was false. I had reasoned that these "read to report", so a wrong read
+    is a wrong report rather than a corrupted artefact. On their estate all of them
+    write *tracked* files - the explorer page, the semantic layer, the deep dives -
+    and the page is the worst case rather than the marginal one, because it is the
+    artefact consumed by people who have no graph and no CLI to check it against.
+    They had a real instance: a refresh where the page embedded a three-day-stale
+    layer beside a brand-new graph and thirteen gates passed.
+
+    One test per call site. The behaviour is shared, so what these actually assert
+    is the wiring - and unwired call sites are the most repeated escape in this
+    repository's mutation gate.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.write_plain({"0": ["a"], "1": ["b"]})
+        self.write_gz({"0": ["a"], "1": ["b"], "2": ["c"]})
+
+    def _stderr_of(self, call):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(out):
+            with contextlib.suppress(Exception):
+                call()
+        return out.getvalue()
+
+    def test_explorer_names_the_other_graph(self):
+        """Breaks if the page can be built from a stale graph in silence. This is
+        the call site the operator asked for first: the page ships to readers with
+        no way to notice it disagrees with the graph it claims to describe."""
+        from knowledgestore import build_explorer
+
+        self.assertIn("MISMATCH", self._stderr_of(build_explorer.load_inputs))
+
+    def test_deep_dives_names_the_other_graph(self):
+        """Breaks if `dives.json` - a committed artefact - can be built from a
+        stale graph in silence."""
+        from knowledgestore import build_deep_dives
+
+        self.assertIn("MISMATCH", self._stderr_of(lambda: build_deep_dives.extract("a")))
+
+    def test_semantic_index_names_the_other_graph(self):
+        """Breaks if the semantic layer's vocabulary can be collected from a stale
+        graph in silence - the layer is committed and the page embeds it."""
+        from knowledgestore import build_semantic_index
+
+        self.assertIn("MISMATCH", self._stderr_of(build_semantic_index.collect_vocabulary))
+
+    def test_the_estate_check_names_the_other_graph(self):
+        """Breaks if the truthfulness gate can run against the wrong graph in
+        silence. The strongest case of the class: a check reading the wrong
+        artefact passes on the wrong data, and its silence then licenses a claim
+        about something it never looked at."""
+        self.assertIn("MISMATCH", self._stderr_of(summaries.estate_identifiers))
 
 
 if __name__ == "__main__":

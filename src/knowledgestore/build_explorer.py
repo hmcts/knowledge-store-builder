@@ -30,12 +30,14 @@ import datetime
 import gzip
 import json
 import re
+import sys
 from collections import defaultdict
 from importlib import resources
 
 
 from . import config
 from .build_intent_index import truncate
+from . import graph_files
 from . import io
 from . import kinds
 
@@ -96,6 +98,11 @@ def app_source() -> str:
 
 def load_inputs() -> tuple[dict, dict, dict, dict]:
     graph = io.load_graph(config.GRAPH_PATH)
+    print(
+        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "explorer.html"),
+        end="",
+        file=sys.stderr,
+    )
     labels = io.load_labels(config.LABELS_PATH)
     intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
     titles = io.read_gzip_json_dict(config.TICKET_TITLES_PATH)

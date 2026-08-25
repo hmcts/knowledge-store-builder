@@ -19,7 +19,7 @@ import sys
 from collections import Counter, defaultdict
 from itertools import combinations
 
-from . import config, io, kinds, provenance
+from . import config, graph_files, io, kinds, provenance
 from .build_topic_briefs import markdown_to_html
 
 
@@ -182,6 +182,11 @@ def summary_coverage(graph: dict, repo: str, summaries: dict) -> dict:
 
 def extract(repo: str) -> int:
     graph = io.load_graph(config.GRAPH_PATH)  # NOTE: the full graph
+    print(
+        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "dives.json"),
+        end="",
+        file=sys.stderr,
+    )
     if not any(n.get("repo") == repo for n in graph["nodes"]):
         # Two very different causes, and the wrong one sends people looking in the
         # wrong place. If NO node carries a repository attribute, the graph was
