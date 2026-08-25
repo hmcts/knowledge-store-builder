@@ -17,9 +17,15 @@ most a test can honestly offer here. It also means a stale entry is possible: a
 repository that was public when it was added and has since been made private will
 still pass. Re-check the list when the estate changes shape.
 
-**Siblings differ, so never generalise from one.** In the set below,
-`cpp-ui-hearing` and `cpp-context-hearing` are public while `cpp-ui-e2e` was
-private — same prefix, same estate, opposite answers.
+**Siblings differ, so never generalise from one.** Two `cpp-ui-*` repositories in
+one estate had opposite answers, and so did two `cpp-*-hearing` ones. The private
+sibling is not named here, for the reason this whole file exists — which is also
+how this check first earned its keep: it failed on its own docstring, where an
+earlier draft named that repository while explaining not to.
+
+It passed locally before that and failed in CI, because the scan reads
+`git ls-files` and a newly written, unstaged file is invisible to it. A check whose
+first run cannot see itself is worth knowing about.
 """
 
 from __future__ import annotations
