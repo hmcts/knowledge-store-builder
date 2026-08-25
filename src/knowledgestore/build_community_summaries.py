@@ -828,13 +828,30 @@ def _verify_exit(
     return 1 if blocking else 0
 
 
-def estate_identifiers() -> set[str]:
+# A cited term shorter than this is not matched against a name *segment*, only
+# against a whole identifier. Segments are short and common - `api`, `ui`, `db` -
+# so a floor is what stops the looser match turning "the estate contains a segment
+# spelled like your term" into "your term is corroborated". Three characters keeps
+# `ngrx`, `hmcts` and `terraform` and rejects the noise.
+MIN_SEGMENT_MATCH = 3
+
+# What a name is composed of, across the ecosystems this has to serve: scoped npm
+# packages (`@scope/name`), Java packages (`uk.gov.example.thing`), Terraform module
+# addresses (`module.name`) and hyphenated repository names.
+_SEGMENT_SEPARATORS = re.compile(r"[/@.\-_:]+")
+
+
+def estate_vocabulary() -> tuple[set[str], set[str]]:
     """Every identifier the graph holds, normalised - the estate's own vocabulary.
 
     The wider evidence base a digest is a 12-node sample of. Node labels and
     `local_id`s together are what a summary could legitimately be about, so a
     cited term absent from all of them is not merely uncorroborated: nothing in
     the store can answer a question about it.
+
+    Returns whole identifiers and the name *segments* they are composed of. A
+    cited term matching only a segment is corroborated - `NgRx` against
+    `@ngrx/store` - and counted separately, so the looser rule stays measurable.
 
     Loads the graph, which is why it is opt-in. `status` must stay cheap; this
     stage is already an authoring-time check and can afford it.
@@ -846,33 +863,93 @@ def estate_identifiers() -> set[str]:
         file=sys.stderr,
     )
     identifiers: set[str] = set()
+    segments: set[str] = set()
     for node in graph.get("nodes", []):
         for field in ("label", "local_id"):
             value = node.get(field)
             if value:
-                identifiers.add(_normalise(str(value)))
+                raw = str(value)
+                identifiers.add(_normalise(raw))
+                # Split the RAW value. `_normalise` reduces to letters and digits,
+                # so by then `@ngrx/store` is `ngrxstore` and there is nothing left
+                # to split on - the first version of this collected segments after
+                # normalising and matched nothing it did not already match.
+                segments |= {_normalise(part) for part in name_segments(raw)}
         source = node.get("source_file")
         if source:
             # The filename alone, because prose cites `AddressPipe` and
             # `address.pipe.ts` rather than the whole repo-relative path.
-            identifiers.add(_normalise(str(source).rsplit("/", 1)[-1]))
+            filename = str(source).rsplit("/", 1)[-1]
+            identifiers.add(_normalise(filename))
+            segments |= {_normalise(part) for part in name_segments(filename)}
     identifiers.discard("")
-    return identifiers
+    segments.discard("")
+    return identifiers, {part for part in segments if len(part) >= MIN_SEGMENT_MATCH}
 
 
-def absent_from_estate(unsupported: list[tuple[str, set[str]]]) -> dict[str, set[str]]:
-    """Of the terms a digest did not corroborate, those the graph does not hold."""
+def estate_identifiers() -> set[str]:
+    """The whole identifiers only. Kept because a caller wanting the strict set
+    should not have to discard the segments to get it."""
+    return estate_vocabulary()[0]
+
+
+def name_segments(identifier: str) -> set[str]:
+    """The parts of a name a cited term may legitimately refer to.
+
+    `NgRx` is reported absent while the estate holds `@ngrx/store`, `@ngrx/effects`
+    and six more scoped packages across 228 labels. A whole-label match can never
+    match a scoped package name, and scoped names are the norm in JS/TS - so that
+    check cried wolf on an entire ecosystem's naming convention, and a check that
+    does that gets switched off and then protects nothing.
+
+    Segments rather than substrings. Substring matching would also match a term
+    against the middle of an unrelated word, and case-insensitively it matches far
+    more than intended. Segments are explainable in one sentence and cover the two
+    other ecosystems this will arrive from next - a Java package and a Terraform
+    module address are the same shape - without a second special case.
+
+    This deliberately loosens a check whose job is not lying, so it trades false
+    positives for false negatives, which fail in the reassuring direction.
+    `MIN_SEGMENT_MATCH` and the count reported by `absent_from_estate` are what
+    keep that trade visible rather than assumed.
+    """
+    parts = {part for part in _SEGMENT_SEPARATORS.split(identifier) if part}
+    return {part for part in parts if len(part) >= MIN_SEGMENT_MATCH}
+
+
+def absent_from_estate(
+    unsupported: list[tuple[str, set[str]]],
+) -> tuple[dict[str, set[str]], int]:
+    """Terms the graph does not hold, and how many were matched only by a segment.
+
+    The second value is the measurement this change is not safe without. The issue
+    asking for a looser match was explicit that it had to be measured against a
+    real estate both ways, and a one-off count on one estate would not have
+    travelled. Reporting it on every run makes the trade visible wherever the check
+    runs: a large number means the whole-label match was hiding a great deal, and a
+    number close to the finding count means the looser rule is doing most of the
+    work and deserves a read.
+    """
     if not unsupported:
-        return {}
-    estate = estate_identifiers()
+        return {}, 0
+    estate, segments = estate_vocabulary()
     if not estate:
-        return {}
-    absent = {}
+        return {}, 0
+    absent: dict[str, set[str]] = {}
+    by_segment = 0
     for cid, terms in unsupported:
-        missing = {term for term in terms if _normalise(term) not in estate}
+        missing = set()
+        for term in terms:
+            normalised = _normalise(term)
+            if normalised in estate:
+                continue
+            if len(normalised) >= MIN_SEGMENT_MATCH and normalised in segments:
+                by_segment += 1
+                continue
+            missing.add(term)
         if missing:
             absent[cid] = missing
-    return absent
+    return absent, by_segment
 
 
 def verify(sample: int | None = None, strict: bool = False, estate: bool = False) -> int:
@@ -920,7 +997,12 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
         if hedges:
             speculative.append((cid, hedges))
 
-    absent = absent_from_estate(unsupported) if estate else None
+    absent, matched_by_segment = absent_from_estate(unsupported) if estate else (None, 0)
+    if estate and matched_by_segment:
+        print(
+            f"  {matched_by_segment} cited terms matched a name segment rather than a "
+            "whole identifier (scoped packages, Java packages, module addresses)"
+        )
     _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent)
     _report_provenance_split(checked, unsupported)
     # Under --estate, fail on what is genuinely unbacked rather than on what a
