@@ -303,7 +303,19 @@ def read_cuts(path: Path) -> list[Cut]:
     first, and a report that reordered it would be harder to read than the file.
     Missing file means no candidates, which is a legitimate state - the layer's own
     totals are worth having before anybody has proposed a cut.
+
+    The upward-path refusal is the read-side twin of `io.checked_write_target`, and
+    it is here for the same reason: `--cuts` is a CLI argument, so whatever built
+    it - an operator, a script or an agent - chooses which file this process opens.
+    Checked lexically, before any resolution, because `realpath` collapses `..` and
+    would launder exactly what this rejects. A store's cuts file lives in the
+    store, so nothing legitimate here climbs out of it.
     """
+    if any(part == ".." for part in Path(path).parts):
+        raise CutError(
+            f"refusing to read a cuts file through a path that traverses upward: {path}. "
+            "Name the file directly."
+        )
     if not path.is_file():
         return []
     cuts: list[Cut] = []
@@ -333,6 +345,47 @@ def read_cuts(path: Path) -> list[Cut]:
     return cuts
 
 
+def _count_nodes(path: Path, cuts: Sequence[Cut], sizing: Sizing) -> tuple[int, dict[str, int]]:
+    """This file's node count, and a bit per candidate keeping each surviving id.
+
+    The table holds only the nodes at least one candidate keeps, which is what
+    makes the second pass affordable on a layer of half a million nodes: on the
+    estate that reported this, a cut worth applying kept a few percent of them.
+    """
+    # Exact rather than inferred, and shared with the layer merge: the path either
+    # carries a `repositories/<name>/` segment or the `repo` axis has nothing to
+    # fall back on for this file.
+    repository = merge_layers.repository_of(str(path))
+    kept: dict[str, int] = {}
+    nodes = 0
+    for node in graph_stream.iter_array(path, key="nodes"):
+        nodes += 1
+        values = _values(node, repository)
+        mask = 0
+        for index, cut in enumerate(cuts):
+            if keeps(cut, values, sizing.hits):
+                mask |= 1 << index
+                sizing.kept_nodes[cut.name] = sizing.kept_nodes.get(cut.name, 0) + 1
+        if mask:
+            kept[str(node.get("id"))] = mask
+    return nodes, kept
+
+
+def _count_edges(path: Path, cuts: Sequence[Cut], kept: dict[str, int], sizing: Sizing) -> int:
+    """This file's edge count, crediting a candidate only where both endpoints survive."""
+    edges = 0
+    for edge in graph_files.iter_edges(path):
+        edges += 1
+        # An edge survives only where both endpoints do, which is the whole
+        # measurement: `&`, never `|`. With `|` a cut that strands its nodes
+        # reports the edges it broke as edges it kept.
+        surviving = kept.get(str(edge.get("source")), 0) & kept.get(str(edge.get("target")), 0)
+        for index, cut in enumerate(cuts):
+            if surviving & (1 << index):
+                sizing.kept_edges[cut.name] = sizing.kept_edges.get(cut.name, 0) + 1
+    return edges
+
+
 def size(paths: Sequence[Path], cuts: Sequence[Cut]) -> Sizing:
     """Count the layer and what each candidate keeps of it, one file at a time.
 
@@ -347,31 +400,8 @@ def size(paths: Sequence[Path], cuts: Sequence[Cut]) -> Sizing:
     """
     sizing = Sizing()
     for path in paths:
-        kept: dict[str, int] = {}
-        nodes = edges = 0
-        # Exact rather than inferred, and shared with the layer merge: the path
-        # either carries a `repositories/<name>/` segment or the `repo` axis has
-        # nothing to fall back on for this file.
-        repository = merge_layers.repository_of(str(path))
-        for node in graph_stream.iter_array(path, key="nodes"):
-            nodes += 1
-            values = _values(node, repository)
-            mask = 0
-            for index, cut in enumerate(cuts):
-                if keeps(cut, values, sizing.hits):
-                    mask |= 1 << index
-                    sizing.kept_nodes[cut.name] = sizing.kept_nodes.get(cut.name, 0) + 1
-            if mask:
-                kept[str(node.get("id"))] = mask
-        for edge in graph_files.iter_edges(path):
-            edges += 1
-            # An edge survives only where both endpoints do, which is the whole
-            # measurement: `&`, never `|`. With `|` a cut that strands its nodes
-            # reports the edges it broke as edges it kept.
-            surviving = kept.get(str(edge.get("source")), 0) & kept.get(str(edge.get("target")), 0)
-            for index, cut in enumerate(cuts):
-                if surviving & (1 << index):
-                    sizing.kept_edges[cut.name] = sizing.kept_edges.get(cut.name, 0) + 1
+        nodes, kept = _count_nodes(path, cuts, sizing)
+        edges = _count_edges(path, cuts, kept, sizing)
         sizing.graphs.append((path, nodes, edges))
         sizing.nodes += nodes
         sizing.edges += edges

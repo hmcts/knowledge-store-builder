@@ -388,6 +388,19 @@ class CutsFileRefusals(SettingsIsolated):
         cuts = _cuts("cut wide\nfile *.tf\ncut narrow\nfile *.tfvars\n")
         self.assertEqual([cut.name for cut in cuts], ["wide", "narrow"])
 
+    def test_a_cuts_path_that_climbs_out_of_the_store_is_refused(self):
+        """Breaks if `--cuts` can open a file outside the store it names.
+
+        The argument comes from the command line, so whatever built it - an
+        operator, a script or an agent - chooses which file the process reads. The
+        check is lexical rather than resolved, because `realpath` collapses `..`
+        and would launder exactly what this rejects; the same reasoning is written
+        down for the write side in `io.checked_write_target`.
+        """
+        with self.assertRaises(size_cuts.CutError) as refused:
+            size_cuts.read_cuts(Path("config", "..", "..", "elsewhere", "content-cuts.txt"))
+        self.assertIn("upward", str(refused.exception))
+
     def test_the_shipped_example_parses(self):
         """Breaks if the file people are told to copy stops being readable.
 
@@ -529,7 +542,11 @@ class WhatTheReportSays(SettingsIsolated):
         )
         text = "cut iac\nfile *.tf\nfile *.tfvars\ncut java\nfile *.java\nfile *.kt\n"
 
-        self.assertEqual(self._report([graph], text), self._report([graph], text))
+        first = self._report([graph], text)
+        second = self._report([graph], text)
+
+        self.assertEqual(first, second)
+        self.assertIn("iac", first[0], "the fixture must produce a report to compare")
 
 
 class TheStageAsRun(SettingsIsolated):
