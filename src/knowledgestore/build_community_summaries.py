@@ -372,6 +372,39 @@ def membership_drift(
     # absent measurement must not read as a measured total loss.
     snap_sets = {str(c): set(ids) for c, ids in snapshot.items() if str(c) in wanted and ids}
     snapshot_ids: set[str] = set().union(*snap_sets.values()) if snap_sets else set()
+    counts, kept, sizes = _tally_membership(nodes, snap_sets, snapshot_ids)
+    cause, message = _blocking_cause(counts, snapshot_ids, coverage, described)
+    result: dict = {
+        "cause": cause,
+        "message": message,
+        "nodes": counts["nodes"],
+        "clustered": counts["clustered"],
+        "communities": counts["communities"],
+        "attached": [],
+        "adrift": [],
+        "narrowed": [],
+        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),
+        "snapshot_ids": len(snapshot_ids),
+        "namespaced_graph_ids": counts["namespaced_graph_ids"],
+        "namespaced_snapshot_ids": sum(1 for node_id in snapshot_ids if "::" in node_id),
+    }
+    if cause:
+        return result
+    result.update(_classify(snap_sets, kept, sizes, bar, precision))
+    return result
+
+
+def _tally_membership(
+    nodes: Iterable[dict], snap_sets: dict[str, set[str]], snapshot_ids: set[str]
+) -> tuple[dict, Counter, Counter]:
+    """One streamed pass, counting only what the comparison needs.
+
+    Deliberately holds no graph ids of its own: `kept` needs
+    `|snapshot members that the graph still files here|`, which is answered by
+    testing each streamed id against the snapshot's set as it goes. On the largest
+    estate available a loaded read of the same question was 5.3s and 3.75 GB
+    against 2.2s and 0.04 GB streamed.
+    """
     kept: Counter = Counter()
     sizes: Counter = Counter()
     communities: set[str] = set()
@@ -393,30 +426,33 @@ def membership_drift(
             sizes[name] += 1
             if node_id in snap_sets[name]:
                 kept[name] += 1
-    result: dict = {
-        "cause": None,
-        "message": "",
+    counts = {
         "nodes": total,
         "clustered": clustered,
         "communities": len(communities),
-        "attached": [],
-        "adrift": [],
-        "narrowed": [],
-        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),
-        "snapshot_ids": len(snapshot_ids),
+        "overlap": overlap,
         "namespaced_graph_ids": namespaced,
-        "namespaced_snapshot_ids": sum(1 for node_id in snapshot_ids if "::" in node_id),
     }
+    return counts, kept, sizes
+
+
+def _blocking_cause(
+    counts: dict, snapshot_ids: set[str], coverage: float, described: str
+) -> tuple[str | None, str]:
+    """Why the comparison must not return a verdict, or `(None, "")` when it may.
+
+    Each of these makes *every* summary compare as adrift, and each needs the
+    opposite response to "membership moved" - so they are named rather than
+    counted. See `membership_drift` for what each one means.
+    """
+    total, clustered = counts["nodes"], counts["clustered"]
     if not total:
-        result["cause"] = "no-graph"
-        result["message"] = (
+        return "no-graph", (
             f"Cannot check membership: no nodes were read from {described or 'the graph'}. "
             "Nothing was compared, so nothing here says the prose is sound."
         )
-        return result
     if clustered / total < coverage:
-        result["cause"] = "no-membership"
-        result["message"] = (
+        return "no-membership", (
             f"Cannot check membership: only {clustered} of {total} nodes carry a community "
             f"({clustered / total:.1%}, floor {coverage:.0%}). Every summary would compare as "
             "adrift, and that is no membership having been read rather than membership having "
@@ -425,16 +461,30 @@ def membership_drift(
             "like this. Do not re-author prose on this result. Pass --coverage to lower the "
             "floor for a deliberately sparse graph."
         )
-        return result
-    if snapshot_ids and not overlap:
-        result["cause"] = "wrong-snapshot"
-        result["message"] = (
+    if snapshot_ids and not counts["overlap"]:
+        return "wrong-snapshot", (
             f"Cannot check membership: the snapshot and {described or 'the graph'} share no "
             "node ids, so this is the wrong snapshot - the same condition `summaries remap` "
             "refuses on. Every summary would compare as adrift. Re-take the snapshot from "
             "this graph rather than re-authoring prose."
         )
-        return result
+    return None, ""
+
+
+def _classify(
+    snap_sets: dict[str, set[str]],
+    kept: Counter,
+    sizes: Counter,
+    bar: float,
+    precision: float,
+) -> dict[str, list]:
+    """Each checked community filed under attached, adrift or narrowed.
+
+    Adrift and narrowed are separate populations because the responses differ:
+    adrift prose is keyed to a set that moved, narrowed prose is still about its
+    members and no longer about most of what a reader sees.
+    """
+    populations: dict[str, list] = {"attached": [], "adrift": [], "narrowed": []}
     for name in sorted(snap_sets, key=_by_id):
         members = snap_sets[name]
         size = sizes[name]
@@ -446,12 +496,12 @@ def membership_drift(
             "precision": round(kept[name] / size, 3) if size else 0.0,
         }
         if entry["share"] < bar:
-            result["adrift"].append(entry)
+            populations["adrift"].append(entry)
         elif entry["precision"] < precision:
-            result["narrowed"].append(entry)
+            populations["narrowed"].append(entry)
         else:
-            result["attached"].append(entry)
-    return result
+            populations["attached"].append(entry)
+    return populations
 
 
 def _namespace_note(result: dict) -> str:
