@@ -260,6 +260,20 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "iter_array matches a nested key again",
+        "graph_stream.py",
+        "        if self.depth == 1 and self.token_start >= 0:",
+        "        if self.token_start >= 0:",
+        "the depth test was repeated in three places and every one-line mutation of "
+        "each survived, because the other two still blocked - so it is now one "
+        "guard, which is what makes it testable. #210: a merged graph carries `graph.hyperedges[].nodes`, a list of id "
+        "strings, before its top-level node array - so the iterator yielded strings, "
+        "type-checking consumers saw nothing, and graph_counts returned (0, 0) on a "
+        "fully clustered graph. Two guards built on those counts then read (0, 0) "
+        "against (0, 0) as agreement, and one of them was a refusal protecting an "
+        "irreversible overwrite. Shipped in v0.14.0",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -358,6 +372,54 @@ MUTATIONS = (
         '"described": config.GRAPH_PATH.name,',
         "",
         "a reader then guesses which of a store's two graph files it refers to",
+    ),
+    Mutation(
+        "absolute-path check unwired",
+        "status.py",
+        "    _report_absolute_paths(arguments.paths)",
+        "    pass",
+        "#176: the fifth instance of this repository's most repeated escape - four "
+        "entries above are the same shape, in the same module, and each was written "
+        "after the previous one was fixed",
+    ),
+    Mutation(
+        "absolute-path check reports every absolute path",
+        "status.py",
+        "    return store_paths.relative(candidate) != candidate",
+        "    return True",
+        "the neighbouring-quantity failure this codebase has shipped repeatedly: "
+        "'every absolute path' rather than 'every path this store wrote absolute' "
+        "makes /etc/hosts and an API route findings, and a check whose first run is "
+        "mostly false positives is switched off before it reports a real one",
+    ),
+    Mutation(
+        "unreadable tracked files reported as a clean store",
+        "status.py",
+        '    if not scan["files"]:',
+        "    if False:",
+        "the '0 checked, none dangling' defect the corpus-citation check in this same "
+        "module already shipped once - a measurement of nothing paired with a clean "
+        "verdict, which reads as a pass",
+    ),
+    Mutation(
+        "absolute paths lost at a read-block boundary",
+        "status.py",
+        "        if match.end() > end:",
+        "        if False:",
+        "the scan streams because a store's tracked artefacts run to gigabytes "
+        "decompressed, and a path cut in half by a block boundary is the silent half "
+        "of that trade: no count can show what it failed to see",
+    ),
+    Mutation(
+        "the deferred path's own start is not resumed from",
+        "status.py",
+        "            resume = min(resume, match.start())",
+        "            resume = min(resume, match.end())",
+        "written and shipped wrong inside the change that added this check, and found "
+        "only by reconciling a 2.4 MB fixture's 12,000 written paths against the 11,997 "
+        "the scan reported - the ones spanning the hold-back point lost their head, the "
+        "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
+        "in the direction that reads as clean",
     ),
     Mutation(
         "retained failure double-counted",
