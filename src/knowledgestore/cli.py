@@ -30,6 +30,7 @@ SELF_PARSING = frozenset(
         "check-corpus",
         "chunk-plan",
         "merge-chunks",
+        "merge-inputs",
         "merge-layers",
         "record-clustering",
     }
@@ -62,6 +63,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "fetch-tickets": (
         "fetch_tickets",
         "ask the issue tracker about discovered tickets (opt-in; needs credentials)",
+    ),
+    "merge-inputs": (
+        "merge_inputs",
+        "name the graphs `graphify merge-graphs` would read, and reconcile them",
     ),
     "chunk-plan": (
         "build_chunk_plan",

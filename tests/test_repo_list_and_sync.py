@@ -507,6 +507,10 @@ class CliTest(SettingsIsolated):
                 # the other route to the same enrichment: ask the tracker
                 # rather than import an export of it
                 "fetch-tickets",
+                # `graphify merge-graphs` runs at this point, and takes a shell
+                # glob while extraction took the declaration - so this names what
+                # the glob would read before anything reads it (#222)
+                "merge-inputs",
                 "chunk-plan",
                 "merge-chunks",
                 # the third fan-out seam: merges the AST and semantic layers

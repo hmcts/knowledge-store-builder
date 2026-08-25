@@ -188,12 +188,17 @@ while IFS='|' read -r repo _; do
   ( cd "repositories/$repo" && graphify update . --no-cluster )
 done < config/repositories.txt
 
+knowledgestore merge-inputs        # what the merge will read, and what it cannot account for
+
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
 
-Reconcile the number of graphs produced with `config/repositories.txt` before
-merging. A shell loop that skipped repositories can still exit successfully.
+`merge-inputs` names every graph on disk that `config/repositories.txt` does not
+declare and `knowledge/provenance.json` cannot date, and every declared
+repository with no graph. A shell loop that skipped repositories can still exit
+successfully, and a graph left behind by an abandoned refresh merges without
+anything saying so. Add `--strict` to fail a build on the first two.
 
 Do not run graphify at the store root or pass `repositories/<name>` from the
 store root. The first route sees a near-empty ignored tree; the second writes

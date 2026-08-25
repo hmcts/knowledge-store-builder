@@ -62,6 +62,7 @@ while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
   ( cd "repositories/$repo" && graphify update . )
 done < config/repositories.txt
 
+knowledgestore merge-inputs        # reconcile what the merge will read
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
@@ -69,6 +70,26 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
 attribute.
+
+**Run `merge-inputs` before every merge, and read its output.** Extraction is
+driven by `config/repositories.txt`; the merge is driven by a shell glob, and
+nothing else reconciles them. A repository cloned and extracted during a refresh
+that was later abandoned keeps its graph, so the merge reads an input the store
+does not declare and `knowledge/provenance.json` cannot date - and an answer
+would cite it. The stage names four divergences rather than counting them:
+undeclared, no provenance entry, declared but not extracted, and extracted only
+as `graph.json.gz` (which the glob above will not read).
+
+It reports and exits 0, because a tree caught mid-refresh is normal. Two states
+exit 1 whatever you pass, because the check could not run at all: no graphs
+found, and an unreadable `config/repositories.txt`. `--strict` also fails on an
+undeclared or undated input; `--paths` writes one input path per line on stdout
+and the report on stderr, so the merge can be handed names instead of a glob.
+
+**Do not replace it with a check that walks `config/repositories.txt`.** The
+input that fails is the one the declaration omits, so such a check skips it and
+reports clean - which is worse than no check, because a clean report is read as
+an answer.
 
 ### Before dispatching semantic extraction
 
