@@ -392,6 +392,17 @@ exclusions; archived are always excluded), then re-run `discover` and `sync`.
 Adding repositories changes clustering, so community ids move: see "when
 clustering changes" below before regenerating summaries.
 
+**A repository left out is a decision, so record it.** `exclude` removes a
+repository from the estate and says nothing about why. `config/estate-boundary.txt`
+is where the estate rules one `active`, `not-used` or `decommissioned`, names an
+off-host alias of a repository it does hold, and dates a copy taken by hand.
+`knowledgestore status` reconciles those rulings against provenance and names a
+repository ruled active that the store does not hold - the shape of a
+"no evidence of X" answer that is wrong. `knowledgestore context` renders the
+declaration into `knowledge/repository-manifest.md`, and says plainly when there
+is none. See the "Declare the boundary" section of `docs/creating-a-store.md` for
+the rule set.
+
 ## Writing community summaries
 
 Summaries are plain-English descriptions of each cluster. They are what the
