@@ -385,6 +385,31 @@ reporting failure:
 - After any stage that writes per-item output, reconcile the count it reports
   against the count you expected.
 
+### Compare the count with the last build's, not with an expectation
+
+A count you reconcile against your own expectation only catches what you thought
+to expect. `intent`, `merge-layers` and `explorer` each record what they measured
+in `knowledge/telemetry.json` and print the movement since the last recorded
+build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+```
+
+**Read the movements and carry them into your report.** Every number in that
+report was plausible on its own and implausible beside its predecessor - a
+file-to-ticket join that lost most of its matches still reports a healthy-looking
+fraction of the graph. `git diff knowledge/telemetry.json` is the reviewable
+record; commit it with the rest of the store.
+
+Nothing fails on a movement, because an estate change moves all of these
+legitimately. The single exception is a measurement that was non-zero and is now
+zero, which goes to stderr as a warning. Do not add a threshold of your own: two
+estates measured the AST-to-semantic node ratio a hundredfold apart, so any
+constant is wrong on one of them, and the comparison that works is against this
+store's own history.
+
 ### Adding repositories to an estate
 
 Edit `config/repository-filters.txt` (include prefixes, explicit repositories,
@@ -683,7 +708,8 @@ knowledgestore explorer
 `knowledgestore status` reports provenance, summary/brief coverage, dangling
 corpus citations, the partitioner recorded in
 `graphify-out/clustering-inputs.json` against the one this environment offers,
-and whether the page is older than a layer it embeds. Add
+whether the page is older than a layer it embeds, and what the last build
+recorded in `knowledge/telemetry.json`. Add
 `--drift` to ask GitHub how far each repository has moved since the build
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.
@@ -750,5 +776,5 @@ Commit `knowledge/`, `knowledge_context.md`, `docs/topics/` and
 uncompressed `graph.json` — all are regenerable and large.
 
 Report honestly what was and was not regenerated: which stages ran, how many
-summaries or briefs are still missing, and whether the estate regression
-passed.
+summaries or briefs are still missing, what `knowledge/telemetry.json` moved by,
+and whether the estate regression passed.
