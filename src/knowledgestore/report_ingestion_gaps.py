@@ -68,9 +68,10 @@ from pathlib import Path
 
 from . import boundary, build_package_edges, config
 
-# How many leading dot-segments make a namespace. Two is too wide - `uk.gov`
-# spans unrelated organisations and group ids of that shape are common - and
-# four splits one estate's namespace into several.
+# How many leading dot-segments make a namespace. Two is too wide: a group id
+# whose first two segments are a country or sector prefix and a shared parent
+# body is common, and every unrelated organisation under that parent would then
+# read as this estate. Four splits one estate's namespace into several.
 NAMESPACE_DEPTH = 3
 
 # A namespace has to be one the estate demonstrably publishes under rather than
