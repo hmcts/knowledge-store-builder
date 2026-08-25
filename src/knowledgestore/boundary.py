@@ -144,46 +144,48 @@ def _resolve(
     return {name: value for name, (value, _) in resolved.items()}
 
 
-def parse(text: str, path: Path) -> Boundary:
-    """Read a declaration, refusing anything a reader could misread."""
-    searched: set[str] = set()
-    unsearched: set[str] = set()
-    aliases: dict[str, str] = {}
-    ruled: dict[str, tuple[str, int]] = {}
-    taken: dict[str, tuple[str, int]] = {}
+@dataclass
+class _Draft:
+    """Declarations as written, before aliases are resolved. Parsing only."""
 
-    for line_number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        kind, _, rest = line.partition(" ")
-        rest = rest.strip()
-        if not rest:
-            raise ValueError(f"{path}:{line_number}: `{kind}` declares nothing: {raw!r}")
-        if kind == "searched":
-            searched.add(rest)
-        elif kind == "unsearched":
-            unsearched.add(rest)
-        elif kind in RULINGS:
-            (name,) = _fields(kind, rest, 1, path, line_number)
-            ruled[name] = (kind, line_number)
-        elif kind == "alias":
-            other, name = _fields(kind, rest, 2, path, line_number)
-            if other == name:
-                raise ValueError(
-                    f"{path}:{line_number}: `alias {other} {name}` says a repository is "
-                    "itself. An alias names the estate repository an off-host name means."
-                )
-            aliases[other] = name
-        elif kind == "snapshot":
-            name, when = _fields(kind, rest, 2, path, line_number)
-            taken[name] = (_iso_date(when, path, line_number), line_number)
-        else:
+    searched: set[str] = field(default_factory=set)
+    unsearched: set[str] = field(default_factory=set)
+    aliases: dict[str, str] = field(default_factory=dict)
+    # Subject as written -> (value, line number). The line number is kept so a
+    # conflict can name both places rather than only the winner.
+    ruled: dict[str, tuple[str, int]] = field(default_factory=dict)
+    taken: dict[str, tuple[str, int]] = field(default_factory=dict)
+
+
+def _apply(draft: _Draft, kind: str, rest: str, path: Path, line_number: int) -> None:
+    """Record one declaration, refusing a kind or a shape a reader could misread."""
+    if kind == "searched":
+        draft.searched.add(rest)
+    elif kind == "unsearched":
+        draft.unsearched.add(rest)
+    elif kind in RULINGS:
+        (name,) = _fields(kind, rest, 1, path, line_number)
+        draft.ruled[name] = (kind, line_number)
+    elif kind == "alias":
+        other, name = _fields(kind, rest, 2, path, line_number)
+        if other == name:
             raise ValueError(
-                f"{path}:{line_number}: unknown declaration `{kind}`. Known: "
-                f"searched, unsearched, {', '.join(RULINGS)}, alias, snapshot."
+                f"{path}:{line_number}: `alias {other} {name}` says a repository is "
+                "itself. An alias names the estate repository an off-host name means."
             )
+        draft.aliases[other] = name
+    elif kind == "snapshot":
+        name, when = _fields(kind, rest, 2, path, line_number)
+        draft.taken[name] = (_iso_date(when, path, line_number), line_number)
+    else:
+        raise ValueError(
+            f"{path}:{line_number}: unknown declaration `{kind}`. Known: "
+            f"searched, unsearched, {', '.join(RULINGS)}, alias, snapshot."
+        )
 
+
+def _refuse_chains(aliases: dict[str, str], path: Path) -> None:
+    """An alias whose target is itself an alias resolves differently by read order."""
     chained = sorted(set(aliases) & set(aliases.values()))
     if chained:
         raise ValueError(
@@ -192,27 +194,48 @@ def parse(text: str, path: Path) -> Boundary:
             "chain resolves differently depending on which end you read from."
         )
 
-    boundary = Boundary(
-        searched=tuple(sorted(searched)),
-        unsearched=tuple(sorted(unsearched)),
-        rulings=_resolve(ruled, aliases, "ruling", path),
-        aliases={other: aliases[other] for other in sorted(aliases)},
-        snapshots=_resolve(taken, aliases, "snapshot date", path),
-    )
-    if not any(
+
+def _refuse_empty(declared: Boundary, path: Path) -> None:
+    """A present file declaring nothing reads as a boundary and describes none."""
+    if any(
         (
-            boundary.searched,
-            boundary.unsearched,
-            boundary.rulings,
-            boundary.aliases,
-            boundary.snapshots,
+            declared.searched,
+            declared.unsearched,
+            declared.rulings,
+            declared.aliases,
+            declared.snapshots,
         )
     ):
-        raise ValueError(
-            f"{path}: holds no declarations. An empty file reads as a declared boundary "
-            "and declares nothing; delete it, or say what was searched."
-        )
-    return boundary
+        return
+    raise ValueError(
+        f"{path}: holds no declarations. An empty file reads as a declared boundary "
+        "and declares nothing; delete it, or say what was searched."
+    )
+
+
+def parse(text: str, path: Path) -> Boundary:
+    """Read a declaration, refusing anything a reader could misread."""
+    draft = _Draft()
+    for line_number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        kind, _, rest = line.partition(" ")
+        rest = rest.strip()
+        if not rest:
+            raise ValueError(f"{path}:{line_number}: `{kind}` declares nothing: {raw!r}")
+        _apply(draft, kind, rest, path, line_number)
+
+    _refuse_chains(draft.aliases, path)
+    declared = Boundary(
+        searched=tuple(sorted(draft.searched)),
+        unsearched=tuple(sorted(draft.unsearched)),
+        rulings=_resolve(draft.ruled, draft.aliases, "ruling", path),
+        aliases={other: draft.aliases[other] for other in sorted(draft.aliases)},
+        snapshots=_resolve(draft.taken, draft.aliases, "snapshot date", path),
+    )
+    _refuse_empty(declared, path)
+    return declared
 
 
 def read(path: Path | None = None) -> Boundary | None:
