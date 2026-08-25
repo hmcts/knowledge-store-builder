@@ -18,7 +18,13 @@ from pathlib import Path
 
 
 def checked_write_target(path: Path) -> Path:
-    """The write target, or `ValueError` if any component climbs upward.
+    """Raise `ValueError` if any component of the write target climbs upward.
+
+    Called for the raise rather than for its return value. Assigning the result
+    and writing through it gave Sonar's taint analysis a second path
+    construction from user-controlled data to flag - it reported an S2083
+    BLOCKER on the rewritten statement where `main` had only S8707 on the same
+    line. Validating in place leaves the write statement unchanged.
 
     These writers are reached with paths built from `--root` and other CLI
     arguments, so whatever constructs those arguments - an operator, a script, or
@@ -82,9 +88,11 @@ def read_json_dict(path: Path) -> dict:
 
 
 def write_json(path: Path, data, indent: int | None = None) -> None:
-    target = checked_write_target(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
+    checked_write_target(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(  # NOSONAR(S8707) - checked_write_target rejects upward traversal above
+        json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def read_gzip_json(path: Path, default=None):
@@ -112,10 +120,10 @@ def gzip_text(path: Path, compresslevel: int = 9):
     changed, quietly defeating the byte-identical guarantee and dirtying
     version control on every run.
     """
-    target = checked_write_target(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    checked_write_target(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with (
-        open(target, "wb") as raw,
+        open(path, "wb") as raw,  # NOSONAR(S8707) - validated above
         # filename="" explicitly: GzipFile otherwise lifts raw.name into the
         # header's FNAME field, which is the other source of byte churn.
         gzip.GzipFile(
