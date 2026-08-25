@@ -699,6 +699,15 @@ and whether the page is older than a layer it embeds. Add
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.
 
+Add `--paths` to report absolute paths in the store's own tracked files. Paths a
+store persists about itself are **relative at rest, absolute in flight**: an
+absolute one records the build machine's directory layout in a committed artefact
+and stops naming a real file as soon as the store moves, while every count still
+reconciles and the JSON stays well-formed. The check names the files and counts
+them, and separates the artefacts that hold absolute paths by contract — graphify's
+`FILE_LIST` must be absolute verbatim — from the ones that should not. Convert with
+`knowledgestore.store_paths`, which still hands readers absolute paths.
+
 ## The semantic index
 
 ```bash
