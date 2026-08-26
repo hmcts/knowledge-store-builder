@@ -30,9 +30,11 @@ SELF_PARSING = frozenset(
         "check-corpus",
         "chunk-plan",
         "chunk-status",
+        "content-set",
         "merge-chunks",
         "merge-layers",
         "record-clustering",
+        "dangling-endpoints",
         "gaps",
         "size-cuts",
     }
@@ -69,6 +71,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "chunk-plan": (
         "build_chunk_plan",
         "write the semantic fan-out's chunk plan (run before dispatching extraction)",
+    ),
+    "content-set": (
+        "build_content_set",
+        "expose the content set a corpus search should read instead of the raw tree",
     ),
     "chunk-status": (
         "chunk_status",
@@ -119,6 +125,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "status": (
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",
+    ),
+    "dangling-endpoints": (
+        "measure_dangling_endpoints",
+        "measure how many dangling edge endpoints name a node the graph already holds",
     ),
     "gaps": (
         "report_ingestion_gaps",

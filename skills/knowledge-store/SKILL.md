@@ -188,6 +188,42 @@ repository, degree ranking, community sizes.
   records the scope; cite it when reporting an absence, and say plainly that a
   thing outside that scope would look identical.
 
+## Step 5 — Falling back to grepping the corpus
+
+The graph does not hold everything, so this fallback is legitimate. **Searching the
+raw tree is not.** Search the content set the pipeline computed:
+
+```bash
+tr '\n' '\0' < knowledge/corpus/content-files.txt \
+  | xargs -0 grep -nIs -- '<term>'
+```
+
+**`grep -r repositories/` is the wrong command.** The pipeline writes into the tree
+it reads, so `repositories/` holds each clone's own extraction cache and graph, its
+VCS pack files and any vendored dependency bundles, alongside the corpus. Measured
+on two estates, a naive recursive search sees several times as many files as the
+store considers content, and the great majority of what it returns matched inside
+something nobody in the estate wrote. One recorded question was answered correctly
+only after reading fifty-three consecutive false positives, one at a time.
+
+Three conditions, and each has a different correct response:
+
+- **The list is absent.** Say so and stop; do not substitute the tree. An operator
+  fixes it with `knowledgestore content-set`, and `knowledgestore status` reports
+  it either way.
+- **`repositories/` is absent.** Expected — the sparse clone in Step 1 does not
+  fetch the corpus, only the artefacts. The list still answers *what the store
+  considers content*, which is often the actual question ("is there any content
+  about X at all"). Say that no corpus is present rather than reporting no matches.
+- **The list is stale.** `status` says when it was built from a different detect
+  result than the one on disk. Report the finding and the staleness together.
+
+**A corpus grep is the weakest layer in the store, so name it.** It is raw text
+with no repository attribution and no relationship to any node — cite the file
+path, say the match came from a text search rather than from the graph, and apply
+the same rule as everywhere else: absence in the content set means absence from
+what this store holds, not from the world.
+
 ## Business intent: "why does this code exist?"
 
 Two layers connect code to intent:

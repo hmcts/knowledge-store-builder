@@ -272,6 +272,27 @@ store-relative source paths that break the file-to-ticket join. Do not include
 an earlier merged graph in `merge-graphs`, because node identifiers would be
 namespaced twice.
 
+Expose the content set once graphify has scanned the corpus:
+
+```bash
+knowledgestore content-set
+```
+
+That commits `knowledge/corpus/content-files.txt`, the set of files the pipeline
+itself classified as content, and the list a corpus search must read — the tree
+also holds each clone's extraction cache and graph, its VCS pack files and any
+vendored bundles, which on two measured estates outnumbered the corpus several
+times over. The report names the directories holding no content, aggregated across
+every repository holding one; excluding those with a `.graphifyignore` before
+extracting is much cheaper than filtering after, because extraction persists in the
+cache and in each clone's own graph where no later filter reaches it. Run it before
+extraction for that reason, and again afterwards so the committed list matches the
+final scan.
+
+Do not hand-maintain an exclusion list instead. A list is a second model of what
+the tool produces: correct the day it is written, and wrong by omission the next
+time the pipeline emits something new.
+
 Add business specifications after the merge:
 
 ```bash

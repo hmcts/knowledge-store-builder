@@ -382,7 +382,15 @@ committed dependency bundles come straight back into the graph: on one estate
 like a graph working hard rather than a graph full of a package manager — the
 god nodes are named `c()` and `push()`. Exclude vendored trees *before*
 extraction rather than filtering after it, which also keeps the corpus inventory
-from claiming the estate covers a package manager. The same argument applies with more force to anything secret-bearing — a
+from claiming the estate covers a package manager.
+
+`knowledgestore content-set` tells you which trees those are on your estate,
+without a list to maintain: each row it reports is the shallowest directory in a
+repository under which the pipeline's own scan found no content at all, aggregated
+across every repository holding one. It also commits the content set itself, which
+is what a corpus search should read — a naive `grep -r` over the tree reads the
+pipeline's cache, each clone's own graph and every vendored bundle alongside the
+corpus, and on two measured estates that was the large majority of what came back. The same argument applies with more force to anything secret-bearing — a
 Terraform state file holds resolved secret values — and there "filter it out
 afterwards" is not merely untidy, it does not work. **Extract a file once and
 its derived content persists in two places later filtering never touches:**

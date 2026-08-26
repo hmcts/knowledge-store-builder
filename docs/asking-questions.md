@@ -140,6 +140,29 @@ overwrite:
   && gunzip -kf graphify-out/graph.json.gz
 ```
 
+### Search the corpus when the graph comes back empty
+
+Search the content set, not the tree:
+
+```bash
+tr '\n' '\0' < knowledge/corpus/content-files.txt \
+  | xargs -0 grep -nIs -- '<term>'
+```
+
+**`grep -r repositories/` is the wrong command**, and it fails in the direction
+that costs most: on the fallback, after the graph has already not answered you.
+The pipeline writes into the tree it reads, so `repositories/` holds each clone's
+extraction cache and graph, its VCS pack files and any vendored dependency bundles
+alongside the corpus. Measured on two estates, a naive recursive search sees several
+times as many files as the store considers content, and most of what it returns
+matched inside something nobody in the estate wrote.
+
+`knowledge/corpus/content-files.txt` is the set the pipeline itself computed, one
+store-relative path per line. It arrives with a sparse clone; the corpus it names
+does not, so this route needs a full `git clone`. If the file is missing, the store
+predates it — a builder adds it with `knowledgestore content-set`, and
+`knowledgestore status` reports whether it is present and current.
+
 ## Other knowledge-store tasks
 
 | Skill | Use it to |
