@@ -41,7 +41,11 @@ _INTERPOLATION = re.compile(r"\{\{.*?\}\}", re.DOTALL)
 # by word characters occurs in shell fragments, patterns and prices, so matching it
 # would rewrite configuration values that are not interpolation at all. The layouts
 # this module reads write their references braced.
-_DOLLAR_INTERPOLATION = re.compile(r"\$?\$\{.*?\}", re.DOTALL)
+# `[^}]*` rather than a reluctant `.*?` (Sonar S5857): identical output on every
+# input, including nested and unterminated references, and no backtracking.
+# `re.DOTALL` is kept for the class, which already spans newlines, so the
+# multi-line case is unaffected.
+_DOLLAR_INTERPOLATION = re.compile(r"\$?\$\{[^}]*\}", re.DOTALL)
 _CONTROL_LINE = re.compile(r"^[ \t]*\{%.*?%\}[ \t]*$\n?", re.MULTILINE | re.DOTALL)
 _INLINE_CONTROL = re.compile(r"\{%.*?%\}", re.DOTALL)
 
