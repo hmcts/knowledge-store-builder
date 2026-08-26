@@ -128,6 +128,7 @@ while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
   ( cd "repositories/$repo" && graphify update . --no-cluster )
 done < config/repositories.txt
 
+knowledgestore merge-inputs        # names what the glob below will read
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 

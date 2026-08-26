@@ -33,6 +33,7 @@ dead file-to-ticket join. Neither gate covers the other.
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -752,6 +753,54 @@ MUTATIONS = (
         "nobody could see was narrow",
     ),
     Mutation(
+        "merge inputs read from the declaration again",
+        "merge_inputs.py",
+        "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
+        "    for repository in sorted(\n"
+        "        config.REPOSITORIES_DIR / name for name in (declared_repositories() or [])\n"
+        "    ):",
+        "the defect an operator measured: a repository discovered, cloned and extracted "
+        "before a refresh aborted stayed on disk while the configuration naming it was "
+        "discarded, and the glob-driven merge read it. Any reconciliation walking "
+        "config/repositories.txt skips exactly that input and reports clean, which is "
+        "worse than no check at all",
+    ),
+    Mutation(
+        "provenance closure no longer checked",
+        "merge_inputs.py",
+        "        ungrounded=tuple(sorted(on_disk - set(recorded))),",
+        "        ungrounded=(),",
+        "the sharp half of the same report: provenance records what was read, and a "
+        "glob-driven merge can read something it has no entry for, so an answer citing "
+        "those nodes cannot name the commit they were read at",
+    ),
+    Mutation(
+        "an undeclared input is counted but not named",
+        "merge_inputs.py",
+        "    if report.undeclared:",
+        "    if False:",
+        "the divergence the issue asked to have named rather than counted - an operator "
+        "given a number knows something is wrong and not which repository to look at",
+    ),
+    Mutation(
+        "an empty merge glob reads as a clean run",
+        "merge_inputs.py",
+        "    if not report.inputs or report.declared is None:\n        return 1",
+        "    if False:\n        return 1",
+        "the vacuity this library keeps meeting: a check over an empty set has nothing "
+        "to report and exits 0, so a build that produced no per-repository graphs at "
+        "all passes the gate meant to notice it",
+    ),
+    Mutation(
+        "status stops reporting the merge inputs",
+        "status.py",
+        "    for line in merge_inputs.lines(merge_inputs.reconcile(), limit=5):\n        print(line)",
+        "    return",
+        "the operator who reported this was reading `status`, which described an "
+        "entirely healthy store over a graph it could not account for; a stage nobody "
+        "runs is how a reconciliation ships and changes nothing",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -1235,6 +1284,36 @@ MUTATIONS = (
         "not be distinguished from a contradiction. A version beside a measurement is "
         "what makes the next disagreement diagnosable",
     ),
+    Mutation(
+        "the suite subprocess caches bytecode again",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        "        env=None,",
+        "#228: CPython invalidates a .pyc on the source's (mtime seconds, size) pair, so "
+        "two mutations of one module that produce a file of identical size inside one "
+        "second are indistinguishable to it. Two entries added for #227 did exactly that, "
+        "and the second run reported a wrong-but-plausible failure set - a spurious "
+        "`caught` or `SURVIVED` about code that was never in the tree",
+    ),
+    Mutation(
+        "bytecode writing is disabled with a value CPython ignores",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        '        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "0"},',
+        '#228: the variable is read as a flag, so "0" and "" both leave bytecode '
+        "writing on while the name sits in the environment looking correct - the defect "
+        "class this gate exists for, a check present and doing nothing",
+    ),
+    Mutation(
+        "the suite subprocess environment is replaced rather than extended",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        '        env={"PYTHONDONTWRITEBYTECODE": "1"},',
+        "#228: passing an env at all replaces the inherited one, and PYTHONPATH is how "
+        "the suite reaches src/ on a machine holding a non-editable install - so the fix "
+        "for a stale .pyc would silently move every mutation run onto the installed "
+        "package, which is a worse version of the same defect",
+    ),
 )
 
 
@@ -1314,12 +1393,25 @@ def restore(module: str, original: bytes) -> None:
 
 
 def run_suite() -> bool:
-    """True when the suite passes. Run as a subprocess so imports are fresh."""
+    """True when the suite passes. Run as a subprocess so imports are fresh.
+
+    Bytecode writing is off, and the environment is this process's plus that one
+    variable rather than a replacement, so PYTHONPATH still points the child at
+    `src/`. CPython invalidates a cached `.pyc` on the source's `(mtime seconds,
+    size)` pair, and this gate rewrites one source file per mutation: two
+    mutations of a module that produce a file of identical size inside the same
+    second are indistinguishable to that check, so the second run would import
+    the first mutation's bytecode and report on code that is not in the tree.
+    Caching buys the gate nothing, because every run has a different source, so
+    disabling it removes the invalidation question rather than narrowing the
+    window (#228).
+    """
     completed = subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", "."],
         cwd=ROOT / "tests",
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     return completed.returncode == 0
 
