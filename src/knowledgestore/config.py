@@ -106,6 +106,11 @@ BOUNDARY_PATH = ROOT / "config" / "estate-boundary.txt"
 # for part of the estate.
 EXTERNAL_CONFIG = ROOT / "config" / "repositories-external.txt"
 TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
+# Files in a named format `content_set` refuses or excludes - a Terraform state file
+# holds resolved secret values - that this estate has decided are safe anyway.
+# Hand-maintained and optional, because whether a named file is safe is a ruling
+# and no part of the pipeline can derive one. Absent means nothing is declared.
+CONTENT_SET_ALLOWED_PATH = ROOT / "config" / "content-set-allowed.txt"
 QUESTIONS_PATH = ROOT / "config" / "questions.txt"
 # Candidate content cuts for `size-cuts` to measure. Not a cut the pipeline
 # applies: a statement of what a store is for, sized before anyone commits to it.
@@ -494,6 +499,7 @@ def _recompute_paths() -> None:
         BOUNDARY_PATH=root / "config" / "estate-boundary.txt",
         EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
+        CONTENT_SET_ALLOWED_PATH=root / "config" / "content-set-allowed.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",
         CONTENT_CUTS_PATH=root / "config" / "content-cuts.txt",
         DETECT_PATH=root / "graphify-out" / ".graphify_detect.json",

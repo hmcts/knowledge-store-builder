@@ -595,5 +595,355 @@ class ConfigureReachesEveryOutputTest(SettingsIsolated):
             )
 
 
+class NamedFormatsTest(unittest.TestCase):
+    """The two named-format categories, as predicates over a content set.
+
+    Both are rules about a *named format*, not about size and not about a
+    language. Size is not the signal - a store's largest content files are
+    routinely its schemas and its variable files - and the claim being made here
+    is narrower and checkable: a Terraform state file holds provider outputs
+    verbatim, so the format itself is the evidence.
+
+    **The state-file cases below drive a constructed content set, and one that
+    the current peer version cannot produce**: graphify's detect pass does not
+    classify `.tfstate`, so no state file reaches a real content set and the
+    refusal is dormant defence-in-depth rather than a live guard. That premise is
+    pinned where it can be measured -
+    `test_documented_graphify_behaviour.DetectClassificationOfNamedFormatsTest`
+    asserts it against the real detect pass - so these tests describe the rule's
+    behaviour without also being the only evidence that the rule applies to
+    anything. The emulator-dump cases need no such caveat: those files are
+    classified, and the same peer test pins that too.
+    """
+
+    def test_a_state_file_is_caught_at_any_depth(self):
+        """Break it catches: anchoring the rule to a top-level path.
+
+        Matching `repositories/<repo>/terraform.tfstate`, or only the repository
+        root, passes cleanly on every estate that keeps its infrastructure in a
+        subdirectory - which is most of them. A state file three directories down
+        holds the same resolved values as one beside the README.
+        """
+        found = content_set.secret_bearing(
+            [
+                "repositories/alpha/terraform.tfstate",
+                "repositories/alpha/infra/envs/prod/terraform.tfstate",
+                "repositories/alpha/infra/terraform.tfstate.backup",
+            ]
+        )
+        self.assertEqual(
+            found,
+            [
+                "repositories/alpha/infra/envs/prod/terraform.tfstate",
+                "repositories/alpha/infra/terraform.tfstate.backup",
+                "repositories/alpha/terraform.tfstate",
+            ],
+        )
+
+    def test_terraform_source_and_variables_are_ordinary_content(self):
+        """Break it catches: widening the rule from a format to a language.
+
+        `.tf` and `.tfvars` are an estate's own infrastructure surface and among
+        the most valuable content it has, and a rule reading "Terraform is risky"
+        rather than "a state file holds resolved outputs" removes them. The
+        sensitivity control for the whole mechanism: a guard that fires on
+        everything is as useless as one that fires on nothing.
+        """
+        ordinary = [
+            "repositories/alpha/infra/main.tf",
+            "repositories/alpha/infra/prod.tfvars",
+            "repositories/alpha/docs/tfstate-recovery.md",
+            "repositories/alpha/src/state.json",
+        ]
+        self.assertEqual(content_set.secret_bearing(ordinary), [])
+        self.assertEqual(content_set.emulator_dumps(ordinary), [])
+
+    def test_an_emulator_dump_is_matched_by_filename_and_a_neighbour_is_not(self):
+        """Break it catches: matching the emulator's name anywhere in the path.
+
+        A substring rule takes out an estate's own emulator wiring - a client
+        module, a compose file, a fixture directory - every one of which is
+        authored content. The dump is one generated filename.
+        """
+        found = content_set.emulator_dumps(
+            [
+                "repositories/alpha/.data/__azurite_db_blob__.json",
+                "repositories/alpha/.data/__azurite_db_queue__.json",
+                "repositories/alpha/src/azurite_client.py",
+                "repositories/alpha/docker/azurite/compose.yaml",
+            ]
+        )
+        self.assertEqual(
+            found,
+            [
+                "repositories/alpha/.data/__azurite_db_blob__.json",
+                "repositories/alpha/.data/__azurite_db_queue__.json",
+            ],
+        )
+
+    def test_a_declared_path_is_neither_refused_nor_excluded(self):
+        """Break it catches: reading the declaration and not applying it.
+
+        A rule with no opt-out is worked around outside the library, and a
+        workaround outside the library is a second model of the tool's own
+        output - the thing this module exists not to have.
+        """
+        content = [
+            "repositories/alpha/infra/terraform.tfstate",
+            "repositories/alpha/other.tfstate",
+            "repositories/alpha/.data/__azurite_db_blob__.json",
+        ]
+        allowed = {
+            "repositories/alpha/infra/terraform.tfstate",
+            "repositories/alpha/.data/__azurite_db_blob__.json",
+        }
+        self.assertEqual(
+            content_set.secret_bearing(content, allowed), ["repositories/alpha/other.tfstate"]
+        )
+        self.assertEqual(content_set.emulator_dumps(content, allowed), [])
+
+    def test_a_declaration_written_absolute_still_names_the_same_file(self):
+        """Break it catches: comparing a declared path against a store-relative one.
+
+        Anything a person copies out of a graphify command line is absolute, and
+        a declaration that silently matches nothing reads exactly like a
+        declaration that was honoured - the refusal simply returns, and the
+        obvious conclusion is that the file is genuinely unsafe.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            declaration = Path(tmp) / "content-set-allowed.txt"
+            declaration.write_text(
+                "# reviewed: the outputs block holds no resolved values\n"
+                "\n"
+                f"{config.ROOT}/repositories/alpha/infra/terraform.tfstate\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                content_set.read_allowed(declaration),
+                {"repositories/alpha/infra/terraform.tfstate"},
+            )
+
+    def test_no_declaration_is_not_an_error(self):
+        """Break it catches: requiring the file. Almost no store will write one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(content_set.read_allowed(Path(tmp) / "absent.txt"), set())
+
+
+class NamedFormatStageTest(SettingsIsolated):
+    """The stage's two distinct responses: refuse the leak, exclude the waste.
+
+    Every test here writes its own detect result, which is fabrication of an
+    artefact graphify owns, so what each one may claim is bounded:
+
+    - the **emulator** cases construct what the real detect pass does produce,
+      verified against it in
+      `test_documented_graphify_behaviour.DetectClassificationOfNamedFormatsTest`;
+    - the **state-file** cases construct something the current peer version does
+      not produce at all. They exercise the refusal's behaviour given such a
+      content set, and they are not evidence that one ever occurs. The same peer
+      test pins that, and fails the day it changes.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        config.configure(root=self.root)
+
+    def build_a_store_holding(self, extra: dict[str, str]) -> None:
+        """A store whose corpus and detect result both name every file in `extra`.
+
+        Both sides, because these rules only act on a file the pipeline
+        classified as **content**: a file merely present on disk is ordinary
+        noise, which `noise_roots` already reports. Every input is named here
+        rather than globbed, so the counts asserted below are derived from the
+        population sent in.
+
+        **This writes the detect result by hand, so for a `.tfstate` it is
+        constructing a classification the real detect pass does not make.** That
+        is deliberate and it is the only way to reach the refusal at all; what it
+        must not be read as is evidence that a state file reaches a real content
+        set. It does not, on the current peer version.
+        """
+        files = {
+            "repositories/alpha/docs/guide.md": "the answer is here",
+            "repositories/beta/src/main.py": "x = 1",
+        }
+        files.update(extra)
+        write_tree(self.root, files)
+        detect_for(
+            self.root,
+            {
+                "document": ["repositories/alpha/docs/guide.md"],
+                "code": ["repositories/beta/src/main.py"],
+                "data": sorted(extra),
+            },
+        )
+
+    def test_a_state_file_in_the_content_set_refuses_the_run(self):
+        """Break it catches: downgrading the refusal to a line in the report.
+
+        Neither reporting surface can see this case, and that is structural
+        rather than an oversight: a state file the pipeline classified as content
+        is *in* the content set, so it is never a contentless directory, and it
+        is not a high-degree node either. A report also arrives too late -
+        extracted content persists in the extraction cache and in each clone's
+        own graph, which `sync` deliberately preserves - so there is nothing left
+        for the reader of the report to decide.
+
+        Driven from a constructed detect result, since the real one classifies no
+        `.tfstate`; the premise is pinned by the peer test named on the class.
+        """
+        self.build_a_store_holding({"repositories/alpha/infra/terraform.tfstate": "{}"})
+        code, output = run()
+        self.assertEqual(code, 2)
+        self.assertIn("REFUSING", output)
+        self.assertIn("repositories/alpha/infra/terraform.tfstate", output)
+        self.assertFalse(config.CONTENT_FILES_PATH.exists())
+        self.assertFalse(config.CONTENT_SET_PATH.exists())
+
+    def test_the_refusal_names_every_offending_path_and_the_way_past_it(self):
+        """Break it catches: printing the count and the first path.
+
+        The remedy is per file - each one is removed from a corpus or ruled safe
+        by name - and a count names nothing to act on. A refusal that does not
+        name its own opt-out is worked around outside the library instead.
+        """
+        two = {
+            "repositories/alpha/infra/envs/prod/terraform.tfstate": "{}",
+            "repositories/beta/terraform.tfstate.backup": "{}",
+        }
+        self.build_a_store_holding(two)
+        code, output = run()
+        self.assertEqual(code, 2)
+        for path in two:
+            self.assertIn(path, output)
+        self.assertIn("2 of the 4 files", output)
+        self.assertIn("config/content-set-allowed.txt", output)
+        self.assertIn("--allow", output)
+
+    def test_a_declared_state_file_is_exposed_rather_than_refused(self):
+        """Break it catches: a refusal an estate cannot overrule.
+
+        This changes what an existing store's run does: a store holding such a
+        file got a content set yesterday and gets an exit code today. Whether a
+        named file is safe is a ruling, which the pipeline cannot derive.
+        """
+        self.build_a_store_holding({"repositories/alpha/infra/terraform.tfstate": "{}"})
+        config.CONTENT_SET_ALLOWED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config.CONTENT_SET_ALLOWED_PATH.write_text(
+            "# reviewed: the outputs block holds no resolved values\n"
+            "repositories/alpha/infra/terraform.tfstate\n",
+            encoding="utf-8",
+        )
+        code, output = run()
+        self.assertEqual(code, 0)
+        self.assertNotIn("REFUSING", output)
+        self.assertIn(
+            "repositories/alpha/infra/terraform.tfstate\n",
+            config.CONTENT_FILES_PATH.read_text(encoding="utf-8"),
+        )
+
+    def test_the_flag_lets_one_run_through_without_committing_a_declaration(self):
+        """Break it catches: an opt-out that exists only as a committed file.
+
+        The first thing anyone does with a refusal is find out what it costs to
+        get past, and a store that must commit a declaration to try that commits
+        it before deciding anything.
+        """
+        self.build_a_store_holding({"repositories/alpha/infra/terraform.tfstate": "{}"})
+        code, output = run(["--allow", "repositories/alpha/infra/terraform.tfstate"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("REFUSING", output)
+        self.assertIn(
+            "repositories/alpha/infra/terraform.tfstate\n",
+            config.CONTENT_FILES_PATH.read_text(encoding="utf-8"),
+        )
+
+    def test_an_emulator_dump_is_excluded_and_counted_but_does_not_refuse(self):
+        """Break it catches: collapsing the two categories into one.
+
+        Either direction is wrong. Made a refusal, the milder half stops a build
+        over wasted work. Made a silent exclusion, nothing says the pipeline
+        dropped something, and an exclusion nobody sees is indistinguishable from
+        content that was never there. Made the *same* as the secret case, the
+        secret case becomes as ignorable as this one.
+        """
+        dumps = {
+            "repositories/alpha/.data/__azurite_db_blob__.json": "{}",
+            "repositories/alpha/.data/__azurite_db_queue__.json": "{}",
+        }
+        self.build_a_store_holding(dumps)
+        code, output = run()
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            config.CONTENT_FILES_PATH.read_text(encoding="utf-8"),
+            "repositories/alpha/docs/guide.md\nrepositories/beta/src/main.py\n",
+        )
+        self.assertIn("excluded 2 emulator dumps", output)
+        for path in dumps:
+            self.assertIn(path, output)
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["excluded_emulator_dumps"], sorted(dumps))
+        # Four files were sent to detect and two are exposed, so the excluded
+        # count is the difference exactly. A tally that does not reconcile is how
+        # a bucket count comes to exceed the population it describes.
+        self.assertEqual(manifest["classified_files"], 4)
+        self.assertEqual(manifest["content_files"], 2)
+        self.assertEqual(
+            manifest["classified_files"],
+            manifest["content_files"] + len(manifest["excluded_emulator_dumps"]),
+        )
+
+    def test_a_truncated_list_of_dumps_says_how_many_it_did_not_name(self):
+        """Break it catches: printing the first `--top` paths as if that were all.
+
+        A list that stops silently reads as complete, so a reader acts on three
+        paths when there are five, and the two they never saw stay in the corpus.
+        The manifest carries every one either way, and the report says where to
+        look for the rest.
+        """
+        dumps = {
+            f"repositories/alpha/.data/__azurite_db_{name}__.json": "{}"
+            for name in ("blob", "queue", "table")
+        }
+        self.build_a_store_holding(dumps)
+        code, output = run(["--top", "1"])
+        self.assertEqual(code, 0)
+        self.assertIn("excluded 3 emulator dumps", output)
+        self.assertIn("repositories/alpha/.data/__azurite_db_blob__.json", output)
+        self.assertNotIn("repositories/alpha/.data/__azurite_db_table__.json", output)
+        self.assertIn("and 2 more", output)
+        self.assertIn("knowledge/corpus/content-set.json", output)
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["excluded_emulator_dumps"], sorted(dumps))
+
+    def test_an_ordinary_infrastructure_store_is_untouched(self):
+        """Break it catches: a rule that fires on size, on JSON, or on a language.
+
+        Every file here is one a broader rule takes: the Terraform source and
+        variables a per-language ban removes, a large generated JSON a size rule
+        removes, and a module whose name merely mentions the emulator. The stage
+        must expose all four and say nothing about any of them.
+        """
+        ordinary = {
+            "repositories/alpha/infra/main.tf": 'resource "thing" {}',
+            "repositories/alpha/infra/prod.tfvars": 'region = "somewhere"',
+            "repositories/alpha/src/azurite_client.py": "import os",
+            "repositories/alpha/generated/schema.json": "{}" + " " * 8192,
+        }
+        self.build_a_store_holding(ordinary)
+        code, output = run()
+        self.assertEqual(code, 0)
+        exposed = config.CONTENT_FILES_PATH.read_text(encoding="utf-8").splitlines()
+        for path in ordinary:
+            self.assertIn(path, exposed)
+        self.assertIn("6 content files", output)
+        self.assertNotIn("REFUSING", output)
+        self.assertNotIn("emulator", output)
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["excluded_emulator_dumps"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
