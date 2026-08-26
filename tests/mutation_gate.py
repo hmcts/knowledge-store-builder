@@ -1580,6 +1580,96 @@ MUTATIONS = (
         "reads as structure - a redaction that looks applied and is not",
     ),
     Mutation(
+        "the second deployment layout unwired",
+        "build_deployments.py",
+        "    facts = _merged_facts(found, reading, tally.flux)",
+        "    facts = _values_facts(found)",
+        "#88: the stage read one layout, so a Kustomize/Flux repository returned exactly the "
+        "pair count the run returned without it. Every test of the reader itself still passes "
+        "with the call site gone, which is the class of escape this gate exists for",
+    ),
+    Mutation(
+        "both layouts' facts appended rather than reconciled",
+        "build_deployments.py",
+        "        if key in facts:",
+        "        if False:",
+        "#88: one clone part-way through a migration declares a service in both layouts, and "
+        "appending both puts two nodes with one id into the graph. A duplicate id raises "
+        "nothing downstream - it is two answers to one question, and the run reports a higher "
+        "pair count for it",
+    ),
+    Mutation(
+        "the base layer dropped from an environment's composition",
+        "deploy_flux.py",
+        "    ordered = [base] if base else []",
+        "    ordered = []",
+        "#88: an overlay declares only what it overrides, so a fact built from the patches "
+        "alone reports a partial configuration as a whole one - the keys it does carry are "
+        "right, which is why nothing looks wrong",
+    ),
+    Mutation(
+        "only the first directory a cluster reconciles is read",
+        "deploy_flux.py",
+        "        if any(_under(rel, directory) for directory in directories):",
+        "        if any(_under(rel, directory) for directory in directories[:1]):",
+        "#88: a cluster reconciles an environment overlay and its stack overlays together, so "
+        "reading one of them loses limits that are really set and reports nothing missing",
+    ),
+    Mutation(
+        "composed values share the parsed document",
+        "deploy_flux.py",
+        "            base[key] = copy.deepcopy(value)",
+        "            base[key] = value",
+        "#88: one base declaration is composed into every environment, so overlaying onto the "
+        "parsed document instead of a copy gives the environments composed later the earlier "
+        "ones' overrides - both facts stay well-formed and one of them is fiction",
+    ),
+    Mutation(
+        "an unparsable Kustomize/Flux file skipped in silence",
+        "build_deployments.py",
+        "        if documents is None:\n            unparsed.append(rel)\n            continue",
+        "        if documents is None:\n            continue",
+        "#88's premise is a silent omission: a file this reader cannot parse is a service "
+        "absent from every answer, and a walk that drops it reports the same clean run",
+    ),
+    Mutation(
+        "the layout that contributed nothing says nothing",
+        "build_deployments.py",
+        "    if flux.releases or flux.kustomizations:",
+        "    if True:",
+        "#88: the finding is a repository adding no nodes and no message. Counting documents "
+        "for a tree that declared none reads as a healthy run, and the sensitivity control "
+        "that proves this reader can tell the two apart is the report line itself",
+    ),
+    Mutation(
+        "the chart source dropped from a chart reference",
+        "deploy_flux.py",
+        '    source = _text(reference.get("name")) if reference.get("kind") in CHART_SOURCE_KINDS else ""',
+        '    source = ""',
+        "#88 and #122: `sourceRef` is a repository-to-repository dependency nothing else in a "
+        "store holds. Losing it leaves the chart name and version on the node, so the fact "
+        "reads as fully parsed",
+    ),
+    Mutation(
+        "every fact claims one route",
+        "build_deployments.py",
+        '            "route": fact.route,',
+        '            "route": ROUTE_VALUES,',
+        "#88: two layouts emit onto one set of environments, so the route is what makes "
+        '"which services reach this environment by which route" answerable. The key is still '
+        "present and every node still carries a value, which is how a wrong one survives",
+    ),
+    Mutation(
+        "every environment named after the root of the cluster tree",
+        "deploy_flux.py",
+        '    return parts[_ENVIRONMENT_SEGMENT] if len(parts) > _ENVIRONMENT_SEGMENT + 1 else ""',
+        '    return parts[0] if len(parts) > 1 else ""',
+        "#88: the environment name is the one thing these trees state by path, so taking the "
+        "wrong segment collapses every environment into one - and a single environment holding "
+        "every service is a plausible-looking answer, which is the failure this stage was "
+        "built to avoid",
+    ),
+    Mutation(
         "one role word is enough to redact",
         "deploy_values.py",
         "    return bool(stores) and bool(entries) and len(stores | entries) > 1",

@@ -247,7 +247,48 @@ was built against, the same repository declares 96 services in `prd` and 72 in
 have merged those into one answer true of neither, and it would have looked
 perfectly plausible.
 
-Three things it cannot promise, all worth saying to whoever asks:
+**Two layouts reach one set of environments.** The **values** route reads one
+templated file per service and environment, which is what
+`KSB_DEPLOY_VALUES_GLOB` points at. The **kustomize** route reads a
+Kustomize/Flux tree: a base HelmRelease per service, patched by environment and
+stack overlays, with each cluster's Flux Kustomizations saying which of those
+directories are reconciled where.
+
+Both emit onto the same `deploy::env:<environment>` nodes, and every fact records
+which route produced it in `metadata.route` — so "which services reach this
+environment, and by which route" is one query rather than two, and an estate
+part-way through a migration has one set of environments rather than two.
+
+The Kustomize/Flux route keys on each document's own `kind` and `apiVersion`, not
+on a list of directories, so a tree that arranges or names its directories
+differently still reads:
+
+| Document | Read as |
+|---|---|
+| `HelmRelease` (`helm.toolkit.fluxcd.io`) with `spec.chart` | the service's base declaration, with its chart and pinned version |
+| `HelmRelease` with no `spec.chart` | a patch over that base |
+| `Kustomization` (`kustomize.toolkit.fluxcd.io`) | which directories a cluster reconciles, and so which patches compose that environment's fact |
+| `spec.chart.spec.sourceRef` naming a chart source | a dependency edge to the repository providing the chart, the shape `packages` gives a Terraform module |
+
+One path assumption is left, and it is where an environment gets its **name**:
+the segment below the root of the tree holding the cluster files, so
+`clusters/<env>/<cluster>/apps.yaml` names `<env>`. A cluster file with no such
+segment is reported rather than given an invented environment. A
+`kustomization.yaml` is deliberately not read — it indexes the patch files, and
+the patches themselves carry `kind: HelmRelease`.
+
+**Read this route's own report before trusting the layer.** The gap it closes was
+silent: the stage returned the same pair count with or without the repository. So
+it names what it could not attribute — files that would not parse, HelmRelease
+files no Kustomization reconciles, documents naming no service, cluster files
+naming no environment — and a tree holding none of this layout says so instead of
+adding nothing:
+
+```text
+  Kustomize/Flux: no HelmRelease or Kustomization document in N YAML file(s) - this layout contributed nothing
+```
+
+Four things it cannot promise, all worth saying to whoever asks:
 
 - **It is declared desired state, not live cluster state.** Even a store built
   minutes ago answers "what the repository declares at this commit", never "what
@@ -255,9 +296,15 @@ Three things it cannot promise, all worth saying to whoever asks:
   is how somebody acts on configuration a hotfix superseded.
 - **Templated values do not resolve.** Roughly nine in ten values files on that
   estate carry Jinja markers, so "does this service set resource limits" is
-  answerable and "what is its replica count" often is not. The key survives
-  carrying a placeholder, so *set from a variable* stays distinguishable from
-  *unset* — never quote a placeholder as though it were a value.
+  answerable and "what is its replica count" often is not. Both dialects get the
+  same treatment, `{{ }}` and `${ }`. The key survives carrying a placeholder, so
+  *set from a variable* stays distinguishable from *unset* — never quote a
+  placeholder as though it were a value.
+- **Secret locations are withheld and their keys are kept.** These files map an
+  environment variable to a store entry to a vault, which is a map of where each
+  credential lives. That a service takes a value from a store is recorded; the
+  store and the entry are replaced with the placeholder. Nothing is rendered and
+  no secret is read.
 - **The join is by name, and names drift.** The stage reports the match rate and
   names what did not match.
 
