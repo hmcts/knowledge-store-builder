@@ -24,7 +24,7 @@ import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config, graph_files, io, provenance, record_clustering, store_paths
+from . import config, graph_files, io, provenance, record_clustering, store_paths, telemetry
 from .build_topic_briefs import read_topics
 
 
@@ -950,6 +950,34 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _report_telemetry() -> None:
+    """What the last build measured, so an operator can see the numbers at all.
+
+    Read-only, and it compares nothing: `status` measures none of these itself -
+    they need the graph, and this stage must not load it - so printing a fresh
+    figure beside a recorded one would be claiming a comparison it never made.
+    The comparison happens where the number is computed, in the stage that
+    records it.
+
+    The empty case says so rather than printing a heading over nothing. A
+    "Telemetry:" line with no rows under it reads as a store with nothing to
+    report instead of one where nothing has been recorded yet.
+    """
+    lines = telemetry.recorded_lines()
+    if not lines:
+        print(
+            "Telemetry: nothing recorded yet - `intent`, `merge-layers` and `explorer` "
+            "each record what they measured, and the next run of each compares against it"
+        )
+        return
+    print(
+        f"Telemetry: what the last build measured ({telemetry.display_path()}), "
+        "and what the next build of each stage compares itself against:"
+    )
+    for line in lines:
+        print(line)
+
+
 def recorded_digests() -> dict[str, str]:
     """What the page was built from, from either manifest shape.
 
@@ -1204,6 +1232,8 @@ def main(argv=None) -> int:
     _report_freshness()
 
     _report_clustering()
+
+    _report_telemetry()
 
     _report_graph_report(arguments.verify_graph)
 

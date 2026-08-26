@@ -486,6 +486,73 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
+    Mutation(
+        "telemetry overwrites the record without reading it",
+        "telemetry.py",
+        "    previous = read()",
+        "    previous = {}",
+        "#154: the defect the whole mechanism exists to remove - every number lived in "
+        "one build's scrollback, so nothing could notice it moving. A record written and "
+        "never read looks identical to one that was compared, because the file afterwards "
+        "is the same either way",
+    ),
+    Mutation(
+        "a collapsed measurement reported as an ordinary statistic",
+        "telemetry.py",
+        "        if movement.collapsed:",
+        "        if False:",
+        "#154: zero is the only condition assertable without knowing the estate, and a "
+        "join that matched nothing was green on one store across its whole graph. Losing "
+        "the routing prints the collapse among the healthy numbers, which is the shape of "
+        "output people are already caught skimming",
+    ),
+    Mutation(
+        "each stage's record erases the last stage's",
+        "telemetry.py",
+        "{**previous, **measurements}",
+        "{**measurements}",
+        "#154: three stages write this artefact in one refresh, so a replace leaves each "
+        "record surviving only until the next stage runs and every comparison is against "
+        "nothing - a mechanism that reads green and measures nothing, which is the class "
+        "this gate exists for",
+    ),
+    Mutation(
+        "layer sizes measured and discarded",
+        "merge_layers.py",
+        "    telemetry.record(layer_measurements(counters))",
+        "    layer_measurements(counters)",
+        "#154, and #116 rests on it: the AST-to-semantic ratio can only be judged against "
+        "a store's own last build, because two estates measured it a hundredfold apart. "
+        "Computing the counts and not recording them is the wiring escape this gate "
+        "already records five times",
+    ),
+    Mutation(
+        "the join cardinality measured and discarded",
+        "build_explorer.py",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
+        "    page_measurements(graph, entries, edges, size_bytes)",
+        "#154 over #149: the join report refuses zero and prints the rate, and the "
+        "half-dead case is neither of those. Without a record the rate reaches a terminal "
+        "and is gone, which is how a join that should have been three times larger read "
+        "as a working join on a sparse estate",
+    ),
+    Mutation(
+        "the indexed inventory measured and discarded",
+        "build_intent_index.py",
+        "    telemetry.record(summarise(index, commits_seen, report))",
+        "    summarise(index, commits_seen, report)",
+        "#154: a corpus inventory that collapsed reported a plausible smaller number and "
+        "read as a smaller estate; nothing but its predecessor contradicts it",
+    ),
+    Mutation(
+        "the record never reaches an operator",
+        "status.py",
+        "    _report_telemetry()\n\n    _report_graph_report",
+        "    _report_graph_report",
+        "#154: reporting through a function while nothing drives the CLI is the most "
+        "repeated escape in this repository, and `status` alone accounts for three "
+        "existing entries here",
+    ),
 )
 
 

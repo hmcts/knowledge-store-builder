@@ -72,6 +72,7 @@ from pathlib import Path
 
 from . import config
 from . import io
+from . import telemetry
 
 
 def _nodes_and_edges(payload: dict) -> tuple[list[dict], list[dict]]:
@@ -331,6 +332,25 @@ def report(counters: dict) -> str:
     return "\n".join(lines)
 
 
+def layer_measurements(counters: dict) -> dict[str, int]:
+    """The four counts a later build needs to see this build's shape move.
+
+    The two input layers are recorded as counts and never as the ratio between
+    them, even though the ratio is what an operator reads. Two estates measured
+    that ratio at roughly 0.5:1 and 57:1 - a factor of a hundred - so it is only
+    meaningful against a store's own previous build, and computing the previous
+    ratio needs the previous build's numerator *and* denominator. A recorded
+    `57.5` would leave a later reader unable to tell an AST layer that doubled
+    from a semantic layer that halved.
+    """
+    return {
+        "layers.ast_nodes": counters["ast_nodes"],
+        "layers.semantic_nodes": counters["semantic_nodes"],
+        "layers.merged_nodes": counters["nodes"],
+        "layers.merged_edges": counters["edges"],
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="knowledgestore merge-layers",
@@ -378,4 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     io.write_json(destination, merged)
     print(report(counters))
     print(f"-> {destination}")
+    # The layer sizes are the numbers #116 has to be decided on, and they are
+    # only interpretable against this store's own last build.
+    telemetry.record(layer_measurements(counters))
     return 0

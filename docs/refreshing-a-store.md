@@ -135,10 +135,43 @@ finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See
 [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record).
 
+### Compare this refresh with the last one
+
+`intent`, `merge-layers` and `explorer` record what they measured in
+`knowledge/telemetry.json` and print how each number moved since the last
+recorded build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_indexed: 28,093 -> 28,140 (+0.2%)
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+  layers.ast_nodes: 19,353 -> 19,502 (+0.8%)
+```
+
+Read the movements rather than the totals. A number is plausible in isolation
+and implausible beside its predecessor, which is what makes the second line
+above worth stopping for: a file-to-ticket join that lost three quarters of its
+matches reports a healthy-looking fraction of the graph, and nothing else in a
+build contradicts it.
+
+```bash
+git diff knowledge/telemetry.json    # the record of what this refresh changed
+```
+
+Commit the file with the rest of the store. Nothing fails on a movement — an
+estate change moves all of these legitimately, and a check that fires on every
+intentional change gets switched off — with one exception: a measurement that
+was non-zero and is now zero is a warning on stderr, because a population that
+had members and now has none needs no judgement about the estate.
+
+`knowledgestore status` prints the record and compares nothing. It measures none
+of these itself, so a fresh figure beside a recorded one would claim a
+comparison it never made.
+
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
-ran, what authored coverage remains, whether grounding checks passed and
-whether the source-drift check is clean.
+ran, what authored coverage remains, whether grounding checks passed, what the
+telemetry moved by and whether the source-drift check is clean.
 
 ## Remove repositories
 
