@@ -33,6 +33,7 @@ dead file-to-ticket join. Neither gate covers the other.
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -1252,6 +1253,36 @@ MUTATIONS = (
         "mutated, so the next run overwrites a healthy file with older bytes - a stale "
         "artefact read as current, the same class as the leftover graph refusals above",
     ),
+    Mutation(
+        "the suite subprocess caches bytecode again",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        "        env=None,",
+        "#228: CPython invalidates a .pyc on the source's (mtime seconds, size) pair, so "
+        "two mutations of one module that produce a file of identical size inside one "
+        "second are indistinguishable to it. Two entries added for #227 did exactly that, "
+        "and the second run reported a wrong-but-plausible failure set - a spurious "
+        "`caught` or `SURVIVED` about code that was never in the tree",
+    ),
+    Mutation(
+        "bytecode writing is disabled with a value CPython ignores",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        '        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "0"},',
+        '#228: the variable is read as a flag, so "0" and "" both leave bytecode '
+        "writing on while the name sits in the environment looking correct - the defect "
+        "class this gate exists for, a check present and doing nothing",
+    ),
+    Mutation(
+        "the suite subprocess environment is replaced rather than extended",
+        "tests/mutation_gate.py",
+        '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
+        '        env={"PYTHONDONTWRITEBYTECODE": "1"},',
+        "#228: passing an env at all replaces the inherited one, and PYTHONPATH is how "
+        "the suite reaches src/ on a machine holding a non-editable install - so the fix "
+        "for a stale .pyc would silently move every mutation run onto the installed "
+        "package, which is a worse version of the same defect",
+    ),
 )
 
 
@@ -1331,12 +1362,25 @@ def restore(module: str, original: bytes) -> None:
 
 
 def run_suite() -> bool:
-    """True when the suite passes. Run as a subprocess so imports are fresh."""
+    """True when the suite passes. Run as a subprocess so imports are fresh.
+
+    Bytecode writing is off, and the environment is this process's plus that one
+    variable rather than a replacement, so PYTHONPATH still points the child at
+    `src/`. CPython invalidates a cached `.pyc` on the source's `(mtime seconds,
+    size)` pair, and this gate rewrites one source file per mutation: two
+    mutations of a module that produce a file of identical size inside the same
+    second are indistinguishable to that check, so the second run would import
+    the first mutation's bytecode and report on code that is not in the tree.
+    Caching buys the gate nothing, because every run has a different source, so
+    disabling it removes the invalidation question rather than narrowing the
+    window (#228).
+    """
     completed = subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", "."],
         cwd=ROOT / "tests",
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     return completed.returncode == 0
 
