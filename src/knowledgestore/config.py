@@ -112,6 +112,9 @@ TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
 # and no part of the pipeline can derive one. Absent means nothing is declared.
 CONTENT_SET_ALLOWED_PATH = ROOT / "config" / "content-set-allowed.txt"
 QUESTIONS_PATH = ROOT / "config" / "questions.txt"
+# Candidate content cuts for `size-cuts` to measure. Not a cut the pipeline
+# applies: a statement of what a store is for, sized before anyone commits to it.
+CONTENT_CUTS_PATH = ROOT / "config" / "content-cuts.txt"
 # graphify's semantic fan-out reads and writes these. The chunk plan is the only
 # map from chunk number to file list, so without it the committed chunk archive
 # cannot be read back; it was ad-hoc and machine-specific until the library owned
@@ -498,6 +501,7 @@ def _recompute_paths() -> None:
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
         CONTENT_SET_ALLOWED_PATH=root / "config" / "content-set-allowed.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",
+        CONTENT_CUTS_PATH=root / "config" / "content-cuts.txt",
         DETECT_PATH=root / "graphify-out" / ".graphify_detect.json",
         CHUNK_PLAN_PATH=root / "graphify-out" / ".graphify_chunk_plan.json",
         UNCACHED_PATH=root / "graphify-out" / ".graphify_uncached.txt",
