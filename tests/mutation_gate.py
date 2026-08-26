@@ -1254,6 +1254,37 @@ MUTATIONS = (
         "artefact read as current, the same class as the leftover graph refusals above",
     ),
     Mutation(
+        "the file-list route grows a directory walk",
+        "extract_ast.py",
+        "        files = content_files(io.read_json_dict(source))",
+        '        files = list(config.REPOSITORIES_DIR.rglob("*.py"))',
+        "the builder guide tells an operator that exclusions applied at detect time carry "
+        "through this stage because it never walks a directory. That paragraph's "
+        "predecessor went stale when code changed and NOTHING failed - it was caught by "
+        "reading. A walk added here as a convenience keeps every behavioural test green "
+        "while reintroducing the second exclusion model the stage exists to remove",
+    ),
+    Mutation(
+        "the guide keeps the conclusion and loses the mechanism",
+        "docs/building-a-knowledge-store.md",
+        "never walks a directory",
+        "reads its input",
+        '"both .graphifyignore placements work on this route" is only true because the '
+        "stage has no scan root. An instruction whose reason has been removed is the one "
+        "someone talks themselves out of, and this one competes with graphify's own "
+        "printed instructions",
+    ),
+    Mutation(
+        "the placement table stops naming the version it was measured against",
+        "docs/building-a-knowledge-store.md",
+        "graphify 0.9.40",
+        "graphify",
+        "one cell of that table was disproved on a later graphify than the one it was "
+        "written against, and there was no way to tell which - so the correction could "
+        "not be distinguished from a contradiction. A version beside a measurement is "
+        "what makes the next disagreement diagnosable",
+    ),
+    Mutation(
         "the suite subprocess caches bytecode again",
         "tests/mutation_gate.py",
         '        env={**os.environ, "PYTHONDONT' + 'WRITEBYTECODE": "1"},',
