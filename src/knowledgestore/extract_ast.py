@@ -193,7 +193,7 @@ def pipeline_artefacts(files: "list[Path]", graph_directory: Path) -> "list[Path
     return inside
 
 
-class RepositoryTimeout(BaseException):
+class RepositoryTimeout(BaseException):  # NOSONAR(S5709) - deliberate, see docstring
     """The per-repository bound, deriving from BaseException on purpose.
 
     Measured against the real extractor, not reasoned about: it wraps each file in
