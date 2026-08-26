@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from knowledgestore import merge_layers  # noqa: E402
+from knowledgestore import config, merge_layers  # noqa: E402
 
 
 def _layer(nodes, edges=None):
@@ -224,6 +224,9 @@ class MergeLayersTest(unittest.TestCase):
         wiring escape this repository's mutation gate has caught four times."""
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
+            # The stage records its layer sizes; keep that out of the repository.
+            self.addCleanup(config.configure, None, TELEMETRY_PATH=config.TELEMETRY_PATH)
+            config.configure(TELEMETRY_PATH=directory / "telemetry.json")
             (directory / "ast.json").write_text(json.dumps(_layer([_node("x", "Component")])))
             (directory / "sem.json").write_text(
                 json.dumps(

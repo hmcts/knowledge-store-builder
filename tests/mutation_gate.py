@@ -260,6 +260,159 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "iter_array matches a nested key again",
+        "graph_stream.py",
+        "        if self.depth == 1 and self.token_start >= 0:",
+        "        if self.token_start >= 0:",
+        "the depth test was repeated in three places and every one-line mutation of "
+        "each survived, because the other two still blocked - so it is now one "
+        "guard, which is what makes it testable. #210: a merged graph carries `graph.hyperedges[].nodes`, a list of id "
+        "strings, before its top-level node array - so the iterator yielded strings, "
+        "type-checking consumers saw nothing, and graph_counts returned (0, 0) on a "
+        "fully clustered graph. Two guards built on those counts then read (0, 0) "
+        "against (0, 0) as agreement, and one of them was a refusal protecting an "
+        "irreversible overwrite. Shipped in v0.14.0",
+    ),
+    Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
+    ),
+    Mutation(
+        "fan-out progress derived from the dispatch log again",
+        "chunk_status.py",
+        "    done = sorted(plan_ids & on_disk)",
+        "    done = sorted(plan_ids & dispatched)",
+        "#131: the defect this stage exists to remove, and it happened in an "
+        "operator's own tally rather than here - a coverage gap of ninety-odd chunks "
+        "announced by diffing the plan against a log that did not cover the early "
+        "rounds, and a redundant round of a dozen agents launched for it. Every "
+        "extraction was on disk the whole time",
+    ),
+    Mutation(
+        "never-sent folded back into in-flight",
+        "chunk_status.py",
+        "    never_sent = sorted(outstanding - dispatched)",
+        "    never_sent = []",
+        "#131: the concurrency ceiling rejects rather than queues, so the two causes "
+        "of 'no output' need opposite responses - and merging them is what left a run "
+        "of rejected low-numbered chunks sitting behind ninety higher-numbered ids "
+        "under plan-ordered dispatch",
+    ),
+    Mutation(
+        "corrupt log tokens counted rather than reported",
+        "chunk_status.py",
+        "        if candidate in plan_ids:",
+        "        if True:",
+        "#131: appending batch files that carried no trailing newline fused the last "
+        "id of one onto the first of the next; counted, those tokens inflated `in "
+        "flight` and deflated `NEVER SENT` for several rounds while every total "
+        "stayed plausible. A status tool that launders a corrupt log into a confident "
+        "number is worse than no tool, because it is trusted",
+    ),
+    Mutation(
+        "never-sent asserted where it cannot be known",
+        "chunk_status.py",
+        "    if not had_log:",
+        "    if False:",
+        "written in this change and caught by its own test before review: with no "
+        "log every outstanding chunk falls out of `classify` as never-sent, and "
+        "printing that as a finding tells an operator to redispatch work in progress "
+        "- the opposite error, and equally expensive",
+    ),
+    Mutation(
+        "an unusable chunk file counted as progress",
+        "chunk_status.py",
+        '        if "nodes" not in payload:',
+        "        if False:",
+        "#131: an agent killed mid-write and an agent that hit the output limit both "
+        "leave a file, so a reader that counts files reports the chunk extracted and "
+        "it is never redone. `merge-chunks` refuses the same file, so the gap would "
+        "surface only once the archive had been assembled",
+    ),
+    Mutation(
+        "a truncated chunk file aborts the report",
+        "chunk_status.py",
+        "        except (json.JSONDecodeError, UnicodeDecodeError, OSError):",
+        "        except (KeyError,):",
+        "`io.read_json_dict` raises on malformed JSON - correct for a stage that "
+        "cannot proceed, fatal for the one stage whose job is to describe the mess. "
+        "One truncated file would take the whole progress report with it, at the "
+        "moment it is most needed",
+    ),
+    Mutation(
+        "the chunk plan counted as an extraction",
+        "chunk_status.py",
+        '        if path.name.endswith("_plan.json"):',
+        "        if False:",
+        "`.graphify_chunk_plan.json` matches `.graphify_chunk_*.json`, so the stage's "
+        "own denominator would arrive as a completed chunk - a wrong numerator and a "
+        "wrong denominator at once. `merge-chunks` carries the same guard, which is "
+        "why it is worth having twice",
+    ),
+    Mutation(
+        "progress estimated with no plan to measure against",
+        "chunk_status.py",
+        "    if not plan:",
+        "    if False:",
+        "the plan is the only map from chunk number to file list, so without it "
+        "there is no denominator and nothing to name as missing. Reporting `0 of 0` "
+        "reads as a finished fan-out",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -360,6 +513,54 @@ MUTATIONS = (
         "a reader then guesses which of a store's two graph files it refers to",
     ),
     Mutation(
+        "absolute-path check unwired",
+        "status.py",
+        "    _report_absolute_paths(arguments.paths)",
+        "    pass",
+        "#176: the fifth instance of this repository's most repeated escape - four "
+        "entries above are the same shape, in the same module, and each was written "
+        "after the previous one was fixed",
+    ),
+    Mutation(
+        "absolute-path check reports every absolute path",
+        "status.py",
+        "    return store_paths.relative(candidate) != candidate",
+        "    return True",
+        "the neighbouring-quantity failure this codebase has shipped repeatedly: "
+        "'every absolute path' rather than 'every path this store wrote absolute' "
+        "makes /etc/hosts and an API route findings, and a check whose first run is "
+        "mostly false positives is switched off before it reports a real one",
+    ),
+    Mutation(
+        "unreadable tracked files reported as a clean store",
+        "status.py",
+        '    if not scan["files"]:',
+        "    if False:",
+        "the '0 checked, none dangling' defect the corpus-citation check in this same "
+        "module already shipped once - a measurement of nothing paired with a clean "
+        "verdict, which reads as a pass",
+    ),
+    Mutation(
+        "absolute paths lost at a read-block boundary",
+        "status.py",
+        "        if match.end() > end:",
+        "        if False:",
+        "the scan streams because a store's tracked artefacts run to gigabytes "
+        "decompressed, and a path cut in half by a block boundary is the silent half "
+        "of that trade: no count can show what it failed to see",
+    ),
+    Mutation(
+        "the deferred path's own start is not resumed from",
+        "status.py",
+        "            resume = min(resume, match.start())",
+        "            resume = min(resume, match.end())",
+        "written and shipped wrong inside the change that added this check, and found "
+        "only by reconciling a 2.4 MB fixture's 12,000 written paths against the 11,997 "
+        "the scan reported - the ones spanning the hold-back point lost their head, the "
+        "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
+        "in the direction that reads as clean",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
@@ -367,85 +568,71 @@ MUTATIONS = (
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
     Mutation(
-        "fan-out progress derived from the dispatch log again",
-        "chunk_status.py",
-        "    done = sorted(plan_ids & on_disk)",
-        "    done = sorted(plan_ids & dispatched)",
-        "#131: the defect this stage exists to remove, and it happened in an "
-        "operator's own tally rather than here - a coverage gap of ninety-odd chunks "
-        "announced by diffing the plan against a log that did not cover the early "
-        "rounds, and a redundant round of a dozen agents launched for it. Every "
-        "extraction was on disk the whole time",
+        "telemetry overwrites the record without reading it",
+        "telemetry.py",
+        "    previous = read()",
+        "    previous = {}",
+        "#154: the defect the whole mechanism exists to remove - every number lived in "
+        "one build's scrollback, so nothing could notice it moving. A record written and "
+        "never read looks identical to one that was compared, because the file afterwards "
+        "is the same either way",
     ),
     Mutation(
-        "never-sent folded back into in-flight",
-        "chunk_status.py",
-        "    never_sent = sorted(outstanding - dispatched)",
-        "    never_sent = []",
-        "#131: the concurrency ceiling rejects rather than queues, so the two causes "
-        "of 'no output' need opposite responses - and merging them is what left a run "
-        "of rejected low-numbered chunks sitting behind ninety higher-numbered ids "
-        "under plan-ordered dispatch",
-    ),
-    Mutation(
-        "corrupt log tokens counted rather than reported",
-        "chunk_status.py",
-        "        if candidate in plan_ids:",
-        "        if True:",
-        "#131: appending batch files that carried no trailing newline fused the last "
-        "id of one onto the first of the next; counted, those tokens inflated `in "
-        "flight` and deflated `NEVER SENT` for several rounds while every total "
-        "stayed plausible. A status tool that launders a corrupt log into a confident "
-        "number is worse than no tool, because it is trusted",
-    ),
-    Mutation(
-        "never-sent asserted where it cannot be known",
-        "chunk_status.py",
-        "    if not had_log:",
-        "    if False:",
-        "written in this change and caught by its own test before review: with no "
-        "log every outstanding chunk falls out of `classify` as never-sent, and "
-        "printing that as a finding tells an operator to redispatch work in progress "
-        "- the opposite error, and equally expensive",
-    ),
-    Mutation(
-        "an unusable chunk file counted as progress",
-        "chunk_status.py",
-        '        if "nodes" not in payload:',
+        "a collapsed measurement reported as an ordinary statistic",
+        "telemetry.py",
+        "        if movement.collapsed:",
         "        if False:",
-        "#131: an agent killed mid-write and an agent that hit the output limit both "
-        "leave a file, so a reader that counts files reports the chunk extracted and "
-        "it is never redone. `merge-chunks` refuses the same file, so the gap would "
-        "surface only once the archive had been assembled",
+        "#154: zero is the only condition assertable without knowing the estate, and a "
+        "join that matched nothing was green on one store across its whole graph. Losing "
+        "the routing prints the collapse among the healthy numbers, which is the shape of "
+        "output people are already caught skimming",
     ),
     Mutation(
-        "a truncated chunk file aborts the report",
-        "chunk_status.py",
-        "        except (json.JSONDecodeError, UnicodeDecodeError, OSError):",
-        "        except (KeyError,):",
-        "`io.read_json_dict` raises on malformed JSON - correct for a stage that "
-        "cannot proceed, fatal for the one stage whose job is to describe the mess. "
-        "One truncated file would take the whole progress report with it, at the "
-        "moment it is most needed",
+        "each stage's record erases the last stage's",
+        "telemetry.py",
+        "{**previous, **measurements}",
+        "{**measurements}",
+        "#154: three stages write this artefact in one refresh, so a replace leaves each "
+        "record surviving only until the next stage runs and every comparison is against "
+        "nothing - a mechanism that reads green and measures nothing, which is the class "
+        "this gate exists for",
     ),
     Mutation(
-        "the chunk plan counted as an extraction",
-        "chunk_status.py",
-        '        if path.name.endswith("_plan.json"):',
-        "        if False:",
-        "`.graphify_chunk_plan.json` matches `.graphify_chunk_*.json`, so the stage's "
-        "own denominator would arrive as a completed chunk - a wrong numerator and a "
-        "wrong denominator at once. `merge-chunks` carries the same guard, which is "
-        "why it is worth having twice",
+        "layer sizes measured and discarded",
+        "merge_layers.py",
+        "    telemetry.record(layer_measurements(counters))",
+        "    layer_measurements(counters)",
+        "#154, and #116 rests on it: the AST-to-semantic ratio can only be judged against "
+        "a store's own last build, because two estates measured it a hundredfold apart. "
+        "Computing the counts and not recording them is the wiring escape this gate "
+        "already records five times",
     ),
     Mutation(
-        "progress estimated with no plan to measure against",
-        "chunk_status.py",
-        "    if not plan:",
-        "    if False:",
-        "the plan is the only map from chunk number to file list, so without it "
-        "there is no denominator and nothing to name as missing. Reporting `0 of 0` "
-        "reads as a finished fan-out",
+        "the join cardinality measured and discarded",
+        "build_explorer.py",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
+        "    page_measurements(graph, entries, edges, size_bytes)",
+        "#154 over #149: the join report refuses zero and prints the rate, and the "
+        "half-dead case is neither of those. Without a record the rate reaches a terminal "
+        "and is gone, which is how a join that should have been three times larger read "
+        "as a working join on a sparse estate",
+    ),
+    Mutation(
+        "the indexed inventory measured and discarded",
+        "build_intent_index.py",
+        "    telemetry.record(summarise(index, commits_seen, report))",
+        "    summarise(index, commits_seen, report)",
+        "#154: a corpus inventory that collapsed reported a plausible smaller number and "
+        "read as a smaller estate; nothing but its predecessor contradicts it",
+    ),
+    Mutation(
+        "the record never reaches an operator",
+        "status.py",
+        "    _report_telemetry()\n\n    _report_graph_report",
+        "    _report_graph_report",
+        "#154: reporting through a function while nothing drives the CLI is the most "
+        "repeated escape in this repository, and `status` alone accounts for three "
+        "existing entries here",
     ),
 )
 

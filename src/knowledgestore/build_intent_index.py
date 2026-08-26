@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-from . import config, io, sensitive
+from . import config, io, sensitive, telemetry
 
 
 TICKET_PREFIX = re.compile(r"^[\s\[\(]*[A-Z][A-Z0-9]{1,9}-\d{1,6}[\]\)]*[\s:,\-–]*")
@@ -633,7 +633,14 @@ def summarise(
     index: dict[str, dict[str, dict]],
     commits_seen: int,
     report: BodyReport | None = None,
-) -> None:
+) -> dict[str, int]:
+    """Print the index's shape, and return the counts worth recording.
+
+    Returns rather than records so that this stays a reporting function with no
+    write of its own; `main` persists what it returns. The returned counts are
+    the ones a collapse shows up in: a corpus inventory that stopped being read
+    reports a plausible smaller number here and nowhere else.
+    """
     total_files = sum(len(files) for files in index.values())
     total_tickets = len(
         {t for files in index.values() for d in files.values() for t in d["tickets"]}
@@ -662,6 +669,15 @@ def summarise(
         f"emptying {bodies.boilerplate_emptied:,} bodies."
     )
     print(f"Wrote {config.INTENT_INDEX_PATH} ({size_mb:.1f} MB)")
+    return {
+        # Repositories with at least one indexed file, which is what `status`
+        # calls mined - not len(index), which counts a repository whose every
+        # commit was unticketed as covered.
+        "intent.repositories_mined": sum(1 for files in index.values() if files),
+        "intent.files_indexed": total_files,
+        "intent.tickets_distinct": total_tickets,
+        "intent.ticketed_commits": commits_seen,
+    }
 
 
 def report_redactions(redactions: RedactionReport) -> None:
@@ -741,7 +757,7 @@ def main() -> int:
     )
     report_redactions(redactions)
 
-    summarise(index, commits_seen, report)
+    telemetry.record(summarise(index, commits_seen, report))
     return 0
 
 
