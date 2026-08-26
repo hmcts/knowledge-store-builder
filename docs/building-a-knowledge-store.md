@@ -361,28 +361,40 @@ fails silently rather than erroring.** The file is read at the scan root and its
 ancestors up to the enclosing VCS root; a file *below* the scan root is inert.
 Measured, one symlink and its target:
 
-| `.graphifyignore` at | per-repository scan | single-root scan |
-|---|---|---|
-| inside the cloned repository | **excluded** | ignored — below the scan root |
-| the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** |
+| `.graphifyignore` at | per-repository scan | single-root scan | `extract-ast` |
+|---|---|---|---|
+| inside the cloned repository | **excluded** | ignored — below the scan root | **excluded** |
+| the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** | **excluded** |
 
-The two placements are mutually exclusive, and the awkward part is that the
+The first two placements are mutually exclusive, and the awkward part is that the
 placement which survives `sync` (outside the corpus) only works for the
 single-root scan — which is the invocation that costs you per-repository node
 namespacing. Extract per repository and the exclusion has to live inside the
-cloned corpus, where the next `sync` may remove it. There is no comfortable
-answer yet; know which trade you are making rather than discovering it in the
-graph.
+cloned corpus, where the next `sync` may remove it.
 
-**Exclusion is also the one thing a store loses by moving to the per-repository
-route, and it loses it silently.** That route does no vendor skipping, so
-committed dependency bundles come straight back into the graph: on one estate
-6,116 nodes of vendored package-manager releases returned from **two files**,
-**35.8% of the whole AST layer**. Nothing announces it, because the result looks
-like a graph working hard rather than a graph full of a package manager — the
-god nodes are named `c()` and `push()`. Exclude vendored trees *before*
-extraction rather than filtering after it, which also keeps the corpus inventory
-from claiming the estate covers a package manager.
+**`extract-ast` is not a scan, which is why its column reads differently.** It is
+handed a file list and never walks a directory, so it has no scan root for a
+placement to be above or below: whatever `detect` excluded is simply absent from
+the list. Both placements work, and the trade above stops being one. What does not
+change is that a `.graphifyignore` inside a clone is still deleted by `sync`, so
+it must be reinstalled before `detect` runs rather than before extraction.
+
+**Exclusion is the one thing a store loses by moving to the per-repository
+*scan*, and it loses it silently.** `graphify update .` per clone does no vendor
+skipping of its own, so committed dependency bundles come straight back into the
+graph: on one estate 6,116 nodes of vendored package-manager releases returned
+from **two files**, **35.8% of the whole AST layer**. Nothing announces it,
+because the result looks like a graph working hard rather than a graph full of a
+package manager — the god nodes are named `c()` and `push()`. Exclude vendored
+trees *before* extraction rather than filtering after it, which also keeps the
+corpus inventory from claiming the estate covers a package manager.
+
+**This paragraph does not apply to `extract-ast`, and the distinction is the
+point.** That stage extracts the content set `detect` computed and nothing else,
+so an exclusion applied at detect time carries through by construction — there is
+no second list, and no opportunity for one to drift from the first. The warning
+above is retained rather than replaced because the scan route is still documented
+and still what most stores run; it is now scoped to the route it is true of.
 
 `knowledgestore content-set` tells you which trees those are on your estate,
 without a list to maintain: each row it reports is the shallowest directory in a
