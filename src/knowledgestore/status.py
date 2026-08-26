@@ -932,6 +932,67 @@ def _report_missing_extractors() -> None:
         )
 
 
+def content_set_state() -> dict:
+    """Whether the committed content set still describes the current detect result.
+
+    Read from the manifest's recorded digest rather than from file dates: the
+    ordinary workflow commits a refreshed detect result and the content set built
+    from it together, so their commit dates agree whether or not the set was
+    rebuilt. Content is the only evidence that survives that.
+    """
+    manifest = io.read_json_dict(config.CONTENT_SET_PATH)
+    if not manifest:
+        return {"written": False}
+    recorded = manifest.get("generated_from") or {}
+    here = io.layer_digests([config.DETECT_PATH], config.ROOT)
+    corpus = manifest.get("corpus") or {}
+    return {
+        "written": True,
+        "content_files": manifest.get("content_files"),
+        # None when the detect result is absent, so "cannot be judged" stays
+        # distinguishable from "disagrees" - a store that never keeps detect
+        # should not read as carrying a stale set every single run.
+        "current": None if not config.DETECT_PATH.is_file() else recorded == here,
+        "measured": bool(corpus.get("measured")),
+        "tree_files": corpus.get("tree_files"),
+        "non_content_files": corpus.get("non_content_files"),
+    }
+
+
+def _report_content_set() -> None:
+    """What a corpus search will read, and whether anything exposes it.
+
+    Nothing used to say this at all, which is the whole of #213: a person whose
+    question the graph could not answer falls back to grepping the corpus, and on
+    two measured estates the large majority of what they then read is not corpus.
+    Reported here because `status` is where an operator looks to find out what the
+    store is missing.
+    """
+    state = content_set_state()
+    if not state["written"]:
+        print(
+            "Content set: not exposed - run `knowledgestore content-set`. Until it is, "
+            "anyone falling back to grepping the corpus searches the raw tree, which on "
+            "two measured estates was mostly not corpus at all."
+        )
+        return
+    files = state["content_files"]
+    if state["measured"] and state["tree_files"]:
+        share = state["non_content_files"] / state["tree_files"]
+        note = (
+            f", against {state['tree_files']:,} files in the corpus tree "
+            f"({share:.1%} of the tree is not content)"
+        )
+    else:
+        note = " (the corpus tree was not measured, so no noise figure is claimed)"
+    print(f"Content set: {files:,} content files{note}")
+    if state["current"] is False:
+        print(
+            "  It was built from a different detect result than the one in graphify-out/, "
+            "so it names the previous scan's files - re-run `knowledgestore content-set`."
+        )
+
+
 def _report_symlink_context(links: dict) -> None:
     """Exclusions already in force, and the limits of the prediction."""
     if links["excluded"] and not links["files"]:
@@ -1287,6 +1348,8 @@ def main(argv=None) -> int:
     _report_intent(recorded)
 
     _report_missing_extractors()
+
+    _report_content_set()
 
     _report_symlinks()
 
