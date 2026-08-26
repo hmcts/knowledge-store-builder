@@ -279,6 +279,27 @@ class TheSweepOverEveryOperatorMessage(unittest.TestCase):
                 ["names 'detect step', which is not a command anything provides"],
             )
 
+    def test_a_peer_command_is_checked_against_the_peer_and_not_a_local_list(self):
+        """Breaks if the graphify branch stops resolving against the real CLI.
+
+        This is the branch that had no observer while nothing named a graphify
+        subcommand, and the one a future remedy is most likely to use. It resolves
+        against `graphify --help`, so a second local model of graphify's commands
+        cannot drift from it - and `detect`, the command the wrong remedies implied,
+        is not in it.
+        """
+        if not self.subcommands:
+            self.skipTest("needs graphify (a peer CLI, not a dependency) to check against")
+        self.assertIn("update", self.subcommands)
+        self.assertNotIn("detect", self.subcommands)
+        self.assertEqual(
+            unresolved_remedies("Run `graphify update .` first.", self.subcommands), []
+        )
+        self.assertEqual(
+            unresolved_remedies("Run `graphify detect .` first.", self.subcommands),
+            ["names `graphify detect`, which is not a subcommand"],
+        )
+
     def test_a_resolvable_remedy_is_not_reported(self):
         """Breaks if the resolver rejects everything, which would fail the sweep for
         reasons unrelated to the defect and be "fixed" by deleting the gate."""
