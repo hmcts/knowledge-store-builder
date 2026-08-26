@@ -29,6 +29,7 @@ from . import (
     config,
     graph_files,
     io,
+    merge_inputs,
     provenance,
     record_clustering,
     store_paths,
@@ -833,6 +834,24 @@ def _report_unsynced(recorded: dict) -> None:
             )
 
 
+def _report_merge_inputs() -> None:
+    """Whether provenance covers what the merge would read.
+
+    Deliberately **not** derived from `recorded`, and deliberately placed beside
+    `_report_unsynced` rather than folded into it. That reporter asks who is
+    declared and missing from provenance; this one asks what the merge glob
+    would read that the declaration and provenance never mention. The undeclared
+    input is exactly the one a manifest walk skips, so the two questions cannot
+    share an iteration - and a skipped input reads as an unchanged one.
+
+    Capped at five names because this is a dashboard; `knowledgestore
+    merge-inputs` names every one. Never non-zero: a tree caught mid-refresh has
+    divergences and is a normal operating condition.
+    """
+    for line in merge_inputs.lines(merge_inputs.reconcile(), limit=5):
+        print(line)
+
+
 def _report_boundary(recorded: dict) -> None:
     """What the estate says lies outside it, and where that disagrees with disk.
 
@@ -1344,6 +1363,8 @@ def main(argv=None) -> int:
     _report_boundary(recorded)
 
     _report_failed_syncs(recorded)
+
+    _report_merge_inputs()
 
     _report_intent(recorded)
 

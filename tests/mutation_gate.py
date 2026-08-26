@@ -752,6 +752,54 @@ MUTATIONS = (
         "nobody could see was narrow",
     ),
     Mutation(
+        "merge inputs read from the declaration again",
+        "merge_inputs.py",
+        "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
+        "    for repository in sorted(\n"
+        "        config.REPOSITORIES_DIR / name for name in (declared_repositories() or [])\n"
+        "    ):",
+        "the defect an operator measured: a repository discovered, cloned and extracted "
+        "before a refresh aborted stayed on disk while the configuration naming it was "
+        "discarded, and the glob-driven merge read it. Any reconciliation walking "
+        "config/repositories.txt skips exactly that input and reports clean, which is "
+        "worse than no check at all",
+    ),
+    Mutation(
+        "provenance closure no longer checked",
+        "merge_inputs.py",
+        "        ungrounded=tuple(sorted(on_disk - set(recorded))),",
+        "        ungrounded=(),",
+        "the sharp half of the same report: provenance records what was read, and a "
+        "glob-driven merge can read something it has no entry for, so an answer citing "
+        "those nodes cannot name the commit they were read at",
+    ),
+    Mutation(
+        "an undeclared input is counted but not named",
+        "merge_inputs.py",
+        "    if report.undeclared:",
+        "    if False:",
+        "the divergence the issue asked to have named rather than counted - an operator "
+        "given a number knows something is wrong and not which repository to look at",
+    ),
+    Mutation(
+        "an empty merge glob reads as a clean run",
+        "merge_inputs.py",
+        "    if not report.inputs or report.declared is None:\n        return 1",
+        "    if False:\n        return 1",
+        "the vacuity this library keeps meeting: a check over an empty set has nothing "
+        "to report and exits 0, so a build that produced no per-repository graphs at "
+        "all passes the gate meant to notice it",
+    ),
+    Mutation(
+        "status stops reporting the merge inputs",
+        "status.py",
+        "    for line in merge_inputs.lines(merge_inputs.reconcile(), limit=5):\n        print(line)",
+        "    return",
+        "the operator who reported this was reading `status`, which described an "
+        "entirely healthy store over a graph it could not account for; a stage nobody "
+        "runs is how a reconciliation ships and changes nothing",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",

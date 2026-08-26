@@ -263,9 +263,12 @@ not the configuration.
 
 `sync --prune` prunes git refs, not repositories. `knowledge/provenance.json` is
 the one thing that self-corrects, because `sync` rewrites it from the configured
-set. Before merging, check for clones and history directories that are not in
-`config/repositories.txt` at all — an orphan from an earlier estate is invisible
-until it turns up in an answer.
+set.
+
+[`knowledgestore merge-inputs`](#check-what-the-merge-will-read) names any clone
+whose graph `config/repositories.txt` does not declare. Nothing does the same for
+`knowledge/git-history/`, so check that by hand: an orphan from an earlier estate
+is invisible until it turns up in an answer.
 
 Then continue as a normal refresh: snapshot, rebuild the graph, cluster, remap.
 Removing repositories moves community IDs exactly as adding them does, and
@@ -284,6 +287,33 @@ rm docs/deep-dives/<repo>.md && knowledgestore deepdive merge
 Finally, check the estate's own regression tests: one that asserts an answer
 naming a removed repository will fail, correctly, and needs replacing rather
 than deleting if it was the only cover for that question shape.
+
+## Check what the merge will read
+
+```bash
+knowledgestore merge-inputs        # before every `graphify merge-graphs`
+```
+
+Removal is not the only direction the glob gets wrong. A repository discovered,
+cloned and extracted during a refresh that was then abandoned keeps its clone and
+its graph while the `config/repositories.txt` change naming it is discarded — so
+the merge reads an input the store does not declare and provenance cannot date.
+Answers would cite it, and no other check sees it: anything walking the
+declaration skips exactly the input that is missing from it.
+
+`merge-inputs` walks the glob instead, and names each divergence:
+
+| Divergence | What it means |
+|---|---|
+| Undeclared merge input | The merged graph carries nodes `config/repositories.txt` does not declare |
+| Ungrounded merge input | No `knowledge/provenance.json` entry, so no answer citing it can name a commit |
+| Declared but not extracted | The merge will omit a repository the store declares |
+| Extracted but not merged | Only `graph.json.gz` is present, and the documented glob names `graph.json` |
+
+It reports and exits 0 — a tree caught mid-refresh is a normal state. It exits 1
+when it could not run at all (no graphs found, or an unreadable
+`config/repositories.txt`), and with `--strict` on an undeclared or undated
+input. `status` prints the same lines, capped, and never fails.
 
 ## When clustering will not persist
 
