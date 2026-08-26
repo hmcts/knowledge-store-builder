@@ -467,6 +467,79 @@ MUTATIONS = (
         "reads as a finished fan-out",
     ),
     Mutation(
+        "content set written empty",
+        "build_content_set.py",
+        "    if not content:",
+        "    if False:",
+        "an empty path list makes every search over it return no matches, and no "
+        "matches reads as a confident answer about the estate rather than as a "
+        "missing detect result - the exact failure mode the artefact exists to end",
+    ),
+    Mutation(
+        "noise figure claimed from a tree nobody measured",
+        "build_content_set.py",
+        '    if not tree:\n        return {"measured": False}',
+        '    if False:\n        return {"measured": False}',
+        "a sparse clone has no corpus, so the tree count is zero and zero renders "
+        "as 'no noise' - the most flattering reading of the least measured case, on "
+        "the one artefact whose whole purpose is to say the tree is mostly noise",
+    ),
+    Mutation(
+        "content files counted as noise",
+        "content_set.py",
+        "        if path in held:",
+        "        if path in bearing:",
+        "written and caught during #213: `bearing` holds directories, so no file "
+        "path is ever in it and every content file was tallied as noise. The "
+        "percentage came out higher, which is the direction that gets believed",
+    ),
+    Mutation(
+        "noise attributed to the file's own directory",
+        "content_set.py",
+        "    for depth in range(2, len(parts)):",
+        "    for depth in range(len(parts) - 1, len(parts)):",
+        "the shallowest contentless directory is the finding; the deepest one is "
+        "thousands of content-hash directories holding one file each, which turns a "
+        "single dominant noise source into an unreadable list",
+    ),
+    Mutation(
+        "noise roots lose their tiebreak",
+        "content_set.py",
+        "        key=lambda root: (-root.files, root.path),",
+        "        key=lambda root: -root.files,",
+        "two directories of equal size then come out in whatever order the caller "
+        "supplied the tree in, so a committed manifest differs between two builds "
+        "that changed nothing - the class of non-determinism that is invisible "
+        "until somebody diffs two stores",
+    ),
+    Mutation(
+        "directory symlinks walked again",
+        "content_set.py",
+        "    for directory, _, names in os.walk(corpus, followlinks=False):",
+        "    for directory, _, names in os.walk(corpus, followlinks=True):",
+        "a followed link reports the same files twice under two paths, inflating "
+        "the tree count that is the denominator of every percentage this stage "
+        "prints; symlink duplication has already produced three wrong figures here",
+    ),
+    Mutation(
+        "content set report unwired",
+        "status.py",
+        "    _report_content_set()",
+        "    pass",
+        "the fourth instance of this repository's most repeated escape, and #213 "
+        "itself is the consequence: the pipeline knew what it considered content "
+        "and nothing said so, so every consumer re-derived it badly",
+    ),
+    Mutation(
+        "a set that cannot be judged reported as stale",
+        "status.py",
+        '"current": None if not config.DETECT_PATH.is_file() else recorded == here,',
+        '"current": recorded == here,',
+        "detect is a graphify working file a store need not keep, so a store "
+        "without one would be told its content set was stale on every single run - "
+        "which is how a real warning stops being read",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",

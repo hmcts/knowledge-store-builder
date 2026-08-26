@@ -1,0 +1,221 @@
+r"""Expose the content set, so a corpus search reads corpus.
+
+The graph is the product and the graph is clean. This stage is about the
+**fallback**: what a person sees when the graph has already failed to answer them
+and they reach for `grep`. On one estate a naive recursive search over the corpus
+reads roughly eight times as many files as the store considers content, so about
+88 per cent of what arrives on the fallback path is not corpus at all - a third of
+it the pipeline's own output, written into the tree the pipeline reads and present
+in every repository. A second estate has the same ratio from a different dominant
+source. One recorded question was answered correctly by reading fifty-three
+matches one at a time, every one a false positive.
+
+    knowledgestore content-set
+
+        knowledge/corpus/content-files.txt   the set, one store-relative path a line
+        knowledge/corpus/content-set.json    the counts, and where the noise lives
+
+Both are committed. The path list is the point: its consumer is `grep`, and a
+consumer that has to parse a manifest first re-derives the set badly instead.
+
+    tr '\n' '\0' < knowledge/corpus/content-files.txt \
+      | xargs -0 grep -nIs -- '<term>'
+
+## Two things this stage refuses to do
+
+**It never writes an empty set.** A store whose detect result is missing gets an
+exit code and a sentence, not a file with nothing in it: an empty path list makes
+every search return no matches, which reads as a confident answer about the estate
+rather than as a missing input.
+
+**It never reports a noise figure it did not measure.** Without the corpus on disk
+- a sparse clone, or a store that has not synced - the tree side of the comparison
+is zero, and zero would render as "no noise", the most flattering possible reading
+of the least measured case. The manifest records `measured: false` and the report
+says which artefact was and was not read.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+from . import config, content_set, io, store_paths
+
+
+def _corpus_measurement(content: list[str]) -> dict:
+    """The tree side of the comparison, or an explicit refusal to claim one."""
+    tree = content_set.tree_files(config.REPOSITORIES_DIR)
+    if not tree:
+        return {"measured": False}
+    held = set(content)
+    roots = content_set.noise_roots(tree, content)
+    non_content = len([path for path in tree if path not in held])
+    return {
+        "measured": True,
+        "tree_files": len(tree),
+        "non_content_files": non_content,
+        "content_files_absent_from_the_tree": len(held - set(tree)),
+        "noise_roots": [
+            {"path": root.path, "files": root.files, "repositories": root.repositories}
+            for root in roots
+        ],
+    }
+
+
+def _report_corpus(corpus: dict, content: int, top: int) -> None:
+    """What the tree holds against what the store calls content."""
+    if not corpus["measured"]:
+        print(
+            f"  The corpus at {content_set.CORPUS}/ holds no files here, so the noise "
+            "figure is NOT measured and none is reported. This store is a sparse or "
+            "partial clone, or has not synced yet; the content set above is still the "
+            "set the pipeline computed.",
+            flush=True,
+        )
+        return
+
+    tree, noise = corpus["tree_files"], corpus["non_content_files"]
+    print(
+        f"  the corpus tree holds {tree:,} files, of which {noise:,} "
+        f"({noise / tree:.1%}) are not in the content set",
+        flush=True,
+    )
+    absent = corpus["content_files_absent_from_the_tree"]
+    if absent:
+        print(
+            f"  {absent:,} of {content:,} content files are not on disk: detect is older "
+            "than the tree. Re-run graphify's detect pass, and pass grep -s meanwhile.",
+            flush=True,
+        )
+    _report_noise_roots(corpus["noise_roots"], noise, top)
+
+
+def _report_noise_roots(roots: list[dict], noise: int, top: int) -> None:
+    """Where the noise lives, and the reconciliation that makes the tally readable.
+
+    The sum is printed rather than assumed. A per-file tally that attributes one
+    file to more than one bucket sums to more than the population it describes and
+    then reads as a larger problem than the estate has; this repository has shipped
+    that shape before.
+    """
+    if not roots:
+        return
+    counted = sum(root["files"] for root in roots)
+    print(
+        f"  where it lives - {len(roots):,} directories hold no content at all, "
+        f"accounting for {counted:,} of {noise:,} non-content files:",
+        flush=True,
+    )
+    for root in roots[:top]:
+        repositories = root["repositories"]
+        print(
+            f"    {root['files']:>9,}  {root['path']}  (in {repositories:,} "
+            f"{'repository' if repositories == 1 else 'repositories'})",
+            flush=True,
+        )
+    if counted != noise:
+        print(
+            f"  WARNING: the buckets total {counted:,} against {noise:,} non-content "
+            "files, so this attribution is not a partition and its numbers cannot be "
+            "added up. Treat the total above, not the buckets, as the measurement.",
+            flush=True,
+        )
+    print(
+        "  Those are measured, not classified: each is the shallowest directory in a "
+        "repository under which the store found no content. Excluding them from "
+        "extraction with a .graphifyignore is cheaper than filtering afterwards.",
+        flush=True,
+    )
+
+
+def _report_absolute(content: list[str]) -> None:
+    """Paths that could not be relativised, counted and named.
+
+    Committing an absolute path records one build machine's directory layout in a
+    tracked artefact, and relativising is silent when it cannot be done - a corpus
+    outside the store root simply stays absolute and the file looks fine. The chunk
+    plan carried tens of thousands of these before it was counted.
+    """
+    absolute = [path for path in content if path.startswith("/")]
+    if not absolute:
+        return
+    print(
+        f"  WARNING: {len(absolute):,} of {len(content):,} paths could not be made "
+        f"relative and are absolute, starting with {absolute[0]}.\n"
+        "  They are outside the store root, so this list carries this machine's layout "
+        "and will not survive a clone. Point graphify at a corpus inside the store.",
+        flush=True,
+    )
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore content-set",
+        description="Write the content set a corpus search should read instead of the tree.",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="how many noise directories to name in the report (default 10). The full "
+        "list is always written to content-set.json",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = parse_args(argv)
+    if arguments.top < 1:
+        print("--top must be at least 1", flush=True)
+        return 2
+
+    detect = io.read_json_dict(config.DETECT_PATH)
+    content = content_set.content_paths(detect)
+    if not content:
+        # Refused rather than written empty. An empty path list makes every search
+        # over it return no matches, and no matches reads as an answer about the
+        # estate rather than as a missing input.
+        print(
+            f"No files classified in {config.DETECT_PATH}, so there is no content set to "
+            "expose and nothing was written. graphify writes that file when it scans the "
+            "corpus - run its detect pass first. An empty list would make every search "
+            "over it come back clean, which is the wrong answer, not a small one.",
+            flush=True,
+        )
+        return 2
+
+    corpus = _corpus_measurement(content)
+    kinds = content_set.kind_counts(detect)
+    manifest = {
+        "generated_from": io.layer_digests([config.DETECT_PATH], config.ROOT),
+        "content_files": len(content),
+        "kinds": kinds,
+        "corpus": corpus,
+    }
+    config.CONTENT_FILES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    io.checked_write_target(config.CONTENT_FILES_PATH)
+    config.CONTENT_FILES_PATH.write_text(  # NOSONAR(S2083, S8707) - validated above
+        "".join(f"{path}\n" for path in content), encoding="utf-8"
+    )
+    io.write_json(config.CONTENT_SET_PATH, manifest, indent=2)
+
+    print(
+        f"{len(content):,} content files -> {config.CONTENT_FILES_PATH}\n"
+        "  by detect category: "
+        + (", ".join(f"{kind} {count:,}" for kind, count in kinds.items()) or "none reported"),
+        flush=True,
+    )
+    _report_corpus(corpus, len(content), arguments.top)
+    _report_absolute(content)
+    # The store-relative path, not the basename: the command is copied and pasted
+    # from the store root, where the basename alone names nothing.
+    print(
+        f"  Search this list, not the tree: tr '\\n' '\\0' < "
+        f"{store_paths.relative(config.CONTENT_FILES_PATH)} | xargs -0 grep -nIs -- '<term>'",
+        flush=True,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
