@@ -40,11 +40,17 @@ from .build_intent_index import truncate
 from . import graph_files
 from . import io
 from . import kinds
+from . import telemetry
 
 
 MINIFIED = re.compile(r"^[A-Za-z_$]{1,3}(\(\))?$")
 MAX_CONNECTIONS = 5
 MAX_TICKETS = 6
+# A page row is a positional list; this is its ticket column. Named because
+# three places count the join through it, and a report that counted a different
+# column would be correct code answering a neighbouring question - the shape of
+# every wrong measurement this pipeline has shipped.
+TICKETS_COLUMN = 7
 # Explorer inclusion policy (the GRAPH stays complete - this only governs
 # what the search page indexes). Business kinds are always included; code
 # entries must be non-method symbols outside backend test trees with at
@@ -242,7 +248,7 @@ def join_by_layer(kept: list, entries: list, intent: dict) -> dict:
             continue
         layer = counts.setdefault(node.get("_origin") or "semantic", [0, 0])
         layer[1] += 1
-        if entry[7]:
+        if entry[TICKETS_COLUMN]:
             layer[0] += 1
     return {name: (joined, total) for name, (joined, total) in counts.items()}
 
@@ -293,7 +299,7 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
     # that matches nothing - only counting the matches says otherwise, and on one
     # store this produced zero across 70,655 nodes with the build still green.
     io.report_join_cardinality(
-        joined=sum(1 for entry in entries if entry[7]),
+        joined=sum(1 for entry in entries if entry[TICKETS_COLUMN]),
         candidates=sum(
             1 for _, node, kind in kept if kind not in (kinds.FEATURE, kinds.SCENARIO, kinds.TICKET)
         ),
@@ -459,6 +465,31 @@ __APP_JS__
 """
 
 
+def page_measurements(graph: dict, entries: list, edges: list, size_bytes: int) -> dict[str, int]:
+    """What this page is, as counts a later build can compare itself against.
+
+    `rows_with_tickets` and `rows_indexed` are the file-to-ticket join at the
+    surface a reader actually meets, and they are recorded as two counts rather
+    than as the rate between them so that the rate can be recomputed for the
+    previous build too. `report_join_cardinality` already refuses a join that
+    matched nothing; a join that has quietly halved is not zero, is not a
+    threshold question either, and is exactly what a predecessor makes visible.
+
+    Counted through `TICKETS_COLUMN` - the same column the join report counts -
+    because a second expression for the same quantity is how two numbers
+    describing one thing start disagreeing.
+    """
+    return {
+        "explorer.graph_nodes": len(graph.get("nodes", [])),
+        "explorer.rows_indexed": len(entries),
+        "explorer.rows_with_tickets": sum(1 for entry in entries if entry[TICKETS_COLUMN]),
+        # Halved, because `edges` is the flattened pair list the page embeds and
+        # the printed line above reports edges, not endpoints.
+        "explorer.edges": len(edges) // 2,
+        "explorer.page_bytes": size_bytes,
+    }
+
+
 def main() -> int:
     if not config.GRAPH_PATH.exists():
         print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
@@ -559,6 +590,7 @@ def main() -> int:
         f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {config.EXPLORER_PATH} "
         f"({size_bytes / 1_048_576:.1f} MB, {size_bytes:,} bytes)"
     )
+    telemetry.record(page_measurements(graph, entries, edges, size_bytes))
     return 0
 
 

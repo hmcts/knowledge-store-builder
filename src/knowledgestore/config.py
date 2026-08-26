@@ -96,6 +96,11 @@ GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
 REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
+# What the estate is, what it deliberately excludes, and what it does not claim.
+# Hand-maintained and optional: none of it can be derived, because a ruling on a
+# repository is a decision. Absent means the estate has declared no boundary,
+# which the manifest and `status` both say rather than passing over in silence.
+BOUNDARY_PATH = ROOT / "config" / "estate-boundary.txt"
 # Repositories fetched but never extracted (`fetch` rules). A separate file, not a
 # column, so that nothing which reads the estate manifest can mistake one of these
 # for part of the estate.
@@ -142,6 +147,11 @@ SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
 # What each repository's clone pointed at when the store was last built.
 # Written by the sync stage; read by status, the manifest and the explorer.
 PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
+# What the last build measured, so the next one can say what moved. Written by
+# the stages that compute the counts (intent, merge-layers, explorer) and read
+# back by each of them before it overwrites its own; `status` prints it.
+# Committed on purpose: the diff is the record of what a refresh changed.
+TELEMETRY_PATH = ROOT / "knowledge" / "telemetry.json"
 TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
 TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
 TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
@@ -393,6 +403,43 @@ STEP_DEFINITION_LANGUAGES: dict[str, dict[str, str | None]] = {
     },
 }
 
+# --- ingestion candidates (`gaps`) ---------------------------------------
+# Tokens that mark a consumed artefact as framework plumbing rather than domain
+# knowledge. `gaps` reports domain namespaces first whatever their weight,
+# because most reference weight is plumbing and a reference to a test utility
+# says the estate writes tests, not how its business works.
+#
+# Matched as whole tokens, never as substrings, so `attestation-service` is not
+# read as `test`. `common` is deliberately absent: a shared domain library is
+# routinely named that, and demoting it hides the rows worth reading.
+#
+# KSB_FRAMEWORK_MARKERS replaces this list rather than extending it. An estate
+# whose plumbing is named differently needs its own vocabulary, and inheriting
+# these would leave it classifying its own domain artefacts as framework.
+FRAMEWORK_MARKERS = _env_set(
+    "KSB_FRAMEWORK_MARKERS",
+    {
+        "framework",
+        "starter",
+        "parent",
+        "bom",
+        "plugin",
+        "archetype",
+        "test",
+        "tests",
+        "testing",
+        "mock",
+        "mocks",
+        "fixture",
+        "fixtures",
+        "util",
+        "utils",
+        "lint",
+        "checkstyle",
+        "codestyle",
+    },
+)
+
 # --- community summaries -------------------------------------------------
 MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
 
@@ -434,6 +481,7 @@ def _recompute_paths() -> None:
     module.update(
         FILTERS_PATH=root / "config" / "repository-filters.txt",
         REPOSITORIES_CONFIG=root / "config" / "repositories.txt",
+        BOUNDARY_PATH=root / "config" / "estate-boundary.txt",
         EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",
@@ -456,6 +504,7 @@ def _recompute_paths() -> None:
         REMAP_REPORT_PATH=root / "knowledge" / "summaries" / "remap-report.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
         PROVENANCE_PATH=root / "knowledge" / "provenance.json",
+        TELEMETRY_PATH=root / "knowledge" / "telemetry.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
         TOPICS_DOCS_DIR=root / "docs" / "topics",

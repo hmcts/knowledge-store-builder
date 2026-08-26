@@ -99,7 +99,7 @@ estate uses another language or layout.
 | `sync` | `repositories/`, `knowledge/provenance.json` | Clone or update sources and record their commits |
 | `export-history` | `knowledge/git-history/` | Create per-commit NDJSON and Markdown datasets |
 | `context` | `knowledge_context.md`, `knowledge/repository-manifest.md` | Record how to interpret the estate and what was read |
-| `intent` | `knowledge/intent/*.json.gz` | Link files to tickets and mine ticket descriptions |
+| `intent` | `knowledge/intent/*.json.gz`, `knowledge/telemetry.json` | Link files to tickets and mine ticket descriptions |
 | `ticket-titles` | `knowledge/intent/ticket-titles.json.gz` | Import real issue titles from CSV |
 | `fetch-tickets` | `knowledge/intent/ticket-tracker.json.gz`, `knowledge/intent/tracker-undecided.json` | Ask the issue tracker about discovered tickets (opt-in; needs credentials) |
 | `merge-inputs` | report only | Name the graphs `merge-graphs` would read and reconcile them against the declaration and provenance |
@@ -109,7 +109,7 @@ estate uses another language or layout.
 | `semantic` | `knowledge/semantic/token-neighbours.json.gz` | Bridge vocabulary gaps at query time |
 | `topics` | `docs/topics/`, `knowledge/topics/briefs.json` | Add pre-written answers to recurring questions |
 | `deepdive` | `docs/deep-dives/`, `knowledge/deep-dives/` | Add a provenance-stamped repository dossier |
-| `explorer` | `graphify-out/explorer.html` | Build the self-contained search and Q&A page |
-| `status` | report only | Report provenance, coverage, citations, freshness and optional drift |
+| `explorer` | `graphify-out/explorer.html`, `knowledge/telemetry.json` | Build the self-contained search and Q&A page |
+| `status` | report only | Report provenance, coverage, citations, freshness, recorded telemetry and optional drift |
 | `check-install-docs` | report only | Check the documented install commands against what the lock declares |
 | `check-evidence` | report only | Fail if a committed ticket-descriptions artefact holds mined text matching a withholding rule |

@@ -113,6 +113,68 @@ Review `config/repositories.txt` before continuing. Discovery warns when a
 selecting rule matched nothing; `knowledgestore discover --strict` makes those
 warnings fail CI.
 
+### Declare the boundary
+
+Every "no evidence of X" a store reports means "no evidence of X in the
+repositories this store holds". Declaring the boundary is how a reader can tell
+those apart, and how a repository left out on purpose reads as a decision rather
+than as a gap:
+
+```bash
+cat > config/estate-boundary.txt <<'EOF'
+# Comments must be on their own line.
+searched an internal forge, by hand - see the snapshot date below
+unsearched a second internal forge no build machine can reach
+
+active payments-api
+not-used legacy-reporting
+decommissioned old-batch-runner
+
+alias payments.api payments-api
+snapshot payments-api 2026-01-15
+EOF
+
+knowledgestore status
+```
+
+| Rule | Records |
+|---|---|
+| `searched <where>` | A source that contributed to this store beyond `KSB_GITHUB_ORG`, which the manifest already names |
+| `unsearched <where>` | One known to hold estate code and not read |
+| `active <name>` | A repository the estate rules live |
+| `not-used <name>` | One that exists and is not used |
+| `decommissioned <name>` | One that has been retired |
+| `alias <other> <name>` | `<other>` is the same repository as `<name>` |
+| `snapshot <name> <YYYY-MM-DD>` | When a hand-taken copy of an off-host repository was taken |
+
+The file and every rule in it are optional. What the declaration never does is
+claim completeness: a store may have enumerated every host and still be missing a
+deployed service whose repository nobody has located, so
+`knowledge/repository-manifest.md` states that the declaration says what the
+estate knows about rather than what exists.
+
+Three things to know before writing one:
+
+- **A ruling is a decision, so nothing derives it.** `active` on a repository the
+  store does not hold is the case worth writing down — `knowledgestore status`
+  names it, because a question about that repository is currently answered as
+  though it did not exist.
+- **Put comments on their own line.** Unlike `config/repository-filters.txt`, a
+  trailing comment here fails the build instead of quietly becoming part of a
+  repository name.
+- **An unreadable declaration stops `knowledgestore context`.** A file that
+  silently rendered as "no boundary declared" would let an estate believe it had
+  said something its own store denies.
+
+Skip the file and the manifest says so, under **What this manifest does not
+cover**. Nothing else in the pipeline changes.
+
+Once the estate is synced, the same question runs the other way:
+`knowledgestore gaps` ranks what the estate already depends on and does not
+hold, and reads this declaration so a repository you ruled out reads as a
+decision rather than as a candidate. See
+[Decide what to ingest next](refreshing-a-store.md#decide-what-to-ingest-next).
+
 ## Build the store
 
 Open Claude Code in the store directory and run

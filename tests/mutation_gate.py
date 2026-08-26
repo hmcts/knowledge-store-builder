@@ -274,6 +274,247 @@ MUTATIONS = (
         "irreversible overwrite. Shipped in v0.14.0",
     ),
     Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
+    ),
+    Mutation(
+        "declared boundary never reaches the manifest",
+        "build_knowledge_context.py",
+        "        *boundary.manifest_section(boundary.read()),",
+        "        *[],",
+        "the unwired-check class this library has shipped twice - the parse works, "
+        "the rendering works, and the committed artefact a reader opens says none of "
+        "it, which is indistinguishable from an estate that declared nothing",
+    ),
+    Mutation(
+        "store stops saying it does not claim completeness",
+        "boundary.py",
+        '    return lines + [NO_COMPLETENESS, ""]',
+        "    return lines",
+        "a declaration that reads as `this is all of it` is a new false claim "
+        "replacing the old silent one; the estate that prompted this had enumerated "
+        "its hosts and was still hunting services with no locatable repository",
+    ),
+    Mutation(
+        "declared repository with no ruling vanishes from the manifest",
+        "boundary.py",
+        "    subjects = sorted({*declared.rulings, *declared.snapshots, *declared.aliases.values()})",
+        "    subjects = sorted(declared.rulings)",
+        "written this way first, and found by re-reading the artefact rather than by a "
+        "test: a repository declared only by a snapshot date or only by an alias parsed "
+        "cleanly, was counted in the status summary, and reached no reader at all",
+    ),
+    Mutation(
+        "status no longer says the boundary is undeclared",
+        "status.py",
+        "    _report_boundary(recorded)",
+        "    pass",
+        "silence is the state every store starts in, so a report that speaks only "
+        "for the configured case never reaches the stores that most need telling "
+        "what their own absences mean",
+    ),
+    Mutation(
+        "off-host name stops resolving to the repository held",
+        "boundary.py",
+        "        target = aliases.get(name, name)",
+        "        target = name",
+        "the false absence the declaration exists to remove, reintroduced inside it: "
+        "a ruling written under the off-host name keys itself under a name no store "
+        "holds, so `status` reports a held repository as missing",
+    ),
+    Mutation(
+        "declaration stops being reconciled against disk",
+        "status.py",
+        "    disagreements = boundary.reconciliation(declared, set(recorded))",
+        "    disagreements = {k: [] for k in ('active_absent', 'ruled_out_held', 'alias_absent')}",
+        "a declaration nothing checks is a second artefact that can be quietly "
+        "wrong, and a repository ruled live and not held is the exact shape of the "
+        "published finding that was drawn honestly and was false",
+    ),
+    Mutation(
+        "fan-out progress derived from the dispatch log again",
+        "chunk_status.py",
+        "    done = sorted(plan_ids & on_disk)",
+        "    done = sorted(plan_ids & dispatched)",
+        "#131: the defect this stage exists to remove, and it happened in an "
+        "operator's own tally rather than here - a coverage gap of ninety-odd chunks "
+        "announced by diffing the plan against a log that did not cover the early "
+        "rounds, and a redundant round of a dozen agents launched for it. Every "
+        "extraction was on disk the whole time",
+    ),
+    Mutation(
+        "never-sent folded back into in-flight",
+        "chunk_status.py",
+        "    never_sent = sorted(outstanding - dispatched)",
+        "    never_sent = []",
+        "#131: the concurrency ceiling rejects rather than queues, so the two causes "
+        "of 'no output' need opposite responses - and merging them is what left a run "
+        "of rejected low-numbered chunks sitting behind ninety higher-numbered ids "
+        "under plan-ordered dispatch",
+    ),
+    Mutation(
+        "corrupt log tokens counted rather than reported",
+        "chunk_status.py",
+        "        if candidate in plan_ids:",
+        "        if True:",
+        "#131: appending batch files that carried no trailing newline fused the last "
+        "id of one onto the first of the next; counted, those tokens inflated `in "
+        "flight` and deflated `NEVER SENT` for several rounds while every total "
+        "stayed plausible. A status tool that launders a corrupt log into a confident "
+        "number is worse than no tool, because it is trusted",
+    ),
+    Mutation(
+        "never-sent asserted where it cannot be known",
+        "chunk_status.py",
+        "    if not had_log:",
+        "    if False:",
+        "written in this change and caught by its own test before review: with no "
+        "log every outstanding chunk falls out of `classify` as never-sent, and "
+        "printing that as a finding tells an operator to redispatch work in progress "
+        "- the opposite error, and equally expensive",
+    ),
+    Mutation(
+        "an unusable chunk file counted as progress",
+        "chunk_status.py",
+        '        if "nodes" not in payload:',
+        "        if False:",
+        "#131: an agent killed mid-write and an agent that hit the output limit both "
+        "leave a file, so a reader that counts files reports the chunk extracted and "
+        "it is never redone. `merge-chunks` refuses the same file, so the gap would "
+        "surface only once the archive had been assembled",
+    ),
+    Mutation(
+        "a truncated chunk file aborts the report",
+        "chunk_status.py",
+        "        except (json.JSONDecodeError, UnicodeDecodeError, OSError):",
+        "        except (KeyError,):",
+        "`io.read_json_dict` raises on malformed JSON - correct for a stage that "
+        "cannot proceed, fatal for the one stage whose job is to describe the mess. "
+        "One truncated file would take the whole progress report with it, at the "
+        "moment it is most needed",
+    ),
+    Mutation(
+        "the chunk plan counted as an extraction",
+        "chunk_status.py",
+        '        if path.name.endswith("_plan.json"):',
+        "        if False:",
+        "`.graphify_chunk_plan.json` matches `.graphify_chunk_*.json`, so the stage's "
+        "own denominator would arrive as a completed chunk - a wrong numerator and a "
+        "wrong denominator at once. `merge-chunks` carries the same guard, which is "
+        "why it is worth having twice",
+    ),
+    Mutation(
+        "progress estimated with no plan to measure against",
+        "chunk_status.py",
+        "    if not plan:",
+        "    if False:",
+        "the plan is the only map from chunk number to file list, so without it "
+        "there is no denominator and nothing to name as missing. Reporting `0 of 0` "
+        "reads as a finished fan-out",
+    ),
+    Mutation(
+        "merge inputs read from the declaration again",
+        "merge_inputs.py",
+        "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
+        "    for repository in sorted(\n"
+        "        config.REPOSITORIES_DIR / name for name in (declared_repositories() or [])\n"
+        "    ):",
+        "the defect an operator measured: a repository discovered, cloned and extracted "
+        "before a refresh aborted stayed on disk while the configuration naming it was "
+        "discarded, and the glob-driven merge read it. Any reconciliation walking "
+        "config/repositories.txt skips exactly that input and reports clean, which is "
+        "worse than no check at all",
+    ),
+    Mutation(
+        "provenance closure no longer checked",
+        "merge_inputs.py",
+        "        ungrounded=tuple(sorted(on_disk - set(recorded))),",
+        "        ungrounded=(),",
+        "the sharp half of the same report: provenance records what was read, and a "
+        "glob-driven merge can read something it has no entry for, so an answer citing "
+        "those nodes cannot name the commit they were read at",
+    ),
+    Mutation(
+        "an undeclared input is counted but not named",
+        "merge_inputs.py",
+        "    if report.undeclared:",
+        "    if False:",
+        "the divergence the issue asked to have named rather than counted - an operator "
+        "given a number knows something is wrong and not which repository to look at",
+    ),
+    Mutation(
+        "an empty merge glob reads as a clean run",
+        "merge_inputs.py",
+        "    if not report.inputs or report.declared is None:\n        return 1",
+        "    if False:\n        return 1",
+        "the vacuity this library keeps meeting: a check over an empty set has nothing "
+        "to report and exits 0, so a build that produced no per-repository graphs at "
+        "all passes the gate meant to notice it",
+    ),
+    Mutation(
+        "status stops reporting the merge inputs",
+        "status.py",
+        "    for line in merge_inputs.lines(merge_inputs.reconcile(), limit=5):\n        print(line)",
+        "    return",
+        "the operator who reported this was reading `status`, which described an "
+        "entirely healthy store over a graph it could not account for; a stage nobody "
+        "runs is how a reconciliation ships and changes nothing",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -428,57 +669,172 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
-    # The merge-input reconciliation (#222). The first entry is the whole point
-    # of the module: every other check here can be correct while that one change
-    # makes all of them blind, because the input that fails is the one the
-    # declaration omits.
     Mutation(
-        "merge inputs read from the declaration again",
-        "merge_inputs.py",
-        "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
-        "    for repository in sorted(\n"
-        "        config.REPOSITORIES_DIR / name for name in (declared_repositories() or [])\n"
-        "    ):",
-        "the defect an operator measured: a repository discovered, cloned and extracted "
-        "before a refresh aborted stayed on disk while the configuration naming it was "
-        "discarded, and the glob-driven merge read it. Any reconciliation walking "
-        "config/repositories.txt skips exactly that input and reports clean, which is "
-        "worse than no check at all",
+        "telemetry overwrites the record without reading it",
+        "telemetry.py",
+        "    previous = read()",
+        "    previous = {}",
+        "#154: the defect the whole mechanism exists to remove - every number lived in "
+        "one build's scrollback, so nothing could notice it moving. A record written and "
+        "never read looks identical to one that was compared, because the file afterwards "
+        "is the same either way",
     ),
     Mutation(
-        "provenance closure no longer checked",
-        "merge_inputs.py",
-        "        ungrounded=tuple(sorted(on_disk - set(recorded))),",
-        "        ungrounded=(),",
-        "the sharp half of the same report: provenance records what was read, and a "
-        "glob-driven merge can read something it has no entry for, so an answer citing "
-        "those nodes cannot name the commit they were read at",
+        "a collapsed measurement reported as an ordinary statistic",
+        "telemetry.py",
+        "        if movement.collapsed:",
+        "        if False:",
+        "#154: zero is the only condition assertable without knowing the estate, and a "
+        "join that matched nothing was green on one store across its whole graph. Losing "
+        "the routing prints the collapse among the healthy numbers, which is the shape of "
+        "output people are already caught skimming",
     ),
     Mutation(
-        "an undeclared input is counted but not named",
-        "merge_inputs.py",
-        "    if report.undeclared:",
-        "    if False:",
-        "the divergence the issue asked to have named rather than counted - an operator "
-        "given a number knows something is wrong and not which repository to look at",
+        "each stage's record erases the last stage's",
+        "telemetry.py",
+        "{**previous, **measurements}",
+        "{**measurements}",
+        "#154: three stages write this artefact in one refresh, so a replace leaves each "
+        "record surviving only until the next stage runs and every comparison is against "
+        "nothing - a mechanism that reads green and measures nothing, which is the class "
+        "this gate exists for",
     ),
     Mutation(
-        "an empty merge glob reads as a clean run",
-        "merge_inputs.py",
-        "    if not report.inputs or report.declared is None:\n        return 1",
-        "    if False:\n        return 1",
-        "the vacuity this library keeps meeting: a check over an empty set has nothing "
-        "to report and exits 0, so a build that produced no per-repository graphs at "
-        "all passes the gate meant to notice it",
+        "layer sizes measured and discarded",
+        "merge_layers.py",
+        "    telemetry.record(layer_measurements(counters))",
+        "    layer_measurements(counters)",
+        "#154, and #116 rests on it: the AST-to-semantic ratio can only be judged against "
+        "a store's own last build, because two estates measured it a hundredfold apart. "
+        "Computing the counts and not recording them is the wiring escape this gate "
+        "already records five times",
     ),
     Mutation(
-        "status stops reporting the merge inputs",
+        "the join cardinality measured and discarded",
+        "build_explorer.py",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
+        "    page_measurements(graph, entries, edges, size_bytes)",
+        "#154 over #149: the join report refuses zero and prints the rate, and the "
+        "half-dead case is neither of those. Without a record the rate reaches a terminal "
+        "and is gone, which is how a join that should have been three times larger read "
+        "as a working join on a sparse estate",
+    ),
+    Mutation(
+        "the indexed inventory measured and discarded",
+        "build_intent_index.py",
+        "    telemetry.record(summarise(index, commits_seen, report))",
+        "    summarise(index, commits_seen, report)",
+        "#154: a corpus inventory that collapsed reported a plausible smaller number and "
+        "read as a smaller estate; nothing but its predecessor contradicts it",
+    ),
+    Mutation(
+        "the record never reaches an operator",
         "status.py",
-        "    for line in merge_inputs.lines(merge_inputs.reconcile(), limit=5):\n        print(line)",
-        "    return",
-        "the operator who reported this was reading `status`, which described an "
-        "entirely healthy store over a graph it could not account for; a stage nobody "
-        "runs is how a reconciliation ships and changes nothing",
+        "    _report_telemetry()\n\n    _report_graph_report",
+        "    _report_graph_report",
+        "#154: reporting through a function while nothing drives the CLI is the most "
+        "repeated escape in this repository, and `status` alone accounts for three "
+        "existing entries here",
+    ),
+    # Ingestion candidates (#101). The stage's whole value is that its numbers
+    # answer the question its columns claim to, so the entries below are the
+    # ways it could keep printing a plausible ranking that means something else -
+    # the class this repository has shipped more than any other.
+    Mutation(
+        "the ranking stage is unreachable from the CLI",
+        "cli.py",
+        '    "gaps": (\n        "report_ingestion_gaps",',
+        '    "gaps-unreachable": (\n        "report_ingestion_gaps",',
+        "the unwired-stage class, twice shipped here: the reader is tested, the "
+        "report is right, and nothing a user or a skill can type reaches it - while "
+        "the documentation that tells them to type it still passes review",
+    ),
+    Mutation(
+        "the built side stops being subtracted",
+        "report_ingestion_gaps.py",
+        "        if coordinate in consumed and coordinate not in evidence.built:",
+        "        if coordinate in consumed:",
+        "the whole stage reduced to `list your internal dependencies`, which is a "
+        "list nobody can act on; it still ranks, still classifies and still prints a "
+        "confident table, with the estate's own artefacts at the top of it",
+    ),
+    Mutation(
+        "framework plumbing ranks above domain again",
+        "report_ingestion_gaps.py",
+        "    rows.sort(key=lambda row: (KIND_ORDER[row.kind], -row.main, -row.test, -row.repos, row.group))",
+        "    rows.sort(key=lambda row: (-row.main, -row.test, -row.repos, row.group))",
+        "measured on one estate, two thirds of all reference weight was framework "
+        "plumbing, so a weight-ordered ranking puts test utilities at the top and the "
+        "repository actually worth adding below the fold - a correct number answering "
+        "the wrong question, and the reason classification is ordered before weight",
+    ),
+    Mutation(
+        "equal-weight namespaces fall back to hash order",
+        "report_ingestion_gaps.py",
+        "    rows.sort(key=lambda row: (KIND_ORDER[row.kind], -row.main, -row.test, -row.repos, row.group))",
+        "    rows.sort(key=lambda row: (KIND_ORDER[row.kind], -row.main, -row.test, -row.repos))",
+        "the tiebreak that makes two runs of one store byte-identical; the rows are "
+        "grouped out of a set, so without it the order is the process's hash seed, "
+        "and hash randomisation has broken determinism here before and been invisible "
+        "until somebody diffed two builds",
+    ),
+    Mutation(
+        "test scope is blended into the main column",
+        "report_ingestion_gaps.py",
+        '        if declaration.scope == "test":',
+        "        if False:",
+        "the strongest argument for the report-not-action framing, removed: a "
+        "test-scope dependency counted as main says the estate's product needs "
+        "something when what it says is that the estate writes tests against it. A "
+        "single blended figure is worse than no figure, because its scope is invisible",
+    ),
+    Mutation(
+        "directories of copies are read as this estate's dependencies",
+        "report_ingestion_gaps.py",
+        "            if entry.name not in SKIP_DIRS:",
+        "            if True:",
+        "`node_modules` holds every dependency's own manifest, `target` holds "
+        "generated poms and `.terraform` holds the upstream modules themselves - so "
+        "the report ranks other projects' dependencies as this estate's gaps. The "
+        "same shape as the merge that picked up a previous run's outputs and looked "
+        "healthy",
+    ),
+    Mutation(
+        "an off-host alias becomes a repository to ingest",
+        "report_ingestion_gaps.py",
+        "        name = aliases.get(provider, provider)",
+        "        name = provider",
+        "a false absence invented inside the report whose subject is false absence: "
+        "a module consumed under the off-host name of a repository the store already "
+        "holds is reported as something to go and find",
+    ),
+    Mutation(
+        "an unscoped package makes every public dependency internal",
+        "report_ingestion_gaps.py",
+        "    counts = Counter(namespace_of(coordinate.group) for coordinate in built if coordinate.group)",
+        "    counts = Counter(namespace_of(coordinate.group) for coordinate in built)",
+        "one unscoped npm package published by the estate turns the empty namespace "
+        "into an internal one, after which the whole of npm is a candidate to ingest - "
+        "a check that cannot fire on Maven and fires on everything under npm",
+    ),
+    Mutation(
+        "an unreadable declaration reads as an estate that declared nothing",
+        "report_ingestion_gaps.py",
+        "        return None, str(error)",
+        '        return None, ""',
+        "the false absence the declaration exists to remove, one level in: a "
+        "declaration that fails to parse is indistinguishable from an estate that "
+        "wrote none, so a repository already ruled out is ranked as a candidate and "
+        "one held under another name is reported absent - and the run still exits 0",
+    ),
+    Mutation(
+        "the refusal to resolve a coordinate stops reaching the reader",
+        "report_ingestion_gaps.py",
+        '    lines += ["", FOOTER]',
+        "    lines += []",
+        "an operator who is not told a coordinate is unresolved reads the namespace as "
+        "a repository name and searches the forge for it, which returns nothing for an "
+        "artefact published to a binary repository and rate-limits while doing so",
     ),
 )
 
