@@ -152,6 +152,20 @@ MUTATIONS = (
         "built those arguments chose where the process wrote",
     ),
     Mutation(
+        "the write guard applied to the reads",
+        "io.py",
+        '    if not path.exists():\n        return default\n    if path.suffix == ".gz":',
+        "    checked_write_target(path)\n    if not path.exists():\n"
+        '        return default\n    if path.suffix == ".gz":',
+        "the one-line answer to the same rule's second report - S8707 on read_json, "
+        "code-scanning alert 53 - which this library rejects: the guard is in the "
+        "module already, so calling it on a read is one line, and it then refuses "
+        "every relative path an operator types from a subdirectory. Confining reads "
+        "instead of suppressing was measured twice on the write side, at 48 and 4 "
+        "failing tests, and nothing on the read path observed either until "
+        "test_read_path_policy; with this applied the whole suite failed only there",
+    ),
+    Mutation(
         "deployments overwrites the committed graph from a stale one",
         "build_deployments.py",
         "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
