@@ -299,6 +299,11 @@ Do not hand-maintain an exclusion list instead. A list is a second model of what
 the tool produces: correct the day it is written, and wrong by omission the next
 time the pipeline emits something new.
 
+The stage also names every cloned repository that contributed no content file, and
+a non-zero count there is expected on a healthy estate. It refuses — non-zero exit,
+neither artefact written — only when no clone contributed anything while clones are
+present, which is what a scan that never saw the corpus produces.
+
 Add business specifications after the merge:
 
 ```bash

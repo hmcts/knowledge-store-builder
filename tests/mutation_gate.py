@@ -1204,6 +1204,48 @@ MUTATIONS = (
         "a repository name and searches the forge for it, which returns nothing for an "
         "artefact published to a binary repository and rate-limits while doing so",
     ),
+    Mutation(
+        "a corpus no clone contributed to is reported, not refused",
+        "build_content_set.py",
+        "    if contribution.clones and len(contribution.silent) == len(contribution.clones):",
+        "    if False:",
+        "hazard 2 of #112: detect honours .gitignore and repositories/ is gitignored, "
+        "so a pass run at the store root classifies the store's own files and stops. "
+        "The set is small rather than empty, so the empty-set refusal is stepped around, "
+        "and every other guard in the library is comparative - which leaves it "
+        "undetectable on a first build, the one build with no baseline to compare",
+    ),
+    Mutation(
+        "clones that contributed nothing are counted but not named",
+        "build_content_set.py",
+        "    for name in contribution.silent:",
+        "    for name in ():",
+        "the count is expected to be non-zero on a healthy estate - a repository "
+        "created and never populated contributes nothing and appears in none of "
+        "detect's exclusion buckets - so a bare number sends an operator hunting a "
+        "defect that is not there. Reading one name settles it in seconds",
+    ),
+    Mutation(
+        "the clone count taken from the declaration instead of the directory",
+        "content_set.py",
+        "    clones = sorted(entry.name for entry in corpus.iterdir() if entry.is_dir())",
+        "    from . import merge_inputs\n\n"
+        "    clones = sorted(merge_inputs.declared_repositories() or ())",
+        "#222 arriving in a second place: extraction is declaration-driven while the "
+        "merge walks the corpus, and a guard against a first-build failure that reads "
+        "the declaration inherits its blind spot precisely on a first build, where the "
+        "declaration is most likely absent or behind the disk",
+    ),
+    Mutation(
+        "the zero-contributor report unwired",
+        "build_content_set.py",
+        "    _report_contribution(contribution)",
+        "    pass",
+        "this repository's most repeated escape, on a reconciliation nothing else "
+        "performs: noise_roots aggregates non-content files by directory across "
+        "repositories, so a clone that contributed nothing is visible in no other "
+        "output the stage prints",
+    ),
     # This gate's own file, mutated through the same machinery: a run that is
     # killed used to leave a deliberately introduced defect in the working tree,
     # and every check below reads that tree. Each `find` is spelt as two literals

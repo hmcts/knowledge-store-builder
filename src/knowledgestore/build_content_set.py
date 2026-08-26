@@ -21,7 +21,14 @@ consumer that has to parse a manifest first re-derives the set badly instead.
     tr '\n' '\0' < knowledge/corpus/content-files.txt \
       | xargs -0 grep -nIs -- '<term>'
 
-## Two things this stage refuses to do
+## Three things this stage refuses to do
+
+**It never writes a set no clone on disk contributed to.** `detect` honours
+`.gitignore` and `repositories/` is gitignored, so a pass run at the store root
+classifies the store's own files and stops - and the set that comes back is small
+rather than empty, so the refusal below is stepped around rather than triggered.
+Clones that contributed nothing are otherwise reported and named, not refused: a
+repository created and never populated legitimately contributes nothing.
 
 **It never writes an empty set.** A store whose detect result is missing gets an
 exit code and a sentence, not a file with nothing in it: an empty path list makes
@@ -128,6 +135,66 @@ def _report_noise_roots(roots: list[dict], noise: int, top: int) -> None:
     )
 
 
+def _report_contribution(contribution: content_set.Contribution) -> None:
+    """Which clones on disk the content set holds nothing from, named.
+
+    **A non-zero count here is the healthy case**, and the report says so. A
+    repository that was created and never populated - a licence file, an ignore
+    file, nothing else - contributes nothing and appears in none of detect's own
+    exclusion buckets, so it is indistinguishable from a defect to anyone told
+    only the number. Reading one name answers in seconds what the count cannot.
+
+    Every name is printed rather than the largest few: the count is expected to be
+    a handful, and truncating would hide precisely the run where it is not.
+    """
+    if not contribution.silent:
+        return
+    silent, clones = len(contribution.silent), len(contribution.clones)
+    print(
+        f"  {silent:,} of {clones:,} cloned "
+        f"{'repository' if clones == 1 else 'repositories'} in {content_set.CORPUS}/ "
+        "contributed no content file:",
+        flush=True,
+    )
+    for name in contribution.silent:
+        print(f"    {name}", flush=True)
+    print(
+        "  A non-zero count is expected here and is not by itself a defect: a repository "
+        "created and never populated genuinely contributes nothing, and detect reports it "
+        "under no exclusion of its own. Read the names - one you expected to hold content "
+        "means detect never read that clone.",
+        flush=True,
+    )
+
+
+def _no_contributor_refusal(contribution: content_set.Contribution) -> str:
+    """Why nothing is written when no clone on disk contributed anything.
+
+    States what the signal cannot distinguish rather than dodging it. A store
+    holding one all-but-empty repository satisfies "all of them" and is refused on
+    correct data; naming that reading is cheaper than either alternative, because
+    a count threshold makes the check tunable and an escape flag would be taken
+    without being read - this fires on a first build, where nobody has a baseline
+    to check a skip against.
+    """
+    clones = len(contribution.clones)
+    return (
+        f"No content file comes from any of the {clones:,} cloned "
+        f"{'repository' if clones == 1 else 'repositories'} in {content_set.CORPUS}/, so "
+        "this content set describes something other than the corpus and nothing was "
+        "written. A scan run at the store root produces exactly this: "
+        f"{content_set.CORPUS}/ is gitignored, so detect reads the store's own files and "
+        "reports a set that is small rather than empty - which is why the empty-set "
+        "refusal cannot catch it. Re-scan with the corpus visible to detect, then run "
+        "this stage again.\n"
+        "  This cannot tell 'no clone has content' from 'the only clone has no content'. A "
+        "store whose single clone is an all-but-empty repository reads identically here, "
+        "and for that store this is a false alarm and the content set was correct. There "
+        "is deliberately no flag to skip this: on a first build there is no baseline to "
+        "check the skip against."
+    )
+
+
 def _report_absolute(content: list[str]) -> None:
     """Paths that could not be relativised, counted and named.
 
@@ -184,6 +251,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    contribution = content_set.contributions(config.REPOSITORIES_DIR, content)
+    # All or nothing, with no threshold, and the reason belongs here rather than in
+    # a review comment: on a real corpus the gap between "some clones contributed
+    # nothing" and "every clone contributed nothing" is orders of magnitude, so
+    # nothing legitimate sits near the line. A percentage would be a tuned constant
+    # - the obvious "why not warn at half of them?" - while *all of them* is a
+    # structural impossibility for a corpus that was scanned clone by clone.
+    if contribution.clones and len(contribution.silent) == len(contribution.clones):
+        print(_no_contributor_refusal(contribution), flush=True)
+        return 2
+
     corpus = _corpus_measurement(content)
     kinds = content_set.kind_counts(detect)
     manifest = {
@@ -206,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
     _report_corpus(corpus, len(content), arguments.top)
+    _report_contribution(contribution)
     _report_absolute(content)
     # The store-relative path, not the basename: the command is copied and pasted
     # from the store root, where the basename alone names nothing.

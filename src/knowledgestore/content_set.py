@@ -45,6 +45,10 @@ Two consequences worth stating, because they are what keep the derivation honest
   there, because refusing `documnet` is better than planning nothing for it. Here
   a closed list would be the drift this module exists to avoid: a graphify release
   adding a category would quietly move those files into the noise.
+- **The clones are counted from the directory, never from the estate
+  declaration.** `contributions` reconciles the set against what is on disk,
+  because the failure it exists to notice lands on a first build - which is
+  exactly when a declaration is most likely to be absent or behind the disk.
 - **The noise is never classified, only located.** `noise_roots` names the
   shallowest directory in each repository under which the store found no content
   at all. That is a measurement of the content set, not a judgement about
@@ -73,6 +77,56 @@ LOOSE = "(loose beside content)"
 
 # The attribution key for a repository that holds no content at all.
 WHOLE_REPOSITORY = "(the whole repository)"
+
+
+@dataclass(frozen=True)
+class Contribution:
+    """The content set reconciled against the clones on disk, repository by repository.
+
+    `clones` is every directory in the corpus; `silent` are the ones the content
+    set holds no file from. `silent` is a subset of `clones` by construction, so a
+    repository named only by the detect result is in neither - a path is not
+    evidence that a clone is there.
+    """
+
+    clones: tuple[str, ...]
+    silent: tuple[str, ...]
+
+
+def contributions(corpus: Path, content: list[str]) -> Contribution:
+    """Which clones contributed a content file and which contributed none.
+
+    This is what notices a scan that never read the corpus: `detect` honours
+    `.gitignore` and `repositories/` is gitignored, so a pass run at the store
+    root classifies the store's own files and stops. The set that comes back is
+    small rather than empty, so the empty-set refusal is stepped around rather
+    than triggered, and every other guard in this library is comparative - which
+    leaves the failure undetectable on a first build, when nobody has a baseline.
+
+    **The clones are counted from the directory, never from a declaration.**
+    Extraction is declaration-driven while the merge walks the corpus (#222), and
+    a guard against a first-build failure must not inherit that blind spot: a
+    first build is exactly when a declaration is most likely to be absent or
+    behind the disk. Any directory counts, as `merge_inputs.discovered` does -
+    requiring a `.git` inside would make this vacuous on a store whose corpus was
+    copied in rather than cloned, and a vacuous guard is worse than a noisy one.
+
+    Sorted, because the caller prints the names and `iterdir()` yields in
+    directory order: two runs over one store would otherwise list them
+    differently and neither list could be diffed against the other.
+    """
+    if not corpus.is_dir():
+        return Contribution((), ())
+    clones = sorted(entry.name for entry in corpus.iterdir() if entry.is_dir())
+    # Keyed on the corpus prefix and the repository segment, as `_attribution`
+    # is: `len(parts) > 2` requires a file *under* the repository, so the
+    # repository directory named on its own does not make itself a contributor.
+    contributed: set[str] = set()
+    for path in content:
+        parts = Path(path).parts
+        if len(parts) > 2 and parts[0] == CORPUS:
+            contributed.add(parts[1])
+    return Contribution(tuple(clones), tuple(name for name in clones if name not in contributed))
 
 
 @dataclass(frozen=True)

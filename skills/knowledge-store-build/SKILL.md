@@ -125,6 +125,15 @@ Nothing here is classified against a list of directory names. The rows are deriv
 from the content set, so an estate whose dominant cause is something nobody has
 seen before still gets it named.
 
+**It also reconciles the set against the clones on disk, and this one can stop the
+build.** Cloned repositories that contributed no content file are named, and a
+non-zero count there is expected rather than a defect — a repository created and
+never populated contributes nothing. The stage exits non-zero, writing neither
+artefact, only when *no* clone contributed anything while clones are present:
+that is what a scan which never saw the corpus produces, and the set it reports is
+small rather than empty, so nothing else in the pipeline can tell. Read the
+refusal before acting on it — it says which single case it cannot distinguish.
+
 ### Size the AST layer before merging
 
 Run this between the extraction loop and `merge-graphs` above, while the layer
