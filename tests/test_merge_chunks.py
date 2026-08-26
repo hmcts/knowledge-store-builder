@@ -388,3 +388,69 @@ class DefectsFoundOnARealEstate(unittest.TestCase):
         merge_chunks.consolidate(nodes, remap, counters)
         for key in ("consolidated", "fragmented_left", "disambiguated"):
             self.assertIn(key, counters)
+
+
+class TheIdNamingSteps(unittest.TestCase):
+    """Two decisions inside the naming that nothing was watching.
+
+    Both were established by mutation rather than by reading: with the suffix search
+    stopped at `_2`, and separately with the empty-stem guard removed, the whole
+    suite of 1,287 tests passed. The first is the node loss the disambiguation
+    exists to prevent, one collision later than the case already pinned; the second
+    silently re-keys a node that has no usable stem.
+    """
+
+    def test_a_third_identity_sharing_stem_and_original_is_not_dropped(self):
+        """Breaks if the suffix search stops at `_2` instead of advancing.
+
+        The two-identity case is already pinned, and it passes whether the search
+        advances or not - so it cannot see the third identity taking the second's
+        name and displacing it. Same silent loss, one collision later.
+        """
+        chunks = [
+            (
+                "c1",
+                {
+                    "nodes": [
+                        node("dup", "Label One", "p/q.bpmn"),
+                        node("dup", "Label Two", "p/q.bpmn"),
+                        node("dup", "Label Three", "p/q.bpmn"),
+                        node("dup", "Label Four", "p/q.bpmn"),
+                    ]
+                },
+            )
+        ]
+        nodes, _remap, counters = merge_chunks.merge_nodes(chunks)
+        self.assertEqual(
+            sorted(nodes),
+            ["p_q_dup", "p_q_dup_2", "p_q_dup_3", "p_q_dup_4"],
+            "an identity was displaced by a later one taking its id",
+        )
+        self.assertEqual(counters["disambiguated"], 3)
+        self.assertEqual(
+            {n["label"] for n in nodes.values()},
+            {"Label One", "Label Two", "Label Three", "Label Four"},
+            "all four labels must survive",
+        )
+
+    def test_a_basis_with_no_usable_stem_leaves_the_original_id(self):
+        """Breaks if an empty stem is prefixed anyway, yielding a leading underscore.
+
+        A node with no source file falls back to its label as the basis, and a label
+        of punctuation reduces to no stem at all. `original_id` still records what
+        the id was, so nothing is lost either way - but the id a consumer resolves
+        would change from `slug` to `_slug`, and stage output is committed data.
+        """
+        chunks = [
+            ("c1", {"nodes": [node("slug", "***", "")]}),
+            ("c2", {"nodes": [node("slug", "###", "")]}),
+        ]
+        nodes, remap, counters = merge_chunks.merge_nodes(chunks)
+        self.assertEqual(sorted(nodes), ["slug", "slug_2"])
+        self.assertEqual(counters["namespaced"], 2)
+        self.assertEqual(counters["disambiguated"], 1)
+        self.assertNotEqual(
+            remap[("c1", "slug")], remap[("c2", "slug")], "two labels, so two entities"
+        )
+        for entry in nodes.values():
+            self.assertEqual(entry["original_id"], "slug")
