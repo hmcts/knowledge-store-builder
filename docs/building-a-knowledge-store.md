@@ -361,23 +361,38 @@ fails silently rather than erroring.** The file is read at the scan root and its
 ancestors up to the enclosing VCS root; a file *below* the scan root is inert.
 Measured, one symlink and its target:
 
-| `.graphifyignore` at | per-repository scan | single-root scan | `extract-ast` |
-|---|---|---|---|
-| inside the cloned repository | **excluded** | ignored — below the scan root | **excluded** |
-| the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** | **excluded** |
+Re-measured on graphify 0.9.40, all four cells, with the clone and the store root
+each a real git repository:
 
-The first two placements are mutually exclusive, and the awkward part is that the
-placement which survives `sync` (outside the corpus) only works for the
-single-root scan — which is the invocation that costs you per-repository node
-namespacing. Extract per repository and the exclusion has to live inside the
-cloned corpus, where the next `sync` may remove it.
+| `.graphifyignore` at | per-repository scan | single-root scan |
+|---|---|---|
+| inside the cloned repository | **excluded** | **excluded** |
+| the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** |
 
-**`extract-ast` is not a scan, which is why its column reads differently.** It is
-handed a file list and never walks a directory, so it has no scan root for a
-placement to be above or below: whatever `detect` excluded is simply absent from
-the list. Both placements work, and the trade above stops being one. What does not
-change is that a `.graphifyignore` inside a clone is still deleted by `sync`, so
-it must be reinstalled before `detect` runs rather than before extraction.
+**The top-right cell previously read "ignored — below the scan root", and that no
+longer reproduces.** A file inside a clone is honoured by a single-root scan at the
+store root, in every shape constructed: with and without a VCS root at the store,
+and with `gitignore=False`. Whether graphify changed or the row was generalised
+from something narrower is not recoverable from here, so it is recorded as measured
+against 0.9.40 rather than presented as timeless.
+
+**So the placements are not mutually exclusive, and there is one that always
+works.** Inside the clone is honoured by both scans; the store root is honoured
+only by the single-root scan. The trade this passage used to describe — that the
+placement surviving `sync` only works for the invocation which costs you
+per-repository namespacing — dissolves, because the placement that works
+everywhere is the one inside the clone.
+
+What remains, and it is the whole remaining cost: **`sync` deletes it.** `sync`
+ends with `git clean -fd -e graphify-out`, so an ignore file inside a clone is
+untracked and removed on every refresh, and must be reinstalled before the scan.
+
+`extract-ast` has no column here because it is not a scan. It is handed a file list
+and never walks a directory, so it has no scan root for a placement to be above or
+below: it inherits whatever the `detect` that produced its content set excluded.
+Which cell applies to it is therefore a question about *that* detect invocation,
+not about this stage — and the reinstall deadline moves earlier with it, to before
+`detect` runs rather than before extraction.
 
 **Exclusion is the one thing a store loses by moving to the per-repository
 *scan*, and it loses it silently.** `graphify update .` per clone does no vendor
