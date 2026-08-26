@@ -6,6 +6,14 @@ deliberately **(service, environment)** rather than service alone: a single node
 per service would merge production and development configuration into one blob,
 and an answer built on it would be confidently wrong.
 
+Two layouts reach the same node. The **values** route reads
+`KSB_DEPLOY_VALUES_GLOB`, one templated file per service and environment. The
+**kustomize** route reads a Kustomize/Flux tree - a base HelmRelease patched by
+environment and stack overlays, with a cluster's Flux Kustomizations saying which
+of those directories are reconciled where (#88). Both emit onto the same
+`deploy::env:<environment>` nodes, so one set of environments carries whichever
+layout declared a service, and each fact records the route that produced it.
+
 Modelled on `build_package_edges`: strip the layer this stage wrote before, walk
 the clone, write nodes and edges back, report what joined and what did not.
 """
@@ -15,12 +23,20 @@ from __future__ import annotations
 import json
 import sys
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, deploy_values, graph_files, io
+from . import config, deploy_flux, deploy_values, graph_files, io
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
+_YAML_SUFFIXES = (".yaml", ".yml")
+
+# Which layout a fact was read from, carried on every node. Without it "which
+# services reach this environment by which route" is answerable only by guessing
+# from the path a fact happens to cite.
+ROUTE_VALUES = "values"
+ROUTE_KUSTOMIZE = "kustomize"
 
 
 def _glob_root(glob: str) -> str:
@@ -50,7 +66,8 @@ def service_of(filename: str) -> str:
     return _VALUES_SUFFIX.sub("", filename)
 
 
-def _parse(text: str) -> dict[str, str] | None:
+def _yaml():
+    """PyYAML, or the install line. One copy, because both routes parse YAML."""
     try:
         import yaml
     except ImportError:  # pragma: no cover - exercised by the stage's preflight
@@ -58,6 +75,11 @@ def _parse(text: str) -> dict[str, str] | None:
             "The deployments stage parses YAML, which needs PyYAML.\n"
             "  pip install 'hmcts-knowledge-store-builder[deploy]'"
         ) from None
+    return yaml
+
+
+def _parse(text: str) -> dict[str, str] | None:
+    yaml = _yaml()
     try:
         loaded = yaml.safe_load(deploy_values.strip_template(text))
     except yaml.YAMLError:
@@ -65,6 +87,21 @@ def _parse(text: str) -> dict[str, str] | None:
     if not isinstance(loaded, dict):
         return None
     return deploy_values.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
+
+
+def _documents(text: str) -> list[object] | None:
+    """Every YAML document in one file, or None when the file will not parse.
+
+    `safe_load_all`, not `safe_load`: a cluster's Kustomizations are conventionally
+    one file of `---`-separated documents, and reading only the first would take
+    the environment binding of every document after it with no sign that anything
+    was missed.
+    """
+    yaml = _yaml()
+    try:
+        return list(yaml.safe_load_all(deploy_values.strip_template(text)))
+    except yaml.YAMLError:
+        return None
 
 
 def discover(repo_dir: Path) -> tuple[dict[tuple[str, str], dict[str, str]], list[str]]:
@@ -88,6 +125,43 @@ def discover(repo_dir: Path) -> tuple[dict[tuple[str, str], dict[str, str]], lis
             continue
         found[(environment_of(rel, root), service_of(path.name))] = flat
     return found, unparsed
+
+
+def _readable_yaml(repo_dir: Path):
+    """Every YAML file in the clone, hidden directories excluded.
+
+    `.git` holds packed objects rather than configuration, and `.github` holds
+    workflow YAML that declares no deployment - reading either would inflate the
+    document count the report is judged on without adding a fact.
+    """
+    for path in sorted(repo_dir.rglob("*")):
+        if path.suffix not in _YAML_SUFFIXES or not path.is_file():
+            continue
+        if any(part.startswith(".") for part in path.relative_to(repo_dir).parts):
+            continue
+        yield path
+
+
+def discover_flux(repo_dir: Path) -> tuple[deploy_flux.Reading, list[str], int]:
+    """The Kustomize/Flux layout in one clone: what it declares, and what would not read.
+
+    Returns the reading, the files that would not parse, and how many YAML files
+    were opened. The file count is what makes "nothing found" a statement rather
+    than a silence: a run that read 400 files and found no HelmRelease has looked,
+    and one that read none has not.
+    """
+    entries: list[tuple[str, list[object]]] = []
+    unparsed: list[str] = []
+    files = 0
+    for path in _readable_yaml(repo_dir):
+        files += 1
+        rel = path.relative_to(repo_dir).as_posix()
+        documents = _documents(path.read_text(encoding="utf-8", errors="replace"))
+        if documents is None:
+            unparsed.append(rel)
+            continue
+        entries.append((rel, documents))
+    return deploy_flux.read(entries), unparsed, files
 
 
 def _norm(value: str) -> str:
@@ -187,32 +261,74 @@ def _environment_node(environment: str, deploy_repo: str, community: int, name: 
     }
 
 
-def _deployment_node(
-    environment: str,
-    service: str,
-    deploy_repo: str,
-    rel: str,
-    flat: dict[str, str],
-    community: int,
-    name: str,
-) -> dict:
+@dataclass(frozen=True)
+class _Fact:
+    """One (service, environment) pair ready to become a node, whichever route read it.
+
+    Both routes reduce to this, which is what keeps the node shape single: the
+    difference between them is the route name, the file cited, and whatever extra
+    metadata the layout can state (a Kustomize/Flux fact names its layers and its
+    chart; a values fact has neither).
+    """
+
+    environment: str
+    service: str
+    rel: str
+    route: str
+    config: dict[str, str]
+    extra: dict[str, object] = field(default_factory=dict)
+    chart_source: str = ""
+
+
+def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -> dict:
     return {
-        "id": f"{deploy_repo}::deploy:{environment}:{service}",
-        "label": f"{service} ({environment})",
-        "norm_label": f"{service} ({environment})".lower(),
+        "id": f"{deploy_repo}::deploy:{fact.environment}:{fact.service}",
+        "label": f"{fact.service} ({fact.environment})",
+        "norm_label": f"{fact.service} ({fact.environment})".lower(),
         "file_type": "concept",
-        "source_file": rel,
+        "source_file": fact.rel,
         "source_location": None,
         "repo": deploy_repo,
         "_origin": FORMAT,
-        "local_id": f"deploy:{environment}:{service}",
+        "local_id": f"deploy:{fact.environment}:{fact.service}",
         "community": community,
         "community_name": name,
         "metadata": {
             "kind": "deployment",
-            "service": service,
-            "environment": environment,
-            "config": flat,
+            "service": fact.service,
+            "environment": fact.environment,
+            "route": fact.route,
+            "config": fact.config,
+            **fact.extra,
+        },
+    }
+
+
+def _chart_node(source: str, in_estate: bool) -> dict:
+    """A chart source, identified by the repository providing the chart.
+
+    The shape `build_package_edges` gives a Terraform module (#122): the provider
+    names the node, and `repo` is set only when the estate actually holds that
+    repository, because naming an unsynced one puts it into every per-repository
+    aggregate. The id namespace is `::chart` rather than `::module` deliberately -
+    both stages strip their own layer by `_origin`, so a shared id would have each
+    stage delete the other's edges, and the loss would surface a stage later in a
+    count nobody is comparing.
+    """
+    return {
+        "id": f"{source}::chart",
+        "label": source,
+        "norm_label": source.lower(),
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": source if in_estate else "",
+        "_origin": FORMAT,
+        "local_id": "chart",
+        "metadata": {
+            "kind": "chart_source",
+            "provider_repo": source,
+            "provider_in_estate": in_estate,
         },
     }
 
@@ -265,6 +381,29 @@ def _representatives(graph: dict) -> dict[str, str]:
     return best
 
 
+class _FluxTally:
+    """What the Kustomize/Flux route read, and everything it could not attribute.
+
+    Counted separately from the values route rather than added to it: a total over
+    two layouts cannot say which one contributed nothing, and #88 exists because
+    a layout contributing nothing was indistinguishable from a clean run.
+    """
+
+    def __init__(self) -> None:
+        self.files = 0
+        self.documents = 0
+        self.releases = 0
+        self.kustomizations = 0
+        self.facts = 0
+        self.unreadable: list[str] = []
+        self.unattached: list[str] = []
+        self.unnamed_environments: list[str] = []
+        self.unnamed_services: list[str] = []
+        self.chart_sources: dict[str, bool] = {}
+        self.chart_edges = 0
+        self.both_routes: list[str] = []
+
+
 class _Tally:
     """What one run accumulated across every deployment repository."""
 
@@ -275,6 +414,106 @@ class _Tally:
         self.joined = 0
         self.unmatched: set[str] = set()
         self.unreadable: list[str] = []
+        self.flux = _FluxTally()
+
+
+def _values_facts(found: dict[tuple[str, str], dict[str, str]]) -> dict[tuple[str, str], _Fact]:
+    """The layout this stage already read, as facts."""
+    root = _glob_root(config.DEPLOY_VALUES_GLOB)
+    return {
+        (environment, service): _Fact(
+            environment,
+            service,
+            _source_file(root, environment, service),
+            ROUTE_VALUES,
+            flat,
+        )
+        for (environment, service), flat in sorted(found.items())
+    }
+
+
+def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
+    """A Kustomize/Flux reading as facts, its values flattened by the same rules.
+
+    `deploy_values.flatten` is what applies the secret-location policy, so the
+    second layout inherits it rather than restating it - the whole point of
+    settling that policy in the library (#88).
+    """
+    facts: dict[tuple[str, str], _Fact] = {}
+    for key, fact in sorted(reading.facts.items()):
+        extra: dict[str, object] = {"layers": list(fact.layers)}
+        if fact.chart.name or fact.chart.version or fact.chart.source:
+            extra["chart"] = fact.chart.name
+            extra["chart_version"] = fact.chart.version
+            extra["chart_source"] = fact.chart.source
+        facts[key] = _Fact(
+            fact.environment,
+            fact.service,
+            # The first layer, which is the base declaration wherever there is one.
+            # No single file holds a composed fact, so the citation has to choose:
+            # the declaration is the file a reader should open first, and it does
+            # not move when a stack overlay is added, whereas "the layer with the
+            # final word" would cite an override that sets one key and read as the
+            # place this service is defined. Every layer is listed in `layers`.
+            fact.layers[0],
+            ROUTE_KUSTOMIZE,
+            deploy_values.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
+            extra,
+            fact.chart.source,
+        )
+    return facts
+
+
+def _merged_facts(
+    found: dict[tuple[str, str], dict[str, str]],
+    reading: deploy_flux.Reading,
+    tally: _FluxTally,
+) -> dict[tuple[str, str], _Fact]:
+    """Both routes' facts, keyed as before, with a clash resolved to the values route.
+
+    One clone holding both layouts would otherwise produce two nodes with one id.
+    The existing route wins because its output is already committed in consumer
+    repositories, and the clash is named rather than resolved quietly - a service
+    declared twice in one repository is a migration half-done, which is a finding.
+    """
+    facts = _values_facts(found)
+    for key, fact in _flux_facts(reading).items():
+        if key in facts:
+            tally.both_routes.append(f"{fact.service} ({fact.environment})")
+            continue
+        facts[key] = fact
+    return facts
+
+
+def _chart_edges(
+    graph: dict, fact: _Fact, node_id: str, reps: dict[str, str], tally: _Tally
+) -> None:
+    """The chart source a fact declares, as a node and a dependency edge."""
+    source = fact.chart_source
+    if not source:
+        return
+    if source not in tally.flux.chart_sources:
+        in_estate = source in reps
+        tally.flux.chart_sources[source] = in_estate
+        graph["nodes"].append(_chart_node(source, in_estate))
+    # Cited on the fact's own file, which is the declaration the chart is part of.
+    graph["links"].append(_edge(node_id, f"{source}::chart", "uses_chart", fact.rel))
+    tally.flux.chart_edges += 1
+    tally.edges += 1
+
+
+def _record_flux(
+    reading: deploy_flux.Reading, unparsed: list[str], files: int, tally: _FluxTally
+) -> None:
+    tally.files += files
+    tally.documents += reading.documents
+    tally.releases += reading.releases
+    tally.kustomizations += reading.kustomizations
+    tally.facts += len(reading.facts)
+    tally.unreadable.extend(unparsed)
+    tally.unattached.extend(reading.unattached)
+    tally.unnamed_environments.extend(reading.unnamed_environments)
+    tally.unnamed_services.extend(reading.unnamed_services)
 
 
 def _add_repo_layer(
@@ -285,30 +524,97 @@ def _add_repo_layer(
     communities: Communities,
 ) -> None:
     """Write one deployment clone's nodes and edges into the graph."""
-    found, unparsed = discover(config.REPOSITORIES_DIR / deploy_repo)
+    repo_dir = config.REPOSITORIES_DIR / deploy_repo
+    found, unparsed = discover(repo_dir)
     tally.unreadable.extend(unparsed)
-    services = {service for _, service in found}
+    reading, flux_unparsed, files = discover_flux(repo_dir)
+    _record_flux(reading, flux_unparsed, files, tally.flux)
+
+    facts = _merged_facts(found, reading, tally.flux)
+    services = {service for _, service in facts}
     matched = match_services(services, set(reps))
     tally.unmatched |= services - set(matched)
-    root = _glob_root(config.DEPLOY_VALUES_GLOB)
 
-    for (environment, service), flat in sorted(found.items()):
-        rel = _source_file(root, environment, service)
+    for _, fact in sorted(facts.items()):
+        environment = fact.environment
         cid = communities.for_environment(environment)
         name = communities.labels[str(cid)]
-        node = _deployment_node(environment, service, deploy_repo, rel, flat, cid, name)
+        node = _deployment_node(fact, deploy_repo, cid, name)
         graph["nodes"].append(node)
         tally.pairs += 1
         if environment not in tally.environments:
             graph["nodes"].append(_environment_node(environment, deploy_repo, cid, name))
             tally.environments.add(environment)
-        graph["links"].append(_edge(node["id"], f"deploy::env:{environment}", "deployed_in", rel))
+        graph["links"].append(
+            _edge(node["id"], f"deploy::env:{environment}", "deployed_in", fact.rel)
+        )
         tally.edges += 1
-        target = reps.get(matched.get(service, ""))
+        target = reps.get(matched.get(fact.service, ""))
         if target:
-            graph["links"].append(_edge(node["id"], target, "deploys", rel))
+            graph["links"].append(_edge(node["id"], target, "deploys", fact.rel))
             tally.edges += 1
             tally.joined += 1
+        _chart_edges(graph, fact, node["id"], reps, tally)
+
+
+def _named(paths: list[str], limit: int = 5) -> str:
+    """The first few of a list of files, named rather than counted."""
+    return ", ".join(sorted(set(paths))[:limit])
+
+
+def _flux_report(flux: _FluxTally) -> None:
+    """What the Kustomize/Flux route read, and everything it could not attribute.
+
+    Printed on every configured run, including the run that found nothing: the
+    defect #88 reports is a repository contributing no nodes and no message, so
+    "nothing here" has to be a sentence the stage says out loud.
+    """
+    if flux.releases or flux.kustomizations:
+        # Files opened and documents parsed are two quantities, and the difference
+        # between them is the unparsable files named below. One figure covering both
+        # would report a file that yielded nothing as a file that was read.
+        print(
+            f"  Kustomize/Flux: {flux.files} YAML file(s) opened, {flux.documents} "
+            f"document(s) parsed - {flux.releases} HelmRelease, "
+            f"{flux.kustomizations} Kustomization, {flux.facts} service/environment fact(s)"
+        )
+    else:
+        print(
+            f"  Kustomize/Flux: no HelmRelease or Kustomization document in "
+            f"{flux.files} YAML file(s) - this layout contributed nothing"
+        )
+    if flux.chart_sources:
+        outside = sum(1 for in_estate in flux.chart_sources.values() if not in_estate)
+        print(
+            f"    chart sources: {len(flux.chart_sources)} referenced, "
+            f"{flux.chart_edges} edge(s) added, {outside} not held by this estate"
+        )
+    if flux.unreadable:
+        print(
+            f"    {len(set(flux.unreadable))} YAML file(s) in the Kustomize/Flux walk did not "
+            f"parse and carry no evidence: {_named(flux.unreadable)}"
+        )
+    if flux.unattached:
+        print(
+            f"    {len(set(flux.unattached))} HelmRelease file(s) carry no environment because "
+            f"no Kustomization reconciles them: {_named(flux.unattached)}"
+        )
+    if flux.unnamed_environments:
+        print(
+            f"    {len(set(flux.unnamed_environments))} Kustomization file(s) name no "
+            f"environment segment, so what they reconcile is unattributed: "
+            f"{_named(flux.unnamed_environments)}"
+        )
+    if flux.unnamed_services:
+        print(
+            f"    {len(set(flux.unnamed_services))} HelmRelease document(s) name no service: "
+            f"{_named(flux.unnamed_services)}"
+        )
+    if flux.both_routes:
+        print(
+            f"    {len(set(flux.both_routes))} fact(s) are declared by both layouts; the "
+            f"values-layout fact is kept: {_named(flux.both_routes)}"
+        )
 
 
 def _report(tally: _Tally, graph: dict) -> None:
@@ -337,6 +643,7 @@ def _report(tally: _Tally, graph: dict) -> None:
         print(
             f"  {len(tally.unreadable)} values file(s) did not parse and carry no evidence: {shown}"
         )
+    _flux_report(tally.flux)
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
 
 
