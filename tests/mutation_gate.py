@@ -274,6 +274,118 @@ MUTATIONS = (
         "irreversible overwrite. Shipped in v0.14.0",
     ),
     Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
+    ),
+    Mutation(
+        "declared boundary never reaches the manifest",
+        "build_knowledge_context.py",
+        "        *boundary.manifest_section(boundary.read()),",
+        "        *[],",
+        "the unwired-check class this library has shipped twice - the parse works, "
+        "the rendering works, and the committed artefact a reader opens says none of "
+        "it, which is indistinguishable from an estate that declared nothing",
+    ),
+    Mutation(
+        "store stops saying it does not claim completeness",
+        "boundary.py",
+        '    return lines + [NO_COMPLETENESS, ""]',
+        "    return lines",
+        "a declaration that reads as `this is all of it` is a new false claim "
+        "replacing the old silent one; the estate that prompted this had enumerated "
+        "its hosts and was still hunting services with no locatable repository",
+    ),
+    Mutation(
+        "declared repository with no ruling vanishes from the manifest",
+        "boundary.py",
+        "    subjects = sorted({*declared.rulings, *declared.snapshots, *declared.aliases.values()})",
+        "    subjects = sorted(declared.rulings)",
+        "written this way first, and found by re-reading the artefact rather than by a "
+        "test: a repository declared only by a snapshot date or only by an alias parsed "
+        "cleanly, was counted in the status summary, and reached no reader at all",
+    ),
+    Mutation(
+        "status no longer says the boundary is undeclared",
+        "status.py",
+        "    _report_boundary(recorded)",
+        "    pass",
+        "silence is the state every store starts in, so a report that speaks only "
+        "for the configured case never reaches the stores that most need telling "
+        "what their own absences mean",
+    ),
+    Mutation(
+        "off-host name stops resolving to the repository held",
+        "boundary.py",
+        "        target = aliases.get(name, name)",
+        "        target = name",
+        "the false absence the declaration exists to remove, reintroduced inside it: "
+        "a ruling written under the off-host name keys itself under a name no store "
+        "holds, so `status` reports a held repository as missing",
+    ),
+    Mutation(
+        "declaration stops being reconciled against disk",
+        "status.py",
+        "    disagreements = boundary.reconciliation(declared, set(recorded))",
+        "    disagreements = {k: [] for k in ('active_absent', 'ruled_out_held', 'alias_absent')}",
+        "a declaration nothing checks is a second artefact that can be quietly "
+        "wrong, and a repository ruled live and not held is the exact shape of the "
+        "published finding that was drawn honestly and was false",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -428,64 +540,72 @@ MUTATIONS = (
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
-    # The boundary declaration (#92). Its whole purpose is to stop a store
-    # implying a reach it never had, so every way of removing it while the suite
-    # stays green is the defect it exists to prevent - and the two shapes below
-    # are the ones this repository has actually shipped: a check that parses and
-    # is never rendered, and prose that renders while meaning something else.
     Mutation(
-        "declared boundary never reaches the manifest",
-        "build_knowledge_context.py",
-        "        *boundary.manifest_section(boundary.read()),",
-        "        *[],",
-        "the unwired-check class this library has shipped twice - the parse works, "
-        "the rendering works, and the committed artefact a reader opens says none of "
-        "it, which is indistinguishable from an estate that declared nothing",
+        "telemetry overwrites the record without reading it",
+        "telemetry.py",
+        "    previous = read()",
+        "    previous = {}",
+        "#154: the defect the whole mechanism exists to remove - every number lived in "
+        "one build's scrollback, so nothing could notice it moving. A record written and "
+        "never read looks identical to one that was compared, because the file afterwards "
+        "is the same either way",
     ),
     Mutation(
-        "store stops saying it does not claim completeness",
-        "boundary.py",
-        '    return lines + [NO_COMPLETENESS, ""]',
-        "    return lines",
-        "a declaration that reads as `this is all of it` is a new false claim "
-        "replacing the old silent one; the estate that prompted this had enumerated "
-        "its hosts and was still hunting services with no locatable repository",
+        "a collapsed measurement reported as an ordinary statistic",
+        "telemetry.py",
+        "        if movement.collapsed:",
+        "        if False:",
+        "#154: zero is the only condition assertable without knowing the estate, and a "
+        "join that matched nothing was green on one store across its whole graph. Losing "
+        "the routing prints the collapse among the healthy numbers, which is the shape of "
+        "output people are already caught skimming",
     ),
     Mutation(
-        "declared repository with no ruling vanishes from the manifest",
-        "boundary.py",
-        "    subjects = sorted({*declared.rulings, *declared.snapshots, *declared.aliases.values()})",
-        "    subjects = sorted(declared.rulings)",
-        "written this way first, and found by re-reading the artefact rather than by a "
-        "test: a repository declared only by a snapshot date or only by an alias parsed "
-        "cleanly, was counted in the status summary, and reached no reader at all",
+        "each stage's record erases the last stage's",
+        "telemetry.py",
+        "{**previous, **measurements}",
+        "{**measurements}",
+        "#154: three stages write this artefact in one refresh, so a replace leaves each "
+        "record surviving only until the next stage runs and every comparison is against "
+        "nothing - a mechanism that reads green and measures nothing, which is the class "
+        "this gate exists for",
     ),
     Mutation(
-        "status no longer says the boundary is undeclared",
+        "layer sizes measured and discarded",
+        "merge_layers.py",
+        "    telemetry.record(layer_measurements(counters))",
+        "    layer_measurements(counters)",
+        "#154, and #116 rests on it: the AST-to-semantic ratio can only be judged against "
+        "a store's own last build, because two estates measured it a hundredfold apart. "
+        "Computing the counts and not recording them is the wiring escape this gate "
+        "already records five times",
+    ),
+    Mutation(
+        "the join cardinality measured and discarded",
+        "build_explorer.py",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
+        "    page_measurements(graph, entries, edges, size_bytes)",
+        "#154 over #149: the join report refuses zero and prints the rate, and the "
+        "half-dead case is neither of those. Without a record the rate reaches a terminal "
+        "and is gone, which is how a join that should have been three times larger read "
+        "as a working join on a sparse estate",
+    ),
+    Mutation(
+        "the indexed inventory measured and discarded",
+        "build_intent_index.py",
+        "    telemetry.record(summarise(index, commits_seen, report))",
+        "    summarise(index, commits_seen, report)",
+        "#154: a corpus inventory that collapsed reported a plausible smaller number and "
+        "read as a smaller estate; nothing but its predecessor contradicts it",
+    ),
+    Mutation(
+        "the record never reaches an operator",
         "status.py",
-        "    _report_boundary(recorded)",
-        "    pass",
-        "silence is the state every store starts in, so a report that speaks only "
-        "for the configured case never reaches the stores that most need telling "
-        "what their own absences mean",
-    ),
-    Mutation(
-        "off-host name stops resolving to the repository held",
-        "boundary.py",
-        "        target = aliases.get(name, name)",
-        "        target = name",
-        "the false absence the declaration exists to remove, reintroduced inside it: "
-        "a ruling written under the off-host name keys itself under a name no store "
-        "holds, so `status` reports a held repository as missing",
-    ),
-    Mutation(
-        "declaration stops being reconciled against disk",
-        "status.py",
-        "    disagreements = boundary.reconciliation(declared, set(recorded))",
-        "    disagreements = {k: [] for k in ('active_absent', 'ruled_out_held', 'alias_absent')}",
-        "a declaration nothing checks is a second artefact that can be quietly "
-        "wrong, and a repository ruled live and not held is the exact shape of the "
-        "published finding that was drawn honestly and was false",
+        "    _report_telemetry()\n\n    _report_graph_report",
+        "    _report_graph_report",
+        "#154: reporting through a function while nothing drives the CLI is the most "
+        "repeated escape in this repository, and `status` alone accounts for three "
+        "existing entries here",
     ),
 )
 

@@ -24,7 +24,7 @@ import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import boundary, config, graph_files, io, provenance, record_clustering, store_paths
+from . import boundary, config, graph_files, io, provenance, record_clustering, store_paths, telemetry
 from .build_topic_briefs import read_topics
 
 
@@ -70,6 +70,35 @@ def layer_coverage() -> dict:
         "briefs_written": len(briefs),
         "topics_configured": len(topics),
     }
+
+
+def snapshot_pointer() -> str:
+    """What the summaries count above does *not* say, and how to find out.
+
+    The count is the same whether or not the prose still describes the community
+    it is keyed to. Community ids are positional, so only the membership snapshot
+    binds a summary to a member set; rebuild or re-cluster without refreshing it
+    and every summary is silently re-pointed while every community still has one.
+    An operator read exactly that coverage line as healthy.
+
+    A pointer rather than the check itself, because `status` must not read the
+    graph and the comparison cannot be made without it - so what `status` can
+    honestly do here is name its own blind spot instead of leaving a green line
+    to be read as a verdict. `summaries adrift` is the check.
+    """
+    if not config.SUMMARIES_PATH.is_file():
+        return ""
+    if not config.SUMMARIES_SNAPSHOT_PATH.is_file():
+        return (
+            f"Summary membership: no snapshot at {_relative(config.SUMMARIES_SNAPSHOT_PATH)}, so "
+            "nothing can say whether that prose still describes those communities. Run "
+            "`knowledgestore summaries snapshot`."
+        )
+    return (
+        "Summary membership: not checked here - `status` never reads the graph. The count above "
+        "is the same whether or not the prose still describes its community; run "
+        "`knowledgestore summaries adrift`."
+    )
 
 
 def intent_coverage(recorded: dict) -> dict:
@@ -975,6 +1004,34 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _report_telemetry() -> None:
+    """What the last build measured, so an operator can see the numbers at all.
+
+    Read-only, and it compares nothing: `status` measures none of these itself -
+    they need the graph, and this stage must not load it - so printing a fresh
+    figure beside a recorded one would be claiming a comparison it never made.
+    The comparison happens where the number is computed, in the stage that
+    records it.
+
+    The empty case says so rather than printing a heading over nothing. A
+    "Telemetry:" line with no rows under it reads as a store with nothing to
+    report instead of one where nothing has been recorded yet.
+    """
+    lines = telemetry.recorded_lines()
+    if not lines:
+        print(
+            "Telemetry: nothing recorded yet - `intent`, `merge-layers` and `explorer` "
+            "each record what they measured, and the next run of each compares against it"
+        )
+        return
+    print(
+        f"Telemetry: what the last build measured ({telemetry.display_path()}), "
+        "and what the next build of each stage compares itself against:"
+    )
+    for line in lines:
+        print(line)
+
+
 def recorded_digests() -> dict[str, str]:
     """What the page was built from, from either manifest shape.
 
@@ -1202,6 +1259,9 @@ def main(argv=None) -> int:
         f"Summaries: {cov['summaries_written']}/{cov['summaries_expected']} "
         f"significant communities have prose"
     )
+    pointer = snapshot_pointer()
+    if pointer:
+        print(pointer)
     print(
         f"Topic briefs: {cov['briefs_written']} written, "
         f"{cov['topics_configured']} topics configured"
@@ -1228,6 +1288,8 @@ def main(argv=None) -> int:
     _report_freshness()
 
     _report_clustering()
+
+    _report_telemetry()
 
     _report_graph_report(arguments.verify_graph)
 
