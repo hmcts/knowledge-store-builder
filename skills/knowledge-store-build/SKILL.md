@@ -91,16 +91,50 @@ input that fails is the one the declaration omits, so such a check skips it and
 reports clean - which is worse than no check, because a clean report is read as
 an answer.
 
-### Expose the content set, and read what it measures
+### Write the detect result, then expose the content set
 
-Run this as soon as graphify has scanned the corpus, before extraction:
+`content-set`, `chunk-plan` and `extract-ast` all read
+`graphify-out/.graphify_detect.json` at the store root, and **nothing in
+graphify's CLI writes it**: there is no `graphify detect`, and `graphify update .`
+at the store root exits 0 leaving no detect result. Write it first, from the store
+root, before extraction:
 
 ```bash
+mkdir -p graphify-out
+python3 -c "import json; from pathlib import Path; from graphify.detect import detect; print(json.dumps(detect(Path('.'), gitignore=False)))" \
+  > graphify-out/.graphify_detect.json
+
 knowledgestore content-set     # -> knowledge/corpus/content-files.txt
                                #    knowledge/corpus/content-set.json
 ```
 
-Two things come out of it, and both are committed.
+`gitignore=False` is what makes the corpus visible: `repositories/` is in the
+store's `.gitignore` and the scan honours ignore rules, so the default classifies
+the store's own handful of files and nothing in any clone. `mkdir -p graphify-out`
+first — the shell opens the redirect target before python runs. This is a
+classification scan, not extraction; extraction still runs inside each clone.
+
+**Say what the parameter costs when you report the build.** With
+`gitignore=False`, anything a repository excluded only through its own
+`.gitignore` becomes content unless the store's `.graphifyignore` re-excludes it —
+and that file is one forgotten reinstall away from absent, because `sync` ends in
+`git clean -fd -e graphify-out`. Two measured facts, both the opposite of what a
+reader assumes:
+
+- **`gitignore=False` does not disable `.graphifyignore`.** Measured in two
+  independent sessions: a `.graphifyignore` still excluded a bundled directory
+  inside a clone with the parameter set.
+- **For content a repository tracks, the parameter changes nothing.** A tracked
+  file was never excluded by that repository's `.gitignore` and cannot be, so it
+  widens the scan only over what a repository generates and ignores.
+
+**Where the scan does not complete, this route is unavailable.** On at least one
+real estate the scan does not finish at that scale, and that store builds its
+content set from extraction output instead. There is no substitute to recommend:
+such a store has to produce `graphify-out/.graphify_detect.json` another way, and
+every stage reading it takes it at face value. Say which route produced it.
+
+Two things come out of `content-set`, and both are committed.
 
 **The path list is what a corpus search must read.** Anyone who falls back from the
 graph to `grep` otherwise searches the raw tree, and the tree holds each clone's

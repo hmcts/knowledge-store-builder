@@ -278,22 +278,72 @@ store-relative source paths that break the file-to-ticket join. Do not include
 an earlier merged graph in `merge-graphs`, because node identifiers would be
 namespaced twice.
 
-Expose the content set once graphify has scanned the corpus:
+### Write the detect result, then expose the content set
+
+`content-set`, `chunk-plan` and `extract-ast` all read one artefact:
+`graphify-out/.graphify_detect.json` at the store root, graphify's own record of
+every file it classified. Nothing in graphify's CLI writes it. Write it, then
+expose the content set derived from it:
 
 ```bash
+mkdir -p graphify-out
+python3 -c "import json; from pathlib import Path; from graphify.detect import detect; print(json.dumps(detect(Path('.'), gitignore=False)))" \
+  > graphify-out/.graphify_detect.json
+
 knowledgestore content-set
 ```
 
-That commits `knowledge/corpus/content-files.txt`, the set of files the pipeline
-itself classified as content, and the list a corpus search must read — the tree
-also holds each clone's extraction cache and graph, its VCS pack files and any
-vendored bundles, which on two measured estates outnumbered the corpus several
-times over. The report names the directories holding no content, aggregated across
-every repository holding one; excluding those with a `.graphifyignore` before
-extracting is much cheaper than filtering after, because extraction persists in the
-cache and in each clone's own graph where no later filter reaches it. Run it before
-extraction for that reason, and again afterwards so the committed list matches the
-final scan.
+Three things about that command, each with a failure behind it:
+
+- **`graphify detect` does not exist, and `graphify update .` does not write the
+  file.** At the store root `graphify update .` exits 0, reports the graph it
+  updated, and leaves no detect result — so an operator following the CLI finds
+  nothing and the next stage refuses.
+- **`gitignore=False` is what makes the corpus visible.** `repositories/` is in
+  the store's `.gitignore`, and the scan honours ignore rules, so the default
+  classifies the store's own handful of files and nothing in any clone.
+- **`mkdir -p graphify-out` first.** The shell opens the redirect target before
+  python runs, so an absent directory fails the command rather than the scan.
+
+This is a classification scan at the store root, not graph extraction: it reads
+the tree and writes one JSON file. Graph extraction still runs from inside each
+clone, as above.
+
+**What `gitignore=False` costs.** With `gitignore=False`, anything a repository
+excluded only through its own `.gitignore` becomes content unless the store's
+`.graphifyignore` re-excludes it — and that file is one forgotten reinstall away
+from absent, because `sync` ends in `git clean -fd -e graphify-out`. It trades an
+exclusion list each repository maintains for its own reasons for one this
+pipeline has to remember to reinstall. Two measured facts go with it, and a
+reader tends to assume the opposite of both:
+
+- **`gitignore=False` does not disable `.graphifyignore`.** Measured in two
+  independent sessions: with the parameter set, a `.graphifyignore` still
+  excluded a bundled directory inside a clone while the rest of that clone was
+  classified. The exclusion mechanism a store relies on survives the parameter.
+- **For content a repository tracks, the parameter changes nothing.** A tracked
+  file was never excluded by that repository's `.gitignore` and cannot be, so
+  `gitignore=False` widens the scan only over what a repository generates and
+  ignores. Anything committed that must not be extracted needs excluding
+  explicitly either way.
+
+**Where the scan does not complete, this route is unavailable.** On at least one
+real estate the scan does not finish at that scale, and that store builds its
+content set from extraction output instead. There is no substitute route to
+recommend: a store in that position has to produce
+`graphify-out/.graphify_detect.json` some other way, and every stage reading it
+takes it at face value — nothing downstream can tell how it was made.
+
+`knowledgestore content-set` commits `knowledge/corpus/content-files.txt`, the
+set of files the pipeline itself classified as content, and the list a corpus
+search must read — the tree also holds each clone's extraction cache and graph,
+its VCS pack files and any vendored bundles, which on two measured estates
+outnumbered the corpus several times over. The report names the directories
+holding no content, aggregated across every repository holding one; excluding
+those with a `.graphifyignore` before extracting is much cheaper than filtering
+after, because extraction persists in the cache and in each clone's own graph
+where no later filter reaches it. Run it before extraction for that reason, and
+again afterwards so the committed list matches the final scan.
 
 Do not hand-maintain an exclusion list instead. A list is a second model of what
 the tool produces: correct the day it is written, and wrong by omission the next

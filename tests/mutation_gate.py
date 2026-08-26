@@ -513,6 +513,17 @@ MUTATIONS = (
         "missing detect result - the exact failure mode the artefact exists to end",
     ),
     Mutation(
+        "refusal sends an operator to a step nothing provides",
+        "build_chunk_plan.py",
+        'f"No detection results at {config.DETECT_PATH}. {content_set.DETECT_PRODUCER} "',
+        'f"No detection results at {config.DETECT_PATH}. graphify writes this when it '
+        'scans the corpus, so run its detect step first. "',
+        "the wording that shipped, and the reason #236 was raised: there is no "
+        "`graphify detect` subcommand and `graphify update` at the store root writes "
+        "no detect result, so the remedy named a step an operator could not perform "
+        "and the only route to the file was undocumented",
+    ),
+    Mutation(
         "noise figure claimed from a tree nobody measured",
         "build_content_set.py",
         '    if not tree:\n        return {"measured": False}',
