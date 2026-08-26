@@ -1427,6 +1427,47 @@ MUTATIONS = (
         "for a stale .pyc would silently move every mutation run onto the installed "
         "package, which is a worse version of the same defect",
     ),
+    Mutation(
+        "the second interpolation dialect dropped",
+        "deploy_values.py",
+        "    return _DOLLAR_INTERPOLATION.sub(PLACEHOLDER, stripped)",
+        "    return stripped",
+        "#88: two deployment layouts interpolate differently, `{{ }}` and `${ }`, and the "
+        "second going unstripped publishes the variable names the first withholds. Nothing "
+        "counts a name that was not withheld, so both layouts' output reads as healthy",
+    ),
+    Mutation(
+        "the secret-location policy unwired",
+        "deploy_values.py",
+        '    _walk(withhold_secret_locations(value), "", out, max_chars)',
+        '    _walk(value, "", out, max_chars)',
+        "#88: a values file maps an environment variable to a store and an entry inside it, "
+        "which is a map of where each credential lives, and the flattened output is "
+        "committed. Every test of the primitive itself still passes with the call site "
+        "gone - the wiring-never-asserted class this gate exists for",
+    ),
+    Mutation(
+        "a nested secret store walked into",
+        "deploy_values.py",
+        "                PLACEHOLDER if reference and (store or entry) else "
+        "withhold_secret_locations(item)",
+        "                PLACEHOLDER\n"
+        "                if reference and (store or entry) and not isinstance(item, dict)\n"
+        "                else withhold_secret_locations(item)",
+        "#88: the store half is frequently a mapping rather than a scalar, so withholding "
+        "only scalars leaves the store name one level down, published under a key that "
+        "reads as structure - a redaction that looks applied and is not",
+    ),
+    Mutation(
+        "one role word is enough to redact",
+        "deploy_values.py",
+        "    return bool(stores) and bool(entries) and len(stores | entries) > 1",
+        "    return bool(stores) or bool(entries)",
+        "#88: `path`, `key` and `store` are ordinary configuration words on their own, so a "
+        "rule satisfied by one of them withholds real configuration facts. This is the "
+        "failure that reads as extra safety: a policy redacting everything answers no "
+        "deployment question, and the stage reports the same key count either way",
+    ),
 )
 
 
