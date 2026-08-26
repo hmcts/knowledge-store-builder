@@ -152,6 +152,20 @@ MUTATIONS = (
         "built those arguments chose where the process wrote",
     ),
     Mutation(
+        "the write guard applied to the reads",
+        "io.py",
+        '    if not path.exists():\n        return default\n    if path.suffix == ".gz":',
+        "    checked_write_target(path)\n    if not path.exists():\n"
+        '        return default\n    if path.suffix == ".gz":',
+        "the one-line answer to the same rule's second report - S8707 on read_json, "
+        "code-scanning alert 53 - which this library rejects: the guard is in the "
+        "module already, so calling it on a read is one line, and it then refuses "
+        "every relative path an operator types from a subdirectory. Confining reads "
+        "instead of suppressing was measured twice on the write side, at 48 and 4 "
+        "failing tests, and nothing on the read path observed either until "
+        "test_read_path_policy; with this applied the whole suite failed only there",
+    ),
+    Mutation(
         "deployments overwrites the committed graph from a stale one",
         "build_deployments.py",
         "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
@@ -812,6 +826,63 @@ MUTATIONS = (
         "runs is how a reconciliation ships and changes nothing",
     ),
     Mutation(
+        "secret-bearing content reported instead of refused",
+        "build_content_set.py",
+        "        _refuse_secret_bearing(refused, len(content))\n        return 2",
+        "        _refuse_secret_bearing(refused, len(content))",
+        "the reporting-instead-of-refusing shape, on the one input where reporting "
+        "cannot work: a state file holds resolved secret values, and by the time a "
+        "report is read the content is extracted and persists in the extraction cache "
+        "and in each clone's own graphify-out/, which sync deliberately preserves. "
+        "Reachable today only through a constructed content set - detect classifies no "
+        ".tfstate, so the refusal is dormant defence-in-depth and this entry keeps its "
+        "shape alive until the peer version changes",
+    ),
+    Mutation(
+        "the estate's own ruling ignored",
+        "build_content_set.py",
+        "    refused = content_set.secret_bearing(content, allowed)",
+        "    refused = content_set.secret_bearing(content)",
+        "the declaration is the only thing that makes this refusal safe to ship to "
+        "stores that already build: whether a named file is safe is a ruling nothing "
+        "in the pipeline can derive. An opt-out that is read and not applied reads "
+        "exactly like one that was honoured, because the refusal simply stands. Same "
+        "dormancy as the entry above - constructed input only, until detect classifies "
+        "the format",
+    ),
+    Mutation(
+        "emulator dumps dropped in silence",
+        "build_content_set.py",
+        "    _report_emulator_dumps(dumps, len(content), len(exposed), arguments.top)",
+        "    pass",
+        "an exclusion nobody sees is indistinguishable from content that was never "
+        "there, and this one changes a committed path list. The same escape as every "
+        "other unwired report in this file, with the count that reconciles the set "
+        "against what detect classified as its only observer",
+    ),
+    Mutation(
+        "the state-file rule anchored to the repository root",
+        "content_set.py",
+        "if path not in allowed and PurePosixPath(path).name.endswith(SECRET_BEARING_SUFFIXES)",
+        "if path not in allowed and len(PurePosixPath(path).parts) == 3",
+        "a rule that only fires on repositories/<repo>/<file> passes cleanly on every "
+        "estate that keeps its infrastructure in a subdirectory, which is most of "
+        "them - and passing cleanly is how it reads as compliance for files it never "
+        "looked at. Constructed input only while the refusal is dormant; the emulator "
+        "half of the same matcher is exercised on input the real detect pass produces",
+    ),
+    Mutation(
+        "the emulator-dump rule widened to a substring",
+        "content_set.py",
+        'EMULATOR_DUMP_NAMES = ("__azurite_db_*.json",)',
+        'EMULATOR_DUMP_NAMES = ("*azurite*",)',
+        "the opposite direction and the more tempting one: matching the emulator's "
+        "name anywhere takes out an estate's own emulator wiring - a client module, a "
+        "compose file, a fixture directory - all authored content, removed from a "
+        "committed path list by a rule that was only ever meant to drop one generated "
+        "filename",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -1263,6 +1334,37 @@ MUTATIONS = (
         "#227: a record that outlives its restore describes a file that is no longer "
         "mutated, so the next run overwrites a healthy file with older bytes - a stale "
         "artefact read as current, the same class as the leftover graph refusals above",
+    ),
+    Mutation(
+        "the file-list route grows a directory walk",
+        "extract_ast.py",
+        "        files = content_files(io.read_json_dict(source))",
+        '        files = list(config.REPOSITORIES_DIR.rglob("*.py"))',
+        "the builder guide tells an operator that exclusions applied at detect time carry "
+        "through this stage because it never walks a directory. That paragraph's "
+        "predecessor went stale when code changed and NOTHING failed - it was caught by "
+        "reading. A walk added here as a convenience keeps every behavioural test green "
+        "while reintroducing the second exclusion model the stage exists to remove",
+    ),
+    Mutation(
+        "the guide keeps the conclusion and loses the mechanism",
+        "docs/building-a-knowledge-store.md",
+        "never walks a directory",
+        "reads its input",
+        '"both .graphifyignore placements work on this route" is only true because the '
+        "stage has no scan root. An instruction whose reason has been removed is the one "
+        "someone talks themselves out of, and this one competes with graphify's own "
+        "printed instructions",
+    ),
+    Mutation(
+        "the placement table stops naming the version it was measured against",
+        "docs/building-a-knowledge-store.md",
+        "graphify 0.9.40",
+        "graphify",
+        "one cell of that table was disproved on a later graphify than the one it was "
+        "written against, and there was no way to tell which - so the correction could "
+        "not be distinguished from a contradiction. A version beside a measurement is "
+        "what makes the next disagreement diagnosable",
     ),
     Mutation(
         "the suite subprocess caches bytecode again",
