@@ -21,7 +21,7 @@ consumer that has to parse a manifest first re-derives the set badly instead.
     tr '\n' '\0' < knowledge/corpus/content-files.txt \
       | xargs -0 grep -nIs -- '<term>'
 
-## Three things this stage refuses to do
+## Four things this stage refuses to do
 
 **It never writes a set no clone on disk contributed to.** `detect` honours
 `.gitignore` and `repositories/` is gitignored, so a pass run at the store root
@@ -29,6 +29,28 @@ classifies the store's own files and stops - and the set that comes back is smal
 rather than empty, so the refusal below is stepped around rather than triggered.
 Clones that contributed nothing are otherwise reported and named, not refused: a
 repository created and never populated legitimately contributes nothing.
+
+**It never exposes a file in a format that holds resolved secret values.** A
+Terraform state file holds provider outputs verbatim, and there "report it and
+let a human judge" is the wrong shape: by the time the report is read the content
+is extracted, and extracted content persists in the extraction cache and in each
+clone's own `graphify-out/`, which `sync` deliberately preserves. So this is an
+exit code that names every offending path, overridable per file in
+`config/content-set-allowed.txt` or with `--allow`, because whether a named file
+is safe is a ruling the pipeline cannot derive.
+
+**On the current peer version this refusal cannot fire, and it is documented as
+dormant rather than as a guard.** graphify's detect pass does not classify
+`.tfstate`, so no state file reaches the content set - it is defence-in-depth
+against a peer change, one extension-map entry away given detect already
+classifies a plain `.json` as code. `content_set` carries the reasoning, and
+`DetectClassificationOfNamedFormatsTest` pins the premise against the real detect
+pass so the change is noticed rather than assumed.
+
+**Storage-emulator dumps are the lesser half and this half is live.** Those files
+*are* classified, so they do reach the content set, and they stay a separate,
+lesser response - excluded from the set and counted in the report, since they are
+wasted work rather than a leak.
 
 **It never writes an empty set.** A store whose detect result is missing gets an
 exit code and a sentence, not a file with nothing in it: an empty path list makes
@@ -215,6 +237,67 @@ def _report_absolute(content: list[str]) -> None:
     )
 
 
+def _refuse_secret_bearing(refused: list[str], classified: int) -> None:
+    """Every offending path, then the two ways past the refusal.
+
+    Named rather than counted, because the remedy is per file: each one is
+    removed from the corpus or ruled safe by name, and a count names nothing to
+    act on. The opt-out is printed with the refusal for the same reason - a
+    refusal whose escape is undocumented is worked around outside the library.
+
+    Unreachable on the current peer version, since detect classifies no
+    `.tfstate`; see `content_set.SECRET_BEARING_SUFFIXES`.
+    """
+    print(
+        f"REFUSING to write a content set: {len(refused):,} of the {classified:,} files "
+        "the pipeline classified as content are in a format that holds resolved secret "
+        "values. Nothing was written.",
+        flush=True,
+    )
+    for path in refused:
+        print(f"    {path}", flush=True)
+    print(
+        "  This is a refusal rather than a report because a report arrives too late. "
+        "Extracted content persists in graphify-out/cache/ast/ keyed by content hash, "
+        "and in each clone's own graphify-out/, which sync deliberately preserves - so "
+        "filtering the published graph afterwards reaches neither copy.\n"
+        "  Remove each file from the corpus and re-run the detect pass. If this estate "
+        "has decided a named file is safe, declare it in "
+        f"{store_paths.relative(config.CONTENT_SET_ALLOWED_PATH)} (one store-relative "
+        "path a line, # comments allowed), or pass --allow <path> once per file for a "
+        "single run.",
+        flush=True,
+    )
+
+
+def _report_emulator_dumps(dumps: list[str], classified: int, exposed: int, top: int) -> None:
+    """What was dropped from the set, counted and named, with the arithmetic.
+
+    Deliberately not a refusal: this is wasted work rather than a leak. Equally
+    deliberately not silent - an exclusion nobody sees is indistinguishable from
+    content that was never there, which is the whole shape of this failure class.
+    """
+    if not dumps:
+        return
+    print(
+        f"  excluded {len(dumps):,} emulator "
+        f"{'dump' if len(dumps) == 1 else 'dumps'} from the set: detect classified "
+        f"{classified:,} files and {exposed:,} are exposed. They are a named generated "
+        "format that yields zero nodes, so they cost a parse and return nothing - "
+        "wasted work rather than anything unsafe, which is why they are dropped here "
+        "and a secret-bearing format is refused outright:",
+        flush=True,
+    )
+    for path in dumps[:top]:
+        print(f"    {path}", flush=True)
+    if len(dumps) > top:
+        print(
+            f"  ...and {len(dumps) - top:,} more; all of them are named in "
+            f"{store_paths.relative(config.CONTENT_SET_PATH)}.",
+            flush=True,
+        )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="knowledgestore content-set",
@@ -226,6 +309,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=10,
         help="how many noise directories to name in the report (default 10). The full "
         "list is always written to content-set.json",
+    )
+    parser.add_argument(
+        "--allow",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="a store-relative path in a named format this stage refuses or excludes, "
+        "that this estate has decided to expose anyway, repeatable. For a lasting "
+        "decision write it into config/content-set-allowed.txt instead, where the "
+        "ruling is reviewable",
     )
     return parser.parse_args(argv)
 
@@ -252,6 +345,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     contribution = content_set.contributions(config.REPOSITORIES_DIR, content)
+    # Before the format rules, and measured on `content` rather than on what
+    # survives them. This asks whether detect saw the corpus at all - if it did
+    # not, the set is describing something other than the estate and searching it
+    # for named formats answers a question about the wrong files.
+    #
     # All or nothing, with no threshold, and the reason belongs here rather than in
     # a review comment: on a real corpus the gap between "some clones contributed
     # nothing" and "every clone contributed nothing" is orders of magnitude, so
@@ -262,30 +360,48 @@ def main(argv: list[str] | None = None) -> int:
         print(_no_contributor_refusal(contribution), flush=True)
         return 2
 
-    corpus = _corpus_measurement(content)
+    # The two named formats, before anything is written. Both consult the same
+    # declaration, so one place records every ruling this estate has made.
+    allowed = content_set.read_allowed(config.CONTENT_SET_ALLOWED_PATH) | {
+        store_paths.relative(path) for path in arguments.allow
+    }
+    refused = content_set.secret_bearing(content, allowed)
+    if refused:
+        _refuse_secret_bearing(refused, len(content))
+        return 2
+    dumps = content_set.emulator_dumps(content, allowed)
+    dropped = set(dumps)
+    exposed = [path for path in content if path not in dropped]
+
+    corpus = _corpus_measurement(exposed)
     kinds = content_set.kind_counts(detect)
     manifest = {
         "generated_from": io.layer_digests([config.DETECT_PATH], config.ROOT),
-        "content_files": len(content),
+        # Both numbers, so the exclusion reconciles in the artefact and not only
+        # in the report: classified = content_files + excluded, exactly.
+        "classified_files": len(content),
+        "content_files": len(exposed),
+        "excluded_emulator_dumps": dumps,
         "kinds": kinds,
         "corpus": corpus,
     }
     config.CONTENT_FILES_PATH.parent.mkdir(parents=True, exist_ok=True)
     io.checked_write_target(config.CONTENT_FILES_PATH)
     config.CONTENT_FILES_PATH.write_text(  # NOSONAR(S2083, S8707) - validated above
-        "".join(f"{path}\n" for path in content), encoding="utf-8"
+        "".join(f"{path}\n" for path in exposed), encoding="utf-8"
     )
     io.write_json(config.CONTENT_SET_PATH, manifest, indent=2)
 
     print(
-        f"{len(content):,} content files -> {config.CONTENT_FILES_PATH}\n"
+        f"{len(exposed):,} content files -> {config.CONTENT_FILES_PATH}\n"
         "  by detect category: "
         + (", ".join(f"{kind} {count:,}" for kind, count in kinds.items()) or "none reported"),
         flush=True,
     )
-    _report_corpus(corpus, len(content), arguments.top)
+    _report_emulator_dumps(dumps, len(content), len(exposed), arguments.top)
+    _report_corpus(corpus, len(exposed), arguments.top)
     _report_contribution(contribution)
-    _report_absolute(content)
+    _report_absolute(exposed)
     # The store-relative path, not the basename: the command is copied and pasted
     # from the store root, where the basename alone names nothing.
     print(
