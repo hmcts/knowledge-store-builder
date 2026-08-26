@@ -14,6 +14,11 @@ would have stopped the thing that actually happened.
     python3 tests/mutation_gate.py          # all mutations
     python3 tests/mutation_gate.py --list   # names only
 
+A run that is killed can leave a mutation applied, because SIGKILL cannot be
+handled: `apply` therefore records the original bytes in
+`tests/.mutation-gate-recovery` before touching a file, and the next run restores
+from that record before it does anything else.
+
 A surviving mutation is a failure of this gate, not a curiosity: it means the
 behaviour it describes could be removed today and the suite would stay green.
 
@@ -28,13 +33,30 @@ dead file-to-ticket join. Neither gate covers the other.
 from __future__ import annotations
 
 import argparse
+import signal
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "knowledgestore"
+
+# What a killed run leaves behind: the module it had mutated and the original
+# bytes, written before the mutation and deleted after the restore. SIGKILL
+# cannot be handled, so nothing in this process can put the file back - only
+# something already on disk can.
+RECOVERY_PATH = ROOT / "tests" / ".mutation-gate-recovery"
+
+# The signals that end the process without unwinding, so a `finally` never
+# runs: a timeout, a job kill and a cancelled CI step all send SIGTERM. SIGINT
+# is absent because CPython already raises KeyboardInterrupt for it.
+TERMINATION_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
 
 
 @dataclass(frozen=True)
@@ -540,6 +562,138 @@ MUTATIONS = (
         "which is how a real warning stops being read",
     ),
     Mutation(
+        "only the store root's output is refused",
+        "extract_ast.py",
+        "        in_a_clone = bool(name) and name in candidate.parts[:-1]",
+        "        in_a_clone = False",
+        "the first version of the refusal above, written and caught the same hour by "
+        "reading this library's own build notes: `sync` ends with "
+        "`git clean -fd -e graphify-out`, so that directory is the one thing in a "
+        "clone sync deliberately preserves and every repository in the corpus can "
+        "hold one. A refusal anchored at the store root alone passes the corpus copies "
+        "through, which is where most of them are",
+    ),
+    Mutation(
+        "the pipeline parses its own output again",
+        "extract_ast.py",
+        "    if artefacts:",
+        "    if False:",
+        "a store driving extraction itself excluded dependency bundles, build output "
+        "and state files from its hand-written list, and not the directory this "
+        "pipeline writes - so several hundred of the pipeline's own artefacts were "
+        "handed to the parser as source. Found by watching a run parse a graph file, "
+        "because an exclusion list has no failing case: correct the day it is written "
+        "and silently wrong at the next new artefact",
+    ),
+    Mutation(
+        "one repository's failure loses the estate again",
+        "extract_ast.py",
+        "except Exception as error:  # a parser raises whatever the grammar raises",
+        "except KeyboardInterrupt as error:",
+        "the reported failure this stage exists for: a whole-corpus call on a "
+        "several-hundred-repository estate ran over eight minutes at full CPU and "
+        "produced no output at all, with nothing to attribute it to. Reverting to an "
+        "unisolated loop restores exactly that, and the run reads as a parser problem "
+        "rather than as one repository's",
+    ),
+    Mutation(
+        "a partial layer reports success",
+        "extract_ast.py",
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 1',
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 0',
+        "the layer is written even when repositories failed, on purpose, so the exit "
+        "code is the only thing carrying the failure. Returning 0 takes a CI build "
+        "green over a layer missing whole repositories - the shape of every escape "
+        "found in this library, a check that reads one artefact and is silent about "
+        "the one that matters",
+    ),
+    Mutation(
+        "a repository that shrank is never named",
+        "extract_ast.py",
+        "    if before:",
+        "    if False:",
+        "the gap a reviewing operator found in the first version of this stage, and the "
+        "only one of their four controls that had caught anything real - two genuine "
+        "decreases on one refresh. Reconciling a run against its own input catches input "
+        "dropped within a run; it cannot catch a repository extracting less than last "
+        "time, where every count reconciles and the store loses structure quietly",
+    ),
+    Mutation(
+        "a decrease is reported as no movement",
+        "extract_ast.py",
+        "            if after[name] < before[name]",
+        "            if False",
+        "the narrower half of the same gap: with the report still printing for gone and "
+        "new repositories, an operator sees a movement section and reads its silence on "
+        "decreases as an all-clear. A report that runs is the strongest possible "
+        "disguise for a check that does not",
+    ),
+    Mutation(
+        "a failed repository is dropped from the baseline",
+        "extract_ast.py",
+        "    return {**carried, **counts}",
+        "    return dict(counts)",
+        "found by re-reading this stage after its own review passed: a repository that "
+        "failed vanished from the sidecar, so it read as absent from the content set on "
+        "the next run and new on the one after, and the count its recovery would be "
+        "compared against was gone. With every repository failing, the whole baseline was "
+        "replaced with nothing - a failed run erasing the record of what it cost",
+    ),
+    Mutation(
+        "the per-repository bound never fires",
+        "extract_ast.py",
+        "signal.alarm(seconds)",
+        "signal.alarm(0)",
+        "per-repository extraction names the repository that is hanging, which is no use "
+        "to an operator who is asleep - the run has to end. The first version of this "
+        "stage had the attribution and no bound, so a pathological parse was identifiable "
+        "and still unbounded",
+    ),
+    Mutation(
+        "files the extractor could not read are discarded again",
+        "extract_ast.py",
+        'unread = [str(f) for f in (result.get("failed_sources") or [])]',
+        "unread = []",
+        "found by asking the real extractor what it returns rather than trusting the "
+        "stub: it names every file it could not read and returns *successfully* while "
+        "doing so, and this stage dropped that field on the floor. A repository that "
+        "parsed none of its files reported as extracted with a node count of zero and "
+        "no explanation - the information existed, was handed over, and was not read",
+    ),
+    Mutation(
+        "the bound is swallowed by the extractor's own error handling",
+        "extract_ast.py",
+        "class RepositoryTimeout(BaseException):",
+        "class RepositoryTimeout(Exception):",
+        "found by running the bound against the real extractor rather than reasoning "
+        "about it: it wraps each file in its own `except Exception`, so a TimeoutError "
+        "was caught there, the file skipped, and the call returned successfully with "
+        "fewer nodes. The bound silently converted a hang into a smaller layer - the "
+        "exact failure the movement check exists to catch a whole run later - while "
+        "reporting the repository as extracted. Deriving from Exception reads like a "
+        "tidy-up",
+    ),
+    Mutation(
+        "the alarm is left armed for a later stage",
+        "extract_ast.py",
+        "        signal.alarm(0)\n        signal.signal(signal.SIGALRM, previous)",
+        "        signal.signal(signal.SIGALRM, previous)",
+        "`signal.alarm` is process-wide, so an alarm left set fires inside whatever stage "
+        "runs next in the same process and names a repository that stage never touched. "
+        "The hardest class of failure to attribute, introduced by the fix for the one "
+        "above",
+    ),
+    Mutation(
+        "an empty layer looks like a successful extraction",
+        "extract_ast.py",
+        "    if not files:",
+        "    if False:",
+        "mirrors `merge-layers`, which carries the same refusal for an observed "
+        "reason: an empty layer merged silently produces a smaller graph that reads "
+        "as a successful run. Without it here the symptom surfaces two stages later "
+        "as a merge failure rather than at the stage that produced it",
+    ),
+    Mutation(
         "merge inputs read from the declaration again",
         "merge_inputs.py",
         "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
@@ -992,7 +1146,130 @@ MUTATIONS = (
         "a repository name and searches the forge for it, which returns nothing for an "
         "artefact published to a binary repository and rate-limits while doing so",
     ),
+    # This gate's own file, mutated through the same machinery: a run that is
+    # killed used to leave a deliberately introduced defect in the working tree,
+    # and every check below reads that tree. Each `find` is spelt as two literals
+    # joined with `+` on purpose: the table quotes the code it mutates, so a single
+    # literal would match itself - it sits earlier in the file - and `apply` would
+    # rewrite this table rather than the code. `+` rather than adjacency because
+    # `ruff format` joins adjacent literals that fit on one line, which would put
+    # the whole string back. `test_a_mutation_of_this_gate_cannot_rewrite_its_own_table`
+    # fails if either happens.
+    Mutation(
+        "a termination signal stops unwinding the restore",
+        "tests/mutation_gate.py",
+        "    previous = [(number, signal.signal(number, handle)) "
+        + "for number in TERMINATION_SIGNALS]",
+        "    previous = []",
+        "#227: SIGTERM ends a process with no unwinding, so the restore in the loop's "
+        "`finally` never ran - and SIGTERM is what a timeout, a job kill and a cancelled "
+        "CI step send, which makes it the interrupt that actually happens. The comment on "
+        "that `finally` claimed to cover it, which is why nobody looked",
+    ),
+    Mutation(
+        "the record a SIGKILL cannot destroy is never written",
+        "tests/mutation_gate.py",
+        '    RECOVERY_PATH.write_bytes(mutation.module.encode("utf-8") ' + '+ b"\\n" + original)',
+        "    pass",
+        "#227: no signal handler covers SIGKILL, so the only thing that can put a file "
+        "back is bytes already on disk when the process died. Without them the tree keeps "
+        "the mutation and the next suite run in it reports real-looking failures in real code",
+    ),
+    Mutation(
+        "a recovery record is left unread at startup",
+        "tests/mutation_gate.py",
+        "    if recover" + "():",
+        "    if False:",
+        "#227: the record is worth nothing unread, and it has to be read before the "
+        "pre-check - a mutation still applied makes the suite fail for a reason that has "
+        "nothing to do with the tree, which the pre-check then reports as the suite being "
+        "broken. Written and never consulted is the half-wired shape this whole gate is for",
+    ),
+    Mutation(
+        "a used recovery record is left on disk",
+        "tests/mutation_gate.py",
+        "    RECOVERY_PATH.unlink(" + "missing_ok=True)",
+        "    pass",
+        "#227: a record that outlives its restore describes a file that is no longer "
+        "mutated, so the next run overwrites a healthy file with older bytes - a stale "
+        "artefact read as current, the same class as the leftover graph refusals above",
+    ),
 )
+
+
+class Terminated(Exception):
+    """A termination signal, raised so that `finally` clauses run."""
+
+    def __init__(self, number: int) -> None:
+        self.number = number
+        super().__init__(signal.Signals(number).name)
+
+
+@contextmanager
+def restoring_on_termination() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into `Terminated` for the duration of a block.
+
+    Installed here rather than at import time, and the previous handlers are put
+    back on the way out: this module is imported by the suite, and changing a
+    test runner's signal disposition as a side effect of an import would be its
+    own defect.
+    """
+
+    def handle(number: int, frame: FrameType | None) -> None:
+        raise Terminated(number)
+
+    previous = [(number, signal.signal(number, handle)) for number in TERMINATION_SIGNALS]
+    try:
+        yield
+    finally:
+        for number, handler in previous:
+            signal.signal(number, handler)
+
+
+def target_of(module: str) -> Path:
+    """The file a mutation names: a module of the package, or a path relative to
+    the repository root when it carries a directory - this gate's own file does."""
+    return ROOT / module if "/" in module else SRC / module
+
+
+def recover() -> int:
+    """Restore a file a killed run left mutated. Non-zero when a run must not start.
+
+    Called before the pre-check below, because a mutation still applied makes
+    the suite fail for a reason that has nothing to do with the working tree,
+    and the pre-check would report that as a real failure.
+    """
+    if not RECOVERY_PATH.is_file():
+        return 0
+    name, separator, original = RECOVERY_PATH.read_bytes().partition(b"\n")
+    module = name.decode("utf-8", "replace")
+    target = target_of(module) if separator and not _traversal(module) else None
+    if target is None or not target.is_file():
+        print(
+            f"{RECOVERY_PATH} records a mutation from an earlier run but does not name a "
+            f"file this gate can restore, so a source file may still hold a deliberately "
+            f"introduced defect. Restore it from git, then delete {RECOVERY_PATH}.",
+            file=sys.stderr,
+        )
+        return 1
+    target.write_bytes(original)
+    RECOVERY_PATH.unlink()
+    print(
+        f"Recovered {module}: an earlier run was killed with a mutation applied, and "
+        f"{RECOVERY_PATH} held the original bytes."
+    )
+    return 0
+
+
+def _traversal(module: str) -> bool:
+    """True when a recovery record names something outside the tree it should."""
+    return not module or Path(module).is_absolute() or ".." in Path(module).parts
+
+
+def restore(module: str, original: bytes) -> None:
+    """Put a mutated file back, byte for byte, and drop the recovery record."""
+    target_of(module).write_bytes(original)
+    RECOVERY_PATH.unlink(missing_ok=True)
 
 
 def run_suite() -> bool:
@@ -1006,18 +1283,25 @@ def run_suite() -> bool:
     return completed.returncode == 0
 
 
-def apply(mutation: Mutation) -> str:
-    """Apply one mutation, returning the original text for restoration."""
-    path = SRC / mutation.module
-    original = path.read_text(encoding="utf-8")
-    if mutation.find not in original:
+def apply(mutation: Mutation) -> bytes:
+    """Apply one mutation, returning the original bytes for restoration.
+
+    Bytes rather than text, and recorded on disk before the file is touched: a
+    re-decoded restore is a re-derivation of the original rather than the
+    original, and a process that is killed cannot restore anything at all.
+    """
+    path = target_of(mutation.module)
+    original = path.read_bytes()
+    source = original.decode("utf-8")
+    if mutation.find not in source:
         raise SystemExit(
             f"mutation '{mutation.name}' no longer applies: its target is absent from "
             f"{mutation.module}. Either the code moved - update the mutation - or the "
             "behaviour was removed, in which case decide deliberately rather than "
             "letting this gate quietly stop testing it."
         )
-    path.write_text(original.replace(mutation.find, mutation.replace, 1), encoding="utf-8")
+    RECOVERY_PATH.write_bytes(mutation.module.encode("utf-8") + b"\n" + original)
+    path.write_bytes(source.replace(mutation.find, mutation.replace, 1).encode("utf-8"))
     return original
 
 
@@ -1031,6 +1315,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{mutation.name:<38} {mutation.module:<32} {mutation.escaped_as}")
         return 0
 
+    if recover():
+        return 1
+
     if not run_suite():
         print(
             "The suite is already failing, so nothing can be concluded about any "
@@ -1040,18 +1327,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     survived = []
-    for mutation in MUTATIONS:
-        path = SRC / mutation.module
-        original = apply(mutation)
-        try:
-            caught = not run_suite()
-        finally:
-            # Always, including on interrupt: a mutation left in place is a
-            # corrupted working tree that reads as a real defect.
-            path.write_text(original, encoding="utf-8")
-        print(f"  {'caught ' if caught else 'SURVIVED'}  {mutation.name}")
-        if not caught:
-            survived.append(mutation)
+    with restoring_on_termination():
+        for mutation in MUTATIONS:
+            original = apply(mutation)
+            try:
+                caught = not run_suite()
+            except Terminated as termination:
+                print(
+                    f"\n{termination} while '{mutation.name}' was applied. "
+                    f"{mutation.module} is restored, so nothing is left mutated.",
+                    file=sys.stderr,
+                )
+                return 128 + termination.number
+            finally:
+                # On a pass, on an exception, on SIGINT (CPython raises
+                # KeyboardInterrupt) and on the signals `restoring_on_termination`
+                # handles. Not on SIGKILL, which no process can handle - that is
+                # what the record `apply` writes to RECOVERY_PATH is for.
+                restore(mutation.module, original)
+            print(f"  {'caught ' if caught else 'SURVIVED'}  {mutation.name}")
+            if not caught:
+                survived.append(mutation)
 
     print(f"\n{len(MUTATIONS) - len(survived)} of {len(MUTATIONS)} mutations caught.")
     for mutation in survived:
