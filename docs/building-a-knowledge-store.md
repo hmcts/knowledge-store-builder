@@ -315,8 +315,33 @@ signal you have reads as reassurance while production configuration hangs off
 unrelated code. An early version of this stage matched on any normalised
 substring and sent `id-service` to a video repository, because `id` is inside `video`.
 Matching now requires a whole hyphen-delimited segment, falling back to substring
-only for stems long enough that coincidence is implausible. If a match rate ever
-looks surprisingly good, suspect the matcher before believing it.
+only for stems long enough that coincidence is implausible, and last of all to the
+repository name equalling a leading *run* of the service's hyphen segments — the
+rule that joins the several components one repository ships, so a repository named
+`alpha` claims `alpha-agent`, `alpha-backend` and `alpha-frontend`. Whole
+segments, not a character prefix: `alpha` does not claim `alphabet-agent`, because
+a namesake claiming a service it merely starts is a deployment relationship
+nothing declared. Directional, so a service cannot claim a repository whose name
+extends its own; floored, so a short name cannot collect a whole naming
+convention; and last, so it only ever adds a join. If a match rate ever looks
+surprisingly good, suspect the matcher before believing it.
+
+**A service that matched nothing is two different facts.** Either a repository is
+in the graph and the join missed it, which is matcher work, or the estate holds no
+repository for that service at all — a deployment repository configures
+third-party components and report jobs whose code is somewhere else entirely. The
+run separates them, naming the services no repository in the graph shares even one
+word with:
+
+```
+  N service(s) matched no repository: ...
+  M of those share no name with any repository in the graph: ...
+```
+
+That second line is a scope fact, not a gap to chase: what closes it is adding a
+repository, and no name rule can reach those services. Measured on one estate,
+every unmatched service was of that kind — so a match rate that reads as a matcher
+missing half its joins was a denominator holding services no matcher can touch.
 
 The whole configuration stays in the graph for an agent to read; the explorer
 page carries a capped summary per deployment (`KSB_DEPLOY_PAGE_KEYS`), searchable

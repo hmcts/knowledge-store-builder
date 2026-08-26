@@ -176,6 +176,116 @@ MUTATIONS = (
         "artefact rather than describing one wrongly",
     ),
     Mutation(
+        "one repository's several components lose their deployment joins",
+        "build_deployments.py",
+        "        candidates = sorted(exact or loose, key=lambda r: (len(r), r)) or _prefix_claims(\n            bare, repos\n        )",
+        "        candidates = sorted(exact or loose, key=lambda r: (len(r), r))",
+        "#88: the two older name rules cannot see a repository named `alpha` "
+        "shipping `alpha-agent`, `alpha-backend` and `alpha-frontend`, so it "
+        "joined the service named exactly `alpha` and none of the components it "
+        "also ships. Their deployment configuration then reached no code in the "
+        "graph - a missing edge, which nothing in the report distinguishes from a "
+        "service nobody deploys",
+    ),
+    Mutation(
+        "the deployment leading-run rule runs before the rules it must not move",
+        "build_deployments.py",
+        "        candidates = sorted(exact or loose, key=lambda r: (len(r), r)) or _prefix_claims(\n            bare, repos\n        )",
+        "        candidates = _prefix_claims(bare, repos) or sorted(\n            exact or loose, key=lambda r: (len(r), r)\n        )",
+        "#88: the rule is additive only because it runs last. Consulted first it "
+        "re-points joins the segment and substring rules already made - "
+        "`delta-agent` from `svc-deltaagent` to `delta` - which is not a new join "
+        "but the same configuration silently attached to different code",
+    ),
+    Mutation(
+        "the deployment join crosses a word boundary again",
+        "build_deployments.py",
+        "if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(r) in runs]",
+        "if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(name).startswith(_norm(r))]",
+        "#88 as first written: a character prefix rather than whole segments, so "
+        "`alpha` claimed `alphabet-agent` wherever the repository named `alphabet` "
+        "was absent from the graph. That is a deployment relationship nothing "
+        "declared - valid on the page, wrong, and counted as a join, so it raised "
+        "the match rate rather than showing as the gap it is. The floor cannot "
+        "catch it: `alpha` is above the floor",
+    ),
+    Mutation(
+        "the deployment leading-run rule matches in both directions",
+        "build_deployments.py",
+        "if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(r) in runs]",
+        "if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(name) in _leading_runs(r)]",
+        "#88: the runs come from the service, and splitting the repository instead "
+        "inverts the join - a service named `alpha` would take a repository named "
+        "`alpha-agent`, attaching one component's configuration to another's code, "
+        "and the components the rule exists for lose their joins in the same move",
+    ),
+    Mutation(
+        "a short repository name collects a whole naming convention",
+        "build_deployments.py",
+        "if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(r) in runs]",
+        "if _norm(r) in runs]",
+        "#88: whole segments removed the coincidence the floor was first measured "
+        "against, and this is what it protects now that the segment rule does not "
+        "need it. There the entire stem matched; here a leading run did, so at one "
+        "to three characters the claimant is convention vocabulary (`ops-`, `ui-`) "
+        "and a repository with that name takes every service behind the prefix",
+    ),
+    Mutation(
+        "the deployment join normalises before it segments",
+        "build_deployments.py",
+        '    segments = [_norm(part) for part in name.split("-")]',
+        '    segments = _norm(name).split("-")',
+        "#88, and the defect this change turns on: `_norm` strips every separator, "
+        'so normalising first leaves nothing to segment on and "whole segments" '
+        "silently means nothing. The runs vanish, and the repair anyone reaches for "
+        "is a character prefix - which is how `alpha` came to claim "
+        "`alphabet-agent`, a deployment relationship nothing declared. Reported by "
+        "a store operator reading the implementation rather than its tests",
+    ),
+    Mutation(
+        "the more specific repository loses the deployment claim",
+        "build_deployments.py",
+        "    return sorted(claiming, key=lambda r: (-len(_norm(r)), r))",
+        "    return sorted(claiming, key=lambda r: (len(_norm(r)), r))",
+        "#88: shortest-first is the order the two rules above use, so it is the "
+        "one line to copy by mistake. Both `alpha` and `alpha-agent` are leading "
+        "runs of `alpha-agent-worker`, and the shorter hands one real "
+        "repository's production configuration to another",
+    ),
+    Mutation(
+        "two deployment runs disagree about which repository was claimed",
+        "build_deployments.py",
+        "    return sorted(claiming, key=lambda r: (-len(_norm(r)), r))",
+        "    return sorted(claiming, key=lambda r: -len(_norm(r)))",
+        "#88: claimants tie on length only by normalising to the same string, so "
+        "`alpha-core` and `alphacore` tie and the winner without the name key is "
+        "whatever the hash seed put first in a set. Two runs of one build then "
+        "write the deployment edge to different nodes, and the committed graph "
+        "diff is the only place it is visible",
+    ),
+    Mutation(
+        "a service no repository could match reads as a matcher gap",
+        "build_deployments.py",
+        "    if tally.out_of_reach:",
+        "    if False:",
+        "#88: a deployment repository configures third-party components and report "
+        'jobs whose code is in no repository here, and reported as "matched no '
+        'repository" they send an operator to tune a matcher that cannot reach '
+        "them. Measured on one estate, that was every unmatched service, so the "
+        "instruction the report gave was wrong for all of them and the match rate "
+        "read as a matcher missing half its joins",
+    ),
+    Mutation(
+        "a shared abbreviation counts as a repository worth looking at",
+        "build_deployments.py",
+        "if len(word) >= _MIN_WORD}",
+        "if word}",
+        "#88: `api` and `ops` are shared vocabulary rather than names, so counting "
+        "them as name material hides the scope fact behind a coincidence - the "
+        "expensive direction, because a suppressed scope fact reads as matcher work "
+        "that can be done",
+    ),
+    Mutation(
         "packages overwrites the committed graph from a stale one",
         "build_package_edges.py",
         "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
