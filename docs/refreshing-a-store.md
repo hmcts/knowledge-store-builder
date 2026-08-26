@@ -10,6 +10,7 @@ To build a store for the first time, see
 | You want to | Start with |
 |---|---|
 | Bring source repositories and generated artefacts up to date | [Refresh the store](#refresh-the-store) |
+| Work out which repository to add next | [Decide what to ingest next](#decide-what-to-ingest-next) |
 | Take repositories out of the estate | [Remove repositories](#remove-repositories) |
 | Change the library release used by the store | [Update the library version](#update-the-library-version) |
 
@@ -33,6 +34,24 @@ Skip `summaries snapshot` only when the store has no summaries to preserve.
 **Take it immediately before each re-cluster**, not once per session: a snapshot
 of a clustering the summaries are no longer keyed to is not refused, it just
 retains less, silently. Two re-clusters in one refresh need two snapshots.
+
+Run `knowledgestore summaries adrift` **before** that snapshot, on the store as
+committed. It answers the question a coverage count cannot: whether the committed
+snapshot still describes the committed graph, and so whether each summary still
+describes the community it names. Community ids are positional, so a store whose
+prose has been silently re-pointed reports the same `status` coverage as one whose
+has not.
+
+Two things about when it means something:
+
+- **It is vacuous immediately after `summaries snapshot`.** The snapshot is then
+  taken from the graph it is compared against, so every summary matches by
+  construction. Run it on a checkout, in CI, or at the start of a refresh — any
+  point where the two committed artefacts might have gone out of step.
+- **Exit 1 is drift; exit 2 means the check could not run**, and the two need
+  opposite responses. An unreadable membership — a clustering step that printed
+  success without persisting its result, say — makes every summary compare as
+  adrift, and the answer to that is to fix the graph, never to re-author prose.
 
 If the store reads its issue tracker, run `fetch-tickets` after `intent`, which
 is the stage that discovers which tickets exist:
@@ -82,8 +101,14 @@ summaries onto them by membership overlap:
 ```bash
 knowledgestore record-clustering
 knowledgestore summaries remap
+knowledgestore summaries snapshot
 knowledgestore summaries extract
 ```
+
+The second `snapshot` re-keys the baseline to the clustering the remapped
+summaries now sit on. Without it the committed snapshot describes the graph the
+store no longer has, and the next refresh remaps from a baseline that is
+consistently wrong — the one state `remap`'s own guards cannot see.
 
 Read the retention reported by `remap` — and before you attribute a low figure to
 the corpus, read what `status` says about the partitioner. A refresh run where
@@ -111,10 +136,101 @@ finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See
 [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record).
 
+### Compare this refresh with the last one
+
+`intent`, `merge-layers` and `explorer` record what they measured in
+`knowledge/telemetry.json` and print how each number moved since the last
+recorded build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_indexed: 28,093 -> 28,140 (+0.2%)
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+  layers.ast_nodes: 19,353 -> 19,502 (+0.8%)
+```
+
+Read the movements rather than the totals. A number is plausible in isolation
+and implausible beside its predecessor, which is what makes the second line
+above worth stopping for: a file-to-ticket join that lost three quarters of its
+matches reports a healthy-looking fraction of the graph, and nothing else in a
+build contradicts it.
+
+```bash
+git diff knowledge/telemetry.json    # the record of what this refresh changed
+```
+
+Commit the file with the rest of the store. Nothing fails on a movement — an
+estate change moves all of these legitimately, and a check that fires on every
+intentional change gets switched off — with one exception: a measurement that
+was non-zero and is now zero is a warning on stderr, because a population that
+had members and now has none needs no judgement about the estate.
+
+`knowledgestore status` prints the record and compares nothing. It measures none
+of these itself, so a fresh figure beside a recorded one would claim a
+comparison it never made.
+
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
-ran, what authored coverage remains, whether grounding checks passed and
-whether the source-drift check is clean.
+ran, what authored coverage remains, whether grounding checks passed, what the
+telemetry moved by and whether the source-drift check is clean.
+
+## Decide what to ingest next
+
+Rank what the estate already depends on and does not hold, from the build files
+in the repositories the store has synced:
+
+```bash
+knowledgestore gaps                        # top 20 namespaces
+knowledgestore gaps --limit 0              # all of them
+```
+
+The stage reads `pom.xml`, `build.gradle`, `package.json` and Terraform module
+sources, collects the coordinates the estate **consumes**, subtracts the ones it
+**builds**, and ranks the remainder. It writes nothing, reads no graph, touches
+no network, and never exits non-zero on a finding.
+
+Widening the repository-name prefixes is the intuitive move and the wrong one.
+Measured on one estate it would have added mostly reusable infrastructure
+wrappers and empty repositories, and contradicted an exclusion already recorded
+deliberately. Dependency evidence answers a different question — not *what
+shares our naming* but *what do we already depend on that we do not hold* — and
+on that estate it found a repository holding a shared schema model, referenced
+heavily by artefacts nothing in the estate built. Adding it resolved every
+unresolved reference in a payload contract the store had already published a
+finding about, and that finding was rewritten.
+
+Four things to know before acting on the output:
+
+- **Read the class column before the weight.** Domain namespaces are listed
+  first whatever their weight, because most reference weight is framework
+  plumbing and a reference to a test utility says the estate writes tests, not
+  how its business works. `KSB_FRAMEWORK_MARKERS` replaces the marker list for
+  an estate whose plumbing is named differently.
+- **`main` and `test` are never summed.** They answer different questions: the
+  product needs a main-scope dependency, whereas a test-scope one tells you the
+  estate writes tests against it. A blended figure hides which one you read.
+- **Resolve a coordinate from your artefact repository, not from the forge.** An
+  internal artefact is published to a binary repository, so its `artifactId` may
+  appear in no source file at all and code search returns nothing while
+  rate-limiting. The authoritative mapping is the published POM's `<scm>` URL.
+  Name matching against a large organisation returns confident nonsense from
+  unrelated programmes, so the stage refuses to try.
+- **Unbuilt does not mean addable.** On the estate this was measured against,
+  roughly a hundred coordinates were unbuilt and one was worth adding. The stage
+  ranks and explains; the decision is yours.
+
+The report reads `config/estate-boundary.txt` where there is one, so a module
+consumed under an `alias` of a repository the store already holds is not
+reported at all, a repository ruled `not-used` or `decommissioned` is shown as a
+decision rather than a gap, and one ruled `active` and not held is named as the
+candidate the estate has already agreed about. Without a declaration the report
+says so: see
+[Declare the boundary](creating-a-store.md#declare-the-boundary).
+
+Adding a repository then goes through `config/repository-filters.txt` and a
+normal [refresh](#refresh-the-store), which moves community ids exactly as any
+other membership change does. Record the candidates you ruled out in the
+boundary declaration, so the next run of this report shows them as decisions.
 
 ## Remove repositories
 
@@ -310,4 +426,6 @@ Two failures, both reported by store operators:
 | Symptom | Action |
 |---|---|
 | `summaries remap` would discard most prose | Stop. Verify clustering coverage before remapping; a clustering command can report success without saving its result. |
+| `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
+| `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |

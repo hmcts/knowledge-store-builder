@@ -76,6 +76,7 @@ class ExportToIntentSeamTest(SettingsIsolated):
                 / "intent"
                 / "ticket-descriptions.json.gz"
             )
+            config.configure(TELEMETRY_PATH=root / "knowledge" / "telemetry.json")
             code = intent.main()
 
             index = json.load(gzip.open(config.INTENT_INDEX_PATH, "rt", encoding="utf-8"))

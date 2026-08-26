@@ -274,6 +274,7 @@ class BuildPageSmokeTest(SettingsIsolated):
             config.configure(DEEPDIVES_PATH=root / "missing-dives.json")
             config.configure(EXPLORER_PATH=root / "explorer.html")
             config.configure(PROVENANCE_PATH=root / "provenance.json")
+            config.configure(TELEMETRY_PATH=root / "telemetry.json")
             with open(config.PROVENANCE_PATH, "w") as pf:
                 _json.dump(
                     {

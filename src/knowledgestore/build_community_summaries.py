@@ -20,6 +20,11 @@ Claude Code (maintainers have a licence; consumers never need one):
        After re-clustering, carries summaries onto the new ids by membership
        overlap and reports retention. Refuses on an unclustered graph.
 
+  4a. knowledgestore summaries adrift [--bar 0.6] [--precision 0.2] [--coverage 0.5]
+       Whether the snapshot still describes the graph: which committed summaries
+       are keyed to a community that no longer holds the members they were
+       written about. Exit 1 on drift, 2 when the check could not run.
+
   5. knowledgestore summaries merge <file.json ...>
        -> knowledge/summaries/communities.json  (committed)
        Validates ids and length bounds, merges over any existing file.
@@ -36,11 +41,13 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 
 from . import config
 from . import graph_files
+from . import graph_stream
 from . import io
 from . import kinds
 
@@ -280,6 +287,421 @@ def snapshot() -> int:
         f"Snapshotted {len(members)} communities "
         f"({sum(len(v) for v in members.values())} member nodes) -> {config.SUMMARIES_SNAPSHOT_PATH}"
     )
+    return 0
+
+
+# How many adrift or narrowed communities the report names individually before it
+# stops and gives a count. A re-cluster can strand thousands, and a wall of ids
+# reads as noise rather than as a finding.
+REPORT_LIMIT = 20
+
+# Above this share, a population of node ids counts as namespaced `<repo>::<id>`.
+# Half, because the question is only which id space a side is *mostly* in - two
+# sides on opposite answers are not comparable, whatever the exact proportions.
+NAMESPACED_SHARE = 0.5
+
+
+def _by_id(name: str) -> tuple[int, str]:
+    """Deterministic order for community ids that are numeric strings.
+
+    Length first so `9` sorts before `10`, then lexically so two ids of the same
+    length never swap between runs. The tiebreak `_claim_targets` already uses.
+    """
+    return len(name), name
+
+
+def membership_drift(
+    summaries: dict,
+    snapshot: dict,
+    nodes: Iterable[dict],
+    bar: float = DEFAULT_BAR,
+    precision: float = DEFAULT_PRECISION,
+    coverage: float = DEFAULT_COVERAGE,
+    described: str = "",
+) -> dict:
+    """Which committed summaries no longer describe the community they are keyed to.
+
+    `described` names the graph file the nodes came from, for the messages. A
+    store has two graph files and the caller decides which it read, so naming
+    `config.GRAPH_PATH` here would put the wrong one in the message on any
+    checkout where only the committed `.gz` exists.
+
+    Community ids are positional, so a summary is bound to a *number*; only the
+    snapshot binds it to a member *set*. Rebuild or re-cluster without refreshing
+    the snapshot and every summary stays attached to a community it no longer
+    describes, with no outward sign: every community still has a summary and every
+    summary still has a community, so the coverage `status` reports is the same
+    either way. `_remap_refusal` cannot see it, because a snapshot taken from a
+    stale graph shares every node id with that same stale file - consistent and
+    wrong is the one case that guard is blind to.
+
+    **Measured the way `remap` compares, deliberately.** For each summary, the
+    share of its snapshot members the graph still files under that same community
+    id - `remap`'s recall - and the share of the community those members now make
+    up - `remap`'s precision. Not strict set equality: a guard stricter than the
+    tool it guards sends people re-authoring prose `remap` would have carried
+    unchanged. Both, because recall alone was measured on a real refresh to carry
+    prose describing a corner of something much larger.
+
+    Ids are compared exactly, which is also what `remap` does - `_claim_targets`
+    looks each snapshot member up in a dict keyed by raw `node["id"]`. Stripping a
+    `<repo>::` prefix to compare would be *looser* than the `remap` this guards,
+    reporting prose as sound that `remap` will drop; and in a merged estate two
+    repositories can hold the same local id, so collapsing the prefix silently
+    merges distinct nodes into one member. Where the two sides are in different id
+    spaces, that is named as its own cause or note rather than reported as drift.
+
+    Four causes stop the comparison instead of returning a verdict, because each
+    makes *every* summary compare as adrift and each needs the opposite response
+    to "membership moved":
+
+    - `no-graph` - nothing was read at all.
+    - `no-membership` - the nodes carry no `community`. graphify holds the
+      assignment in that key, so a renamed key, or a clustering step that printed
+      success without persisting its result, reads as total drift.
+    - `stale-graph` - the graph read disagrees with its committed counterpart, so
+      the community ids it carries may not be the ones the store ships. Checked
+      before any count is printed, because stating a count from the wrong file as
+      though it were the store's is the same error one step earlier.
+    - `wrong-snapshot` - the snapshot and the graph share no node ids, the same
+      condition `_remap_refusal` refuses on.
+
+    Summaries with no snapshot entry are returned as their own population, never
+    filtered out. They can be neither checked nor re-keyed - a remap cannot even
+    withdraw them - so excluding them narrows the population and then reports a
+    count as though it had covered everything.
+    """
+    wanted = {str(key) for key in summaries}
+    # An empty member list joins the unsnapshotted rather than scoring 0.0: an
+    # absent measurement must not read as a measured total loss.
+    snap_sets = {str(c): set(ids) for c, ids in snapshot.items() if str(c) in wanted and ids}
+    snapshot_ids: set[str] = set().union(*snap_sets.values()) if snap_sets else set()
+    counts, kept, sizes = _tally_membership(nodes, snap_sets, snapshot_ids)
+    cause, message = _blocking_cause(counts, snapshot_ids, coverage, described)
+    result: dict = {
+        "cause": cause,
+        "message": message,
+        "nodes": counts["nodes"],
+        "clustered": counts["clustered"],
+        "communities": counts["communities"],
+        "attached": [],
+        "adrift": [],
+        "narrowed": [],
+        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),
+        "snapshot_ids": len(snapshot_ids),
+        "namespaced_graph_ids": counts["namespaced_graph_ids"],
+        "namespaced_snapshot_ids": sum(1 for node_id in snapshot_ids if "::" in node_id),
+    }
+    if cause:
+        return result
+    result.update(_classify(snap_sets, kept, sizes, bar, precision))
+    return result
+
+
+def _tally_membership(
+    nodes: Iterable[dict], snap_sets: dict[str, set[str]], snapshot_ids: set[str]
+) -> tuple[dict, Counter, Counter]:
+    """One streamed pass, counting only what the comparison needs.
+
+    Deliberately holds no graph ids of its own: `kept` needs
+    `|snapshot members that the graph still files here|`, which is answered by
+    testing each streamed id against the snapshot's set as it goes. On the largest
+    estate available a loaded read of the same question was 5.3s and 3.75 GB
+    against 2.2s and 0.04 GB streamed.
+    """
+    kept: Counter = Counter()
+    sizes: Counter = Counter()
+    communities: set[str] = set()
+    total = clustered = overlap = namespaced = 0
+    for node in nodes:
+        total += 1
+        node_id = node.get("id")
+        if node_id is not None and "::" in str(node_id):
+            namespaced += 1
+        if node_id in snapshot_ids:
+            overlap += 1
+        community = node.get("community")
+        if community is None:
+            continue
+        clustered += 1
+        name = str(community)
+        communities.add(name)
+        if name in snap_sets:
+            sizes[name] += 1
+            if node_id in snap_sets[name]:
+                kept[name] += 1
+    counts = {
+        "nodes": total,
+        "clustered": clustered,
+        "communities": len(communities),
+        "overlap": overlap,
+        "namespaced_graph_ids": namespaced,
+    }
+    return counts, kept, sizes
+
+
+def _blocking_cause(
+    counts: dict, snapshot_ids: set[str], coverage: float, described: str
+) -> tuple[str | None, str]:
+    """Why the comparison must not return a verdict, or `(None, "")` when it may.
+
+    Each of these makes *every* summary compare as adrift, and each needs the
+    opposite response to "membership moved" - so they are named rather than
+    counted. See `membership_drift` for what each one means.
+    """
+    total, clustered = counts["nodes"], counts["clustered"]
+    if not total:
+        return "no-graph", (
+            f"Cannot check membership: no nodes were read from {described or 'the graph'}. "
+            "Nothing was compared, so nothing here says the prose is sound."
+        )
+    if clustered / total < coverage:
+        return "no-membership", (
+            f"Cannot check membership: only {clustered} of {total} nodes carry a community "
+            f"({clustered / total:.1%}, floor {coverage:.0%}). Every summary would compare as "
+            "adrift, and that is no membership having been read rather than membership having "
+            "moved - graphify carries the assignment in `community`, so a renamed key, or a "
+            "clustering step that printed success without writing its result, looks exactly "
+            "like this. Do not re-author prose on this result. Pass --coverage to lower the "
+            "floor for a deliberately sparse graph."
+        )
+    if snapshot_ids and not counts["overlap"]:
+        return "wrong-snapshot", (
+            f"Cannot check membership: the snapshot and {described or 'the graph'} share no "
+            "node ids, so this is the wrong snapshot - the same condition `summaries remap` "
+            "refuses on. Every summary would compare as adrift. Re-take the snapshot from "
+            "this graph rather than re-authoring prose."
+        )
+    return None, ""
+
+
+def _classify(
+    snap_sets: dict[str, set[str]],
+    kept: Counter,
+    sizes: Counter,
+    bar: float,
+    precision: float,
+) -> dict[str, list]:
+    """Each checked community filed under attached, adrift or narrowed.
+
+    Adrift and narrowed are separate populations because the responses differ:
+    adrift prose is keyed to a set that moved, narrowed prose is still about its
+    members and no longer about most of what a reader sees.
+    """
+    populations: dict[str, list] = {"attached": [], "adrift": [], "narrowed": []}
+    for name in sorted(snap_sets, key=_by_id):
+        members = snap_sets[name]
+        size = sizes[name]
+        entry = {
+            "id": name,
+            "was": len(members),
+            "size": size,
+            "share": round(kept[name] / len(members), 3),
+            "precision": round(kept[name] / size, 3) if size else 0.0,
+        }
+        if entry["share"] < bar:
+            populations["adrift"].append(entry)
+        elif entry["precision"] < precision:
+            populations["narrowed"].append(entry)
+        else:
+            populations["attached"].append(entry)
+    return populations
+
+
+def _namespace_note(result: dict) -> str:
+    """A line naming an id-space mismatch, when that is what the drift is.
+
+    The trap a first implementation of this check fell into: the snapshot held
+    bare ids, the graph held `<repo>::<id>`, and an exact comparison reported
+    communities as adrift that were not. `wrong-snapshot` catches the
+    whole-population case; this catches the partial one, where enough ids still
+    match for the comparison to look legitimate.
+
+    Named rather than corrected. Stripping the prefix would make this check looser
+    than the `remap` it guards - see `membership_drift` - so the honest move is to
+    say the measurement may not mean what it appears to and leave re-taking the
+    snapshot to the operator.
+    """
+    if not result["nodes"] or not result["snapshot_ids"]:
+        return ""
+    graph_share = result["namespaced_graph_ids"] / result["nodes"]
+    snapshot_share = result["namespaced_snapshot_ids"] / result["snapshot_ids"]
+    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):
+        return ""
+    return (
+        f"  Note: {graph_share:.0%} of the graph's node ids are namespaced `<repo>::<id>` "
+        f"against {snapshot_share:.0%} of the snapshot's, so the two are in different id "
+        "spaces and this may be a mismatch rather than moved membership. Re-take the snapshot "
+        "from this graph before re-authoring anything. Comparing with the prefix stripped is "
+        "not the fix: `summaries remap` matches ids exactly, so a looser check here would "
+        "report prose as sound that remap will drop."
+    )
+
+
+def _graph_to_check() -> Path | None:
+    """The graph file this check reads: the one `remap` reads, or the committed one.
+
+    `config.GRAPH_PATH` is the uncompressed graph every store gitignores, so it is
+    both the file `remap` reads and the file that is absent on a fresh checkout.
+    Stopping there would make the check unrunnable exactly where an operator wants
+    it, and streaming the `.gz` costs the same - so fall back to the committed
+    archive, and name the file that was read rather than leaving a reader to guess
+    which of a store's two graphs a count describes.
+    """
+    if config.GRAPH_PATH.is_file():
+        return config.GRAPH_PATH
+    other = graph_files.counterpart(config.GRAPH_PATH)
+    return other if other is not None and other.is_file() else None
+
+
+def _report_population(label: str, entries: list, note: str = "") -> None:
+    if not entries:
+        return
+    print(f"{label}: {len(entries)}")
+    for entry in entries[:REPORT_LIMIT]:
+        print(
+            f"  community {entry['id']}: {entry['share']:.0%} of its {entry['was']} snapshot "
+            f"members are still filed there; the community now holds {entry['size']} nodes, "
+            f"{entry['precision']:.0%} of them described"
+        )
+    if len(entries) > REPORT_LIMIT:
+        print(f"  ... and {len(entries) - REPORT_LIMIT} more")
+    if note:
+        print(note)
+
+
+def adrift(
+    bar: float = DEFAULT_BAR,
+    precision: float = DEFAULT_PRECISION,
+    coverage: float = DEFAULT_COVERAGE,
+) -> int:
+    """Report which committed summaries no longer describe the community they name.
+
+    Exit codes are three-valued on purpose. `2` is "the check could not run", and
+    it is separate from `1` because the two need opposite responses: drift means
+    re-key or re-author, an unreadable membership means fix the graph and run
+    again. Collapsing them is how a one-line read failure gets answered by
+    rewriting an estate's prose.
+
+    **Vacuous immediately after `summaries snapshot`**, which is worth saying
+    because nothing in a green result can say it: the snapshot is then taken from
+    the graph it is compared against, so every summary matches by construction.
+    The check means something on a checkout, in CI, or at the start of a refresh -
+    wherever the two committed artefacts have had an opportunity to go out of
+    step.
+    """
+    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    if not summaries:
+        print(
+            f"No summaries at {config.SUMMARIES_PATH}, so there was nothing to check. "
+            "This is not a clean result.",
+            file=sys.stderr,
+        )
+        return 2
+    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
+        print(
+            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}, so nothing can say "
+            f"whether the {len(summaries)} committed summaries still describe their "
+            "communities. Run `summaries snapshot`.",
+            file=sys.stderr,
+        )
+        return 2
+    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
+        snapshot: dict = json.load(handle)
+    if not snapshot:
+        print(
+            f"The membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH} is empty, so nothing "
+            "was compared. Re-run `summaries snapshot` against a clustered graph.",
+            file=sys.stderr,
+        )
+        return 2
+    graph = _graph_to_check()
+    if graph is None:
+        print(
+            f"No graph at {config.GRAPH_PATH} or its .gz counterpart, so the snapshot cannot be "
+            "compared against anything.",
+            file=sys.stderr,
+        )
+        return 2
+    result = membership_drift(
+        summaries,
+        snapshot,
+        graph_stream.iter_array(graph),
+        bar=bar,
+        precision=precision,
+        coverage=coverage,
+        described=graph.name,
+    )
+    # A disagreeing counterpart is the fourth blocking cause, and it is checked
+    # before any count is stated - reported by an operator whose run printed "One of
+    # them is stale" and then returned a verdict of `1`, whose documented response
+    # is to re-take the snapshot and re-author. On their store that instruction
+    # would have destroyed five thousand correct summaries.
+    #
+    # It is the cause an operator is most likely to meet, because `_graph_to_check`
+    # prefers the gitignored file - the one most likely to be a stale leftover -
+    # over the committed archive, which by definition is not.
+    stale = graph_files.disagreement(
+        graph,
+        (result["communities"], result["clustered"]),
+        "Community ids are positional, so every summary would be compared against "
+        "communities from a graph the store may not ship.",
+    )
+    if stale:
+        print(
+            f"Cannot check membership: {graph.name} and its counterpart hold different "
+            "graphs, so the counts read here may not describe what this store ships.",
+            file=sys.stderr,
+        )
+        print(stale.rstrip("\n"), file=sys.stderr)
+        print(
+            "Do not re-take the snapshot and do not re-author prose on this result - both "
+            "would answer a read failure by rewriting an estate's prose. Read the graph the "
+            "store ships and run again.",
+            file=sys.stderr,
+        )
+        return 2
+    print(
+        f"Read {result['nodes']} nodes and {result['communities']} communities from "
+        f"{graph.name}; the snapshot holds {len(snapshot)} communities."
+    )
+    if result["cause"]:
+        print(result["message"], file=sys.stderr)
+        return 2
+    checked = len(result["attached"]) + len(result["adrift"]) + len(result["narrowed"])
+    print(
+        f"Membership: {len(result['attached'])} of {checked} checked summaries still describe "
+        f"the community they name (recall bar {bar:.0%}, precision floor {precision:.0%})"
+    )
+    print(
+        f"Reconciles: {checked} checked + {len(result['unsnapshotted'])} with no snapshot entry "
+        f"= {len(summaries)} committed summaries"
+    )
+    note = _namespace_note(result)
+    _report_population(
+        "Adrift - too few of its members are still filed under that id, so the prose is keyed "
+        "to a set that moved",
+        result["adrift"],
+        note,
+    )
+    _report_population(
+        "Narrowed - the members stayed but the community grew around them, so the prose "
+        "describes a corner of it",
+        result["narrowed"],
+    )
+    if result["unsnapshotted"]:
+        named = ", ".join(result["unsnapshotted"][:REPORT_LIMIT])
+        more = (
+            f" ... and {len(result['unsnapshotted']) - REPORT_LIMIT} more"
+            if len(result["unsnapshotted"]) > REPORT_LIMIT
+            else ""
+        )
+        print(
+            f"No snapshot entry: {len(result['unsnapshotted'])} summaries can be neither "
+            f"checked nor re-keyed - a remap cannot even withdraw them. {named}{more}"
+        )
+    if result["adrift"] or result["narrowed"] or result["unsnapshotted"]:
+        return 1
     return 0
 
 
@@ -1031,6 +1453,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         options = parser.parse_args(arguments[1:])
         return verify(sample=options.sample, strict=options.strict, estate=options.estate)
+    if arguments[:1] == ["adrift"]:
+        parser = argparse.ArgumentParser(prog="knowledgestore summaries adrift")
+        parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
+        parser.add_argument("--precision", type=float, default=DEFAULT_PRECISION)
+        parser.add_argument("--coverage", type=float, default=DEFAULT_COVERAGE)
+        options = parser.parse_args(arguments[1:])
+        return adrift(bar=options.bar, precision=options.precision, coverage=options.coverage)
     if arguments[:1] == ["remap"]:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries remap")
         parser.add_argument("--bar", type=float, default=DEFAULT_BAR)
