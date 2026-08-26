@@ -149,6 +149,11 @@ CONTENT_SET_PATH = ROOT / "knowledge" / "corpus" / "content-set.json"
 # What each repository's clone pointed at when the store was last built.
 # Written by the sync stage; read by status, the manifest and the explorer.
 PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
+# What the last build measured, so the next one can say what moved. Written by
+# the stages that compute the counts (intent, merge-layers, explorer) and read
+# back by each of them before it overwrites its own; `status` prints it.
+# Committed on purpose: the diff is the record of what a refresh changed.
+TELEMETRY_PATH = ROOT / "knowledge" / "telemetry.json"
 TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
 TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
 TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
@@ -465,6 +470,7 @@ def _recompute_paths() -> None:
         CONTENT_FILES_PATH=root / "knowledge" / "corpus" / "content-files.txt",
         CONTENT_SET_PATH=root / "knowledge" / "corpus" / "content-set.json",
         PROVENANCE_PATH=root / "knowledge" / "provenance.json",
+        TELEMETRY_PATH=root / "knowledge" / "telemetry.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
         TOPICS_DOCS_DIR=root / "docs" / "topics",

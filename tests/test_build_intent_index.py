@@ -76,6 +76,7 @@ def run_stage(commits, repo="repo-a"):
             HISTORY_DIR=root / "history",
             INTENT_INDEX_PATH=root / "file-tickets.json.gz",
             TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+            TELEMETRY_PATH=root / "telemetry.json",
         )
         printed = io.StringIO()
         with contextlib.redirect_stdout(printed):

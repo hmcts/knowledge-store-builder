@@ -565,6 +565,20 @@ step-definition edges once, and nothing else noticed.
 - **Record provenance.** Per-repository commit SHAs turn "the store is
   probably current" into a checkable claim, and let a dossier say exactly what
   it was measured against.
+- **Keep paths in the store's own files relative to the store root.** Relative at
+  rest, absolute in flight: `knowledgestore.store_paths` converts both ways, and
+  readers that want absolute paths keep getting them. An absolute path at rest
+  records the build machine's directory layout in a published artefact and stops
+  naming a real file the moment the store moves — and the failure is silent, because
+  the entry counts still reconcile and the JSON is still well-formed. Check it with:
+
+  ```bash
+  knowledgestore status --paths
+  ```
+
+  It reads every tracked file, names the ones carrying absolute paths and counts
+  them, and separates the artefacts that hold them by contract — graphify's
+  `FILE_LIST` has to be absolute verbatim — from the ones that should not.
 - **Regenerate prose, do not hand-edit it.** Editing an LLM-authored summary to
   match a rename is how a brief stops matching the evidence it cites. Either
   regenerate, or leave it and say it is stale.

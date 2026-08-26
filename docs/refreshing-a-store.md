@@ -34,6 +34,24 @@ Skip `summaries snapshot` only when the store has no summaries to preserve.
 of a clustering the summaries are no longer keyed to is not refused, it just
 retains less, silently. Two re-clusters in one refresh need two snapshots.
 
+Run `knowledgestore summaries adrift` **before** that snapshot, on the store as
+committed. It answers the question a coverage count cannot: whether the committed
+snapshot still describes the committed graph, and so whether each summary still
+describes the community it names. Community ids are positional, so a store whose
+prose has been silently re-pointed reports the same `status` coverage as one whose
+has not.
+
+Two things about when it means something:
+
+- **It is vacuous immediately after `summaries snapshot`.** The snapshot is then
+  taken from the graph it is compared against, so every summary matches by
+  construction. Run it on a checkout, in CI, or at the start of a refresh — any
+  point where the two committed artefacts might have gone out of step.
+- **Exit 1 is drift; exit 2 means the check could not run**, and the two need
+  opposite responses. An unreadable membership — a clustering step that printed
+  success without persisting its result, say — makes every summary compare as
+  adrift, and the answer to that is to fix the graph, never to re-author prose.
+
 If the store reads its issue tracker, run `fetch-tickets` after `intent`, which
 is the stage that discovers which tickets exist:
 
@@ -82,8 +100,14 @@ summaries onto them by membership overlap:
 ```bash
 knowledgestore record-clustering
 knowledgestore summaries remap
+knowledgestore summaries snapshot
 knowledgestore summaries extract
 ```
+
+The second `snapshot` re-keys the baseline to the clustering the remapped
+summaries now sit on. Without it the committed snapshot describes the graph the
+store no longer has, and the next refresh remaps from a baseline that is
+consistently wrong — the one state `remap`'s own guards cannot see.
 
 Read the retention reported by `remap` — and before you attribute a low figure to
 the corpus, read what `status` says about the partitioner. A refresh run where
@@ -118,10 +142,43 @@ finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See
 [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record).
 
+### Compare this refresh with the last one
+
+`intent`, `merge-layers` and `explorer` record what they measured in
+`knowledge/telemetry.json` and print how each number moved since the last
+recorded build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_indexed: 28,093 -> 28,140 (+0.2%)
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+  layers.ast_nodes: 19,353 -> 19,502 (+0.8%)
+```
+
+Read the movements rather than the totals. A number is plausible in isolation
+and implausible beside its predecessor, which is what makes the second line
+above worth stopping for: a file-to-ticket join that lost three quarters of its
+matches reports a healthy-looking fraction of the graph, and nothing else in a
+build contradicts it.
+
+```bash
+git diff knowledge/telemetry.json    # the record of what this refresh changed
+```
+
+Commit the file with the rest of the store. Nothing fails on a movement — an
+estate change moves all of these legitimately, and a check that fires on every
+intentional change gets switched off — with one exception: a measurement that
+was non-zero and is now zero is a warning on stderr, because a population that
+had members and now has none needs no judgement about the estate.
+
+`knowledgestore status` prints the record and compares nothing. It measures none
+of these itself, so a fresh figure beside a recorded one would claim a
+comparison it never made.
+
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
-ran, what authored coverage remains, whether grounding checks passed and
-whether the source-drift check is clean.
+ran, what authored coverage remains, whether grounding checks passed, what the
+telemetry moved by and whether the source-drift check is clean.
 
 ## Remove repositories
 
@@ -317,4 +374,6 @@ Two failures, both reported by store operators:
 | Symptom | Action |
 |---|---|
 | `summaries remap` would discard most prose | Stop. Verify clustering coverage before remapping; a clustering command can report success without saving its result. |
+| `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
+| `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |

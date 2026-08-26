@@ -4,6 +4,11 @@ Cheap by design — this stage must not load the graph. The corpus citation
 check reads the small tracked extract, not graph.json, and the partitioner
 check reads the recorded `clustering-inputs.json` rather than the clustering
 sitting in the graph.
+
+Anything that costs more than that is behind a flag and says so in its help.
+`--paths` is the one that reads bulk: it streams every tracked file, a block at
+a time, so a gigabyte-scale artefact costs time rather than memory — and it
+still never parses the graph.
 """
 
 from __future__ import annotations
@@ -11,13 +16,15 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import gzip
 import re
 import shutil
 import subprocess
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config, graph_files, io, provenance, record_clustering
+from . import config, graph_files, io, provenance, record_clustering, store_paths, telemetry
 from .build_topic_briefs import read_topics
 
 
@@ -63,6 +70,35 @@ def layer_coverage() -> dict:
         "briefs_written": len(briefs),
         "topics_configured": len(topics),
     }
+
+
+def snapshot_pointer() -> str:
+    """What the summaries count above does *not* say, and how to find out.
+
+    The count is the same whether or not the prose still describes the community
+    it is keyed to. Community ids are positional, so only the membership snapshot
+    binds a summary to a member set; rebuild or re-cluster without refreshing it
+    and every summary is silently re-pointed while every community still has one.
+    An operator read exactly that coverage line as healthy.
+
+    A pointer rather than the check itself, because `status` must not read the
+    graph and the comparison cannot be made without it - so what `status` can
+    honestly do here is name its own blind spot instead of leaving a green line
+    to be read as a verdict. `summaries adrift` is the check.
+    """
+    if not config.SUMMARIES_PATH.is_file():
+        return ""
+    if not config.SUMMARIES_SNAPSHOT_PATH.is_file():
+        return (
+            f"Summary membership: no snapshot at {_relative(config.SUMMARIES_SNAPSHOT_PATH)}, so "
+            "nothing can say whether that prose still describes those communities. Run "
+            "`knowledgestore summaries snapshot`."
+        )
+    return (
+        "Summary membership: not checked here - `status` never reads the graph. The count above "
+        "is the same whether or not the prose still describes its community; run "
+        "`knowledgestore summaries adrift`."
+    )
 
 
 def intent_coverage(recorded: dict) -> dict:
@@ -303,6 +339,236 @@ def corpus_citations(root: Path) -> dict:
     nodes = [n for n in corpus.get("nodes", []) if n.get("source_file")]
     dangling = sorted(n["source_file"] for n in nodes if not (root / n["source_file"]).exists())
     return {"checked": len(nodes), "dangling": dangling}
+
+
+# --- absolute paths in a store's own tracked files -----------------------
+# `store_paths` states the rule - relative at rest, absolute in flight - and
+# nothing enforced it or even called it, so a store author had no way to discover
+# it existed (#176). This is the executable half: a non-author can run it.
+#
+# The defect class is the silent kind. Both instances behind that rule passed
+# every check a maintainer would naturally run: entry counts reconciled, the JSON
+# stayed well-formed, and every path in it existed on disk. Only the next
+# relocation showed anything, and by then the rewrite was the cost.
+
+# A slash-led path of at least two segments. Deliberately not "a string starting
+# with /": that reads API routes, XPath expressions and URL paths as filesystem
+# paths, and a check whose first run is mostly false positives is one nobody runs
+# twice. The lookbehind is what keeps `https://host/a/b` out - the character
+# before a genuine candidate is never a word character, a dot, a dash or another
+# slash - and `[\w.+@~-]` excludes `*`, so a glob like `**/*.py` is not a path.
+ABSOLUTE_PATH = re.compile(r"(?<![\w./-])/[\w.+@~-]+(?:/[\w.+@~-]+)+")
+
+# A store's largest tracked artefacts run to gigabytes decompressed, so the scan
+# streams. READ_BLOCK is the read size; CARRY is the tail held back between
+# blocks so a path straddling the boundary is matched whole. CARRY has to exceed
+# any plausible path length, because under-sizing it loses findings and a count
+# cannot show you what it failed to see.
+READ_BLOCK = 1 << 20
+CARRY = 4096
+
+
+def in_flight_artefacts() -> dict[str, str]:
+    """Tracked files that hold absolute paths by contract, and the reason each does.
+
+    The rule has an intended exception, and an operator who learns to ignore one
+    line of a report stops reading the whole report - so the exceptions are named
+    with their justification rather than left to be recognised.
+
+    graphify's extraction spec requires the FILE_LIST handed to an agent to be
+    absolute "verbatim", and `.graphify_uncached.txt` *is* that list, so
+    relativising it would break the contract `store_paths` exists to keep.
+    `.graphify_detect.json` is graphify's own cache in graphify's format; this
+    library prepares its inputs and does not own its shape.
+
+    Derived from `config` rather than hard-coded strings so a store that moves
+    either file keeps the exemption.
+    """
+    return {
+        _relative(config.UNCACHED_PATH): (
+            "graphify's FILE_LIST, which its extraction spec requires to be absolute verbatim"
+        ),
+        _relative(config.DETECT_PATH): "graphify's own detection cache, in graphify's format",
+    }
+
+
+def _is_store_path_at_rest(candidate: str) -> bool:
+    """Whether `store_paths` would have written this absolute path relative.
+
+    Decided by asking `store_paths.relative` rather than by re-deriving the rule,
+    so the check agrees with the utility by construction. The alternative - "any
+    absolute path" - is a neighbour of the quantity being claimed rather than the
+    quantity itself: it makes `/etc/hosts` and `/api/v1/things` findings, and a
+    check that reports those gets switched off the first time it runs.
+    """
+    return store_paths.relative(candidate) != candidate
+
+
+def _count_in(text: str, end: int) -> tuple[int, int]:
+    """Store paths in `text` finishing by `end`, and the offset to resume from.
+
+    Two numbers because they are one decision. A match running past `end` may be a
+    path the block boundary cut in half, so it is not counted here - and what the
+    next pass has to start from is that match's *start*, not `end`. Resuming later
+    than the match began chops its head off, the lookbehind then refuses what is
+    left, and the path is counted by neither pass.
+
+    Measured while building this: 11,997 of 12,000 absolute paths in a 2.4 MB
+    artefact, the three lost being the ones that happened to span the hold-back
+    point. A count cannot show you what it failed to see, which is why the
+    reconciliation against the fixture is the check and the count is not.
+    """
+    found = 0
+    resume = max(0, end)
+    for match in ABSOLUTE_PATH.finditer(text):
+        if match.end() > end:
+            resume = min(resume, match.start())
+            break
+        if _is_store_path_at_rest(match.group()):
+            found += 1
+    return found, resume
+
+
+def _open_text(path: Path):
+    """A text stream over a tracked file, transparently gunzipping `.gz`.
+
+    Undecodable bytes are replaced rather than raised: a store commits gzipped
+    JSON and archives beside its prose, and one bad byte is not a reason to stop
+    reading the file it sits in.
+    """
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return path.open("rt", encoding="utf-8", errors="replace")
+
+
+def scan_file(path: Path) -> tuple[int, int]:
+    """(store paths written absolute, characters read) for one tracked file."""
+    found = 0
+    read = 0
+    carry = ""
+    with _open_text(path) as stream:
+        while True:
+            block = stream.read(READ_BLOCK)
+            if not block:
+                break
+            read += len(block)
+            text = carry + block
+            counted, resume = _count_in(text, len(text) - CARRY)
+            found += counted
+            # One character before the resume point, so a path starting exactly
+            # there still has the preceding character the lookbehind reads.
+            carry = text[max(0, resume - 1) :]
+    return found + _count_in(carry, len(carry))[0], read
+
+
+def absolute_paths_at_rest(run=run_git) -> dict:
+    """Store paths written absolute in the store's own tracked files, by file.
+
+    Scoped to what the store *tracks*: untracked build intermediates are
+    regenerated on the next run and their shape is nobody's business.
+
+    Reads files, never the graph, so the module docstring's rule holds - but it
+    reads every tracked file including the compressed ones, which is why the
+    caller opts in.
+
+    `checked` is False when the tracked files could not be listed at all. That is
+    "cannot check", not "nothing found", and the two must never print the same.
+    """
+    try:
+        listing = run(["-C", str(config.ROOT), "ls-files", "-z"])
+    except (subprocess.CalledProcessError, OSError):
+        return {"checked": False}
+    tracked = sorted(name for name in listing.split("\0") if name)
+    exempt = in_flight_artefacts()
+    scan = {
+        "checked": True,
+        "listed": len(tracked),
+        "files": 0,
+        "characters": 0,
+        "findings": {},
+        "in_flight": {},
+        "unreadable": [],
+    }
+    for name in tracked:
+        try:
+            found, read = scan_file(config.ROOT / name)
+        # Three unrelated hierarchies, and each has to be here. `gzip.BadGzipFile`
+        # needs no mention because it is an OSError; a *truncated* archive raises
+        # EOFError and a corrupt deflate body raises `zlib.error`, and neither is.
+        # Measured, not reasoned about: a valid gzip header over random bytes
+        # raises `zlib.error`, which would have taken a stage that must never fail
+        # down over one bad file.
+        except (OSError, EOFError, zlib.error):
+            scan["unreadable"].append(name)
+            continue
+        scan["files"] += 1
+        scan["characters"] += read
+        if found:
+            bucket = "in_flight" if name in exempt else "findings"
+            scan[bucket][name] = found
+    return scan
+
+
+def _report_absolute_paths(enabled: bool) -> None:
+    """Print the absolute-paths-at-rest section, or nothing when not asked for.
+
+    Opt-in like `--drift` and `--central`, because it reads every tracked file.
+    Reports and never refuses: whether a given tracked file may hold absolute
+    paths is a judgement about that artefact's contract, and the exemptions this
+    stage knows about are the two it can name.
+    """
+    if not enabled:
+        return
+    scan = absolute_paths_at_rest()
+    if not scan["checked"]:
+        print(
+            "Absolute paths at rest: could not be checked - `git ls-files` failed, so the "
+            "store's own tracked files could not be listed. Not a clean result."
+        )
+        return
+    if not scan["files"]:
+        # "0 files read, none found" pairs a measurement of nothing with a clean
+        # verdict and reads as a pass - the same shape as the corpus-citation
+        # check's "0 checked, none dangling", which was reported and fixed.
+        print(
+            f"Absolute paths at rest: nothing checked - none of the {scan['listed']} tracked "
+            "file(s) could be read."
+        )
+    elif scan["findings"]:
+        print(_findings_line(scan))
+    else:
+        print(
+            f"Absolute paths at rest: none in {scan['files']} tracked file(s) read "
+            f"({scan['characters']:,} characters)."
+        )
+    exempt = in_flight_artefacts()
+    for name, count in sorted(scan.get("in_flight", {}).items()):
+        print(f"  ({name} holds {count:,}, by contract: {exempt[name]}.)")
+    if scan.get("unreadable"):
+        shown = ", ".join(scan["unreadable"][:3])
+        print(
+            f"  {len(scan['unreadable'])} tracked file(s) could not be read, so nothing here "
+            f"is claimed about them - {shown}."
+        )
+
+
+def _findings_line(scan: dict) -> str:
+    """The finding, with the files named. A count alone cannot be acted on.
+
+    Ordered by count and then by name, never by count alone: a dict ordered only
+    by score reorders between processes on ties, and two runs of this stage on one
+    store must read identically.
+    """
+    ranked = sorted(scan["findings"].items(), key=lambda kv: (-kv[1], kv[0]))
+    named = ", ".join(f"{name} ({count:,})" for name, count in ranked[:5])
+    more = f" and {len(ranked) - 5} more" if len(ranked) > 5 else ""
+    return (
+        f"Absolute paths at rest: {sum(scan['findings'].values()):,} in {len(ranked)} of "
+        f"{scan['files']} tracked file(s) read - {named}{more}. A store's own files should "
+        "hold paths relative to the store root (`knowledgestore.store_paths`): an absolute "
+        "one records the build machine's directory layout in a published artefact and stops "
+        "naming a real file the moment the store moves."
+    )
 
 
 def _committed_at(path: str, run) -> str:
@@ -745,6 +1011,34 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _report_telemetry() -> None:
+    """What the last build measured, so an operator can see the numbers at all.
+
+    Read-only, and it compares nothing: `status` measures none of these itself -
+    they need the graph, and this stage must not load it - so printing a fresh
+    figure beside a recorded one would be claiming a comparison it never made.
+    The comparison happens where the number is computed, in the stage that
+    records it.
+
+    The empty case says so rather than printing a heading over nothing. A
+    "Telemetry:" line with no rows under it reads as a store with nothing to
+    report instead of one where nothing has been recorded yet.
+    """
+    lines = telemetry.recorded_lines()
+    if not lines:
+        print(
+            "Telemetry: nothing recorded yet - `intent`, `merge-layers` and `explorer` "
+            "each record what they measured, and the next run of each compares against it"
+        )
+        return
+    print(
+        f"Telemetry: what the last build measured ({telemetry.display_path()}), "
+        "and what the next build of each stage compares itself against:"
+    )
+    for line in lines:
+        print(line)
+
+
 def recorded_digests() -> dict[str, str]:
     """What the page was built from, from either manifest shape.
 
@@ -952,6 +1246,11 @@ def main(argv=None) -> int:
         action="store_true",
         help="also check GitHub for commits since the build (one API call per repository)",
     )
+    parser.add_argument(
+        "--paths",
+        action="store_true",
+        help="also report absolute paths in the store's own tracked files (reads every one)",
+    )
     arguments = parser.parse_args(argv)
 
     _report_central(arguments.central)
@@ -967,6 +1266,9 @@ def main(argv=None) -> int:
         f"Summaries: {cov['summaries_written']}/{cov['summaries_expected']} "
         f"significant communities have prose"
     )
+    pointer = snapshot_pointer()
+    if pointer:
+        print(pointer)
     print(
         f"Topic briefs: {cov['briefs_written']} written, "
         f"{cov['topics_configured']} topics configured"
@@ -988,9 +1290,13 @@ def main(argv=None) -> int:
 
     _report_citations()
 
+    _report_absolute_paths(arguments.paths)
+
     _report_freshness()
 
     _report_clustering()
+
+    _report_telemetry()
 
     _report_graph_report(arguments.verify_graph)
 

@@ -419,6 +419,31 @@ reporting failure:
 - After any stage that writes per-item output, reconcile the count it reports
   against the count you expected.
 
+### Compare the count with the last build's, not with an expectation
+
+A count you reconcile against your own expectation only catches what you thought
+to expect. `intent`, `merge-layers` and `explorer` each record what they measured
+in `knowledge/telemetry.json` and print the movement since the last recorded
+build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+```
+
+**Read the movements and carry them into your report.** Every number in that
+report was plausible on its own and implausible beside its predecessor - a
+file-to-ticket join that lost most of its matches still reports a healthy-looking
+fraction of the graph. `git diff knowledge/telemetry.json` is the reviewable
+record; commit it with the rest of the store.
+
+Nothing fails on a movement, because an estate change moves all of these
+legitimately. The single exception is a measurement that was non-zero and is now
+zero, which goes to stderr as a warning. Do not add a threshold of your own: two
+estates measured the AST-to-semantic node ratio a hundredfold apart, so any
+constant is wrong on one of them, and the comparison that works is against this
+store's own history.
+
 ### Adding repositories to an estate
 
 Edit `config/repository-filters.txt` (include prefixes, explicit repositories,
@@ -513,10 +538,28 @@ path is the failure mode to check for.
 ### When clustering changes
 
 ```bash
+knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
 knowledgestore summaries snapshot   # BEFORE re-clustering
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+knowledgestore summaries snapshot   # re-key the baseline to the new clustering
 ```
+
+**`adrift` first, and never straight after a snapshot.** Community ids are
+positional, so only the snapshot binds a summary to a member set; re-cluster or
+rebuild without refreshing it and every summary stays attached to a community it
+no longer describes, while every community still has a summary and `status`
+reports the same coverage either way. `remap` cannot see it — it refuses when the
+snapshot and the graph share *no* node ids, and a snapshot taken from a stale
+graph shares *every* id with that same stale file. Run `adrift` on the store as
+committed; run it immediately after `summaries snapshot` and it compares the
+snapshot against the graph it was just taken from, which passes by construction.
+
+Exit 1 is drift. **Exit 2 means the check could not run**, and it names why: no
+membership read, or the wrong snapshot. Both make every summary compare as adrift,
+and the response is to fix the graph or re-take the snapshot — never to re-author
+prose. An id-space mismatch (`<repo>::<id>` on one side, bare ids on the other) is
+reported as a note for the same reason.
 
 **The bar measures recall, not fit**: it asks how much of the old cluster
 landed together, never how much of the new cluster those members make up. A
@@ -717,10 +760,20 @@ knowledgestore explorer
 `knowledgestore status` reports provenance, summary/brief coverage, dangling
 corpus citations, the partitioner recorded in
 `graphify-out/clustering-inputs.json` against the one this environment offers,
-and whether the page is older than a layer it embeds. Add
+whether the page is older than a layer it embeds, and what the last build
+recorded in `knowledge/telemetry.json`. Add
 `--drift` to ask GitHub how far each repository has moved since the build
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.
+
+Add `--paths` to report absolute paths in the store's own tracked files. Paths a
+store persists about itself are **relative at rest, absolute in flight**: an
+absolute one records the build machine's directory layout in a committed artefact
+and stops naming a real file as soon as the store moves, while every count still
+reconciles and the JSON stays well-formed. The check names the files and counts
+them, and separates the artefacts that hold absolute paths by contract — graphify's
+`FILE_LIST` must be absolute verbatim — from the ones that should not. Convert with
+`knowledgestore.store_paths`, which still hands readers absolute paths.
 
 ## The semantic index
 
@@ -784,5 +837,5 @@ Commit `knowledge/`, `knowledge_context.md`, `docs/topics/` and
 uncompressed `graph.json` — all are regenerable and large.
 
 Report honestly what was and was not regenerated: which stages ran, how many
-summaries or briefs are still missing, and whether the estate regression
-passed.
+summaries or briefs are still missing, what `knowledge/telemetry.json` moved by,
+and whether the estate regression passed.

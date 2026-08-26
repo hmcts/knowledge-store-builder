@@ -260,6 +260,151 @@ MUTATIONS = (
         "avoid",
     ),
     Mutation(
+        "iter_array matches a nested key again",
+        "graph_stream.py",
+        "        if self.depth == 1 and self.token_start >= 0:",
+        "        if self.token_start >= 0:",
+        "the depth test was repeated in three places and every one-line mutation of "
+        "each survived, because the other two still blocked - so it is now one "
+        "guard, which is what makes it testable. #210: a merged graph carries `graph.hyperedges[].nodes`, a list of id "
+        "strings, before its top-level node array - so the iterator yielded strings, "
+        "type-checking consumers saw nothing, and graph_counts returned (0, 0) on a "
+        "fully clustered graph. Two guards built on those counts then read (0, 0) "
+        "against (0, 0) as agreement, and one of them was a refusal protecting an "
+        "irreversible overwrite. Shipped in v0.14.0",
+    ),
+    Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
+    ),
+    Mutation(
+        "content set written empty",
+        "build_content_set.py",
+        "    if not content:",
+        "    if False:",
+        "an empty path list makes every search over it return no matches, and no "
+        "matches reads as a confident answer about the estate rather than as a "
+        "missing detect result - the exact failure mode the artefact exists to end",
+    ),
+    Mutation(
+        "noise figure claimed from a tree nobody measured",
+        "build_content_set.py",
+        '    if not tree:\n        return {"measured": False}',
+        '    if False:\n        return {"measured": False}',
+        "a sparse clone has no corpus, so the tree count is zero and zero renders "
+        "as 'no noise' - the most flattering reading of the least measured case, on "
+        "the one artefact whose whole purpose is to say the tree is mostly noise",
+    ),
+    Mutation(
+        "content files counted as noise",
+        "content_set.py",
+        "        if path in held:",
+        "        if path in bearing:",
+        "written and caught during #213: `bearing` holds directories, so no file "
+        "path is ever in it and every content file was tallied as noise. The "
+        "percentage came out higher, which is the direction that gets believed",
+    ),
+    Mutation(
+        "noise attributed to the file's own directory",
+        "content_set.py",
+        "    for depth in range(2, len(parts)):",
+        "    for depth in range(len(parts) - 1, len(parts)):",
+        "the shallowest contentless directory is the finding; the deepest one is "
+        "thousands of content-hash directories holding one file each, which turns a "
+        "single dominant noise source into an unreadable list",
+    ),
+    Mutation(
+        "noise roots lose their tiebreak",
+        "content_set.py",
+        "        key=lambda root: (-root.files, root.path),",
+        "        key=lambda root: -root.files,",
+        "two directories of equal size then come out in whatever order the caller "
+        "supplied the tree in, so a committed manifest differs between two builds "
+        "that changed nothing - the class of non-determinism that is invisible "
+        "until somebody diffs two stores",
+    ),
+    Mutation(
+        "directory symlinks walked again",
+        "content_set.py",
+        "    for directory, _, names in os.walk(corpus, followlinks=False):",
+        "    for directory, _, names in os.walk(corpus, followlinks=True):",
+        "a followed link reports the same files twice under two paths, inflating "
+        "the tree count that is the denominator of every percentage this stage "
+        "prints; symlink duplication has already produced three wrong figures here",
+    ),
+    Mutation(
+        "content set report unwired",
+        "status.py",
+        "    _report_content_set()",
+        "    pass",
+        "the fourth instance of this repository's most repeated escape, and #213 "
+        "itself is the consequence: the pipeline knew what it considered content "
+        "and nothing said so, so every consumer re-derived it badly",
+    ),
+    Mutation(
+        "a set that cannot be judged reported as stale",
+        "status.py",
+        '"current": None if not config.DETECT_PATH.is_file() else recorded == here,',
+        '"current": recorded == here,',
+        "detect is a graphify working file a store need not keep, so a store "
+        "without one would be told its content set was stale on every single run - "
+        "which is how a real warning stops being read",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -360,88 +505,126 @@ MUTATIONS = (
         "a reader then guesses which of a store's two graph files it refers to",
     ),
     Mutation(
+        "absolute-path check unwired",
+        "status.py",
+        "    _report_absolute_paths(arguments.paths)",
+        "    pass",
+        "#176: the fifth instance of this repository's most repeated escape - four "
+        "entries above are the same shape, in the same module, and each was written "
+        "after the previous one was fixed",
+    ),
+    Mutation(
+        "absolute-path check reports every absolute path",
+        "status.py",
+        "    return store_paths.relative(candidate) != candidate",
+        "    return True",
+        "the neighbouring-quantity failure this codebase has shipped repeatedly: "
+        "'every absolute path' rather than 'every path this store wrote absolute' "
+        "makes /etc/hosts and an API route findings, and a check whose first run is "
+        "mostly false positives is switched off before it reports a real one",
+    ),
+    Mutation(
+        "unreadable tracked files reported as a clean store",
+        "status.py",
+        '    if not scan["files"]:',
+        "    if False:",
+        "the '0 checked, none dangling' defect the corpus-citation check in this same "
+        "module already shipped once - a measurement of nothing paired with a clean "
+        "verdict, which reads as a pass",
+    ),
+    Mutation(
+        "absolute paths lost at a read-block boundary",
+        "status.py",
+        "        if match.end() > end:",
+        "        if False:",
+        "the scan streams because a store's tracked artefacts run to gigabytes "
+        "decompressed, and a path cut in half by a block boundary is the silent half "
+        "of that trade: no count can show what it failed to see",
+    ),
+    Mutation(
+        "the deferred path's own start is not resumed from",
+        "status.py",
+        "            resume = min(resume, match.start())",
+        "            resume = min(resume, match.end())",
+        "written and shipped wrong inside the change that added this check, and found "
+        "only by reconciling a 2.4 MB fixture's 12,000 written paths against the 11,997 "
+        "the scan reported - the ones spanning the hold-back point lost their head, the "
+        "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
+        "in the direction that reads as clean",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
     ),
-    # The content set (#213). The class here is different from the two above: not
-    # wiring never asserted, but a measurement that stays green while answering a
-    # neighbouring question. Every one of these leaves the artefact well-formed and
-    # the run reporting success.
     Mutation(
-        "content set written empty",
-        "build_content_set.py",
-        "    if not content:",
-        "    if False:",
-        "an empty path list makes every search over it return no matches, and no "
-        "matches reads as a confident answer about the estate rather than as a "
-        "missing detect result - the exact failure mode the artefact exists to end",
+        "telemetry overwrites the record without reading it",
+        "telemetry.py",
+        "    previous = read()",
+        "    previous = {}",
+        "#154: the defect the whole mechanism exists to remove - every number lived in "
+        "one build's scrollback, so nothing could notice it moving. A record written and "
+        "never read looks identical to one that was compared, because the file afterwards "
+        "is the same either way",
     ),
     Mutation(
-        "noise figure claimed from a tree nobody measured",
-        "build_content_set.py",
-        '    if not tree:\n        return {"measured": False}',
-        '    if False:\n        return {"measured": False}',
-        "a sparse clone has no corpus, so the tree count is zero and zero renders "
-        "as 'no noise' - the most flattering reading of the least measured case, on "
-        "the one artefact whose whole purpose is to say the tree is mostly noise",
+        "a collapsed measurement reported as an ordinary statistic",
+        "telemetry.py",
+        "        if movement.collapsed:",
+        "        if False:",
+        "#154: zero is the only condition assertable without knowing the estate, and a "
+        "join that matched nothing was green on one store across its whole graph. Losing "
+        "the routing prints the collapse among the healthy numbers, which is the shape of "
+        "output people are already caught skimming",
     ),
     Mutation(
-        "content files counted as noise",
-        "content_set.py",
-        "        if path in held:",
-        "        if path in bearing:",
-        "written and caught during #213: `bearing` holds directories, so no file "
-        "path is ever in it and every content file was tallied as noise. The "
-        "percentage came out higher, which is the direction that gets believed",
+        "each stage's record erases the last stage's",
+        "telemetry.py",
+        "{**previous, **measurements}",
+        "{**measurements}",
+        "#154: three stages write this artefact in one refresh, so a replace leaves each "
+        "record surviving only until the next stage runs and every comparison is against "
+        "nothing - a mechanism that reads green and measures nothing, which is the class "
+        "this gate exists for",
     ),
     Mutation(
-        "noise attributed to the file's own directory",
-        "content_set.py",
-        "    for depth in range(2, len(parts)):",
-        "    for depth in range(len(parts) - 1, len(parts)):",
-        "the shallowest contentless directory is the finding; the deepest one is "
-        "thousands of content-hash directories holding one file each, which turns a "
-        "single dominant noise source into an unreadable list",
+        "layer sizes measured and discarded",
+        "merge_layers.py",
+        "    telemetry.record(layer_measurements(counters))",
+        "    layer_measurements(counters)",
+        "#154, and #116 rests on it: the AST-to-semantic ratio can only be judged against "
+        "a store's own last build, because two estates measured it a hundredfold apart. "
+        "Computing the counts and not recording them is the wiring escape this gate "
+        "already records five times",
     ),
     Mutation(
-        "noise roots lose their tiebreak",
-        "content_set.py",
-        "        key=lambda root: (-root.files, root.path),",
-        "        key=lambda root: -root.files,",
-        "two directories of equal size then come out in whatever order the caller "
-        "supplied the tree in, so a committed manifest differs between two builds "
-        "that changed nothing - the class of non-determinism that is invisible "
-        "until somebody diffs two stores",
+        "the join cardinality measured and discarded",
+        "build_explorer.py",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
+        "    page_measurements(graph, entries, edges, size_bytes)",
+        "#154 over #149: the join report refuses zero and prints the rate, and the "
+        "half-dead case is neither of those. Without a record the rate reaches a terminal "
+        "and is gone, which is how a join that should have been three times larger read "
+        "as a working join on a sparse estate",
     ),
     Mutation(
-        "directory symlinks walked again",
-        "content_set.py",
-        "    for directory, _, names in os.walk(corpus, followlinks=False):",
-        "    for directory, _, names in os.walk(corpus, followlinks=True):",
-        "a followed link reports the same files twice under two paths, inflating "
-        "the tree count that is the denominator of every percentage this stage "
-        "prints; symlink duplication has already produced three wrong figures here",
+        "the indexed inventory measured and discarded",
+        "build_intent_index.py",
+        "    telemetry.record(summarise(index, commits_seen, report))",
+        "    summarise(index, commits_seen, report)",
+        "#154: a corpus inventory that collapsed reported a plausible smaller number and "
+        "read as a smaller estate; nothing but its predecessor contradicts it",
     ),
     Mutation(
-        "content set report unwired",
+        "the record never reaches an operator",
         "status.py",
-        "    _report_content_set()",
-        "    pass",
-        "the fourth instance of this repository's most repeated escape, and #213 "
-        "itself is the consequence: the pipeline knew what it considered content "
-        "and nothing said so, so every consumer re-derived it badly",
-    ),
-    Mutation(
-        "a set that cannot be judged reported as stale",
-        "status.py",
-        '"current": None if not config.DETECT_PATH.is_file() else recorded == here,',
-        '"current": recorded == here,',
-        "detect is a graphify working file a store need not keep, so a store "
-        "without one would be told its content set was stale on every single run - "
-        "which is how a real warning stops being read",
+        "    _report_telemetry()\n\n    _report_graph_report",
+        "    _report_graph_report",
+        "#154: reporting through a function while nothing drives the CLI is the most "
+        "repeated escape in this repository, and `status` alone accounts for three "
+        "existing entries here",
     ),
 )
 
