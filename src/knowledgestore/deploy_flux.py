@@ -260,10 +260,50 @@ def _fact(service: str, environment: str, layers: Sequence[tuple[str, dict]]) ->
     return Fact(service, environment, tuple(rel for rel, _ in layers), values, chart)
 
 
+def _place_release(
+    rel: str, document: object, releases: list[tuple[str, dict]], nameless: list[str]
+) -> None:
+    """A HelmRelease is a declaration when it names a service, and a report line
+    when it does not.
+
+    `metadata.name` is the service, and it is the only thing here that says which
+    service a file is about: without it there is no (service, environment) pair to
+    compose, and inferring one from the path is the invention this reader refuses.
+    So it is named in the report rather than dropped.
+    """
+    if service_of(document):
+        releases.append((rel, _mapping(document)))
+    else:
+        nameless.append(rel)
+
+
+def _place_reconciliation(
+    rel: str, document: object, reconciled: dict[str, set[str]], unattributed: list[str]
+) -> None:
+    """A Kustomization binds the directory it reconciles to the environment its own
+    file names, and is a report line when that file names none.
+
+    The environment comes from the path of the cluster whose Kustomizations
+    reconcile the overlays, so a file too shallow to carry that segment leaves
+    whatever it reconciles unattributed - reported, never given an invented
+    environment.
+    """
+    environment = environment_of(rel)
+    if environment:
+        reconciled.setdefault(environment, set()).add(reconciled_path(document))
+    else:
+        unattributed.append(rel)
+
+
 def _classify(
     entries: Sequence[tuple[str, Sequence[object]]],
 ) -> tuple[list[tuple[str, dict]], dict[str, set[str]], Reading]:
-    """Split the documents into declarations and reconciliations, counting as it goes."""
+    """Split the documents into declarations and reconciliations, counting as it goes.
+
+    Each document is placed by its own kind, and what to do with a document of that
+    kind is the placing helper's decision - which is also where the reasoning for it
+    lives. A document of any other kind is counted and passed over.
+    """
     releases: list[tuple[str, dict]] = []
     reconciled: dict[str, set[str]] = {}
     unnamed_environments: list[str] = []
@@ -274,17 +314,10 @@ def _classify(
         for document in parsed:
             documents += 1
             if is_helm_release(document):
-                if service_of(document):
-                    releases.append((rel, _mapping(document)))
-                else:
-                    unnamed_services.append(rel)
+                _place_release(rel, document, releases, unnamed_services)
             elif is_kustomization(document):
                 kustomizations += 1
-                environment = environment_of(rel)
-                if environment:
-                    reconciled.setdefault(environment, set()).add(reconciled_path(document))
-                else:
-                    unnamed_environments.append(rel)
+                _place_reconciliation(rel, document, reconciled, unnamed_environments)
     counted = Reading(
         documents=documents,
         releases=len(releases),

@@ -531,7 +531,11 @@ def _add_repo_layer(
     _record_flux(reading, flux_unparsed, files, tally.flux)
 
     facts = _merged_facts(found, reading, tally.flux)
-    services = {service for _, service in facts}
+    # Read off the facts rather than destructured out of their keys: the key's
+    # second element and the fact's own `service` are the same string by
+    # construction, and the matcher sorts what it is given, so neither the set nor
+    # anything downstream of it depends on iteration order.
+    services = {fact.service for fact in facts.values()}
     matched = match_services(services, set(reps))
     tally.unmatched |= services - set(matched)
 
