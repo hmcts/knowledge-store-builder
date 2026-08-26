@@ -144,7 +144,9 @@ relate things that have no relation.
 estate whose code is spread thinly across deep trees produces many small chunks:
 measured at 6,704 chunks averaging 3.3 files, against 762 averaging 22 for the same
 corpus partitioned ad-hoc. That is roughly nine times the agent dispatches, which
-interacts with the fan-out's own limits. Decide both together.
+interacts with the fan-out's own limits. Decide both together - the limits are in
+"Dispatching the semantic fan-out" below, and nine times the dispatches is nine
+times the exposure to every one of them.
 
 **Adopting this planner is a full re-archive.** On the one estate with an existing
 plan, matching its path set exactly, only 799 chunks have identical membership - and
@@ -160,6 +162,76 @@ directory-grouped; it is not.
 **Chunk numbering is the archive's only index.** If you change `--chunk-size`
 between refreshes the numbering moves, and an archive of previous extractions is no
 longer addressable by it. Decide the maximum once per estate.
+
+### Dispatching the semantic fan-out
+
+**A code-only corpus never reaches this section.** graphify's semantic pass writes
+an empty layer for a corpus holding no documents, papers or images, so an estate of
+nothing but application code produces zero chunks and skips the fan-out entirely.
+Everything below is conditional on corpus composition rather than universal - and a
+doc-bearing estate spends a long build inside it, so the absence of complaints
+about the fan-out is evidence of who has run it, not that it is well-supported.
+
+Give **every** extraction agent this instruction, verbatim:
+
+> Write each chunk to disk IMMEDIATELY after producing it. Do NOT accumulate
+> results in your context and write at the end.
+
+An agent handed twenty-odd chunks will otherwise accumulate and write at the end,
+and past roughly **64k output tokens it dies with everything it produced lost** -
+it wrote nothing. The evidence for the instruction is stronger than the evidence of
+the failure that prompted it: later in the same build a session limit killed ten
+agents mid-batch simultaneously, and because every one was writing per chunk the
+loss was the single chunk each had in flight rather than the twenty-odd each had
+completed. On a layer that costs tens of millions of tokens to produce, this line
+is the difference between an interruption costing a handful of chunks and it
+costing hundreds.
+
+**The concurrency ceiling rejects rather than queues.** Dispatch past the
+concurrent-agent limit and the excess is refused, not held - so a chunk can be
+recorded as dispatched and never launched, and it then waits forever because
+nothing will ever produce it. Two things follow:
+
+- **"No output on disk" has two causes** - an agent still working, and an agent
+  that was never launched - and only the second needs a human. Plan-ordered
+  dispatch hides it: a low-numbered chunk rejected in an early round sits behind
+  every higher-numbered id that followed, unnoticed for as long as the numbers
+  above it keep arriving.
+- **Capacity arithmetic computed from a completed count is systematically
+  optimistic**, because agents finish between the check and the dispatch. Dispatch
+  smaller batches and reconcile after each round rather than computing headroom
+  once and spending it.
+
+**Read progress off disk, never off your dispatch log.**
+
+```bash
+knowledgestore chunk-status --dispatched round-1.txt round-2.txt
+```
+
+`done` is the plan intersected with the extractions on disk and consults no log.
+The log only ever *splits* the outstanding set, into `NEVER SENT` and `in flight`,
+and never-sent is printed first. Chunk files that are present but unreadable are
+reported separately and never counted as done - that is what an agent killed
+mid-write leaves behind. Log tokens matching no chunk in the plan are named rather
+than counted, and a token that looks like several ids run together is diagnosed as
+such. The stage names the logs it read and how many tokens it took from them, so
+you can reconcile against what you dispatched; it exits non-zero only when there
+is no plan to measure against.
+
+**A dispatch log is a cache of intent, not a record of fact.** Both halves of that
+have cost real work. A coverage gap of ninety-odd chunks was announced by diffing
+the plan against a log without intersecting disk, and a redundant round of a dozen
+agents was launched for a gap that did not exist - the log simply did not cover the
+early rounds. Separately, a log assembled by appending batch files that carried no
+trailing newline fused the last id of one file onto the first of the next; those
+tokens matched no chunk, counted as dispatched-but-absent, and for several rounds
+inflated `in flight` and deflated `NEVER SENT` while every total stayed plausible.
+A status tool that launders a corrupt log into a confident number is worse than no
+tool, because it is trusted.
+
+**Reconcile before merging.** `merge-chunks` reports the chunk files it could not
+read, but it cannot report a chunk that produced no file at all - it never sees
+one. Run `chunk-status` until `NEVER SENT` is none and `done` equals the plan.
 
 ### Merging the chunk extractions
 
