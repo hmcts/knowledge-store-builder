@@ -10,6 +10,7 @@ To build a store for the first time, see
 | You want to | Start with |
 |---|---|
 | Bring source repositories and generated artefacts up to date | [Refresh the store](#refresh-the-store) |
+| Work out which repository to add next | [Decide what to ingest next](#decide-what-to-ingest-next) |
 | Take repositories out of the estate | [Remove repositories](#remove-repositories) |
 | Change the library release used by the store | [Update the library version](#update-the-library-version) |
 
@@ -179,6 +180,64 @@ Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages
 ran, what authored coverage remains, whether grounding checks passed, what the
 telemetry moved by and whether the source-drift check is clean.
+
+## Decide what to ingest next
+
+Rank what the estate already depends on and does not hold, from the build files
+in the repositories the store has synced:
+
+```bash
+knowledgestore gaps                        # top 20 namespaces
+knowledgestore gaps --limit 0              # all of them
+```
+
+The stage reads `pom.xml`, `build.gradle`, `package.json` and Terraform module
+sources, collects the coordinates the estate **consumes**, subtracts the ones it
+**builds**, and ranks the remainder. It writes nothing, reads no graph, touches
+no network, and never exits non-zero on a finding.
+
+Widening the repository-name prefixes is the intuitive move and the wrong one.
+Measured on one estate it would have added mostly reusable infrastructure
+wrappers and empty repositories, and contradicted an exclusion already recorded
+deliberately. Dependency evidence answers a different question — not *what
+shares our naming* but *what do we already depend on that we do not hold* — and
+on that estate it found a repository holding a shared schema model, referenced
+heavily by artefacts nothing in the estate built. Adding it resolved every
+unresolved reference in a payload contract the store had already published a
+finding about, and that finding was rewritten.
+
+Four things to know before acting on the output:
+
+- **Read the class column before the weight.** Domain namespaces are listed
+  first whatever their weight, because most reference weight is framework
+  plumbing and a reference to a test utility says the estate writes tests, not
+  how its business works. `KSB_FRAMEWORK_MARKERS` replaces the marker list for
+  an estate whose plumbing is named differently.
+- **`main` and `test` are never summed.** They answer different questions: the
+  product needs a main-scope dependency, whereas a test-scope one tells you the
+  estate writes tests against it. A blended figure hides which one you read.
+- **Resolve a coordinate from your artefact repository, not from the forge.** An
+  internal artefact is published to a binary repository, so its `artifactId` may
+  appear in no source file at all and code search returns nothing while
+  rate-limiting. The authoritative mapping is the published POM's `<scm>` URL.
+  Name matching against a large organisation returns confident nonsense from
+  unrelated programmes, so the stage refuses to try.
+- **Unbuilt does not mean addable.** On the estate this was measured against,
+  roughly a hundred coordinates were unbuilt and one was worth adding. The stage
+  ranks and explains; the decision is yours.
+
+The report reads `config/estate-boundary.txt` where there is one, so a module
+consumed under an `alias` of a repository the store already holds is not
+reported at all, a repository ruled `not-used` or `decommissioned` is shown as a
+decision rather than a gap, and one ruled `active` and not held is named as the
+candidate the estate has already agreed about. Without a declaration the report
+says so: see
+[Declare the boundary](creating-a-store.md#declare-the-boundary).
+
+Adding a repository then goes through `config/repository-filters.txt` and a
+normal [refresh](#refresh-the-store), which moves community ids exactly as any
+other membership change does. Record the candidates you ruled out in the
+boundary declaration, so the next run of this report shows them as decisions.
 
 ## Remove repositories
 

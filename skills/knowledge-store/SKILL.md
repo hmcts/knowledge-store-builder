@@ -300,6 +300,14 @@ worth keeping, offer to save it under `docs/journeys/`.
   brief or summary was LLM-authored against a specific build and goes stale
   silently; nodes and edges are mechanical. When prose and graph disagree, the
   graph wins and the prose is stale — say so rather than reconciling them.
+- **Absence of evidence is a fact about the store's membership, not about the
+  estate.** "No evidence of X" means "no evidence of X in the repositories this
+  store holds". Before reporting one, read the **Declared boundary** section of
+  `knowledge/repository-manifest.md` — it says which hosts were consulted, which
+  repositories the estate has ruled active, not used or decommissioned, and which
+  names are aliases of one another. Say which of the two claims you are making. A
+  store with no declared boundary makes every absence unexplained rather than a
+  decision, and the manifest says that too.
 - Never invent nodes, edges or tickets.
 - Distinguish what the graph shows from what you infer from it, in the answer.
 - Say when evidence is thin rather than filling the gap from general knowledge

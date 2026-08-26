@@ -54,6 +54,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "skills/knowledge-store/SKILL.md": (
         "Every claim traces to evidence in the store",
         "Say which layer answered",
+        "Absence of evidence is a fact about the store's membership",
         "Never invent nodes, edges or tickets",
     ),
     "skills/knowledge-store-build/SKILL.md": (

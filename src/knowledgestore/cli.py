@@ -29,10 +29,12 @@ SELF_PARSING = frozenset(
         "check-answers",
         "check-corpus",
         "chunk-plan",
+        "chunk-status",
         "content-set",
         "merge-chunks",
         "merge-layers",
         "record-clustering",
+        "gaps",
     }
 )
 
@@ -71,6 +73,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "content-set": (
         "build_content_set",
         "expose the content set a corpus search should read instead of the raw tree",
+    ),
+    "chunk-status": (
+        "chunk_status",
+        "report fan-out progress from the extractions on disk, never-launched chunks first",
     ),
     "merge-chunks": (
         "merge_chunks",
@@ -113,6 +119,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "status": (
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",
+    ),
+    "gaps": (
+        "report_ingestion_gaps",
+        "rank what this estate depends on and does not hold (a report, not an action)",
     ),
     "check-install-docs": (
         "check_install_docs",

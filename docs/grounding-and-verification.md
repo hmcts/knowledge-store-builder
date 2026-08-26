@@ -12,7 +12,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 >
 > | Mirrored in | Which part |
 > |---|---|
-> | `skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; say which layer answered |
+> | `skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; absence is a fact about membership; say which layer answered |
 > | `skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate; run `summaries verify` |
 > | `skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
@@ -23,7 +23,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 evidence in the store.** Node names, source paths, repository names, ticket ids,
 schema field names, commit subjects and bodies. Nothing else is admissible.
 
-Three things follow.
+Four things follow.
 
 **Interpretation is allowed; invention is not.** A boolean field named
 `requiresInterpreter` supports "this service records whether a person needs an
@@ -36,6 +36,17 @@ holds no cross-repository call edges, so this cannot be determined" is a correct
 useful answer. Filling that gap from general knowledge of how systems usually
 work is the failure this document exists to prevent — it is indistinguishable
 from a correct answer to the reader, and wrong.
+
+**Absence of evidence is a fact about the store's membership, not about the
+estate.** "No evidence of X" always means "no evidence of X in the repositories
+this store holds", and those are different claims. A published finding once
+concluded that a payload schema had never been readable in one place because its
+references did not resolve; they resolved perfectly, against a repository the
+estate did not hold. So before reporting an absence, read the **Declared
+boundary** section of `knowledge/repository-manifest.md` — written from the
+estate's `config/estate-boundary.txt` — and say which of the two claims you are
+making. Where an estate has declared no boundary, an absence is unexplained
+rather than a decision, and the manifest says so.
 
 **Say which layer answered.** A committed topic brief, a community summary, raw
 graph nodes and commit history have different reliability. Prose was written at a
