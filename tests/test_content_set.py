@@ -464,6 +464,181 @@ class StageTest(SettingsIsolated):
         self.assertIn("at least 1", output)
 
 
+class ClonesThatContributedNothingTest(SettingsIsolated):
+    """The content set reconciled against the clones on disk, per repository.
+
+    Hazard 2 of #112: `detect` honours `.gitignore` and `repositories/` is
+    gitignored, so a scan from the store root classifies only the store's own
+    files. It does not error - it reports a small content set and the build
+    carries on, producing a store that looks fine and is wrong. The refusal above
+    cannot see it because that set is not *empty*, and every other guard in the
+    library is comparative: telemetry needs a predecessor, `GRAPH_REPORT.md` a
+    prior claim, the join-cardinality warning candidates on both sides. So the
+    failure is undetectable precisely on a first build, when nobody has a
+    baseline. The exact signal is that no cloned repository contributed anything.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        config.configure(root=self.root)
+
+    def declare(self, names: list[str]) -> None:
+        """Write the estate declaration, in the format the history stage parses."""
+        config.REPOSITORIES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        config.REPOSITORIES_CONFIG.write_text(
+            "".join(f"{name} | https://example.invalid/{name}.git | main\n" for name in names),
+            encoding="utf-8",
+        )
+
+    def test_a_clone_that_contributed_nothing_is_named_and_the_run_still_passes(self):
+        """Break it catches: printing the count without the names, or refusing on it.
+
+        A clone contributing nothing is legitimate - a repository created and
+        never populated holds a licence file and an ignore file and nothing else,
+        and detect reports it under no exclusion of its own - so refusing here
+        would stop a correct build, and a bare count sends an operator hunting a
+        defect that is not there. The name is what settles it in seconds: one that
+        was expected to hold content means detect never read that clone.
+        """
+        write_tree(
+            self.root,
+            {
+                "repositories/alpha/docs/guide.md": "the answer is here",
+                "repositories/hollow/LICENCE": "a licence, and nothing else",
+                "repositories/hollow/.graphifyignore": "",
+            },
+        )
+        detect_for(self.root, {"document": ["repositories/alpha/docs/guide.md"]})
+        code, output = run()
+        self.assertEqual(code, 0)
+        # Two clone directories by hand, one of them named nowhere in the set.
+        self.assertIn("1 of 2 cloned repositories", output)
+        self.assertIn("\n    hollow\n", output)
+        self.assertIn("expected", output)
+        self.assertTrue(config.CONTENT_FILES_PATH.is_file())
+
+    def test_nothing_is_reported_when_every_clone_contributed(self):
+        """Break it catches: printing the reconciliation unconditionally.
+
+        A guard that fires on healthy input is as useless as one that never
+        fires. An operator who reads this line on every build stops reading it,
+        and its whole value is that it is unusual.
+        """
+        write_tree(
+            self.root,
+            {
+                "repositories/alpha/docs/guide.md": "the answer is here",
+                "repositories/beta/src/main.py": "x = 1",
+                "repositories/beta/vendor/bundle/one.js": "noise",
+            },
+        )
+        detect_for(
+            self.root,
+            {
+                "document": ["repositories/alpha/docs/guide.md"],
+                "code": ["repositories/beta/src/main.py"],
+            },
+        )
+        code, output = run()
+        self.assertEqual(code, 0)
+        self.assertNotIn("contributed no content file", output)
+
+    def test_it_refuses_when_no_clone_on_disk_contributed_anything(self):
+        """Break it catches: reporting this instead of refusing it.
+
+        The original fault by construction: with `repositories/` gitignored the
+        scan reads only the store's own files, so the set is small rather than
+        empty and every guard in the library passes. Written, the store looks
+        built, and the artefact that exists so a fallback search reads corpus
+        instead names the store's own README.
+        """
+        write_tree(
+            self.root,
+            {
+                "README.md": "the store's own file",
+                "repositories/alpha/docs/guide.md": "never scanned",
+                "repositories/beta/src/main.py": "never scanned",
+            },
+        )
+        detect_for(self.root, {"document": ["README.md"]})
+        code, output = run()
+        self.assertEqual(code, 2)
+        self.assertFalse(config.CONTENT_FILES_PATH.exists())
+        self.assertFalse(config.CONTENT_SET_PATH.exists())
+        self.assertIn("2 cloned repositories", output)
+        self.assertIn("nothing was written", output)
+
+    def test_a_clone_the_declaration_never_named_still_counts_as_a_clone(self):
+        """Break it catches: counting the clones from `config/repositories.txt`.
+
+        Extraction is declaration-driven while the merge walks the corpus (#222),
+        so a guard against a first-build failure must not inherit the declaration's
+        blind spot - a first build is when the declaration is most likely absent or
+        behind the disk. Counted from it, an undeclared clone is not a clone at
+        all, so nothing reports that it contributed nothing.
+        """
+        write_tree(
+            self.root,
+            {
+                "repositories/alpha/docs/guide.md": "the answer is here",
+                "repositories/undeclared/LICENCE": "a licence, and nothing else",
+            },
+        )
+        self.declare(["alpha"])
+        detect_for(self.root, {"document": ["repositories/alpha/docs/guide.md"]})
+        code, output = run()
+        self.assertEqual(code, 0)
+        self.assertIn("1 of 2 cloned repositories", output)
+        self.assertIn("\n    undeclared\n", output)
+
+    def test_a_repository_only_the_detect_result_names_is_neither_clone_nor_contributor(self):
+        """Break it catches: taking the contributor set straight from the paths.
+
+        A detect result older than the tree names files under a clone that is no
+        longer on disk. Read as a contributor, the reconciliation says a clone
+        contributed while nothing on disk did, and the refusal never fires; read
+        as a clone, the denominator grows and all-or-nothing stops being reachable.
+        Only the directory is evidence of a clone.
+        """
+        write_tree(self.root, {"repositories/alpha/LICENCE": "a licence, and nothing else"})
+        self.declare(["alpha", "departed"])
+        detect_for(self.root, {"document": ["repositories/departed/docs/guide.md"]})
+        code, output = run()
+        self.assertEqual(code, 2)
+        # One directory on disk, so the singular - `departed` is in the
+        # declaration and in the detect result and is neither side of this.
+        self.assertIn("1 cloned repository", output)
+        self.assertFalse(config.CONTENT_FILES_PATH.exists())
+
+    def test_a_store_whose_single_clone_is_all_but_empty_is_refused_and_told_why(self):
+        """Break it catches: dodging this case with a count threshold or a skip flag.
+
+        Documented behaviour rather than desired behaviour. Zero contributors
+        against one clone satisfies "all of them", so a store holding one
+        all-but-empty repository is refused on correct data. The signal cannot
+        tell that from "no clone has content", so the refusal says which two
+        readings it cannot separate: a threshold would make the check tunable and
+        a flag would be taken without being read, and both fire on a first build
+        where nobody has a baseline to check them against.
+        """
+        write_tree(
+            self.root,
+            {
+                "knowledge/notes.md": "the store's own note",
+                "repositories/hollow/LICENCE": "a licence, and nothing else",
+                "repositories/hollow/.graphifyignore": "",
+            },
+        )
+        detect_for(self.root, {"document": ["knowledge/notes.md"]})
+        code, output = run()
+        self.assertEqual(code, 2)
+        self.assertIn("1 cloned repository", output)
+        self.assertIn("the only clone has no content", output)
+        self.assertIn("false alarm", output)
+
+
 class StageIsWiredTest(unittest.TestCase):
     def test_the_stage_is_registered_under_the_name_the_docs_use(self):
         """Break it catches: shipping the module without registering it.
