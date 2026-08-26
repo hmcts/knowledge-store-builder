@@ -262,8 +262,8 @@ MUTATIONS = (
     Mutation(
         "the stem basis option stops affecting ids",
         "merge_chunks.py",
-        "            stem = spec_stem(basis, keep_extension=keep_extension)",
-        "            stem = spec_stem(basis)",
+        "    stem = spec_stem(basis, keep_extension=keep_extension)",
+        "    stem = spec_stem(basis)",
         "#115: threading an option through and having it change nothing is the "
         "wiring escape this gate already records four times, and here it would "
         "leave a store believing it had adopted the extension basis",
@@ -271,8 +271,8 @@ MUTATIONS = (
     Mutation(
         "the migration cost stops being counted",
         "merge_chunks.py",
-        "            if spec_stem(basis, keep_extension=not keep_extension) != stem:",
-        "            if False:",
+        "    if spec_stem(basis, keep_extension=not keep_extension) != stem:",
+        "    if False:",
         "#115 can only be decided on each estate's own number; the issue's figures "
         "are one estate's, and a cost nobody can measure locally is one nobody acts "
         "on",
