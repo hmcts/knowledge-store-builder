@@ -38,6 +38,7 @@ SELF_PARSING = frozenset(
         "dangling-endpoints",
         "extract-ast",
         "gaps",
+        "size-cuts",
     }
 )
 
@@ -92,6 +93,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "merge-chunks": (
         "merge_chunks",
         "merge per-chunk semantic extractions without fusing unrelated entities",
+    ),
+    "size-cuts": (
+        "size_cuts",
+        "size each declared content cut by the nodes and edges it would keep",
     ),
     "merge-layers": (
         "merge_layers",

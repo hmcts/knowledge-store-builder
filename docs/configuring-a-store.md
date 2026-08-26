@@ -102,6 +102,7 @@ estate uses another language or layout.
 | `intent` | `knowledge/intent/*.json.gz`, `knowledge/telemetry.json` | Link files to tickets and mine ticket descriptions |
 | `ticket-titles` | `knowledge/intent/ticket-titles.json.gz` | Import real issue titles from CSV |
 | `fetch-tickets` | `knowledge/intent/ticket-tracker.json.gz`, `knowledge/intent/tracker-undecided.json` | Ask the issue tracker about discovered tickets (opt-in; needs credentials) |
+| `size-cuts` | report, `knowledge/telemetry.json` | Size each candidate content cut in `config/content-cuts.txt` by the nodes and edges it would keep |
 | `merge-inputs` | report only | Name the graphs `merge-graphs` would read and reconcile them against the declaration and provenance |
 | `gherkin` | updated graph and labels | Add features, scenarios, ticket nodes and step-definition links |
 | `packages` | updated graph | Add cross-repository package nodes and import edges (npm layer) |

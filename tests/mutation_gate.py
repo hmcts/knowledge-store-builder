@@ -694,6 +694,64 @@ MUTATIONS = (
         "as a merge failure rather than at the stage that produced it",
     ),
     Mutation(
+        "a cut's edges counted per endpoint rather than per edge",
+        "size_cuts.py",
+        'kept.get(str(edge.get("source")), 0) & kept.get(str(edge.get("target")), 0)',
+        'kept.get(str(edge.get("source")), 0) | kept.get(str(edge.get("target")), 0)',
+        "#116: an edge survives only when both its endpoints do, and this one operator "
+        "is the difference between the measurement the issue asks for and the one that "
+        "misled it. On the reporting estate a file-level cut kept tens of thousands of "
+        "nodes joined by low hundreds of edges - with `|` that cut reports as keeping a "
+        "graph, and nothing downstream disagrees until clustering",
+    ),
+    Mutation(
+        "an unmatched cut rule reported as a rule with nothing to do",
+        "size_cuts.py",
+        "            if not sizing.hits.get(rule.line):",
+        "            if False:",
+        "#116: a glob written for a path form the graph does not use selects nothing and "
+        "reads exactly like a clean run - the same silence a `match` rule that selected "
+        "no repository already has a reporter for, one artefact along",
+    ),
+    Mutation(
+        "a cut that strands every node it keeps reported as a smaller graph",
+        "size_cuts.py",
+        "        elif not edges:",
+        "        elif False:",
+        "#116: mass without structure is the failure the issue found counter-intuitive, "
+        "and clustering, centrality and summaries are all degree-driven, so the estate "
+        "prose is generated from a layer nothing joins",
+    ),
+    Mutation(
+        "sizing zeros written over the last refresh's counts",
+        "size_cuts.py",
+        "    if not sizing.nodes:",
+        "    if False:",
+        "#116 over #154: comparison against the store's own previous refresh is the only "
+        "comparison available, because two estates measured layer ratios a hundredfold "
+        "apart. A run pointed at a path holding no `nodes` array would record zeros over "
+        "the only baseline there is, and report a successful run doing it",
+    ),
+    Mutation(
+        "the cut sizing measured and discarded",
+        "size_cuts.py",
+        "        telemetry.record(measurements(sizing, cuts))",
+        "        measurements(sizing, cuts)",
+        "#116 over #154: without the record a candidate's counts live in one afternoon's "
+        "scrollback, so the next refresh cannot say whether the cut it applied still "
+        "keeps what it kept - the wiring escape this gate already records six times",
+    ),
+    Mutation(
+        "a `**` glob accepted and read as a single wildcard",
+        "size_cuts.py",
+        '    if "**" in value:',
+        "    if False:",
+        "#116: `*` already crosses directories here, so `**/*.tf` requires a directory "
+        "separator and silently drops a file at a repository's root. A rule that matches "
+        "less than it says is the class that put a whole extension's nodes outside a cut "
+        "nobody could see was narrow",
+    ),
+    Mutation(
         "merge inputs read from the declaration again",
         "merge_inputs.py",
         "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",

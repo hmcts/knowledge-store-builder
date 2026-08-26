@@ -256,10 +256,20 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
 
-`merge-inputs` names every graph on disk that `config/repositories.txt` does not
-declare and `knowledge/provenance.json` cannot date, and every declared
-repository with no graph. A shell loop that skipped repositories can still exit
-successfully, and a graph left behind by an abandoned refresh merges without
+Reconcile the number of graphs produced with `config/repositories.txt` before
+merging. A shell loop that skipped repositories can still exit successfully.
+
+`knowledgestore size-cuts` names every graph the merge glob finds, with its own
+node and edge counts, and sizes the layer while it is still per-repository. See
+[sizing the AST layer](building-a-knowledge-store.md#sizing-the-ast-layer-before-you-commit-to-it),
+which matters most on an estate mixing symbol-level languages with
+infrastructure formats. It does not compare against `config/repositories.txt`.
+
+`knowledgestore merge-inputs` is what does that comparison. It names every graph
+on disk that `config/repositories.txt` does not declare and
+`knowledge/provenance.json` cannot date, and every declared repository with no
+graph. Extraction is manifest-driven while the merge is directory-driven, so a
+graph left behind by an abandoned refresh is still an input and merges without
 anything saying so. Add `--strict` to fail a build on the first two.
 
 Do not run graphify at the store root or pass `repositories/<name>` from the

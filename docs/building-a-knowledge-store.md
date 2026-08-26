@@ -108,6 +108,17 @@ component is a module inside that repository, not a deployment", "this project
 was abandoned before it was built" — these save real time. If your
 organisation has done a catalogue-versus-reality reconciliation, ingest it.
 
+**Size an expansion by its file mix, not by its repository count.** Two
+estimates for one expansion were wrong by an order of magnitude in opposite
+directions, both because they counted repositories: infrastructure repositories
+predicted at hundreds of semantic chunks produced tens, because `.tf` goes to
+the AST layer rather than the semantic plan, and the application repositories
+predicted to be vendor-heavy were not. A language that emits a node per symbol
+and a format that emits one per resource differ by orders of magnitude for the
+same repository, so the same repository count can mean either. §3 says what each
+content type contributes, and [sizing the AST layer](#sizing-the-ast-layer-before-you-commit-to-it)
+measures what yours actually did.
+
 ## 3. What extraction actually yields, by content type
 
 This table is the single most useful thing in this document. Extraction quality
@@ -132,6 +143,94 @@ ingestion. Second, **markdown-heavy repositories need the semantic path**, which
 means an LLM and real time; a code-only sweep silently skips them. If you run
 extraction without a model available, use the code-only mode consciously and
 record which repositories were skipped, rather than discovering it later.
+
+### Sizing the AST layer before you commit to it
+
+```bash
+knowledgestore size-cuts                    # every repositories/*/graphify-out/graph.json
+knowledgestore size-cuts --no-record        # while you are still trying candidates out
+```
+
+Each per-repository graph is named with its own node and edge counts, then every
+candidate declared in `config/content-cuts.txt` is sized. The layer's totals and
+each candidate's two counts go to `knowledge/telemetry.json` — which your store
+commits, so they appear in its diff — and the next refresh reports what moved. Run it
+after extraction and before the layers are merged — the per-repository graphs are
+the only place the AST layer can still be measured on its own terms.
+
+Why it matters on a mixed estate: symbol-level languages contribute a node per
+declaration where infrastructure formats contribute one per resource, so the AST
+layer can reach a size where the semantic layer's edges cannot influence
+clustering at all — and community summaries then describe call graphs instead of
+the estate. The library sets no threshold for that, and cannot: two estates
+measured AST-to-semantic node ratios roughly a factor of a hundred apart, so any
+constant would be wrong on one of them by two orders of magnitude. What you get
+is your layer's numbers and your own previous refresh's.
+
+**Size a candidate by its surviving edges, never by its node count.** An edge
+survives a cut only when both of its endpoints do, so the two reductions are not
+proportional. On the estate that reported this, the most attractive candidate by
+node count kept only file-level nodes — tens of thousands of them, joined by low
+hundreds of edges, because AST edges connect symbols rather than files. Nothing
+but the edge count says that a candidate is mass without structure.
+
+**A cut is a statement of what the store is for, not a structural heuristic.**
+The tempting version — keep every node with an edge to another file, prune the
+rest — was measured on that estate and abandoned: roughly three quarters of Java
+nodes had a cross-file edge and rather fewer Terraform nodes did, so the
+application symbol graph looked *more* connected than the infrastructure the
+store existed to describe. An ordinary import reaches across files. A policy has
+only to be true of your intent, which is why "this store does not hold
+application symbol detail" survives contact with data that refutes the
+heuristic — and it can be written in the store's own documentation, so a reader
+knows the shape of what is missing.
+
+Declare candidates in `config/content-cuts.txt`, one `cut <name>` per candidate:
+
+```bash
+cp examples/content-cuts.txt config/content-cuts.txt   # then make them your own
+```
+
+```
+# Keep the estate's infrastructure surface wherever it lives, including a
+# component's own /infrastructure directory inside an application repository.
+cut iac-anywhere
+file *.tf
+file *.tfvars
+file *.hcl
+
+# For comparison: the same intent expressed by repository, which discards every
+# application repository's component-level infrastructure along with the rest.
+cut infra-repositories-only
+repo *-infrastructure
+```
+
+Three axes — `file` (the node's `source_file`), `kind` (its declaration kind) and
+`repo` — each with a `not-` form. A node is kept when it matches at least one
+rule on **every axis the cut constrains** and no `not-` rule, so rules on one
+axis widen a candidate and a second axis narrows it: `file *.java` with
+`not-kind method` is "Java declarations without the callables".
+
+Three things that will otherwise cost you a run:
+
+- `*` crosses directory separators, so `*.tf` already means any `.tf` at any
+  depth. `**` is refused rather than read as one `*`, because `**/*.tf` would
+  quietly exclude a `.tf` file at a repository's root.
+- `merge-graphs` is what writes the `repo` attribute, so on the layer as
+  extracted no node carries one. A `repo` rule falls back to the
+  `repositories/<name>/` segment of the graph file's own path, which is why the
+  axis works on the default input at all.
+- A rule that matched no node is reported with its line number, and so is a
+  candidate that kept nodes and no edges. Both look exactly like a clean run
+  otherwise.
+
+**The stage sizes cuts; it does not apply one.** A repository-level cut is
+applied by naming fewer graphs to `graphify merge-graphs`; a cut by file type
+inside a repository has no route in the library yet. Before applying either, get
+`config/questions.txt` and `knowledgestore check-answers` (§9) working against
+the uncut store — the measurement that decides a cut is not its size, it is
+whether any question you need answered depended on what it removed, and there is
+no baseline for that after the fact.
 
 ### Deployment configuration (the `deployments` stage, opt-in)
 

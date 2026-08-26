@@ -125,6 +125,44 @@ Nothing here is classified against a list of directory names. The rows are deriv
 from the content set, so an estate whose dominant cause is something nobody has
 seen before still gets it named.
 
+### Size the AST layer before merging
+
+Run this between the extraction loop and `merge-graphs` above, while the layer
+can still be measured on its own terms:
+
+```bash
+knowledgestore size-cuts       # every repositories/*/graphify-out/graph.json
+```
+
+It names each per-repository graph with its own counts, sizes any candidate cut
+declared in `config/content-cuts.txt`, and records the layer's totals so the next
+refresh can say what moved. After the merge you can only measure the layer you
+published, which is a different quantity: a cut removes content for reasons
+unrelated to it being noise, so what survives says nothing about what the raw
+layer held.
+
+Three rules when an estate asks for a content cut, and none of them is a number:
+
+- **Size a candidate by its surviving edges, not its node count.** An edge
+  survives only when both endpoints do. The most attractive candidate by nodes on
+  one estate kept only file-level nodes — tens of thousands of them, joined by low
+  hundreds of edges, because AST edges connect symbols rather than files.
+- **Never propose a threshold, a cap or a per-language ban.** Two estates measured
+  AST-to-semantic node ratios roughly a factor of a hundred apart, so a constant
+  is wrong on one of them by two orders of magnitude. Compare against that store's
+  own previous refresh in `knowledge/telemetry.json`, which is what recording it
+  is for.
+- **Do not prune by cross-file connectivity.** It was measured and abandoned:
+  roughly three quarters of Java nodes had a cross-file edge and rather fewer
+  Terraform nodes did, so the axis marks ordinary imports rather than relevance. A
+  cut is a statement of what the store is for — say it in the store's own
+  documentation, so a reader knows the shape of what is missing.
+
+Applying a cut is a change to the graph the store commits, so get
+`knowledgestore check-answers` passing on the uncut store first: the question is
+not how much smaller the graph got, it is whether anything the estate needs
+answered depended on what left.
+
 ### Before dispatching semantic extraction
 
 If the estate carries documents, papers or images, write the chunk plan first:
