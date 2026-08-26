@@ -37,14 +37,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from knowledgestore import content_set  # noqa: E402
+
 try:
+    from graphify.detect import detect
     from graphify.extract import collect_files
 
     HAS_GRAPHIFY = True
 except ImportError:  # pragma: no cover - depends on the environment
     HAS_GRAPHIFY = False
 
-needs_graphify = unittest.skipUnless(HAS_GRAPHIFY, "needs graphify (optional dependency)")
+needs_graphify = unittest.skipUnless(
+    HAS_GRAPHIFY, "needs graphify (a peer CLI, not a dependency of this library)"
+)
 
 
 @needs_graphify
@@ -201,3 +206,85 @@ class ExtractionCacheRetainsContentTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@needs_graphify
+class DetectClassificationOfNamedFormatsTest(unittest.TestCase):
+    """The premise behind `content_set`'s two named-format rules, measured.
+
+    `content_set` refuses a Terraform state file that reaches the content set and
+    excludes storage-emulator dumps that reach it. Both rules rest on a claim
+    about what **graphify's** detect pass classifies, and the two claims do not
+    have the same answer:
+
+        __azurite_db_*.json    classified, so the exclusion does work today
+        *.tfstate              not classified, so the refusal cannot fire today
+
+    That difference is why the two are described differently. The refusal is
+    defence-in-depth against a peer change, not a fix for a live exposure, and
+    these tests are what make that statement checkable rather than remembered. A
+    state file is one extension-map entry away from being classified - detect
+    already classifies a plain `.json` as code - so when the first test fails the
+    finding is "the refusal is now live, re-describe it", not "fix this
+    repository".
+
+    Without these, every test of the refusal drives a hand-built detect result,
+    and a hand-built fixture asserting its own premise cannot notice that the
+    premise is false.
+    """
+
+    def _content_set(self, names: tuple[str, ...]) -> list[str]:
+        """The content set the real detect pass produces for a tree of `names`.
+
+        A git repository with no `.gitignore`, because detect honours one by
+        default: a fixture that let an ignore file swallow the tree would report
+        "not classified" for every file in it, which is the flattering reading of
+        a broken fixture rather than a measurement.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for name in names:
+            (root / name).write_text('{"version": 4}\n', encoding="utf-8")
+        return content_set.content_paths(detect(root))
+
+    def test_a_terraform_state_file_is_not_classified_as_content(self):
+        """Break it catches: graphify classifying the state format.
+
+        This test exists to fail, and while it passes `content_set.secret_bearing`
+        returns nothing on any real estate - which is precisely the claim the
+        refusal's own prose has to make and cannot check for itself.
+
+        The two controls in the same tree are load-bearing. Without them an empty
+        fixture, a failed `git init` or an ignore file swallowing the tree would
+        report "not classified" for everything and pass, which is how a check
+        that reads as compliance comes to have looked at nothing.
+        """
+        content = self._content_set(
+            ("terraform.tfstate", "terraform.tfstate.backup", "plain.json", "main.tf")
+        )
+        self.assertEqual(sorted(Path(path).name for path in content), ["main.tf", "plain.json"])
+        self.assertEqual(
+            content_set.secret_bearing(content),
+            [],
+            "graphify now classifies a state file as content, so the refusal in "
+            "`content-set` is live rather than defence-in-depth. Re-describe it, and "
+            "check whether the estate needs telling.",
+        )
+
+    def test_an_emulator_dump_is_classified_as_content(self):
+        """Break it catches: graphify stopping classifying the dump.
+
+        The exclusion earns its place only while these files do reach the content
+        set. If detect stops classifying them, the exclusion is dead code that
+        still prints a heading, and nothing else in the suite would notice -
+        every other test of it builds the detect result by hand.
+        """
+        content = self._content_set(("__azurite_db_blob__.json",))
+        self.assertEqual(
+            [Path(path).name for path in content_set.emulator_dumps(content)],
+            ["__azurite_db_blob__.json"],
+            "graphify no longer classifies an emulator dump as content, so nothing "
+            "reaches the exclusion in `content-set` and it is now dead code.",
+        )

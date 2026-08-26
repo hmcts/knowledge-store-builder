@@ -106,6 +106,11 @@ BOUNDARY_PATH = ROOT / "config" / "estate-boundary.txt"
 # for part of the estate.
 EXTERNAL_CONFIG = ROOT / "config" / "repositories-external.txt"
 TOPICS_CONFIG_PATH = ROOT / "config" / "topics.txt"
+# Files in a named format `content_set` refuses or excludes - a Terraform state file
+# holds resolved secret values - that this estate has decided are safe anyway.
+# Hand-maintained and optional, because whether a named file is safe is a ruling
+# and no part of the pipeline can derive one. Absent means nothing is declared.
+CONTENT_SET_ALLOWED_PATH = ROOT / "config" / "content-set-allowed.txt"
 QUESTIONS_PATH = ROOT / "config" / "questions.txt"
 # graphify's semantic fan-out reads and writes these. The chunk plan is the only
 # map from chunk number to file list, so without it the committed chunk archive
@@ -491,6 +496,7 @@ def _recompute_paths() -> None:
         BOUNDARY_PATH=root / "config" / "estate-boundary.txt",
         EXTERNAL_CONFIG=root / "config" / "repositories-external.txt",
         TOPICS_CONFIG_PATH=root / "config" / "topics.txt",
+        CONTENT_SET_ALLOWED_PATH=root / "config" / "content-set-allowed.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",
         DETECT_PATH=root / "graphify-out" / ".graphify_detect.json",
         CHUNK_PLAN_PATH=root / "graphify-out" / ".graphify_chunk_plan.json",

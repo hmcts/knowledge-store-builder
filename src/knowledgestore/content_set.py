@@ -50,13 +50,58 @@ Two consequences worth stating, because they are what keep the derivation honest
   at all. That is a measurement of the content set, not a judgement about
   directory names, so it needs no list to maintain and it reports whatever
   actually dominates a given estate.
+
+## The one named list here, and why it is not the drift above
+
+Two formats are named rather than derived, and the difference from an exclusion
+list is the direction of the claim. An exclusion list says "these are the
+uninteresting places on this estate", which is an estate-shaped judgement that
+goes stale by omission. `SECRET_BEARING_SUFFIXES` and `EMULATOR_DUMP_NAMES` say
+"this generated format contains this" - a statement about the format, true
+wherever the format occurs, and wrong only if the format changes.
+
+**The two formats are not in the same state today, and the difference matters
+more than the rule.** Measured against the installed peer version:
+
+    __azurite_db_*.json    classified, so the exclusion below does work
+    *.tfstate              NOT classified, so `secret_bearing` returns nothing
+
+So the emulator exclusion is live, and the secret-bearing refusal is
+**defence-in-depth against a change in a peer tool, not a fix for a live
+exposure**. No state file reaches the content set on the current peer version,
+because detect has no entry for the format; a state file is one extension-map
+entry away from being classified, since detect already classifies a plain `.json`
+as code. `tests/test_documented_graphify_behaviour.py` pins both halves against
+the real detect pass, and the day the first one fails the refusal becomes live
+and this paragraph has to be rewritten.
+
+Stated that way because the alternative is worse than saying nothing: a check
+that cannot fire, described as though it were guarding something, reads as
+protection and is believed because it is present.
+
+What the refusal is for, if it fires. A Terraform state file the pipeline
+classified as **content** is *in* the content set, so it is never a contentless
+directory and it is not a high-degree node either - neither reporting surface
+above can reach it. And for a file holding resolved secret values, reporting is
+the wrong shape whatever surface it appears on: by the time a person reads the
+report the content is extracted, and extracted content persists in the extraction
+cache (keyed by content hash) and in each clone's own `graphify-out/`, which
+`sync` deliberately preserves. Filtering the published graph afterwards does not
+reach either copy - which is itself asserted against the peer package rather than
+described, in `ExtractionCacheRetainsContentTest`.
+
+So the secret-bearing case is a refusal that names every path, overridable by
+name, and the emulator dumps are excluded and counted. The two stay separate:
+collapsed together, the secret case becomes as ignorable as the wasted parse.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
+from collections.abc import Container
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import store_paths
 
@@ -73,6 +118,42 @@ LOOSE = "(loose beside content)"
 
 # The attribution key for a repository that holds no content at all.
 WHOLE_REPOSITORY = "(the whole repository)"
+
+# Two named formats, and they are named formats on purpose.
+#
+# **Not a size rule and not a per-language ban.** Size is not the signal: an
+# estate's largest content files are routinely its schemas and its variable
+# files, and any byte threshold is wrong by orders of magnitude on some estate.
+# A per-language ban is worse - `.tf` and `.tfvars` are an estate's own
+# infrastructure surface and among the most valuable content it holds. The claim
+# made here is narrower and checkable in each case: *this named format is
+# generated, and what it contains is known*.
+
+# Terraform / OpenTofu state. The format holds provider outputs **verbatim**,
+# resolved, including passwords, keys and connection strings, so the format is
+# the evidence and no inspection of the file is needed to know it. Matched on the
+# final path component at any depth, because a state file in a subdirectory holds
+# the same resolved values as one beside the README.
+#
+# **This cannot fire on the current peer version, and that is the honest
+# description of it.** graphify's detect pass does not classify `.tfstate` at all,
+# so no state file reaches the content set and `secret_bearing` returns nothing on
+# any real estate. This is defence-in-depth against a peer change - one
+# extension-map entry, given detect already classifies a plain `.json` as code -
+# and not a fix for a live exposure. The premise is pinned against the real detect
+# pass by `DetectClassificationOfNamedFormatsTest`, so the day it changes a test
+# fails and says so; without that test this comment would be the only record that
+# the rule is dormant, and a dormant rule described as an active one is worse than
+# no rule.
+SECRET_BEARING_SUFFIXES = (".tfstate", ".tfstate.backup")
+
+# Storage-emulator dumps. The **lesser** category, deliberately kept separate:
+# these are wasted work rather than a leak - graphify itself reports that they
+# produce zero nodes - so they cost a parse and yield nothing. Matched on the
+# generated filename rather than on the emulator's name anywhere in the path,
+# which would take out an estate's own emulator wiring: a client module, a
+# compose file, a fixture directory, all of them authored content.
+EMULATOR_DUMP_NAMES = ("__azurite_db_*.json",)
 
 
 @dataclass(frozen=True)
@@ -108,6 +189,66 @@ def content_paths(detect: dict) -> list[str]:
         if isinstance(paths, list):
             found.update(store_paths.relative(p) for p in paths if isinstance(p, str) and p)
     return sorted(found)
+
+
+def read_allowed(path: Path) -> set[str]:
+    """Paths this estate has declared safe, store-relative. Absent means none.
+
+    Hand-maintained and optional, in the style of the other `config/`
+    declarations: whether a named file is safe is a ruling, and nothing in the
+    pipeline can derive a ruling. Blank lines and `#` comments are skipped.
+
+    Every declared path is relativised, because anything copied out of a graphify
+    command line is absolute - and a declaration that silently matches nothing
+    reads exactly like a declaration that was honoured, since the refusal simply
+    stands and the obvious conclusion is that the file is genuinely unsafe.
+    """
+    if not path.is_file():
+        return set()
+    declared: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            declared.add(store_paths.relative(line))
+    return declared
+
+
+def secret_bearing(content: list[str], allowed: Container[str] = ()) -> list[str]:
+    """Content-set paths in a format that holds resolved secret values, sorted.
+
+    **Returns nothing on the current peer version**: detect does not classify
+    `.tfstate`, so no state file reaches a real content set. Every test that
+    exercises the refusal therefore drives a constructed content set, and the
+    premise itself is pinned separately, against the real detect pass, by
+    `DetectClassificationOfNamedFormatsTest`.
+
+    If it does fire, "report it and let a human judge" is the wrong shape and
+    neither reporting surface in this module can see the file anyway: a state file
+    classified as content is *in* the content set, so it is never a `noise_roots`
+    row, and it is not a high-degree node either.
+    """
+    return sorted(
+        path
+        for path in content
+        if path not in allowed and PurePosixPath(path).name.endswith(SECRET_BEARING_SUFFIXES)
+    )
+
+
+def emulator_dumps(content: list[str], allowed: Container[str] = ()) -> list[str]:
+    """Content-set paths that are storage-emulator dumps, sorted.
+
+    Excluded and counted rather than refused. Collapsing this into
+    `secret_bearing` would make the secret case as ignorable as this one.
+    """
+    return sorted(
+        path
+        for path in content
+        if path not in allowed
+        and any(
+            fnmatch.fnmatchcase(PurePosixPath(path).name, pattern)
+            for pattern in EMULATOR_DUMP_NAMES
+        )
+    )
 
 
 def kind_counts(detect: dict) -> dict[str, int]:

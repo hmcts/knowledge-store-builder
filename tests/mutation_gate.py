@@ -944,6 +944,63 @@ MUTATIONS = (
         "a repository name and searches the forge for it, which returns nothing for an "
         "artefact published to a binary repository and rate-limits while doing so",
     ),
+    Mutation(
+        "secret-bearing content reported instead of refused",
+        "build_content_set.py",
+        "        _refuse_secret_bearing(refused, len(content))\n        return 2",
+        "        _refuse_secret_bearing(refused, len(content))",
+        "the reporting-instead-of-refusing shape, on the one input where reporting "
+        "cannot work: a state file holds resolved secret values, and by the time a "
+        "report is read the content is extracted and persists in the extraction cache "
+        "and in each clone's own graphify-out/, which sync deliberately preserves. "
+        "Reachable today only through a constructed content set - detect classifies no "
+        ".tfstate, so the refusal is dormant defence-in-depth and this entry keeps its "
+        "shape alive until the peer version changes",
+    ),
+    Mutation(
+        "the estate's own ruling ignored",
+        "build_content_set.py",
+        "    refused = content_set.secret_bearing(content, allowed)",
+        "    refused = content_set.secret_bearing(content)",
+        "the declaration is the only thing that makes this refusal safe to ship to "
+        "stores that already build: whether a named file is safe is a ruling nothing "
+        "in the pipeline can derive. An opt-out that is read and not applied reads "
+        "exactly like one that was honoured, because the refusal simply stands. Same "
+        "dormancy as the entry above - constructed input only, until detect classifies "
+        "the format",
+    ),
+    Mutation(
+        "emulator dumps dropped in silence",
+        "build_content_set.py",
+        "    _report_emulator_dumps(dumps, len(content), len(exposed), arguments.top)",
+        "    pass",
+        "an exclusion nobody sees is indistinguishable from content that was never "
+        "there, and this one changes a committed path list. The same escape as every "
+        "other unwired report in this file, with the count that reconciles the set "
+        "against what detect classified as its only observer",
+    ),
+    Mutation(
+        "the state-file rule anchored to the repository root",
+        "content_set.py",
+        "if path not in allowed and PurePosixPath(path).name.endswith(SECRET_BEARING_SUFFIXES)",
+        "if path not in allowed and len(PurePosixPath(path).parts) == 3",
+        "a rule that only fires on repositories/<repo>/<file> passes cleanly on every "
+        "estate that keeps its infrastructure in a subdirectory, which is most of "
+        "them - and passing cleanly is how it reads as compliance for files it never "
+        "looked at. Constructed input only while the refusal is dormant; the emulator "
+        "half of the same matcher is exercised on input the real detect pass produces",
+    ),
+    Mutation(
+        "the emulator-dump rule widened to a substring",
+        "content_set.py",
+        'EMULATOR_DUMP_NAMES = ("__azurite_db_*.json",)',
+        'EMULATOR_DUMP_NAMES = ("*azurite*",)',
+        "the opposite direction and the more tempting one: matching the emulator's "
+        "name anywhere takes out an estate's own emulator wiring - a client module, a "
+        "compose file, a fixture directory - all authored content, removed from a "
+        "committed path list by a rule that was only ever meant to drop one generated "
+        "filename",
+    ),
 )
 
 
