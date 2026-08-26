@@ -169,6 +169,12 @@ Three things to know before writing one:
 Skip the file and the manifest says so, under **What this manifest does not
 cover**. Nothing else in the pipeline changes.
 
+Once the estate is synced, the same question runs the other way:
+`knowledgestore gaps` ranks what the estate already depends on and does not
+hold, and reads this declaration so a repository you ruled out reads as a
+decision rather than as a candidate. See
+[Decide what to ingest next](refreshing-a-store.md#decide-what-to-ingest-next).
+
 ## Build the store
 
 Open Claude Code in the store directory and run
