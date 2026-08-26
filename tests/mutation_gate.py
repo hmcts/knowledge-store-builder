@@ -540,6 +540,138 @@ MUTATIONS = (
         "which is how a real warning stops being read",
     ),
     Mutation(
+        "only the store root's output is refused",
+        "extract_ast.py",
+        "        in_a_clone = bool(name) and name in candidate.parts[:-1]",
+        "        in_a_clone = False",
+        "the first version of the refusal above, written and caught the same hour by "
+        "reading this library's own build notes: `sync` ends with "
+        "`git clean -fd -e graphify-out`, so that directory is the one thing in a "
+        "clone sync deliberately preserves and every repository in the corpus can "
+        "hold one. A refusal anchored at the store root alone passes the corpus copies "
+        "through, which is where most of them are",
+    ),
+    Mutation(
+        "the pipeline parses its own output again",
+        "extract_ast.py",
+        "    if artefacts:",
+        "    if False:",
+        "a store driving extraction itself excluded dependency bundles, build output "
+        "and state files from its hand-written list, and not the directory this "
+        "pipeline writes - so several hundred of the pipeline's own artefacts were "
+        "handed to the parser as source. Found by watching a run parse a graph file, "
+        "because an exclusion list has no failing case: correct the day it is written "
+        "and silently wrong at the next new artefact",
+    ),
+    Mutation(
+        "one repository's failure loses the estate again",
+        "extract_ast.py",
+        "except Exception as error:  # a parser raises whatever the grammar raises",
+        "except KeyboardInterrupt as error:",
+        "the reported failure this stage exists for: a whole-corpus call on a "
+        "several-hundred-repository estate ran over eight minutes at full CPU and "
+        "produced no output at all, with nothing to attribute it to. Reverting to an "
+        "unisolated loop restores exactly that, and the run reads as a parser problem "
+        "rather than as one repository's",
+    ),
+    Mutation(
+        "a partial layer reports success",
+        "extract_ast.py",
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 1',
+        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 0',
+        "the layer is written even when repositories failed, on purpose, so the exit "
+        "code is the only thing carrying the failure. Returning 0 takes a CI build "
+        "green over a layer missing whole repositories - the shape of every escape "
+        "found in this library, a check that reads one artefact and is silent about "
+        "the one that matters",
+    ),
+    Mutation(
+        "a repository that shrank is never named",
+        "extract_ast.py",
+        "    if before:",
+        "    if False:",
+        "the gap a reviewing operator found in the first version of this stage, and the "
+        "only one of their four controls that had caught anything real - two genuine "
+        "decreases on one refresh. Reconciling a run against its own input catches input "
+        "dropped within a run; it cannot catch a repository extracting less than last "
+        "time, where every count reconciles and the store loses structure quietly",
+    ),
+    Mutation(
+        "a decrease is reported as no movement",
+        "extract_ast.py",
+        "            if after[name] < before[name]",
+        "            if False",
+        "the narrower half of the same gap: with the report still printing for gone and "
+        "new repositories, an operator sees a movement section and reads its silence on "
+        "decreases as an all-clear. A report that runs is the strongest possible "
+        "disguise for a check that does not",
+    ),
+    Mutation(
+        "a failed repository is dropped from the baseline",
+        "extract_ast.py",
+        "    return {**carried, **counts}",
+        "    return dict(counts)",
+        "found by re-reading this stage after its own review passed: a repository that "
+        "failed vanished from the sidecar, so it read as absent from the content set on "
+        "the next run and new on the one after, and the count its recovery would be "
+        "compared against was gone. With every repository failing, the whole baseline was "
+        "replaced with nothing - a failed run erasing the record of what it cost",
+    ),
+    Mutation(
+        "the per-repository bound never fires",
+        "extract_ast.py",
+        "signal.alarm(seconds)",
+        "signal.alarm(0)",
+        "per-repository extraction names the repository that is hanging, which is no use "
+        "to an operator who is asleep - the run has to end. The first version of this "
+        "stage had the attribution and no bound, so a pathological parse was identifiable "
+        "and still unbounded",
+    ),
+    Mutation(
+        "files the extractor could not read are discarded again",
+        "extract_ast.py",
+        'unread = [str(f) for f in (result.get("failed_sources") or [])]',
+        "unread = []",
+        "found by asking the real extractor what it returns rather than trusting the "
+        "stub: it names every file it could not read and returns *successfully* while "
+        "doing so, and this stage dropped that field on the floor. A repository that "
+        "parsed none of its files reported as extracted with a node count of zero and "
+        "no explanation - the information existed, was handed over, and was not read",
+    ),
+    Mutation(
+        "the bound is swallowed by the extractor's own error handling",
+        "extract_ast.py",
+        "class RepositoryTimeout(BaseException):",
+        "class RepositoryTimeout(Exception):",
+        "found by running the bound against the real extractor rather than reasoning "
+        "about it: it wraps each file in its own `except Exception`, so a TimeoutError "
+        "was caught there, the file skipped, and the call returned successfully with "
+        "fewer nodes. The bound silently converted a hang into a smaller layer - the "
+        "exact failure the movement check exists to catch a whole run later - while "
+        "reporting the repository as extracted. Deriving from Exception reads like a "
+        "tidy-up",
+    ),
+    Mutation(
+        "the alarm is left armed for a later stage",
+        "extract_ast.py",
+        "        signal.alarm(0)\n        signal.signal(signal.SIGALRM, previous)",
+        "        signal.signal(signal.SIGALRM, previous)",
+        "`signal.alarm` is process-wide, so an alarm left set fires inside whatever stage "
+        "runs next in the same process and names a repository that stage never touched. "
+        "The hardest class of failure to attribute, introduced by the fix for the one "
+        "above",
+    ),
+    Mutation(
+        "an empty layer looks like a successful extraction",
+        "extract_ast.py",
+        "    if not files:",
+        "    if False:",
+        "mirrors `merge-layers`, which carries the same refusal for an observed "
+        "reason: an empty layer merged silently produces a smaller graph that reads "
+        "as a successful run. Without it here the symptom surfaces two stages later "
+        "as a merge failure rather than at the stage that produced it",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
