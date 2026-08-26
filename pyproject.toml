@@ -34,6 +34,11 @@ deploy = ["PyYAML>=6"]
 # no Office documents should not carry the dependency, and one with them should
 # make the choice deliberately.
 documents = ["markitdown>=0.0.1"]
+# Only the extract-ast stage drives a source parser. Optional because a store
+# that already produces its own AST layer should not carry a parser it never
+# calls, and because extraction is the one part of this pipeline that is not
+# standard library by nature.
+ast = ["graphifyy>=0.1"]
 # Lint, format and type-check tooling, pinned to what CI runs.
 dev = ["ruff==0.16.3", "pyright==1.1.411"]
 
