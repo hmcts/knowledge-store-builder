@@ -453,6 +453,49 @@ exclusions; archived are always excluded), then re-run `discover` and `sync`.
 Adding repositories changes clustering, so community ids move: see "when
 clustering changes" below before regenerating summaries.
 
+**A repository left out is a decision, so record it.** `exclude` removes a
+repository from the estate and says nothing about why. `config/estate-boundary.txt`
+is where the estate rules one `active`, `not-used` or `decommissioned`, names an
+off-host alias of a repository it does hold, and dates a copy taken by hand.
+`knowledgestore status` reconciles those rulings against provenance and names a
+repository ruled active that the store does not hold - the shape of a
+"no evidence of X" answer that is wrong. `knowledgestore context` renders the
+declaration into `knowledge/repository-manifest.md`, and says plainly when there
+is none. See the "Declare the boundary" section of `docs/creating-a-store.md` for
+the rule set.
+
+**Which repository to add is a measurement, not a guess.** Once the estate is
+synced:
+
+```bash
+knowledgestore gaps          # add --limit 0 for every namespace
+```
+
+It reads the estate's own build files for the artefact coordinates it consumes,
+subtracts the ones it builds, and ranks what is left. Three rules when reading
+it, each of which has already cost someone an afternoon:
+
+- **Read the class column before the weight.** Domain namespaces are listed
+  first whatever their weight, because most reference weight is framework
+  plumbing and a reference to a test utility says the estate writes tests, not
+  how its business works.
+- **Never resolve a coordinate to a repository by name.** An internal artefact
+  is published to a binary repository, so its `artifactId` may appear in no
+  source file on the forge and code search returns nothing while rate-limiting.
+  Name matching against a large organisation returns confident nonsense from
+  unrelated programmes. Report the coordinate as written and let a human resolve
+  it from the published POM's `<scm>` URL.
+- **Unbuilt does not mean addable, and this stage never proposes an addition.**
+  On the estate the method was measured against, roughly a hundred coordinates
+  were unbuilt and one was worth adding. Rank, explain, and hand the decision to
+  the operator - including the decision to record a rejected candidate in
+  `config/estate-boundary.txt`.
+
+Widening the name prefixes instead is the intuitive move and the measured
+answer was no: on that estate it would have added mostly reusable
+infrastructure wrappers and empty repositories, and contradicted an exclusion
+the estate had already recorded deliberately.
+
 ## Writing community summaries
 
 Summaries are plain-English descriptions of each cluster. They are what the
@@ -540,10 +583,28 @@ path is the failure mode to check for.
 ### When clustering changes
 
 ```bash
+knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
 knowledgestore summaries snapshot   # BEFORE re-clustering
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+knowledgestore summaries snapshot   # re-key the baseline to the new clustering
 ```
+
+**`adrift` first, and never straight after a snapshot.** Community ids are
+positional, so only the snapshot binds a summary to a member set; re-cluster or
+rebuild without refreshing it and every summary stays attached to a community it
+no longer describes, while every community still has a summary and `status`
+reports the same coverage either way. `remap` cannot see it — it refuses when the
+snapshot and the graph share *no* node ids, and a snapshot taken from a stale
+graph shares *every* id with that same stale file. Run `adrift` on the store as
+committed; run it immediately after `summaries snapshot` and it compares the
+snapshot against the graph it was just taken from, which passes by construction.
+
+Exit 1 is drift. **Exit 2 means the check could not run**, and it names why: no
+membership read, or the wrong snapshot. Both make every summary compare as adrift,
+and the response is to fix the graph or re-take the snapshot — never to re-author
+prose. An id-space mismatch (`<repo>::<id>` on one side, bare ids on the other) is
+reported as a note for the same reason.
 
 **The bar measures recall, not fit**: it asks how much of the old cluster
 landed together, never how much of the new cluster those members make up. A
@@ -749,6 +810,15 @@ recorded in `knowledge/telemetry.json`. Add
 `--drift` to ask GitHub how far each repository has moved since the build
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.
+
+Add `--paths` to report absolute paths in the store's own tracked files. Paths a
+store persists about itself are **relative at rest, absolute in flight**: an
+absolute one records the build machine's directory layout in a committed artefact
+and stops naming a real file as soon as the store moves, while every count still
+reconciles and the JSON stays well-formed. The check names the files and counts
+them, and separates the artefacts that hold absolute paths by contract — graphify's
+`FILE_LIST` must be absolute verbatim — from the ones that should not. Convert with
+`knowledgestore.store_paths`, which still hands readers absolute paths.
 
 ## The semantic index
 

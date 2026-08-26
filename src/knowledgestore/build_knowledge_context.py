@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-from . import config, provenance
+from . import boundary, config, provenance
 
 
 def read_first_record(ndjson_path: Path) -> dict[str, object]:
@@ -46,6 +46,13 @@ def scope_statement(counted: int) -> list[str]:
     in what we read", and this says what that was. Discovery covering more than
     one host is the larger change (issue #92); saying what was covered is the
     part that stops a store implying a reach it never had.
+
+    The generic statement is what the library can derive on its own. Everything
+    an estate has actually decided - which other hosts exist, which repositories
+    it has ruled out, which names are aliases - is a declaration it maintains by
+    hand, and `boundary` renders it here. An estate that has declared nothing
+    gets told so, because a reader needs the difference between "outside this
+    store by decision" and "nobody has looked".
     """
     where = f"the `{config.GITHUB_ORG}` organisation" if config.GITHUB_ORG else "one organisation"
     return [
@@ -61,6 +68,7 @@ def scope_statement(counted: int) -> list[str]:
         "and check whether the thing you are looking for lives somewhere that was "
         "never in scope.",
         "",
+        *boundary.manifest_section(boundary.read()),
     ]
 
 
