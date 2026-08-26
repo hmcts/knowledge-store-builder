@@ -745,6 +745,14 @@ Rules to give each subagent, verbatim in spirit:
   inventing behaviour the names do not show is not.
 - Name the repository. If the top nodes are schema properties, say it is
   schema or contract content. If tests dominate, say it is test coverage.
+- **A hyphenated term is checked as an identifier only if it has three or more
+  segments and a lowercase initial**, so `same-named` and `JDBC-backed` are never
+  flagged, and a compound joined by a preposition or conjunction (`end-to-end`,
+  `point-in-time`) is exempt as well. A three-segment lowercase compound is
+  flagged whether it is an identifier or ordinary English, because an estate's
+  identifiers are built from ordinary English words — `widget-record-created` and
+  `no-reason-supplied` are one shape to any check. If a flagged term is English,
+  rephrase it; do not assume the check is wrong.
 - Write the output as one JSON object `{"<id>": "<summary>"}` covering every
   digest id in the batch, and nothing else.
 - **Anything else you write must carry your batch in its name.** A helper script,
