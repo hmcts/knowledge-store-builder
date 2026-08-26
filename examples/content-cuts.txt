@@ -1,0 +1,57 @@
+# Candidate content cuts, sized before anything is cut.
+#
+# Copy this to config/content-cuts.txt and edit. `knowledgestore size-cuts`
+# reads it, streams every repositories/*/graphify-out/graph.json, and reports
+# what each candidate would keep - nodes and, more importantly, the edges that
+# survive it. An edge survives only when BOTH of its endpoints do, so a node
+# count predicts neither: the most attractive candidate by nodes on one estate
+# kept only file-level nodes, tens of thousands of them joined by low hundreds
+# of edges, because AST edges connect symbols rather than files.
+#
+# Nothing here is applied. A cut is a statement about what the store is for, so
+# the pipeline measures candidates and a person chooses - and the choice belongs
+# in the store's own documentation, so a reader knows the shape of what is
+# missing.
+#
+# One `cut <name>` per candidate (lower case, hyphens - the name becomes part of
+# a metric in knowledge/telemetry.json), then its rules, one per line:
+#
+#   file <glob>       keep nodes whose source_file matches
+#   kind <glob>       keep nodes of this declaration kind (class, method, resource...)
+#   repo <glob>       keep nodes from a matching repository
+#   not-file <glob>   drop them, whatever else matched
+#   not-kind <glob>   drop them, whatever else matched
+#   not-repo <glob>   drop them, whatever else matched
+#
+# Rules on one axis widen a candidate; a second axis narrows it. A node is kept
+# when it matches at least one rule on every axis the candidate constrains, and
+# no `not-` rule.
+#
+# `*` crosses directory separators, so `*.tf` already means any .tf at any
+# depth. `**` is refused rather than read as one `*`, because `**/*.tf` would
+# quietly exclude a .tf file at a repository's root.
+#
+# Comments and blank lines are ignored. Comment the intent: the rules say what
+# is kept, and only you can say why that is what this store is for.
+
+
+# This store answers questions about infrastructure and deployment, so keep the
+# estate's infrastructure surface wherever it lives - including an application
+# repository's own /infrastructure directory, which a cut by repository would
+# discard along with the application code.
+cut iac-anywhere
+file *.tf
+file *.tfvars
+file *.hcl
+
+# For comparison, the same intent expressed by repository. Size both: on one
+# estate this discarded thousands of component-level infrastructure nodes spread
+# across hundreds of application repositories.
+cut infra-repositories-only
+repo *-infrastructure
+
+# Also for comparison, and expected to be a bad candidate: keeping the files and
+# dropping the symbols leaves the files as disconnected dots. Left in this file
+# on purpose, because seeing its edge count is the argument.
+cut files-only
+kind file

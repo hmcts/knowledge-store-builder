@@ -256,6 +256,15 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
 
 Reconcile the number of graphs produced with `config/repositories.txt` before
 merging. A shell loop that skipped repositories can still exit successfully.
+`knowledgestore size-cuts` gives you the two numbers to reconcile — it names
+every graph the merge glob finds, with its own node and edge counts — and sizes
+the layer while it is still per-repository. See
+[sizing the AST layer](building-a-knowledge-store.md#sizing-the-ast-layer-before-you-commit-to-it),
+which matters most on an estate mixing symbol-level languages with
+infrastructure formats. It does not compare against `config/repositories.txt`:
+extraction is manifest-driven and the merge is directory-driven, so a graph on
+disk that no manifest declares is still an input, and that difference is yours
+to look at.
 
 Do not run graphify at the store root or pass `repositories/<name>` from the
 store root. The first route sees a near-empty ignored tree; the second writes
