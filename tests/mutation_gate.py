@@ -467,6 +467,79 @@ MUTATIONS = (
         "reads as a finished fan-out",
     ),
     Mutation(
+        "content set written empty",
+        "build_content_set.py",
+        "    if not content:",
+        "    if False:",
+        "an empty path list makes every search over it return no matches, and no "
+        "matches reads as a confident answer about the estate rather than as a "
+        "missing detect result - the exact failure mode the artefact exists to end",
+    ),
+    Mutation(
+        "noise figure claimed from a tree nobody measured",
+        "build_content_set.py",
+        '    if not tree:\n        return {"measured": False}',
+        '    if False:\n        return {"measured": False}',
+        "a sparse clone has no corpus, so the tree count is zero and zero renders "
+        "as 'no noise' - the most flattering reading of the least measured case, on "
+        "the one artefact whose whole purpose is to say the tree is mostly noise",
+    ),
+    Mutation(
+        "content files counted as noise",
+        "content_set.py",
+        "        if path in held:",
+        "        if path in bearing:",
+        "written and caught during #213: `bearing` holds directories, so no file "
+        "path is ever in it and every content file was tallied as noise. The "
+        "percentage came out higher, which is the direction that gets believed",
+    ),
+    Mutation(
+        "noise attributed to the file's own directory",
+        "content_set.py",
+        "    for depth in range(2, len(parts)):",
+        "    for depth in range(len(parts) - 1, len(parts)):",
+        "the shallowest contentless directory is the finding; the deepest one is "
+        "thousands of content-hash directories holding one file each, which turns a "
+        "single dominant noise source into an unreadable list",
+    ),
+    Mutation(
+        "noise roots lose their tiebreak",
+        "content_set.py",
+        "        key=lambda root: (-root.files, root.path),",
+        "        key=lambda root: -root.files,",
+        "two directories of equal size then come out in whatever order the caller "
+        "supplied the tree in, so a committed manifest differs between two builds "
+        "that changed nothing - the class of non-determinism that is invisible "
+        "until somebody diffs two stores",
+    ),
+    Mutation(
+        "directory symlinks walked again",
+        "content_set.py",
+        "    for directory, _, names in os.walk(corpus, followlinks=False):",
+        "    for directory, _, names in os.walk(corpus, followlinks=True):",
+        "a followed link reports the same files twice under two paths, inflating "
+        "the tree count that is the denominator of every percentage this stage "
+        "prints; symlink duplication has already produced three wrong figures here",
+    ),
+    Mutation(
+        "content set report unwired",
+        "status.py",
+        "    _report_content_set()",
+        "    pass",
+        "the fourth instance of this repository's most repeated escape, and #213 "
+        "itself is the consequence: the pipeline knew what it considered content "
+        "and nothing said so, so every consumer re-derived it badly",
+    ),
+    Mutation(
+        "a set that cannot be judged reported as stale",
+        "status.py",
+        '"current": None if not config.DETECT_PATH.is_file() else recorded == here,',
+        '"current": recorded == here,',
+        "detect is a graphify working file a store need not keep, so a store "
+        "without one would be told its content set was stale on every single run - "
+        "which is how a real warning stops being read",
+    ),
+    Mutation(
         "merge inputs read from the declaration again",
         "merge_inputs.py",
         "    for repository in sorted(config.REPOSITORIES_DIR.iterdir()):",
@@ -661,6 +734,89 @@ MUTATIONS = (
         "the scan reported - the ones spanning the hold-back point lost their head, the "
         "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
         "in the direction that reads as clean",
+    ),
+    Mutation(
+        "ambiguous endpoints folded into the recovered total",
+        "measure_dangling_endpoints.py",
+        "    return AMBIGUOUS if found > 1 else ABSENT",
+        "    return RECOVERABLE if found > 1 else ABSENT",
+        "#162: the one constraint the measurement rests on. A repair built on "
+        "this rate resolves only where the name is unambiguous, so a rate that "
+        "counted the ambiguous ones promises recoveries the repair must refuse - "
+        "and the totals still add up, so nothing else notices",
+    ),
+    Mutation(
+        "entity names matched against the whole path-qualified id",
+        "measure_dangling_endpoints.py",
+        '    return str(value).strip().rsplit("::", 1)[-1].casefold()',
+        "    return str(value).strip().casefold()",
+        "#162, and the shape this codebase has shipped most often: a name matched "
+        "against a path-qualified id cannot match, so the rate comes back a clean "
+        "0.0% and reads as an estate with nothing to fix",
+    ),
+    Mutation(
+        "recovery stops looking at local_id",
+        "measure_dangling_endpoints.py",
+        '    keys = {entity_name(node.get("id")), entity_name(node.get("local_id"))}',
+        '    keys = {entity_name(node.get("id"))}',
+        "#162's whole claim is that local_id carries the entity name; without it "
+        "the estate whose endpoints dangle because a chunk named an id defined in "
+        "another chunk measures zero, which is the answer that closes the issue",
+    ),
+    Mutation(
+        "an empty walk reports a clean rate",
+        "measure_dangling_endpoints.py",
+        '    return (graphs, "") if graphs else ([], _no_graphs_message(repositories))',
+        '    return graphs, ""',
+        "#162: every stage in this library that shipped doing nothing did so with "
+        "a passing suite, and '0 dangling endpoints' over a walk that read no "
+        "files is indistinguishable from an estate that has none",
+    ),
+    Mutation(
+        "graphs that could not be measured reported as a measured zero",
+        "measure_dangling_endpoints.py",
+        "    if not any(m.measurable for m in measurements):",
+        "    if False:",
+        "#162: a graph with no edges has no endpoints to dangle, so every count "
+        "is zero and the rate is undefined - printed as a result it says the "
+        "store is clean",
+    ),
+    Mutation(
+        "the merged estate graph offered as a substitute",
+        "measure_dangling_endpoints.py",
+        '        candidate = config.ROOT / "graphify-out" / name\n        if candidate.is_file():',
+        '        candidate = config.ROOT / "graphify-out" / name\n        if False:',
+        "#162: one estate's first measurement came back at zero and was a "
+        "tautology, because it read the file its own merge had already cleaned. "
+        "That file is at the store root and is the one an operator reaches for "
+        "next, so it has to be refused by name rather than merely not walked",
+    ),
+    Mutation(
+        "the same graph measured twice from one clone",
+        "measure_dangling_endpoints.py",
+        "                found.append(candidate)\n                break",
+        "                found.append(candidate)",
+        "#162: a clone holding both graph forms would have every count doubled "
+        "while the rate stayed put - an error that reconciles internally, which "
+        "is the kind nobody finds",
+    ),
+    Mutation(
+        "the report stops naming the artefacts it read",
+        "measure_dangling_endpoints.py",
+        "        *_read_lines(measurements),",
+        "",
+        "#162: a rate measured downstream of a store's own fix is not a rate, and "
+        "the only way a reader can tell which it got is the list of files. A "
+        "check's silence licenses a claim only about the artefact it read",
+    ),
+    Mutation(
+        "named endpoints printed in set order",
+        "measure_dangling_endpoints.py",
+        "    result.classified = {kind: sorted(found) for kind, found in buckets.items()}",
+        "    result.classified = {kind: list(found) for kind, found in buckets.items()}",
+        "#162: two runs on the same graph must be byte-identical, and hash "
+        "randomisation makes an unsorted list invisible until someone diffs two "
+        "builds from different processes",
     ),
     Mutation(
         "retained failure double-counted",

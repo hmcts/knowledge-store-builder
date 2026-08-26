@@ -91,6 +91,40 @@ input that fails is the one the declaration omits, so such a check skips it and
 reports clean - which is worse than no check, because a clean report is read as
 an answer.
 
+### Expose the content set, and read what it measures
+
+Run this as soon as graphify has scanned the corpus, before extraction:
+
+```bash
+knowledgestore content-set     # -> knowledge/corpus/content-files.txt
+                               #    knowledge/corpus/content-set.json
+```
+
+Two things come out of it, and both are committed.
+
+**The path list is what a corpus search must read.** Anyone who falls back from the
+graph to `grep` otherwise searches the raw tree, and the tree holds each clone's
+extraction cache and graph, its VCS pack files and any vendored bundles alongside
+the corpus. Measured on two estates, a naive search sees several times as many
+files as the store considers content. Do not hand-maintain an exclusion list to
+work around it: a list is a second model of what the tool produces, correct the day
+it is written and silently wrong the next time the pipeline emits something new.
+One store's list covered dependency bundles, build output and state files and not
+the pipeline's own directory, so hundreds of its own artefacts were being fed back
+to the extractor.
+
+**The report names where the noise is, and now is when that is cheap to act on.**
+Each row is the shallowest directory in a repository under which the store found no
+content at all, aggregated across every repository holding one — so the estate-wide
+magnitude of a single cause reads as one line. Excluding those with a
+`.graphifyignore` **before** extracting is far cheaper than filtering afterwards:
+extract a file once and its derived content persists in the extraction cache and in
+that clone's own graph, neither of which a later filter touches.
+
+Nothing here is classified against a list of directory names. The rows are derived
+from the content set, so an estate whose dominant cause is something nobody has
+seen before still gets it named.
+
 ### Before dispatching semantic extraction
 
 If the estate carries documents, papers or images, write the chunk plan first:
@@ -319,6 +353,34 @@ rather than clean up afterwards.
 Nothing fails when the flag is used. Every stage reports success and the graph
 is simply wrong, which is why this is documented here rather than left to be
 noticed.
+
+**Measure that trade on this estate before acting on it.** The share above
+varies by three orders of magnitude between estates measured with the same
+predicate, and by different mechanisms, so no figure from another estate
+predicts yours:
+
+```bash
+knowledgestore dangling-endpoints          # after extraction, before merge-graphs
+knowledgestore dangling-endpoints --json graphify-out/dangling-endpoints.json
+```
+
+It walks `repositories/*/graphify-out/graph.json`, names every file it read, and
+splits the dangling endpoints three ways: **recoverable** (the id names exactly
+one node the graph already holds), **ambiguous** (it names more than one — never
+guessed, never counted as recovered), and **absent** (no node of that name, which
+is what external and standard-library symbols look like). It writes nothing to
+the graph.
+
+Run it **before** `merge-graphs`. Measured on the merged graph the rate is zero
+by construction: `merge-graphs` has already turned every dangling endpoint into a
+node, and the layer merge has already dropped the rest. The stage refuses that
+file by name rather than reporting a clean zero, and it exits non-zero when the
+walk finds nothing at all.
+
+Read the count beside the rate. A high rate over a few dozen endpoints sizes
+nothing; a low rate over tens of thousands may still be worth acting on. The
+recoverable count is what a repair could win, and the absent count is what
+materialising from `local_id` would turn into labelled nodes nobody asked for.
 
 **Pin the hash seed before clustering.** Without it the same graph file can yield
 a different community membership in each process — measured on two estates, and

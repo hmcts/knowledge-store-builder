@@ -512,6 +512,11 @@ class CliTest(SettingsIsolated):
                 # the glob would read before anything reads it (#222)
                 "merge-inputs",
                 "chunk-plan",
+                # beside chunk-plan because both read graphify's detect result,
+                # and deliberately before extraction: the noise it measures is
+                # only cheap to act on while a .graphifyignore can still change
+                # what gets extracted (#213)
+                "content-set",
                 # reads fan-out progress off the extractions on disk, between the
                 # plan that names the work and the merge that consumes it (#131)
                 "chunk-status",
@@ -532,6 +537,10 @@ class CliTest(SettingsIsolated):
                 "deepdive",
                 "explorer",
                 "status",
+                # a diagnostic, not a build step: it reads the per-repository
+                # graphs before they are merged, which is the only point at
+                # which a dangling endpoint still exists to be counted
+                "dangling-endpoints",
                 # also not part of a build: asks what the estate should ingest
                 # next, from the dependency evidence its clones already carry
                 "gaps",
