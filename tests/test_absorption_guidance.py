@@ -16,16 +16,16 @@ gate unless one is written — `CLAUDE.md` puts it as: a correction ships the ch
 that makes it durable.
 
 It pins the decision content rather than the wording around it, so the section can
-be rewritten without failing this, and cannot be gutted without failing it.
+be rewritten without failing this, and cannot be gutted without failing it. The
+extractor and the forge are `tests/doc_sections`, shared with the other gates over
+prose; what stays here is this section's heading, its fragments and its assertions.
 """
 
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-GUIDE = ROOT / "docs" / "refreshing-a-store.md"
+from doc_sections import Copy, body_of, collapsed, missing_elements, section_lines, sensitivity
 
 # The three outcomes. Each is a distinct decision, and dropping any one of them
 # leaves an operator with no answer for that case.
@@ -35,43 +35,32 @@ REQUIRED_DECISIONS = (
     "detects a **narrower** case",
 )
 
-
-def guidance(text: str) -> str:
-    """The section, or "" if the heading is gone.
-
-    Extracted rather than searched for across the whole document, so that a
-    matching phrase appearing somewhere else cannot stand in for the section
-    actually being present.
-    """
-    heading = "### Deciding whether a local check can go"
-    if heading not in text:
-        return ""
-    after = text.split(heading, 1)[1]
-    nxt = after.find("\n## ")
-    return after[:nxt] if nxt != -1 else after
+GUIDE = Copy(
+    "docs/refreshing-a-store.md",
+    "### Deciding whether a local check can go",
+    REQUIRED_DECISIONS,
+)
 
 
 class AbsorptionGuidanceTest(unittest.TestCase):
     def setUp(self):
-        self.text = GUIDE.read_text(encoding="utf-8")
-        self.section = guidance(self.text)
+        self.section = body_of(GUIDE)
 
     def test_the_section_is_present(self):
         """Breaks if the heading is renamed or removed, which would leave every
         assertion below passing over an empty string."""
-        self.assertTrue(self.section, f"no absorption guidance found in {GUIDE.name}")
         self.assertGreater(
-            len(self.section.strip().splitlines()),
+            section_lines(self.section),
             8,
-            "the section is present but too short to contain the guidance",
+            f"{GUIDE.path} has no {GUIDE.heading!r} section, or one too short to "
+            "contain the guidance",
         )
 
     def test_all_three_decisions_are_stated(self):
         """Breaks if a row is dropped. Each is a distinct case, and an operator
         meeting the missing one has no answer."""
-        for decision in REQUIRED_DECISIONS:
-            with self.subTest(decision=decision):
-                self.assertIn(decision, self.section)
+        absent = missing_elements(self.section, REQUIRED_DECISIONS)
+        self.assertEqual(absent, [], f"the decision table no longer states: {absent}")
 
     def test_the_principle_is_stated(self):
         """Breaks if the table survives without the reason for it.
@@ -80,9 +69,9 @@ class AbsorptionGuidanceTest(unittest.TestCase):
         does not list, and both real mistakes were cases the table would not have
         listed.
         """
-        collapsed = " ".join(self.section.lower().split())
-        self.assertIn("failure mode**, not the feature", collapsed)
-        self.assertIn("not the same check", collapsed)
+        principle = collapsed(self.section.lower())
+        self.assertIn("failure mode**, not the feature", principle)
+        self.assertIn("not the same check", principle)
 
     def test_it_says_why_a_reporting_check_is_not_a_gate(self):
         """Breaks if the specific trap goes unstated.
@@ -106,16 +95,22 @@ class AbsorptionGuidanceTest(unittest.TestCase):
     def test_this_gate_notices_a_dropped_decision(self):
         """The sensitivity check, in the same run.
 
-        Removes a decision from the real section text and asserts the check reports
-        it. If this ever passes, the assertions above are measuring the presence of
-        a document rather than its content.
+        Removes each decision from the real section in turn and asserts the check
+        reports that decision and only that decision. If this ever passes
+        trivially, the assertions above are measuring the presence of a document
+        rather than the three outcomes it has to distinguish.
         """
-        forged = self.section.replace(REQUIRED_DECISIONS[0], "")
-        missing = [d for d in REQUIRED_DECISIONS if d not in forged]
+        report = sensitivity(self.section, REQUIRED_DECISIONS)
         self.assertEqual(
-            missing,
-            [REQUIRED_DECISIONS[0]],
-            "removing a decision was not detected, so this gate is vacuous",
+            report.already_missing,
+            [],
+            f"precondition: the section has already lost {report.already_missing}",
+        )
+        self.assertEqual(
+            report.undetected,
+            [],
+            f"removing {report.undetected} from the decision table was not detected, "
+            "so this gate is vacuous for those rows",
         )
 
 

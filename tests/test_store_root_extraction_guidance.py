@@ -26,26 +26,24 @@ Two properties, and the second is the one worth having:
 
 The sections are extracted rather than searched for across the whole document, so
 a phrase surviving somewhere else cannot stand in for the section being present,
-and the gate asserts its own sensitivity in the same run.
+and the gate asserts its own sensitivity in the same run. The extractor and the
+forge are `tests/doc_sections`, shared with the other gates over prose; what
+stays here is this instruction's headings, its fragments and its assertions.
 """
 
 from __future__ import annotations
 
 import unittest
-from dataclasses import dataclass
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
-
-@dataclass(frozen=True)
-class Copy:
-    """One document's copy of the instruction, and what it must still say."""
-
-    path: str
-    heading: str
-    required: tuple[str, ...]
-
+from doc_sections import (
+    Copy,
+    body_of,
+    missing_commands,
+    missing_elements,
+    section_after_rename,
+    section_lines,
+    sensitivity,
+)
 
 # Substrings of the collapsed section, each the shortest fragment that cannot
 # survive its element being dropped -- so the surrounding wording stays free to
@@ -88,68 +86,17 @@ GUARDED = (
 REQUIRED_COMMANDS = ("cd ", "repositories/", "graphify merge-graphs")
 
 
-def section(text: str, heading: str) -> str:
-    """The heading's own body, up to the next heading, or "" if it is gone.
-
-    Extracted rather than searched for so that a matching phrase elsewhere in the
-    document cannot stand in for this section being present. Headings inside
-    fenced code blocks are not headings -- a shell comment opens with `#` too.
-    """
-    if heading not in text:
-        return ""
-    body: list[str] = []
-    fenced = False
-    for line in text.split(heading, 1)[1].splitlines():
-        if line.startswith("```"):
-            fenced = not fenced
-        elif not fenced and line.startswith("#"):
-            break
-        body.append(line)
-    return "\n".join(body)
-
-
-def commands(body: str) -> str:
-    """Only what is inside the section's fenced blocks.
-
-    Prose is excluded so that a sentence mentioning a command cannot stand in for
-    the block that shows it.
-    """
-    inside: list[str] = []
-    fenced = False
-    for line in body.splitlines():
-        if line.startswith("```"):
-            fenced = not fenced
-        elif fenced:
-            inside.append(line)
-    return "\n".join(inside)
-
-
-def collapsed(text: str) -> str:
-    """One line, so a fragment matches across a wrapped line break."""
-    return " ".join(text.split())
-
-
-def missing_elements(text: str, required: tuple[str, ...]) -> list[str]:
-    """Which required elements are absent. Separate so sensitivity can call it."""
-    flat = collapsed(text)
-    return [element for element in required if collapsed(element) not in flat]
-
-
 class StoreRootExtractionGuidanceTest(unittest.TestCase):
     def test_every_guarded_section_is_present(self):
         """Breaks if a heading is renamed or removed, which would otherwise leave
         every assertion below passing over an empty string."""
         for copy in GUARDED:
             with self.subTest(path=copy.path):
-                body = section((ROOT / copy.path).read_text(encoding="utf-8"), copy.heading)
-                self.assertTrue(
-                    body, f"{copy.path} no longer has a section headed {copy.heading!r}"
-                )
                 self.assertGreater(
-                    len(body.strip().splitlines()),
+                    section_lines(body_of(copy)),
                     8,
-                    f"{copy.path}'s {copy.heading!r} section is present but too short to "
-                    "hold the instruction and its reason",
+                    f"{copy.path}'s {copy.heading!r} section is gone or too short to hold "
+                    "the instruction and its reason",
                 )
 
     def test_every_copy_states_the_prohibition_and_the_mechanism(self):
@@ -157,7 +104,7 @@ class StoreRootExtractionGuidanceTest(unittest.TestCase):
         gate -- if it keeps the imperative and drops the reason for it."""
         for copy in GUARDED:
             with self.subTest(path=copy.path):
-                absent = missing_elements(self._section(copy), copy.required)
+                absent = missing_elements(body_of(copy), copy.required)
                 self.assertEqual(
                     absent,
                     [],
@@ -175,49 +122,40 @@ class StoreRootExtractionGuidanceTest(unittest.TestCase):
         something to namespace, so those commands are the instruction's substance.
         """
         for copy in GUARDED:
-            block = commands(self._section(copy))
-            for command in REQUIRED_COMMANDS:
-                with self.subTest(path=copy.path, command=command):
-                    self.assertIn(
-                        command,
-                        block,
-                        f"{copy.path}'s {copy.heading!r} section no longer shows "
-                        f"`{command}` in a command block, so it prohibits a route "
-                        "without showing the one to take",
-                    )
+            with self.subTest(path=copy.path):
+                absent = missing_commands(body_of(copy), REQUIRED_COMMANDS)
+                self.assertEqual(
+                    absent,
+                    [],
+                    f"{copy.path}'s {copy.heading!r} section no longer shows {absent} in a "
+                    "command block, so it prohibits a route without showing the one to "
+                    "take",
+                )
 
     def test_this_gate_notices_a_dropped_element(self):
         """The sensitivity check, in the same run.
 
-        Forges a copy of each real section with one required element removed and
-        asserts the checker reports exactly that element. If this ever passes
-        trivially, the assertions above are measuring the presence of a document
-        rather than its content.
+        Forges each real section with one required element removed and asserts the
+        checker reports exactly that element. If this ever passes trivially, the
+        assertions above are measuring the presence of a document rather than the
+        prohibition and the mechanism it has to carry.
         """
         for copy in GUARDED:
-            # Collapsed first: an element that wraps across a line break is not
-            # present verbatim in the raw section, so a raw replace would match
-            # nothing and the forge would silently be a no-op.
-            body = collapsed(self._section(copy))
-            already = missing_elements(body, copy.required)
+            report = sensitivity(body_of(copy), copy.required)
             with self.subTest(path=copy.path):
                 self.assertEqual(
-                    already,
+                    report.already_missing,
                     [],
-                    f"precondition: {copy.path} still states every element, so every "
-                    "forge below removes something",
+                    f"precondition: {copy.path} no longer states "
+                    f"{report.already_missing}, so nothing below is a forge",
                 )
-            if already:
-                continue  # forging from an already broken section proves nothing
-            for element in copy.required:
-                with self.subTest(path=copy.path, element=element):
-                    forged = body.replace(collapsed(element), "")
-                    self.assertEqual(
-                        missing_elements(forged, copy.required),
-                        [element],
-                        f"removing {element!r} from {copy.path} was not detected, so this "
-                        "gate is vacuous",
-                    )
+                self.assertEqual(
+                    report.undetected,
+                    [],
+                    f"removing {report.undetected} from {copy.path} was not attributed to "
+                    "that element, so this gate would not notice the mechanism being "
+                    "dropped while the imperative stayed",
+                )
 
     def test_this_gate_notices_a_removed_heading(self):
         """The other way the gate could go vacuous: the section extractor finding
@@ -225,35 +163,13 @@ class StoreRootExtractionGuidanceTest(unittest.TestCase):
         """
         for copy in GUARDED:
             with self.subTest(path=copy.path):
-                text = (ROOT / copy.path).read_text(encoding="utf-8")
                 self.assertEqual(
-                    section(text.replace(copy.heading, "## Something Else"), copy.heading),
+                    section_after_rename(copy),
                     "",
-                    "a renamed heading was still found, so the extractor is not reading "
-                    "the heading it names",
+                    f"the extractor found a section in {copy.path} after "
+                    f"{copy.heading!r} was renamed away, so it is not reading the "
+                    "heading it was given",
                 )
-
-    def test_the_extractors_read_the_section_and_nothing_else(self):
-        """Breaks if `section` starts returning the rest of the document, or if
-        `commands` starts reading prose.
-
-        The skill's instruction sits under a heading followed by many others; an
-        extractor that ran past them would find every fragment somewhere and
-        report green over a section that had been gutted. A `commands` that read
-        prose would accept a sentence in place of the block.
-        """
-        document = (
-            "## First\nalpha\n\n```bash\n# not a heading\ncd somewhere\n```\n\n"
-            "### Second\nbeta\n\n## Third\n"
-        )
-        body = section(document, "## First")
-        self.assertEqual(body, "\nalpha\n\n```bash\n# not a heading\ncd somewhere\n```\n")
-        self.assertEqual(section(document, "## Missing"), "")
-        self.assertEqual(commands(body), "# not a heading\ncd somewhere")
-        self.assertNotIn("alpha", commands(body))
-
-    def _section(self, copy: Copy) -> str:
-        return section((ROOT / copy.path).read_text(encoding="utf-8"), copy.heading)
 
 
 if __name__ == "__main__":
