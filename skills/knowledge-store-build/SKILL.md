@@ -333,6 +333,34 @@ Nothing fails when the flag is used. Every stage reports success and the graph
 is simply wrong, which is why this is documented here rather than left to be
 noticed.
 
+**Measure that trade on this estate before acting on it.** The share above
+varies by three orders of magnitude between estates measured with the same
+predicate, and by different mechanisms, so no figure from another estate
+predicts yours:
+
+```bash
+knowledgestore dangling-endpoints          # after extraction, before merge-graphs
+knowledgestore dangling-endpoints --json graphify-out/dangling-endpoints.json
+```
+
+It walks `repositories/*/graphify-out/graph.json`, names every file it read, and
+splits the dangling endpoints three ways: **recoverable** (the id names exactly
+one node the graph already holds), **ambiguous** (it names more than one — never
+guessed, never counted as recovered), and **absent** (no node of that name, which
+is what external and standard-library symbols look like). It writes nothing to
+the graph.
+
+Run it **before** `merge-graphs`. Measured on the merged graph the rate is zero
+by construction: `merge-graphs` has already turned every dangling endpoint into a
+node, and the layer merge has already dropped the rest. The stage refuses that
+file by name rather than reporting a clean zero, and it exits non-zero when the
+walk finds nothing at all.
+
+Read the count beside the rate. A high rate over a few dozen endpoints sizes
+nothing; a low rate over tens of thousands may still be worth acting on. The
+recoverable count is what a repair could win, and the absent count is what
+materialising from `local_id` would turn into labelled nodes nobody asked for.
+
 **Pin the hash seed before clustering.** Without it the same graph file can yield
 a different community membership in each process — measured on two estates, and
 on one the committed graph matched none of its own rebuilds. It is input-dependent

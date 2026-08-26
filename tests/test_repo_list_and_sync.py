@@ -533,6 +533,10 @@ class CliTest(SettingsIsolated):
                 "deepdive",
                 "explorer",
                 "status",
+                # a diagnostic, not a build step: it reads the per-repository
+                # graphs before they are merged, which is the only point at
+                # which a dangling endpoint still exists to be counted
+                "dangling-endpoints",
                 # also not part of a build: asks what the estate should ingest
                 # next, from the dependency evidence its clones already carry
                 "gaps",

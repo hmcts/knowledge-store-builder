@@ -688,6 +688,89 @@ MUTATIONS = (
         "in the direction that reads as clean",
     ),
     Mutation(
+        "ambiguous endpoints folded into the recovered total",
+        "measure_dangling_endpoints.py",
+        "    return AMBIGUOUS if found > 1 else ABSENT",
+        "    return RECOVERABLE if found > 1 else ABSENT",
+        "#162: the one constraint the measurement rests on. A repair built on "
+        "this rate resolves only where the name is unambiguous, so a rate that "
+        "counted the ambiguous ones promises recoveries the repair must refuse - "
+        "and the totals still add up, so nothing else notices",
+    ),
+    Mutation(
+        "entity names matched against the whole path-qualified id",
+        "measure_dangling_endpoints.py",
+        '    return str(value).strip().rsplit("::", 1)[-1].casefold()',
+        "    return str(value).strip().casefold()",
+        "#162, and the shape this codebase has shipped most often: a name matched "
+        "against a path-qualified id cannot match, so the rate comes back a clean "
+        "0.0% and reads as an estate with nothing to fix",
+    ),
+    Mutation(
+        "recovery stops looking at local_id",
+        "measure_dangling_endpoints.py",
+        '    keys = {entity_name(node.get("id")), entity_name(node.get("local_id"))}',
+        '    keys = {entity_name(node.get("id"))}',
+        "#162's whole claim is that local_id carries the entity name; without it "
+        "the estate whose endpoints dangle because a chunk named an id defined in "
+        "another chunk measures zero, which is the answer that closes the issue",
+    ),
+    Mutation(
+        "an empty walk reports a clean rate",
+        "measure_dangling_endpoints.py",
+        '    return (graphs, "") if graphs else ([], _no_graphs_message(repositories))',
+        '    return graphs, ""',
+        "#162: every stage in this library that shipped doing nothing did so with "
+        "a passing suite, and '0 dangling endpoints' over a walk that read no "
+        "files is indistinguishable from an estate that has none",
+    ),
+    Mutation(
+        "graphs that could not be measured reported as a measured zero",
+        "measure_dangling_endpoints.py",
+        "    if not any(m.measurable for m in measurements):",
+        "    if False:",
+        "#162: a graph with no edges has no endpoints to dangle, so every count "
+        "is zero and the rate is undefined - printed as a result it says the "
+        "store is clean",
+    ),
+    Mutation(
+        "the merged estate graph offered as a substitute",
+        "measure_dangling_endpoints.py",
+        '        candidate = config.ROOT / "graphify-out" / name\n        if candidate.is_file():',
+        '        candidate = config.ROOT / "graphify-out" / name\n        if False:',
+        "#162: one estate's first measurement came back at zero and was a "
+        "tautology, because it read the file its own merge had already cleaned. "
+        "That file is at the store root and is the one an operator reaches for "
+        "next, so it has to be refused by name rather than merely not walked",
+    ),
+    Mutation(
+        "the same graph measured twice from one clone",
+        "measure_dangling_endpoints.py",
+        "                found.append(candidate)\n                break",
+        "                found.append(candidate)",
+        "#162: a clone holding both graph forms would have every count doubled "
+        "while the rate stayed put - an error that reconciles internally, which "
+        "is the kind nobody finds",
+    ),
+    Mutation(
+        "the report stops naming the artefacts it read",
+        "measure_dangling_endpoints.py",
+        "        *_read_lines(measurements),",
+        "",
+        "#162: a rate measured downstream of a store's own fix is not a rate, and "
+        "the only way a reader can tell which it got is the list of files. A "
+        "check's silence licenses a claim only about the artefact it read",
+    ),
+    Mutation(
+        "named endpoints printed in set order",
+        "measure_dangling_endpoints.py",
+        "    result.classified = {kind: sorted(found) for kind, found in buckets.items()}",
+        "    result.classified = {kind: list(found) for kind, found in buckets.items()}",
+        "#162: two runs on the same graph must be byte-identical, and hash "
+        "randomisation makes an unsorted list invisible until someone diffs two "
+        "builds from different processes",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
