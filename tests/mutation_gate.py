@@ -274,6 +274,64 @@ MUTATIONS = (
         "irreversible overwrite. Shipped in v0.14.0",
     ),
     Mutation(
+        "a stale graph is ranked rather than refused",
+        "build_community_summaries.py",
+        "    if stale:",
+        "    if False:",
+        'reported from a real store: `summaries adrift` printed "One of them is '
+        'stale" and then returned a verdict of 1, whose documented response is to '
+        "re-take the snapshot and re-author what the report names - which on that "
+        "store would have destroyed five thousand correct summaries. A read failure "
+        "answered by rewriting prose is the worst outcome this check has",
+    ),
+    Mutation(
+        "nothing compares the snapshot to the graph",
+        "build_community_summaries.py",
+        '        if entry["share"] < bar:',
+        "        if False:",
+        "the gap #193 reports: the library writes the membership snapshot, requires it, and "
+        "reports counts derived from it, and nothing checked that it still described the "
+        "graph - so every summary could sit on a community it no longer describes with "
+        "`status` reporting the same coverage either way",
+    ),
+    Mutation(
+        "summaries with no snapshot entry silently excluded",
+        "build_community_summaries.py",
+        '        "unsnapshotted": sorted(wanted - set(snap_sets), key=_by_id),',
+        '        "unsnapshotted": [],',
+        "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
+        "remap cannot even withdraw it - dropped from the population, after which the count "
+        "reads as though it had covered everything",
+    ),
+    Mutation(
+        "a graph carrying no membership reported as total drift",
+        "build_community_summaries.py",
+        "    if clustered / total < coverage:",
+        "    if False:",
+        "graphify holds the assignment in `community`, so a renamed key or a clustering step "
+        "that printed success without writing its result makes every comparison fail; read as "
+        "drift that would send someone re-authoring an entire store over a one-line read "
+        "failure",
+    ),
+    Mutation(
+        "an id-space mismatch reported as moved membership",
+        "build_community_summaries.py",
+        "    if (graph_share >= NAMESPACED_SHARE) == (snapshot_share >= NAMESPACED_SHARE):",
+        "    if True:",
+        "a first implementation of this check elsewhere reported 58 communities adrift of "
+        "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
+        "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
+    ),
+    Mutation(
+        "status leaves its summary count to be read as a verdict",
+        "status.py",
+        "    pointer = snapshot_pointer()",
+        '    pointer = ""',
+        "the count is identical whether the prose still describes its community or not, and an "
+        "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
+        "the blind spot is the only honest thing it can do there",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",

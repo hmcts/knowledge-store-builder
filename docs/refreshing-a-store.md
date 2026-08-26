@@ -34,6 +34,24 @@ Skip `summaries snapshot` only when the store has no summaries to preserve.
 of a clustering the summaries are no longer keyed to is not refused, it just
 retains less, silently. Two re-clusters in one refresh need two snapshots.
 
+Run `knowledgestore summaries adrift` **before** that snapshot, on the store as
+committed. It answers the question a coverage count cannot: whether the committed
+snapshot still describes the committed graph, and so whether each summary still
+describes the community it names. Community ids are positional, so a store whose
+prose has been silently re-pointed reports the same `status` coverage as one whose
+has not.
+
+Two things about when it means something:
+
+- **It is vacuous immediately after `summaries snapshot`.** The snapshot is then
+  taken from the graph it is compared against, so every summary matches by
+  construction. Run it on a checkout, in CI, or at the start of a refresh — any
+  point where the two committed artefacts might have gone out of step.
+- **Exit 1 is drift; exit 2 means the check could not run**, and the two need
+  opposite responses. An unreadable membership — a clustering step that printed
+  success without persisting its result, say — makes every summary compare as
+  adrift, and the answer to that is to fix the graph, never to re-author prose.
+
 If the store reads its issue tracker, run `fetch-tickets` after `intent`, which
 is the stage that discovers which tickets exist:
 
@@ -82,8 +100,14 @@ summaries onto them by membership overlap:
 ```bash
 knowledgestore record-clustering
 knowledgestore summaries remap
+knowledgestore summaries snapshot
 knowledgestore summaries extract
 ```
+
+The second `snapshot` re-keys the baseline to the clustering the remapped
+summaries now sit on. Without it the committed snapshot describes the graph the
+store no longer has, and the next refresh remaps from a baseline that is
+consistently wrong — the one state `remap`'s own guards cannot see.
 
 Read the retention reported by `remap` — and before you attribute a low figure to
 the corpus, read what `status` says about the partitioner. A refresh run where
@@ -310,4 +334,6 @@ Two failures, both reported by store operators:
 | Symptom | Action |
 |---|---|
 | `summaries remap` would discard most prose | Stop. Verify clustering coverage before remapping; a clustering command can report success without saving its result. |
+| `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
+| `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |
