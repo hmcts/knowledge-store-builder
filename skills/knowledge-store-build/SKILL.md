@@ -17,13 +17,13 @@ traps. This skill is the mechanics; that document is the judgement.
 
 ## Setup
 
-**This skill assumes knowledge-store-builder 0.11.6 or newer.** Check before
+**This skill assumes knowledge-store-builder 0.15.0 or newer.** Check before
 following it. The skills and the library install separately - these instructions
 come from the plugin cache, the library from pip - so the two drift, and the
 symptom is a stage documented here reported as `unknown stage`:
 
 ```bash
-knowledgestore --version        # older than 0.11.6? upgrade before following this
+knowledgestore --version        # older than 0.15.0? upgrade before following this
 ```
 
 A store deliberately pinned to an older library is a legitimate position; then
