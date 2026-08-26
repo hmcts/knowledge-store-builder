@@ -512,6 +512,9 @@ class CliTest(SettingsIsolated):
                 # rather than import an export of it
                 "fetch-tickets",
                 "chunk-plan",
+                # reads fan-out progress off the extractions on disk, between the
+                # plan that names the work and the merge that consumes it (#131)
+                "chunk-status",
                 "merge-chunks",
                 # the third fan-out seam: merges the AST and semantic layers
                 # without re-pointing edges at unrelated nodes (#129)
@@ -529,6 +532,9 @@ class CliTest(SettingsIsolated):
                 "deepdive",
                 "explorer",
                 "status",
+                # also not part of a build: asks what the estate should ingest
+                # next, from the dependency evidence its clones already carry
+                "gaps",
                 # not part of a build: gates a store runs in CI
                 "check-install-docs",
                 "check-corpus",

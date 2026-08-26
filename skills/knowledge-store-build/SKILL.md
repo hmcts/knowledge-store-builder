@@ -108,7 +108,9 @@ relate things that have no relation.
 estate whose code is spread thinly across deep trees produces many small chunks:
 measured at 6,704 chunks averaging 3.3 files, against 762 averaging 22 for the same
 corpus partitioned ad-hoc. That is roughly nine times the agent dispatches, which
-interacts with the fan-out's own limits. Decide both together.
+interacts with the fan-out's own limits. Decide both together - the limits are in
+"Dispatching the semantic fan-out" below, and nine times the dispatches is nine
+times the exposure to every one of them.
 
 **Adopting this planner is a full re-archive.** On the one estate with an existing
 plan, matching its path set exactly, only 799 chunks have identical membership - and
@@ -124,6 +126,76 @@ directory-grouped; it is not.
 **Chunk numbering is the archive's only index.** If you change `--chunk-size`
 between refreshes the numbering moves, and an archive of previous extractions is no
 longer addressable by it. Decide the maximum once per estate.
+
+### Dispatching the semantic fan-out
+
+**A code-only corpus never reaches this section.** graphify's semantic pass writes
+an empty layer for a corpus holding no documents, papers or images, so an estate of
+nothing but application code produces zero chunks and skips the fan-out entirely.
+Everything below is conditional on corpus composition rather than universal - and a
+doc-bearing estate spends a long build inside it, so the absence of complaints
+about the fan-out is evidence of who has run it, not that it is well-supported.
+
+Give **every** extraction agent this instruction, verbatim:
+
+> Write each chunk to disk IMMEDIATELY after producing it. Do NOT accumulate
+> results in your context and write at the end.
+
+An agent handed twenty-odd chunks will otherwise accumulate and write at the end,
+and past roughly **64k output tokens it dies with everything it produced lost** -
+it wrote nothing. The evidence for the instruction is stronger than the evidence of
+the failure that prompted it: later in the same build a session limit killed ten
+agents mid-batch simultaneously, and because every one was writing per chunk the
+loss was the single chunk each had in flight rather than the twenty-odd each had
+completed. On a layer that costs tens of millions of tokens to produce, this line
+is the difference between an interruption costing a handful of chunks and it
+costing hundreds.
+
+**The concurrency ceiling rejects rather than queues.** Dispatch past the
+concurrent-agent limit and the excess is refused, not held - so a chunk can be
+recorded as dispatched and never launched, and it then waits forever because
+nothing will ever produce it. Two things follow:
+
+- **"No output on disk" has two causes** - an agent still working, and an agent
+  that was never launched - and only the second needs a human. Plan-ordered
+  dispatch hides it: a low-numbered chunk rejected in an early round sits behind
+  every higher-numbered id that followed, unnoticed for as long as the numbers
+  above it keep arriving.
+- **Capacity arithmetic computed from a completed count is systematically
+  optimistic**, because agents finish between the check and the dispatch. Dispatch
+  smaller batches and reconcile after each round rather than computing headroom
+  once and spending it.
+
+**Read progress off disk, never off your dispatch log.**
+
+```bash
+knowledgestore chunk-status --dispatched round-1.txt round-2.txt
+```
+
+`done` is the plan intersected with the extractions on disk and consults no log.
+The log only ever *splits* the outstanding set, into `NEVER SENT` and `in flight`,
+and never-sent is printed first. Chunk files that are present but unreadable are
+reported separately and never counted as done - that is what an agent killed
+mid-write leaves behind. Log tokens matching no chunk in the plan are named rather
+than counted, and a token that looks like several ids run together is diagnosed as
+such. The stage names the logs it read and how many tokens it took from them, so
+you can reconcile against what you dispatched; it exits non-zero only when there
+is no plan to measure against.
+
+**A dispatch log is a cache of intent, not a record of fact.** Both halves of that
+have cost real work. A coverage gap of ninety-odd chunks was announced by diffing
+the plan against a log without intersecting disk, and a redundant round of a dozen
+agents was launched for a gap that did not exist - the log simply did not cover the
+early rounds. Separately, a log assembled by appending batch files that carried no
+trailing newline fused the last id of one file onto the first of the next; those
+tokens matched no chunk, counted as dispatched-but-absent, and for several rounds
+inflated `in flight` and deflated `NEVER SENT` while every total stayed plausible.
+A status tool that launders a corrupt log into a confident number is worse than no
+tool, because it is trusted.
+
+**Reconcile before merging.** `merge-chunks` reports the chunk files it could not
+read, but it cannot report a chunk that produced no file at all - it never sees
+one. Run `chunk-status` until `NEVER SENT` is none and `done` equals the plan.
 
 ### Merging the chunk extractions
 
@@ -385,12 +457,80 @@ reporting failure:
 - After any stage that writes per-item output, reconcile the count it reports
   against the count you expected.
 
+### Compare the count with the last build's, not with an expectation
+
+A count you reconcile against your own expectation only catches what you thought
+to expect. `intent`, `merge-layers` and `explorer` each record what they measured
+in `knowledge/telemetry.json` and print the movement since the last recorded
+build:
+
+```
+Telemetry, against the last record in knowledge/telemetry.json:
+  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+```
+
+**Read the movements and carry them into your report.** Every number in that
+report was plausible on its own and implausible beside its predecessor - a
+file-to-ticket join that lost most of its matches still reports a healthy-looking
+fraction of the graph. `git diff knowledge/telemetry.json` is the reviewable
+record; commit it with the rest of the store.
+
+Nothing fails on a movement, because an estate change moves all of these
+legitimately. The single exception is a measurement that was non-zero and is now
+zero, which goes to stderr as a warning. Do not add a threshold of your own: two
+estates measured the AST-to-semantic node ratio a hundredfold apart, so any
+constant is wrong on one of them, and the comparison that works is against this
+store's own history.
+
 ### Adding repositories to an estate
 
 Edit `config/repository-filters.txt` (include prefixes, explicit repositories,
 exclusions; archived are always excluded), then re-run `discover` and `sync`.
 Adding repositories changes clustering, so community ids move: see "when
 clustering changes" below before regenerating summaries.
+
+**A repository left out is a decision, so record it.** `exclude` removes a
+repository from the estate and says nothing about why. `config/estate-boundary.txt`
+is where the estate rules one `active`, `not-used` or `decommissioned`, names an
+off-host alias of a repository it does hold, and dates a copy taken by hand.
+`knowledgestore status` reconciles those rulings against provenance and names a
+repository ruled active that the store does not hold - the shape of a
+"no evidence of X" answer that is wrong. `knowledgestore context` renders the
+declaration into `knowledge/repository-manifest.md`, and says plainly when there
+is none. See the "Declare the boundary" section of `docs/creating-a-store.md` for
+the rule set.
+
+**Which repository to add is a measurement, not a guess.** Once the estate is
+synced:
+
+```bash
+knowledgestore gaps          # add --limit 0 for every namespace
+```
+
+It reads the estate's own build files for the artefact coordinates it consumes,
+subtracts the ones it builds, and ranks what is left. Three rules when reading
+it, each of which has already cost someone an afternoon:
+
+- **Read the class column before the weight.** Domain namespaces are listed
+  first whatever their weight, because most reference weight is framework
+  plumbing and a reference to a test utility says the estate writes tests, not
+  how its business works.
+- **Never resolve a coordinate to a repository by name.** An internal artefact
+  is published to a binary repository, so its `artifactId` may appear in no
+  source file on the forge and code search returns nothing while rate-limiting.
+  Name matching against a large organisation returns confident nonsense from
+  unrelated programmes. Report the coordinate as written and let a human resolve
+  it from the published POM's `<scm>` URL.
+- **Unbuilt does not mean addable, and this stage never proposes an addition.**
+  On the estate the method was measured against, roughly a hundred coordinates
+  were unbuilt and one was worth adding. Rank, explain, and hand the decision to
+  the operator - including the decision to record a rejected candidate in
+  `config/estate-boundary.txt`.
+
+Widening the name prefixes instead is the intuitive move and the measured
+answer was no: on that estate it would have added mostly reusable
+infrastructure wrappers and empty repositories, and contradicted an exclusion
+the estate had already recorded deliberately.
 
 ## Writing community summaries
 
@@ -479,10 +619,28 @@ path is the failure mode to check for.
 ### When clustering changes
 
 ```bash
+knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
 knowledgestore summaries snapshot   # BEFORE re-clustering
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+knowledgestore summaries snapshot   # re-key the baseline to the new clustering
 ```
+
+**`adrift` first, and never straight after a snapshot.** Community ids are
+positional, so only the snapshot binds a summary to a member set; re-cluster or
+rebuild without refreshing it and every summary stays attached to a community it
+no longer describes, while every community still has a summary and `status`
+reports the same coverage either way. `remap` cannot see it — it refuses when the
+snapshot and the graph share *no* node ids, and a snapshot taken from a stale
+graph shares *every* id with that same stale file. Run `adrift` on the store as
+committed; run it immediately after `summaries snapshot` and it compares the
+snapshot against the graph it was just taken from, which passes by construction.
+
+Exit 1 is drift. **Exit 2 means the check could not run**, and it names why: no
+membership read, or the wrong snapshot. Both make every summary compare as adrift,
+and the response is to fix the graph or re-take the snapshot — never to re-author
+prose. An id-space mismatch (`<repo>::<id>` on one side, bare ids on the other) is
+reported as a note for the same reason.
 
 **The bar measures recall, not fit**: it asks how much of the old cluster
 landed together, never how much of the new cluster those members make up. A
@@ -683,7 +841,8 @@ knowledgestore explorer
 `knowledgestore status` reports provenance, summary/brief coverage, dangling
 corpus citations, the partitioner recorded in
 `graphify-out/clustering-inputs.json` against the one this environment offers,
-and whether the page is older than a layer it embeds. Add
+whether the page is older than a layer it embeds, and what the last build
+recorded in `knowledge/telemetry.json`. Add
 `--drift` to ask GitHub how far each repository has moved since the build
 (one API call per repository). It never fails the build: drift is normal,
 and the response to it is a refresh, not a red cross.
@@ -759,5 +918,5 @@ Commit `knowledge/`, `knowledge_context.md`, `docs/topics/` and
 uncompressed `graph.json` — all are regenerable and large.
 
 Report honestly what was and was not regenerated: which stages ran, how many
-summaries or briefs are still missing, and whether the estate regression
-passed.
+summaries or briefs are still missing, what `knowledge/telemetry.json` moved by,
+and whether the estate regression passed.
