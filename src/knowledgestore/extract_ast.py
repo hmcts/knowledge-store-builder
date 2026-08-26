@@ -81,8 +81,10 @@ to know. It fails by omission, and omission is exactly what neither a list nor a
 test of a list can see. That is the shape of a vacuous gate, and it cannot be
 fixed by being more careful.
 
-The extractor already computes the content set and writes it to
-`.graphify_detect.json`. This stage consumes that, so there is one model.
+graphify's detect scan already computes the content set, and the build redirects
+it into `.graphify_detect.json` - the extractor does not write that file, and no
+graphify subcommand does either; `content_set.DETECT_PRODUCER` carries the call.
+This stage consumes the result, so there is one model.
 Anything derived from what the pipeline actually wrote cannot drift, because the
 pipeline knows what it wrote.
 
@@ -127,7 +129,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, io
+from . import config, content_set, io
 
 # The kinds `detect` classifies that hold parseable source. `paper`, `image` and
 # `video` are content the semantic layer reads and the AST parser cannot, so
@@ -502,8 +504,8 @@ def resolve_input(arguments, graph_directory: Path) -> "tuple[list[Path], Path]"
         source = arguments.detect or config.DETECT_PATH
         if not source.is_file():
             raise InputRefused(
-                f"Content set not found: {source}. The extractor writes it; run detection "
-                "first, or pass an explicit list with --files."
+                f"Content set not found: {source}. {content_set.DETECT_PRODUCER} Or pass an "
+                "explicit list with --files."
             )
         files = content_files(io.read_json_dict(source))
 

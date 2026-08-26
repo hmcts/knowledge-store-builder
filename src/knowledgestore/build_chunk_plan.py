@@ -52,7 +52,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 
-from . import config, io, store_paths
+from . import config, content_set, io, store_paths
 
 # graphify's own detect categories. Video is transcribed to a document before this
 # runs, so it is never planned directly.
@@ -246,9 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     detect = io.read_json_dict(config.DETECT_PATH)
     if not detect:
         print(
-            f"No detection results at {config.DETECT_PATH}. graphify writes this when it "
-            "scans the corpus, so run its detect step first - a plan invented without it "
-            "would name files nobody has confirmed are there.",
+            f"No detection results at {config.DETECT_PATH}. {content_set.DETECT_PRODUCER} "
+            "A plan invented without it would name files nobody has confirmed are there.",
             flush=True,
         )
         return 2

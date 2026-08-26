@@ -84,7 +84,7 @@ def _report_corpus(corpus: dict, content: int, top: int) -> None:
     if absent:
         print(
             f"  {absent:,} of {content:,} content files are not on disk: detect is older "
-            "than the tree. Re-run graphify's detect pass, and pass grep -s meanwhile.",
+            f"than the tree. Pass grep -s meanwhile, and re-scan. {content_set.DETECT_PRODUCER}",
             flush=True,
         )
     _report_noise_roots(corpus["noise_roots"], noise, top)
@@ -177,9 +177,9 @@ def main(argv: list[str] | None = None) -> int:
         # estate rather than as a missing input.
         print(
             f"No files classified in {config.DETECT_PATH}, so there is no content set to "
-            "expose and nothing was written. graphify writes that file when it scans the "
-            "corpus - run its detect pass first. An empty list would make every search "
-            "over it come back clean, which is the wrong answer, not a small one.",
+            f"expose and nothing was written. {content_set.DETECT_PRODUCER} An empty list "
+            "would make every search over it come back clean, which is the wrong answer, "
+            "not a small one.",
             flush=True,
         )
         return 2

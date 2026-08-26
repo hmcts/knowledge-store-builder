@@ -134,7 +134,10 @@ knowledgestore status --drift
 search reads instead of the raw tree. A refresh changes which files exist, so a
 list carried over from the previous build names the previous build's corpus —
 `status` says when it was built from a different detect result than the one on
-disk.
+disk. `content-set` reads that detect result rather than the tree, so re-run the
+scan that writes it before this block, or the rewritten list describes the
+previous refresh: see
+[Write the detect result, then expose the content set](creating-a-store.md#write-the-detect-result-then-expose-the-content-set).
 
 `intent` reports how many mined values it withheld as identifying a case or a
 person, and `check-evidence` fails if any remain in the committed artefact —
