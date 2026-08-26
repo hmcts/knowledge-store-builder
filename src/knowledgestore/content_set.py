@@ -31,7 +31,7 @@ excluded dependency bundles, build output and state files, and not the pipeline'
 own directory, so hundreds of its own JSON artefacts were being fed back to the
 extractor. That was found by watching a run parse a graph file as a source file.
 
-The pipeline already knows the answer, positively: graphify's detect pass wrote
+The pipeline already knows the answer, positively: graphify's detect scan wrote
 down every file it classified. Anything derived from what the pipeline *actually
 saw* cannot drift by omission, because a new artefact it did not classify is
 simply not in the set. So this module reads that, and everything else here —
@@ -122,6 +122,21 @@ LOOSE = "(loose beside content)"
 
 # The attribution key for a repository that holds no content at all.
 WHOLE_REPOSITORY = "(the whole repository)"
+
+# How the detect result comes to exist, carried by every stage that refuses for
+# want of it. graphify's CLI has no `detect` subcommand and `graphify update` at
+# the store root exits 0 writing no detect result, so a refusal naming "graphify's
+# detect step" sends an operator looking for a command that does not exist (#236).
+# One copy, because three stages say it and a remedy that drifts between them is
+# worse than one written once.
+DETECT_PRODUCER = (
+    "graphify's CLI does not write it - there is no detect subcommand, and "
+    "`graphify update` at the store root writes no detect result either. From the store "
+    'root: run `python3 -c "import json; from pathlib import Path; from graphify.detect '
+    "import detect; print(json.dumps(detect(Path('.'), gitignore=False)))\"` redirected "
+    "to graphify-out/.graphify_detect.json. gitignore=False is what makes repositories/ "
+    "visible to the scan, and docs/creating-a-store.md says what else it widens."
+)
 
 # Two named formats, and they are named formats on purpose.
 #
