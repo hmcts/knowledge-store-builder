@@ -151,6 +151,19 @@ def extract() -> int:
     return 0
 
 
+# The S8707 register. Sonar reports `pythonsecurity:S8707` wherever a path built
+# from CLI arguments reaches the filesystem, and this library answers it in two
+# ways: a write is validated by `io.checked_write_target`, and a read is
+# suppressed on the grounds stated in `merge` below. Every read site cites those
+# grounds rather than restating them, so the two cannot drift into two different
+# policies. Keep this register complete - `tests/test_read_path_policy.py` fails
+# when a module suppresses the rule without appearing here.
+#   S8707 policy site: build_community_summaries.py - merge, where the grounds are
+#   S8707 policy site: extract_ast.py - read_file_list, citing merge
+#   S8707 policy site: chunk_status.py - log_tokens, citing merge
+#   S8707 policy site: io.py - every read, citing merge; its two writes are
+#     validated by checked_write_target, which is a check rather than grounds
+#   S8707 policy site: build_content_set.py - a write, validated the same way
 def merge(paths: list[str]) -> int:
     known_ids = {
         str(d["id"]) for d in json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
@@ -162,9 +175,13 @@ def merge(paths: list[str]) -> int:
     )
     added, rejected = 0, []
     for path in paths:
-        # Sonar S8707: reading a caller-supplied path is this maintainer CLI's
-        # purpose; it runs offline against a local clone with no privilege
-        # boundary to cross.
+        # Sonar S8707, and the grounds the register above points at: reading a
+        # caller-supplied path is this maintainer CLI's purpose; it runs offline
+        # against a local clone with no privilege boundary to cross. No check is
+        # added above it, deliberately - the write-side guard rejects an upward
+        # component because no caller in this library needs to climb out of an
+        # output path it named, and that argument does not transfer to a read
+        # whose entire purpose is to open a path the caller chose.
         batch = json.loads(Path(path).read_text(encoding="utf-8"))  # NOSONAR(S8707)
         for community_id, summary in batch.items():
             summary = " ".join(str(summary).split())

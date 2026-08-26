@@ -4,6 +4,34 @@ Consolidates the read/write patterns previously re-implemented per stage
 (measured in docs/audit-extraction-readiness.md). Named "pipeline_io" (not
 "io") so it can never shadow the stdlib io module when scripts run with
 sys.path[0] pointing at scripts/.
+
+**The read-path policy**, which every read here is annotated with. Sonar reports
+`pythonsecurity:S8707` where a path built from CLI arguments reaches the
+filesystem, so whatever assembles those arguments decides what this process
+reads. It was reported on `read_json`, and the taint flows the analyser prints
+all have one shape - `argparse` in a stage, through `read_json_dict`, to the read
+here - so the answer belongs to the class: `read_json`, `read_gzip_json`,
+`load_graph` and `layer_digests` all carry it.
+
+The grounds are the ones recorded in `build_community_summaries.merge`, cited
+rather than restated so the two cannot drift into two different policies:
+reading a path the operator named is the purpose of the flag, and this is an
+offline maintainer CLI against a local clone with no privilege boundary to cross.
+That module also holds the register of every site under the policy.
+
+`checked_write_target` is deliberately not applied to the reads. It rejects an
+upward component because no caller in this library needs to climb out of an
+output path it *named*, and that argument does not transfer to a read whose
+entire purpose is to open a path the caller chose. Nor are reads confined to the
+store root: a stage is documented to accept an explicit path, and
+`record-clustering --graph <path>` legitimately points outside the store. Both
+confinements were measured on the write side - the store root failed 48 tests, a
+configuration-derived allow-list failed 4 - and on the read side the store root
+is worse, because far more of the pipeline reads than writes: confining
+`read_json` alone fails 106. Confinement belongs at the stage boundary, where the
+boundary is known. `tests/test_read_path_policy.py` pins the reads that must keep
+working, so the next attempt fails on three named assertions rather than in 106
+unrelated places.
 """
 
 from __future__ import annotations
@@ -72,9 +100,9 @@ def read_json(path: Path, default=None):
     if not path.exists():
         return default
     if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
+        with gzip.open(path, "rt", encoding="utf-8") as handle:  # NOSONAR(S8707) - read policy
             return json.load(handle)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707) - read policy
 
 
 def read_json_dict(path: Path) -> dict:
@@ -99,7 +127,7 @@ def read_gzip_json(path: Path, default=None):
     """Parse a gzip-compressed JSON file; return `default` if absent."""
     if not path.exists():
         return default
-    with gzip.open(path, "rt", encoding="utf-8") as source:
+    with gzip.open(path, "rt", encoding="utf-8") as source:  # NOSONAR(S8707) - read policy
         return json.load(source)
 
 
@@ -146,7 +174,7 @@ def write_gzip_json(path: Path, data) -> None:
 def load_graph(path: Path) -> dict:
     """The estate graph (node-link JSON). Raises if absent - callers treat a
     missing graph as a hard error with their own message."""
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707) - read policy
 
 
 def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:
@@ -289,7 +317,9 @@ def layer_digests(paths: "list[Path]", root: Path) -> dict:
     for path in paths:
         name = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
         if path.is_file():
-            digests[name] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+            # Read policy as above; the path comes from a caller that built it
+            # from `--root`, so the same grounds apply.
+            digests[name] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]  # NOSONAR(S8707)
         else:
             digests[name] = None
     return digests
