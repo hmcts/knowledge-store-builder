@@ -102,6 +102,95 @@ def _norm(value: str) -> str:
 # both confidently and both wrong.
 MIN_SUBSTRING_STEM = 4
 
+# The leading-run rule keeps a floor, but not for the reason above. Whole segments
+# already remove the accident that constant was measured against - a name sitting
+# inside another name, `id` within `video` - because a run is either a whole name
+# or nothing, so the coincidence has no way to occur and the floor cannot be what
+# prevents it.
+#
+# What remains is a failure segment boundaries cannot see, and it is the reason the
+# segment rule above needs no floor while this one does. There, the *whole* service
+# stem is what matched, so the entire name took part. Here a leading run matched,
+# which leaves the segments that say which component this is unexamined - and at one
+# to three characters the claimant is shared vocabulary an estate uses as a
+# convention prefix (`id-`, `ui-`, `api-`), so a repository with such a name would
+# collect the whole convention. Every one of those joins is silent, because a wrong
+# join is counted as a join.
+#
+# The threshold is the same constant deliberately, so the library holds one answer
+# to "too short to be evidence" rather than two that can drift apart with nothing in
+# the report to say which rule made a join.
+MIN_PREFIX_REPO = MIN_SUBSTRING_STEM
+
+# The third use of the same threshold, this one on a word two names have in
+# common. Named separately only so each use site says which quantity it bounds.
+_MIN_WORD = MIN_SUBSTRING_STEM
+
+
+def _bare(service: str) -> str:
+    """The service name with its values-file suffix and a trailing `-service` gone.
+
+    One definition, because the matcher and the reachability report both need it
+    and two copies would let them disagree about what a service is called.
+    """
+    return _VALUES_SUFFIX.sub("", service).removesuffix("-service")
+
+
+def _leading_runs(name: str) -> set[str]:
+    """The normalised leading runs of a hyphenated name, the whole name excluded.
+
+    `alpha-agent-worker` offers `alpha` and `alphaagent`. The whole name is left
+    out because a component is what this rule is looking for: the service adds at
+    least one segment to the repository's name, and the segments it adds are what
+    say which component it is. A name matching in full is the segment or substring
+    rule's business and is already theirs.
+    """
+    segments = [_norm(part) for part in name.split("-")]
+    return {"".join(segments[:count]) for count in range(1, len(segments))}
+
+
+def _prefix_claims(name: str, repos: set[str]) -> list[str]:
+    """Repositories whose whole name is a leading run of the service's segments.
+
+    One repository often ships several deployed components, and neither rule
+    above can see any of them: a repository named `alpha` is not a segment match
+    for `alpha-agent`, because `alphaagent` is no segment of `alpha`, and not a
+    substring match either, because a stem longer than the name cannot sit inside
+    it. So `alpha-agent`, `alpha-backend` and `alpha-frontend` all went unjoined
+    while the code they deploy sat in the graph.
+
+    Whole segments rather than a character prefix, which is what stops a namesake
+    claiming a service it merely starts. `alpha` starts `alphabet`, and a
+    character prefix therefore attached `alphabet-agent` to `alpha` whenever the
+    repository named `alphabet` was absent from the graph: a deployment
+    relationship that was never declared anywhere, mechanically valid, entirely
+    wrong, and invisible, since a wrong join is counted as a join and raises the
+    match rate. A missed join is a gap a reader can see, so where the two trade
+    off this stage takes the gap.
+
+    Directional, because the runs come from the service: a repository's own name
+    is never split into runs, so a service cannot claim a repository whose name
+    extends its own.
+
+    Longest run first, so where both `alpha` and `alpha-agent` are runs of
+    `alpha-agent-worker` the more specific one claims it. Two names can only tie
+    by normalising to the same string (`alpha-core` and `alphacore`), and that tie
+    breaks on the name, because `repos` is a set: without it two runs of one build
+    attach the same configuration to different nodes, and hash randomisation keeps
+    that invisible until someone diffs two graphs.
+
+    **Measured on the estate that reported the gap: no effect.** Not one service
+    there is newly joined by this rule, or by the character prefix it was first
+    written as, because repository names in that estate carry an organisational
+    prefix that service stems never carry - so no repository name is a run of any
+    stem, and none will be after the next refresh either. The gap is real and the
+    rule cannot fabricate, which is why it ships; what it is not is the reason that
+    estate's services go unjoined. `unreachable_services` is.
+    """
+    runs = _leading_runs(name)
+    claiming = [r for r in repos if len(_norm(r)) >= MIN_PREFIX_REPO and _norm(r) in runs]
+    return sorted(claiming, key=lambda r: (-len(_norm(r)), r))
+
 
 def match_services(services: set[str], repos: set[str]) -> dict[str, str]:
     """service name -> the repository that holds it, where one clearly does.
@@ -119,18 +208,65 @@ def match_services(services: set[str], repos: set[str]) -> dict[str, str]:
     Ambiguity resolves to the shortest then alphabetically first name so two runs
     agree; that is determinism, which is necessary but is not correctness, which
     is why the segment rule comes first.
+
+    Only when neither has anything to say does the leading-run rule in
+    `_prefix_claims` apply, which is what joins the several components one
+    repository ships. Running it last is what makes it additive: every join the
+    two older rules made, they still make, and the same match cannot be moved
+    from one repository to another by adding this rule.
     """
     matched: dict[str, str] = {}
     for service in sorted(services):
-        stem = _norm(_VALUES_SUFFIX.sub("", service).removesuffix("-service"))
+        bare = _bare(service)
+        stem = _norm(bare)
         if not stem:
             continue
         exact = [r for r in repos if stem in {_norm(part) for part in r.split("-")}]
         loose = [r for r in repos if stem in _norm(r)] if len(stem) >= MIN_SUBSTRING_STEM else []
-        candidates = sorted(exact or loose, key=lambda r: (len(r), r))
+        candidates = sorted(exact or loose, key=lambda r: (len(r), r)) or _prefix_claims(
+            bare, repos
+        )
         if candidates:
             matched[service] = candidates[0]
     return matched
+
+
+def _words(name: str) -> set[str]:
+    """The name's whole hyphen-delimited words, normalised, long enough to identify.
+
+    Floored on the same constant the matching rules use, so the library holds one
+    answer to "too short to be evidence". Sharing `api` or `ops` with a repository
+    is shared vocabulary rather than a lead, and counting it would hide a scope
+    fact behind a name coincidence - the direction that costs an operator time,
+    because it reads as matcher work that can be done.
+    """
+    return {word for word in (_norm(part) for part in name.split("-")) if len(word) >= _MIN_WORD}
+
+
+def unreachable_services(services: set[str], repos: set[str]) -> set[str]:
+    """Of these unmatched services, the ones no name rule could ever have joined.
+
+    A service that matched nothing is two different facts, and the report stated
+    only one of them. Either a repository is in the graph and the join missed it -
+    matcher work, chaseable - or the estate holds no repository for that service at
+    all, because a deployment repository configures third-party components and
+    report jobs whose code is somewhere else entirely. Reported identically, the
+    second sends an operator to tune a matcher against services no matcher can
+    reach, and it makes the match rate read as a matcher missing half its joins
+    when the denominator holds what it cannot touch. Measured on one estate, the
+    unmatched services were of the second kind.
+
+    Deliberately looser than every matching rule: one whole word in common is far
+    less than any rule needs, so a service counted as reachable is one where some
+    repository is at least worth looking at, and a service with nothing in common
+    is beyond any rule that works on names. Being looser is what makes the answer
+    conservative in the right direction - it under-reports the scope fact rather
+    than inventing it.
+    """
+    known: set[str] = set()
+    for repo in repos:
+        known |= _words(repo)
+    return {service for service in services if not _words(_bare(service)) & known}
 
 
 def _strip_layer(graph: dict) -> None:
@@ -274,6 +410,7 @@ class _Tally:
         self.edges = 0
         self.joined = 0
         self.unmatched: set[str] = set()
+        self.out_of_reach: set[str] = set()
         self.unreadable: list[str] = []
 
 
@@ -289,7 +426,9 @@ def _add_repo_layer(
     tally.unreadable.extend(unparsed)
     services = {service for _, service in found}
     matched = match_services(services, set(reps))
-    tally.unmatched |= services - set(matched)
+    unmatched = services - set(matched)
+    tally.unmatched |= unmatched
+    tally.out_of_reach |= unreachable_services(unmatched, set(reps))
     root = _glob_root(config.DEPLOY_VALUES_GLOB)
 
     for (environment, service), flat in sorted(found.items()):
@@ -329,6 +468,18 @@ def _report(tally: _Tally, graph: dict) -> None:
         print(f"  {len(tally.unmatched)} service(s) matched no repository: {shown}")
         print("    a falling match rate means a rename broke the join - check before")
         print("    trusting a deployment answer")
+    if tally.out_of_reach:
+        # Said separately because it is a different instruction. These services
+        # have no repository in the graph sharing even one word with them, so no
+        # name rule can join them and matcher work on them is time spent for
+        # nothing: the deployment repository configures more than this store holds.
+        shown = ", ".join(sorted(tally.out_of_reach)[:10])
+        print(
+            f"  {len(tally.out_of_reach)} of those share no name with any repository "
+            f"in the graph: {shown}"
+        )
+        print("    no name rule can reach these - they are a scope fact, not a matcher")
+        print("    gap, and what closes them is a repository rather than a better rule")
     if tally.unreadable:
         # Said out loud rather than counted silently: each of these is a service
         # whose configuration is absent from every answer, and nothing on the page
