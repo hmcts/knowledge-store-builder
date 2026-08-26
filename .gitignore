@@ -247,3 +247,9 @@ docs/superpowers/
 # bare `npm install` resolves upwards and can drop one at the root.
 .js-toolchain/
 node_modules/
+
+# The mutation gate's recovery record: the original bytes of the file it has
+# mutated, written before the mutation because SIGKILL cannot be handled and
+# deleted after the restore. Present only while a run is in flight, or after one
+# was killed - in which case the next run consumes it.
+/tests/.mutation-gate-recovery
