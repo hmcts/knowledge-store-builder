@@ -24,7 +24,16 @@ import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import boundary, config, graph_files, io, provenance, record_clustering, store_paths, telemetry
+from . import (
+    boundary,
+    config,
+    graph_files,
+    io,
+    provenance,
+    record_clustering,
+    store_paths,
+    telemetry,
+)
 from .build_topic_briefs import read_topics
 
 
