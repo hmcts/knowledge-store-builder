@@ -128,24 +128,24 @@ class StaleMessageFixture(SettingsIsolated):
         self.plain = config.GRAPH_PATH
         self.packed = config.GRAPH_PATH.with_name(config.GRAPH_PATH.name + ".gz")
 
-    def write_plain(self, members):
+    def _write_plain(self, members):
         self.plain.write_text(json.dumps(_graph(members)), encoding="utf-8")
 
-    def write_packed(self, members):
+    def _write_packed(self, members):
         with gzip.open(self.packed, "wt", encoding="utf-8") as handle:
             json.dump(_graph(members), handle)
 
-    def mid_rebuild(self):
+    def _mid_rebuild(self):
         """The reported case: `graph.json` is the fresh merge, the archive is older."""
-        self.write_packed(SMALLER)
-        self.write_plain(LARGER)
+        self._write_packed(SMALLER)
+        self._write_plain(LARGER)
         os.utime(self.packed, (1_600_000_000, 1_600_000_000))
         os.utime(self.plain, (1_700_000_000, 1_700_000_000))
 
-    def abandoned_run(self):
+    def _abandoned_run(self):
         """The case the guard was written for: `graph.json` is a stale leftover."""
-        self.write_plain(SMALLER)
-        self.write_packed(LARGER)
+        self._write_plain(SMALLER)
+        self._write_packed(LARGER)
         os.utime(self.plain, (1_600_000_000, 1_600_000_000))
         os.utime(self.packed, (1_700_000_000, 1_700_000_000))
 
@@ -158,7 +158,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         command for one direction as though it knew which was stale - the reader
         who copies it mid-rebuild destroys a graph that cost a full extraction
         pass, and the command exits 0, so nothing reports the loss."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         refusal = graph_files.stale_refusal(self.plain)
 
@@ -186,7 +186,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         """Breaks if the refusal names only one of the two files as the possibly
         stale one. Naming one is what made the shipped remedy readable as an
         answer; the guard refuses precisely because it has no answer."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         refusal = graph_files.stale_refusal(self.plain)
 
@@ -205,7 +205,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         lower counts on the file that predates the other - can be applied without
         running anything; without it the reader has to guess, which is the state
         the fix was meant to end."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         refusal = graph_files.stale_refusal(self.plain).lower()
 
@@ -218,7 +218,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         """Breaks if one direction keeps a command and the other is left as prose -
         the asymmetry the shipped wording had, which is what made one of the two
         readings look like the supported one."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         refusal = graph_files.stale_refusal(self.plain)
 
@@ -237,7 +237,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         """Breaks if the added prose displaces the measurement. The signal is
         useless without the two numbers it is applied to, and an operator who
         cannot see them has to count two graphs by hand."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         refusal = graph_files.stale_refusal(self.plain)
 
@@ -248,7 +248,7 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         """Breaks if widening the message loses the case it was written for. A
         leftover `graph.json` beside a refreshed archive is the original defect,
         and it must still stop the stage and still offer its own way out."""
-        self.abandoned_run()
+        self._abandoned_run()
 
         refusal = graph_files.stale_refusal(self.plain)
 
@@ -262,8 +262,8 @@ class TheRefusalCarriesItsUncertainty(StaleMessageFixture):
         and would all pass while the guard fired on the normal case. Both files
         hold the same graph after a successful run, and the archive is tracked, so
         a refusal here makes the stage unreachable."""
-        self.write_plain(LARGER)
-        self.write_packed(LARGER)
+        self._write_plain(LARGER)
+        self._write_packed(LARGER)
 
         self.assertEqual(graph_files.stale_refusal(self.plain), "")
 
@@ -279,7 +279,7 @@ class TheAdvisoryNotesCarryItToo(StaleMessageFixture):
     def test_the_shared_artefact_note_gives_no_unconditional_destroying_instruction(self):
         """Breaks if the note shared by the four artefact-writing stages goes back
         to telling an operator to decompress over the plain file or remove it."""
-        self.mid_rebuild()
+        self._mid_rebuild()
         nodes = _graph(LARGER)["nodes"]
 
         note = graph_files.stale_note(self.plain, nodes, "explorer.html")
@@ -291,7 +291,7 @@ class TheAdvisoryNotesCarryItToo(StaleMessageFixture):
         """Breaks if the note drops the instruction and says nothing in its place.
         Removing the wrong answer is not the fix; the reader still has to decide,
         and the note is where the two counts are shown."""
-        self.mid_rebuild()
+        self._mid_rebuild()
         nodes = _graph(LARGER)["nodes"]
 
         note = graph_files.stale_note(self.plain, nodes, "explorer.html")
@@ -303,7 +303,7 @@ class TheAdvisoryNotesCarryItToo(StaleMessageFixture):
         """Breaks if `summaries snapshot` keeps its own copy of the prescription.
         It has one, written separately from the shared note, and a fix to one
         reads as a fix to both."""
-        self.mid_rebuild()
+        self._mid_rebuild()
 
         out = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(out):
