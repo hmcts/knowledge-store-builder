@@ -141,16 +141,49 @@ def counts_from_nodes(nodes) -> tuple[int, int]:
     return len(members), clustered
 
 
+def stale_direction(described: Path, other: Path) -> str:
+    """Which of the two files is stale, as a signal the reader applies to the counts.
+
+    The one sentence every message in this module needs and none of them can
+    answer. Comparing counts says *that* one file is stale; nothing here can say
+    which, because both readings are ordinary:
+
+    - `described` is the fresh merge and `other` is the previous build, which is
+      the state for the whole of a full rebuild. Reported from one, where three
+      stages refused in sequence.
+    - `described` is a leftover from an abandoned run and `other` has been
+      refreshed since - the state these messages were first written for.
+
+    Every message here used to prescribe decompressing the archive over
+    `described`, or removing `described`. Both destroy `described`, so both are
+    right only in the second reading, and in the first they discard the artefact
+    that cost a full extraction pass - **and the command exits 0**, so nothing
+    reports the loss. The counts are printed either way, so stating the signal
+    costs a sentence and leaves the one decision that needs an operator with the
+    operator.
+    """
+    return (
+        f"Which one is stale is not something this can tell: {other.name} is the stale one "
+        f"when its counts are the lower pair and it predates {described.name} - the rebuild "
+        f"case, where {described.name} is the fresh merge; {described.name} is the stale one "
+        "when it is a leftover from an abandoned run."
+    )
+
+
 def stale_note(described, nodes, artefact: str) -> str:
     """The disagreement line for a stage that reads the graph and writes `artefact`.
 
     One phrasing for every artefact-writing stage, because the operator's way out
     is the same in all of them and only the thing at risk differs.
+
+    No command, deliberately: this stage does not rewrite the graph, so the
+    reader's next step is to decide which file they meant, and a command printed
+    before that decision is made is the #243 defect in a quieter place.
     """
-    remedy = (
-        f"{artefact} will be built from {described.name}. Decompress the committed "
-        f"graph over it, or remove the stale file, and re-run."
-    )
+    other = counterpart(described)
+    if other is None:
+        return ""  # nothing to disagree with; `disagreement` would say the same
+    remedy = f"{artefact} will be built from {described.name}. {stale_direction(described, other)}"
     note = disagreement(described, counts_from_nodes(nodes), remedy)
     return f"{note}\n" if note else ""
 
@@ -243,6 +276,11 @@ def stale_refusal(described: Path) -> str:
     the predicate `disagreement` reports on, so this refuses exactly where #197
     reports - which is the intended relationship between them.
 
+    **The refusal is unchanged; its remedy names both directions** (#243, and
+    `stale_direction` for why). What it may not do is pick one: this refuses
+    because it cannot tell which file is stale, and a single command hides that
+    from the reader who acts on it.
+
     Costs a streamed pass over both files. These stages load the whole graph
     anyway, and `graph_counts` streams rather than loading, so it is the cheaper
     half of what the stage is about to do.
@@ -266,6 +304,9 @@ def stale_refusal(described: Path) -> str:
         f"Refusing to run: {described.name} has {mine[0]:,} communities over {mine[1]:,} "
         f"clustered nodes and {other.name} has {theirs[0]:,} over {theirs[1]:,}, so one is "
         f"stale. This stage rewrites both from {described.name}, which would overwrite "
-        f"{other.name} and lose its clustering. Decompress the committed graph over "
-        f"{described.name} (gunzip -kf {other.name}) and re-run, or remove {described.name}."
+        f"{other.name} and lose its clustering.\n"
+        f"{stale_direction(described, other)}\n"
+        f"Both ways out discard a graph, so read the counts above first: if {other.name} is "
+        f"the stale one, gzip -kf {described.name}; if {described.name} is the stale one, "
+        f"gunzip -kf {other.name}. Then re-run."
     )

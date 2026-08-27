@@ -318,6 +318,43 @@ when it could not run at all (no graphs found, or an unreadable
 `config/repositories.txt`), and with `--strict` on an undeclared or undated
 input. `status` prints the same lines, capped, and never fails.
 
+## Run local extractors before the stages that rewrite the archive
+
+Three stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+mid-pipeline `graphify-out/graph.json`:
+
+```bash
+# Stages that rewrite graphify-out/graph.json.gz
+knowledgestore gherkin
+knowledgestore packages
+knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+```
+
+So a store with extractors of its own has one ordering to keep: **run them
+before those three, or remove the archive between them.** Nodes written into
+`graph.json` after the archive was last built leave the two files describing
+different graphs, and neither outcome from there is the one you want: either the
+stage refuses, in a message about communities and clustered nodes, or it
+rewrites the archive from `graph.json` and whatever the archive held that
+`graph.json` does not is gone.
+
+**The refusal names clustering; the cause is the ordering.** It counts
+communities and clustered nodes in both files, prints both totals and says one
+is stale — because losing a clustering is the worst thing the overwrite can do,
+not because clustering is what went wrong. Read it as "these two files hold
+different graphs", and ask what wrote `graph.json` last.
+
+**Do not follow the remedy it prints before answering that.** It offers
+`gunzip -kf graphify-out/graph.json.gz`, which decompresses the archive over
+`graph.json`: right when `graph.json` is a leftover from an abandoned run, and
+the loss of a whole layer when it is the file a local extractor has just
+written. Removing `graph.json`, the other half of the same message, discards it
+too.
+
+Removing the archive instead leaves the stage nothing to overwrite, so it writes
+both files from `graph.json` and the local nodes reach the archive. The archive
+is committed, so version control has it back if the run then fails.
+
 ## When clustering will not persist
 
 `graphify cluster-only` can compute a clustering, decline to write it, and still
@@ -469,3 +506,4 @@ Two failures, both reported by store operators:
 | `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
 | `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |
+| A stage refuses, naming communities and clustered nodes in both graph files | The two files hold different graphs, which is usually an ordering problem rather than a clustering one. See [Run local extractors before the stages that rewrite the archive](#run-local-extractors-before-the-stages-that-rewrite-the-archive). |

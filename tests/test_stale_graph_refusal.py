@@ -87,7 +87,12 @@ class StaleRefusalTest(SettingsIsolated):
 
         self.assertIn("Refusing to run", refusal)
         self.assertIn("graph.json.gz", refusal)
-        self.assertIn("gunzip -kf", refusal, "the refusal must name the way out")
+        # One way out per direction. This asserted `gunzip -kf` alone, which the
+        # refusal satisfied by naming the archive-is-good direction only - the #243
+        # defect, and a passing assertion over it. Which command belongs to which
+        # direction is pinned in test_stale_remedy_directions.py.
+        self.assertIn("gunzip -kf", refusal, "no way out for a stale graph.json")
+        self.assertIn("gzip -kf graph.json", refusal, "no way out for a stale graph.json.gz")
         self.assertRegex(refusal, r"graph\.json\b[^\n]*?\bhas 1 communities over 2\b")
         self.assertRegex(refusal, r"graph\.json\.gz\b[^\n]*?\bhas 1 over 3\b")
 

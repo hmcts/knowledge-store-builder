@@ -306,6 +306,20 @@ MUTATIONS = (
         "artefact rather than describing one wrongly",
     ),
     Mutation(
+        "the stale refusal stops saying which of the two files is stale",
+        "graph_files.py",
+        '        f"{stale_direction(described, other)}\\n"',
+        '        ""',
+        "#243: the refusal named one way out - decompress the archive over "
+        "graph.json, or remove graph.json - and both destroy graph.json, so both "
+        "are right only if the archive is the good copy. Mid-rebuild it is the "
+        "other way round and the reader is told to discard the fresh merge, which "
+        "cost a full extraction pass; the command exits 0, so nothing reports the "
+        "loss. Reported firing on three stages in one documented sequence. Without "
+        "this sentence the message names two directions and no way to tell them "
+        "apart, which is a guess dressed as a choice",
+    ),
+    Mutation(
         "layer merge re-points edges at unrelated nodes",
         "merge_layers.py",
         "        renamed[node_id] = new_id",
@@ -1040,6 +1054,18 @@ MUTATIONS = (
         '"  [not in digest] community',
         '"  [unsupported] community',
         "a label that claimed 98% more than it measured, so the gate got ignored",
+    ),
+    Mutation(
+        "the dashed rule no longer printed with its findings",
+        "build_community_summaries.py",
+        "    _report_dashed_rule({term for _, terms in unsupported for term in terms})",
+        "    pass",
+        "#248: a dashed token is checked only at three or more segments and a lowercase "
+        "initial, and nothing an author could read said so - so authors on a real store "
+        "rewrote correct English defensively, most of it compounds the rule never looks "
+        "at. Every structural and lexical narrowing was measured and rejected, which "
+        "leaves the printed statement as the whole fix: unreached, the report is back to "
+        "naming terms without saying what was checked",
     ),
     Mutation(
         "estate pass never narrows anything",
