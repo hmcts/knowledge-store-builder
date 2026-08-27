@@ -17,7 +17,7 @@ traps. This skill is the mechanics; that document is the judgement.
 
 ## Setup
 
-**This skill assumes knowledge-store-builder 0.15.0 or newer.** Check before
+**This skill assumes knowledge-store-builder 0.15.1 or newer.** Check before
 following it. The skills and the library install separately - these instructions
 come from the plugin cache, the library from pip - so the two drift, and the
 symptom is a stage documented here reported as `unknown stage`:
@@ -26,8 +26,8 @@ symptom is a stage documented here reported as `unknown stage`:
 knowledgestore --version
 ```
 
-**Stop if it reports below 0.15.0. Do not continue to any step below.** Say which
-version is installed, that this skill needs 0.15.0 or newer, and that the fix is
+**Stop if it reports below 0.15.1. Do not continue to any step below.** Say which
+version is installed, that this skill needs 0.15.1 or newer, and that the fix is
 `pip install --upgrade hmcts-knowledge-store-builder`. Continuing produces
 `unknown stage` partway through a build, after earlier stages have already written
 committed artefacts - a worse place to stop than here.
