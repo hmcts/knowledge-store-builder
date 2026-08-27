@@ -95,7 +95,7 @@ graph does not hold.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 
@@ -255,17 +255,22 @@ def rank(by_repo: dict[str, set[Signature]], top: int = 10) -> Report:
 def near_duplicates(path: Path, top: int = 10) -> Report:
     """`rank` over `scan`: the report for one graph file."""
     scanned = scan(path)
-    # Annotated rather than returned inline: `replace` is typed as returning a
-    # `DataclassInstance` rather than the class it was handed, so the declared
-    # return type and the inferred one disagree (Sonar S5886). The annotation
-    # states which is right without weakening either.
-    carried: Report = replace(
-        rank(scanned.by_repo, top=top),
+    # Constructed rather than `replace`d: `dataclasses.replace` is typed as
+    # returning a `DataclassInstance` rather than the class it was handed, so the
+    # declared return type and the inferred one disagree (Sonar S5886). An
+    # annotation does not settle it - it only moves the complaint to the
+    # assignment (S5890) - so the four ranked fields are named explicitly and the
+    # three scan-carried ones alongside them.
+    ranked = rank(scanned.by_repo, top=top)
+    return Report(
+        overlaps=ranked.overlaps,
+        compared=ranked.compared,
+        considered=ranked.considered,
+        intersected=ranked.intersected,
         repositories=scanned.repositories,
         nodes=scanned.nodes,
         unattributed=scanned.unattributed,
     )
-    return carried
 
 
 def lines(report: Report) -> list[str]:
