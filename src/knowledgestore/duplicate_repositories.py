@@ -255,12 +255,17 @@ def rank(by_repo: dict[str, set[Signature]], top: int = 10) -> Report:
 def near_duplicates(path: Path, top: int = 10) -> Report:
     """`rank` over `scan`: the report for one graph file."""
     scanned = scan(path)
-    return replace(
+    # Annotated rather than returned inline: `replace` is typed as returning a
+    # `DataclassInstance` rather than the class it was handed, so the declared
+    # return type and the inferred one disagree (Sonar S5886). The annotation
+    # states which is right without weakening either.
+    carried: Report = replace(
         rank(scanned.by_repo, top=top),
         repositories=scanned.repositories,
         nodes=scanned.nodes,
         unattributed=scanned.unattributed,
     )
+    return carried
 
 
 def lines(report: Report) -> list[str]:
