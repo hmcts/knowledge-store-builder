@@ -59,8 +59,8 @@ Install the development tools and run the checks from the repository root:
 pip install -e '.[dev]'
 python3 -m unittest discover -s tests -v
 
-ruff check src tests scripts
-ruff format --check src tests scripts
+ruff check src tests
+ruff format --check src tests
 pyright
 
 tests/explorer/check-js.sh          # eslint + tsc --checkJs, the versions CI pins
@@ -410,6 +410,20 @@ Pushes to main publish drafts as `<next>.devN+g<sha>` automatically, and
 installing the package needs the git history and tags present (CI checkouts
 use `fetch-depth: 0`), and `uv.lock` records the project as `(dynamic)`, so
 releases can no longer desync the lockfile.
+
+**Two files used to state a version by hand, and both are gone.** The plugin
+manifest's `version` and the build skill's "assumes X or newer" floor were typed
+for the release they shipped in: between them they produced four releases of
+silent drift, a red `main` after a tag, and two blocked publishes, each block
+correct and each fix correct — so the numbers were the defect, not the people
+retyping them. Both stood for something readable directly. The plugin installs
+from `main`, so no number can describe the files a user holds (Claude Code treats
+the field as optional; `claude plugin list` reports `Version: unknown`), and what
+the floor stood for is whether the installed library has the stages the skill
+runs, which `knowledgestore` with no stage answers by name. Adding either back
+fails `tests/test_documented_stages.py`, which also holds every
+`knowledgestore <stage>` in the shipped documentation to be a stage of this
+release — that is what makes the skill's stage comparison worth performing.
 
 ## SonarCloud, learned the hard way
 

@@ -25,10 +25,10 @@ jobs:
         with:
           node-version: "22"
 
-      # No ruff here: `lint.yml` runs `ruff check src tests scripts` on the same
-      # pinned 0.16.0, so this was the identical command twice per pull request -
-      # and two places to remember when the paths change, which is how `scripts/`
-      # came to be linted by neither for a while. `lint.yml` is skipped by
+      # No ruff here: `lint.yml` runs `ruff check src tests` on the same pinned
+      # 0.16.0, so this was the identical command twice per pull request - and two
+      # places to remember when the paths change, which is how a directory outside
+      # `src/` came to be linted by neither for a while. `lint.yml` is skipped by
       # paths-ignore only for changes that carry no Python, so nothing loses
       # coverage.
 
