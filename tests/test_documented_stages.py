@@ -103,6 +103,21 @@ def behind_the_release(skill: str, tag: str) -> str | None:
     return None
 
 
+def plugin_version_behind(manifest_version: str, tag: str) -> str | None:
+    """The complaint if the plugin manifest's version is older than `tag`, else None.
+
+    Separate from the assertion so the sensitivity check can drive it with a
+    fabricated pair rather than trusting a clean result from the one real one.
+    """
+    if triple(manifest_version) < triple(tag):
+        return (
+            f"the plugin manifest says {manifest_version}, but {tag} has shipped since. "
+            "The manifest version is how a user tells one copy of the skills from "
+            "another, so a stale one makes a plugin/library mismatch undiagnosable"
+        )
+    return None
+
+
 def shipped_documentation() -> list[Path]:
     """Every file that tells a reader to run something, plans excluded."""
     skills = sorted(ROOT.joinpath("skills").rglob("SKILL.md"))
@@ -187,6 +202,42 @@ class ThePluginIsIdentifiable(unittest.TestCase):
         )
         self.assertIn("version", manifest, "plugin.json carries no version")
         self.assertRegex(manifest["version"], r"^\d+\.\d+\.\d+$")
+
+    def test_the_plugin_version_is_not_behind_the_latest_release(self):
+        """Breaks if the manifest is left behind a release.
+
+        It sat at 0.11.6 across four releases while the test above was green, because
+        that test asks only whether a version exists and parses. The manifest is the
+        one file in this repository that names a version - `CLAUDE.md` records that
+        the version is the git tag and nothing else states it - so it is the one
+        place a release has to be carried by hand, and the only thing that keeps it
+        honest is a check comparing it to what shipped.
+
+        Ahead is accepted, as it is for the build skill's floor: that is a release
+        being prepared. Only behind is a defect.
+        """
+        tag = latest_release_tag(ROOT)
+        if tag is None:
+            raise unittest.SkipTest(
+                "no release tag is reachable from HEAD (an sdist, a tarball or a "
+                "shallow clone), so there is no shipped version to compare against"
+            )
+        manifest = json.loads(
+            ROOT.joinpath(".claude-plugin/plugin.json").read_text(encoding="utf-8")
+        )
+        problem = plugin_version_behind(manifest["version"], tag)
+        self.assertIsNone(problem, problem)
+
+    def test_this_gate_notices_a_manifest_left_behind(self):
+        """The sensitivity check, in the same run.
+
+        Drives the predicate with a fabricated pair. If this ever passes silently,
+        the assertion above is measuring that a string parses rather than that the
+        manifest kept up.
+        """
+        self.assertIsNotNone(plugin_version_behind("0.11.6", "v0.15.0"))
+        self.assertIsNone(plugin_version_behind("0.15.0", "v0.15.0"))
+        self.assertIsNone(plugin_version_behind("0.16.0", "v0.15.0"))
 
 
 class TheBuildSkillDeclaresTheLibraryItNeeds(unittest.TestCase):
