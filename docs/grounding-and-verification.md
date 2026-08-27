@@ -189,6 +189,28 @@ matched a segment rather than a whole identifier** — a count close to the tota
 finding count means the looser rule is doing most of the work and the sample
 deserves a read.
 
+**Where the term was found, not only whether the graph holds it.** Each flagged
+term is looked up in the history datasets under `knowledge/git-history/` before it
+is reported, because the graph holds a ticket node only for what the intent index
+mined — so a summary citing a ticket that was real for the community it was
+written for reads as absent from the estate, and that is a remap question rather
+than an authoring one. The run therefore reports two counts and the arithmetic
+between them:
+
+```
+absent from the graph AND from history: N term(s)
+in the history datasets but not the graph: M term(s)
+reconciled: N + M = <flagged> flagged.
+```
+
+The first is the figure to act on, and the only class that can contain invention;
+the second is a summary keyed to a community that has moved. They sum to the
+flagged total in the output, because a breakdown that does not add up is worse
+than none. A store with no history datasets is told that instead of being given a
+split, since a split over an artefact nothing read would report the whole flagged
+total as possible invention. The lookup is one streaming pass over the datasets
+shared by every flagged term, and it stops as soon as the last term is located.
+
 **Calibrating on a real store.** Tuned against ~5,300 authored summaries:
 summaries written directly against their own digest flagged at 9%, while
 summaries carried across a re-cluster by `summaries remap` flagged at 37%. Two
