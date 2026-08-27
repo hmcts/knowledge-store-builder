@@ -2,27 +2,36 @@
 
 The skills and the library install separately - the skills through the plugin cache, the
 library through pip - so on a user's machine the two versions can differ, and the symptom
-is a stage the instructions document reported as `unknown stage`. That is diagnosable now
-(`knowledgestore --version`), but the cheaper win is upstream: guarantee that any single
-release is internally consistent, so a user whose plugin and library are the same version
-never meets the failure at all.
+is a stage the instructions document reported as `unknown stage`. A reader diagnoses that
+on their own machine by listing the stages their install has (`knowledgestore` with no
+stage). What this file guarantees upstream is that any single release is internally
+consistent, so a user whose plugin and library came from one release never meets the
+failure at all.
 
 This is the direction that can actually be checked here. Drift is a property of two
 installs, which a test in one repository cannot see; internal consistency of one release
 is a property of this commit, which it can.
 
-Two numbers in this repository are written by hand and derived from nothing: the plugin
-manifest's `version` and the library floor the build skill declares. What this file
-checks of them is that they agree with *each other*, which is a property of this commit
-and needs no tag - and which catches a drift neither of the checks it replaces could
-see, because two equally stale numbers satisfied both.
+No version number is compared here, because none is written down any more. Two were: the
+plugin manifest's `version` and the library floor the build skill declared. Both were
+typed by hand for the release they shipped in and derived from nothing - the library
+version is the git tag (hatch-vcs) and no file in the tree names it - and between them
+they produced four releases of silent drift, a red `main` after a tag, and two blocked
+release publishes. Each block was correct and each fix was correct, which is what makes
+the numbers the defect rather than the people retyping them.
 
-Whether they agree with the newest release is a property of a *tag*, not of the tree, so
-it is not checked here. Comparing against `git describe` made this suite's result change
-when a tag was created rather than when a commit was made: the same `main` passed before
-a release and failed after it, with nothing to attribute the failure to. That comparison
-now lives in `scripts/check_release_versions.py`, which the release job runs before it
-publishes, and `tests/test_release_version_check.py` covers it.
+Both were proxies, and both proxied for something readable directly:
+
+- the manifest's version stood for which copy of the skills is installed, which cannot be
+  derived at all - the plugin installs from `main`, so any number in the manifest is a
+  claim about a release the files may not have come from;
+- the skill's floor stood for whether the installed library has the stages the skill runs,
+  which the library answers itself, by name, in one command.
+
+So the build skill now tells a reader to list the stages their install has and to stop on
+a missing one, and this file is the gate behind that instruction: every
+`knowledgestore <stage>` the shipped documentation names is asserted to be a stage of this
+release, so the list a reader compares against is the list this release actually ships.
 
 Historical plans under `docs/superpowers/plans/` are excluded deliberately: they record
 what was planned at a date, not what to run today, and one of them still names a stage
@@ -47,36 +56,53 @@ INVOCATION = re.compile(r"(?<!from )\bknowledgestore\s+([a-z][a-z0-9-]*)")
 
 MANIFEST = ROOT / ".claude-plugin/plugin.json"
 BUILD_SKILL = ROOT / "skills/knowledge-store-build/SKILL.md"
-# The sentence the build skill states its library floor in.
+
+# The sentence a hand-maintained library floor was stated in. The pattern is kept, with
+# nothing in the tree that satisfies it: what it asserts now is that no floor has been
+# written back in, which is the only way this class of drift returns.
 MINIMUM_DECLARATION = re.compile(r"assumes knowledge-store-builder (\d+\.\d+\.\d+) or newer")
+# The invocation that lists the installed library's stages: `knowledgestore` on a line of
+# its own, with or without a trailing comment. A line naming a stage must not match it -
+# the skill is full of those, and reading one as the listing would make this vacuous.
+STAGE_LISTING = re.compile(r"^knowledgestore[ \t]*(?:#.*)?$", re.MULTILINE)
+# The instruction that turns the listing into a gate rather than a note. Whitespace
+# rather than a literal space between the words: the skill is wrapped prose, so the
+# sentence carries a newline wherever the wrap happens to fall, and a pattern spelt
+# with spaces reads a reworded skill and a rewrapped one as the same defect.
+STOP_ON_A_MISSING_STAGE = re.compile(r"stop\s+if\s+any\b[^.]*\babsent\b", re.IGNORECASE)
+UPGRADE_COMMAND = "pip install --upgrade hmcts-knowledge-store-builder"
 
 
-def declared_minimum(skill: str) -> str | None:
-    """The library version the build skill's prose says it needs, if it says one."""
-    found = MINIMUM_DECLARATION.search(skill)
-    return found.group(1) if found else None
+def capability_problem(skill: str) -> str | None:
+    """The complaint if the build skill's setup cannot stop an older library, else None.
 
-
-def disagreement(manifest_version: str | None, declared: str | None) -> str | None:
-    """The complaint if the two hand-maintained numbers differ, else None.
-
-    Separate from the assertion so the sensitivity check can drive it with forged
-    values rather than trusting a clean result from the one real pair.
-
-    Compared as text, not as version triples: both are written by hand in the
-    form N.N.N, and a release that publishes `0.15.0` beside `0.15.00` has the
-    drift this exists to catch even though the numbers order equally.
+    Separate from the assertion so the sensitivity check can drive it with forged skills
+    rather than trusting a clean result from the one real file.
     """
-    if manifest_version is None:
-        return f"{MANIFEST.relative_to(ROOT)} declares no version"
-    if declared is None:
-        return f"{BUILD_SKILL.relative_to(ROOT)} declares no library minimum"
-    if manifest_version != declared:
+    floor = MINIMUM_DECLARATION.search(skill)
+    if floor is not None:
         return (
-            f"{MANIFEST.relative_to(ROOT)} says {manifest_version} and the build skill "
-            f"assumes {declared} or newer. Both are bumped by hand for the same release, "
-            "so a release cut from this commit publishes a plugin and a floor that "
-            "describe different libraries"
+            f"the build skill states a library floor again ({floor.group(1)}). A version "
+            "typed by hand describes the release it was typed in and is wrong for every "
+            "release after it; the stages the skill runs are the property it stands for, "
+            "and the library reports those by name"
+        )
+    if STAGE_LISTING.search(skill) is None:
+        return (
+            "the build skill no longer tells a reader to list the stages their install "
+            "has, so nothing in it can notice a library older than these instructions"
+        )
+    if STOP_ON_A_MISSING_STAGE.search(skill) is None:
+        return (
+            "the build skill lists the stages without telling a reader to stop when one "
+            "it uses is absent. A check with no instruction on its failure reads as "
+            "advisory, and continuing reaches `unknown stage` only after earlier stages "
+            "have written committed artefacts"
+        )
+    if UPGRADE_COMMAND not in skill:
+        return (
+            f"the build skill does not name the fix ({UPGRADE_COMMAND}), so a reader who "
+            "stops has nothing to do next"
         )
     return None
 
@@ -106,6 +132,19 @@ class DocumentedStagesExist(unittest.TestCase):
             m.group(1) for f in files for m in INVOCATION.finditer(f.read_text(encoding="utf-8"))
         }
         self.assertGreater(len(mentioned), 10, f"only {len(mentioned)} invocations found")
+
+    def test_the_scan_covers_the_build_skill(self):
+        """The build skill tells a reader to compare their install's stage list against
+        its own commands, so those commands have to be stages of this release for the
+        comparison to mean anything. The scan below is what holds that, and the build
+        skill is the file it most has to reach.
+        """
+        scanned = shipped_documentation()
+        self.assertIn(BUILD_SKILL, scanned, "the build skill is not among the scanned files")
+        found = {m.group(1) for m in INVOCATION.finditer(BUILD_SKILL.read_text(encoding="utf-8"))}
+        self.assertGreater(
+            len(found), 20, f"only {len(found)} stage invocations found in the build skill"
+        )
 
     def test_every_documented_stage_is_a_real_stage(self):
         for path in shipped_documentation():
@@ -151,130 +190,159 @@ class TheScanCanStillTell(unittest.TestCase):
                 self.assertEqual([m.group(1) for m in INVOCATION.finditer(text)], [])
 
 
-class ThePluginIsIdentifiable(unittest.TestCase):
-    """A plugin with no version cannot be told apart from any other copy of itself.
+class ThePluginManifestNamesNoVersion(unittest.TestCase):
+    """A version in the plugin manifest can only be a claim that is not checkable.
 
-    Which is what made version drift hard to even discuss: asked what they had installed,
-    a user could answer for the library (with the flag added alongside this) but had
-    nothing to read for the skills.
+    The plugin installs from this repository's `main` branch, which `docs/asking-questions.md`
+    states and the refresh commands there rely on, so the files a user holds are whatever
+    `main` was when they last ran the install - not a release. A number in the manifest
+    named a release those files may never have come from, and it sat four releases behind
+    while looking authoritative.
+
+    Claude Code does not need it. Empirically, on 2.1.247:
+
+        claude plugin validate <plugin dir>            # passes; absence is a warning
+        claude plugin install knowledge-store@...      # succeeds, and the plugin enables
+        claude plugin list                             # reports `Version: unknown`
+
+    `claude plugin validate --strict` turns that warning into a failure. Nothing here runs
+    it; if that changes, the decision to carry no version is what to revisit, rather than
+    the number to reinstate. This test is what fails if one is added back.
     """
 
-    def test_the_plugin_manifest_carries_a_version(self):
+    def test_the_manifest_declares_no_version(self):
+        """Breaks when a version is written back into the manifest - the drift this
+        removes, which cost four releases and two blocked publishes while every check
+        that read the number agreed with it."""
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        self.assertIn("version", manifest, "plugin.json carries no version")
-        self.assertRegex(manifest["version"], r"^\d+\.\d+\.\d+$")
+        self.assertNotIn(
+            "version",
+            manifest,
+            f"{MANIFEST.relative_to(ROOT)} declares a version again. The plugin installs "
+            "from `main`, so no number here can be true of the files a user holds, and "
+            "nothing derives it - it is maintained by hand or it is wrong",
+        )
+
+    def test_the_manifest_still_identifies_the_plugin(self):
+        """The control: removing a field must not have removed the manifest's contents.
+
+        Without this, a manifest emptied by accident would satisfy the assertion above.
+        """
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(manifest.get("name"), "knowledge-store")
+        self.assertIn("description", manifest)
 
 
-class TheBuildSkillDeclaresTheLibraryItNeeds(unittest.TestCase):
+class TheBuildSkillChecksTheStagesItUses(unittest.TestCase):
     """The skill is the newer artefact when the two drift, so it states what it needs.
 
-    What this class checks is that the sentence stating it is there and readable.
-    Whether the version it names is current is checked twice, in the two places the
-    question can actually be answered:
-
-    - against the plugin manifest, by `TheTwoHandMaintainedNumbersAgree` below - a
-      property of this commit, so a test can hold it;
-    - against the tag being cut, by `scripts/check_release_versions.py` at release
-      time - a property of a tag, which is not knowable from a tree. A comparison
-      against the installed version was tried and could not fire: `tests.yml` never
-      runs on a tag, so that version is always a `devN` derived from the *previous*
-      release, and `0.11.6 <= 0.14.1.devN` stayed true while the skill documented ten
-      stages that release does not have. A comparison against `git describe` fired
-      correctly but made this suite's result change on a tag rather than on a commit.
+    It states it as the stages it runs rather than as a version, because the stages are
+    what actually fails: an older library reports `unknown stage`. `DocumentedStagesExist`
+    above is the other half of the instruction - it holds every stage the skill names to
+    be a stage of this release, so a reader comparing their install's list against the
+    skill's commands is comparing against something true, with no number in either place.
     """
 
-    def setUp(self):
-        self.skill = BUILD_SKILL.read_text(encoding="utf-8")
-
-    def test_the_build_skill_declares_a_library_minimum(self):
-        """Breaks if the declaration is deleted or reworded past the pattern.
-
-        The guard on the instrument: the agreement check below and the release
-        script both read that one sentence, and with no sentence to read they would
-        report a clean result about nothing.
-        """
-        self.assertIsNotNone(
-            declared_minimum(self.skill),
-            f"{BUILD_SKILL.relative_to(ROOT)} declares no library minimum a reader can "
-            "check their install against",
-        )
-
-
-class TheTwoHandMaintainedNumbersAgree(unittest.TestCase):
-    """The plugin manifest's version and the build skill's floor are bumped together.
-
-    Both are written by hand for the same release and nothing derives one from the
-    other, so they drift independently. This is the half of that property a tree can
-    hold, and it catches a defect the tag comparisons it replaces could not: two
-    equally stale numbers were behind nothing and passed both of them.
-
-    A release cut from a commit where they disagree publishes a plugin naming one
-    library beside a skill requiring another, which is the mismatch the manifest
-    version exists to make diagnosable in the first place.
-    """
-
-    def test_the_manifest_version_and_the_declared_floor_are_the_same(self):
-        """Breaks when a release-preparing change bumps one of the two and not the
-        other - the drift no comparison against a tag can see, because both numbers
-        can be equally stale or equally ahead and satisfy it."""
-        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        problem = disagreement(
-            manifest.get("version"), declared_minimum(BUILD_SKILL.read_text(encoding="utf-8"))
-        )
+    def test_the_build_skill_tells_a_reader_to_check_for_them(self):
+        """Breaks if the listing, the instruction to stop, or the fix is dropped, and if
+        a hand-maintained floor is written back in."""
+        problem = capability_problem(BUILD_SKILL.read_text(encoding="utf-8"))
         self.assertIsNone(problem, problem)
 
 
-class TheAgreementCheckCanStillTell(unittest.TestCase):
+class TheCapabilityCheckCanStillTell(unittest.TestCase):
     """Break what the check protects, confirm it notices - in this run.
 
-    The check above can only pass or fail; it cannot report that it has stopped
-    comparing. Its predecessor could not fire in CI at all and looked identical from
-    the outside, so the comparison is driven against forged values rather than
-    trusted because the shipped pair happens to agree.
+    The assertion above can only pass or fail; it cannot report that it has stopped
+    reading the skill. Its predecessor read one sentence for a number and could not
+    fire in CI at all, so this is driven against forged skills, each missing exactly one
+    of the properties claimed, rather than trusted because the real file is in shape.
     """
 
-    def forged(self, minimum: str) -> str:
-        """The declaration sentence as the skill writes it, at a chosen version."""
-        text = f"**This skill assumes knowledge-store-builder {minimum} or newer.** Check first.\n"
-        self.assertEqual(declared_minimum(text), minimum, "the fixture must be readable")
-        return text
+    def forged(
+        self,
+        *,
+        listing: bool = True,
+        stop: bool = True,
+        upgrade: bool = True,
+        floor: str | None = None,
+    ) -> str:
+        """A setup section carrying the chosen subset of the properties checked."""
+        parts = ["## Setup\n"]
+        if floor is not None:
+            parts.append(f"**This skill assumes knowledge-store-builder {floor} or newer.**\n")
+        if listing:
+            parts.append("```bash\nknowledgestore   # every stage this install has\n```\n")
+        if stop:
+            parts.append(
+                "**Read that list against the commands below, and stop if any of "
+                "them is absent.**\n"
+            )
+        if upgrade:
+            parts.append(f"The fix is `{UPGRADE_COMMAND}`.\n")
+        return "\n".join(parts)
 
-    def test_it_reports_a_manifest_that_disagrees_with_the_skill(self):
-        """The bite. 0.11.6 beside a 0.15.0 floor is the real historical manifest."""
-        problem = disagreement("0.11.6", declared_minimum(self.forged("0.15.0")))
-        self.assertIsNotNone(problem, "a manifest four releases from the floor read as agreeing")
+    def test_the_shape_it_accepts(self):
+        """The control: without this, every assertion below could be reporting a problem
+        with the fixture rather than with what it forged."""
+        self.assertIsNone(capability_problem(self.forged()), capability_problem(self.forged()))
+
+    def test_it_reports_a_hand_typed_floor_written_back_in(self):
+        """The bite, in the wording that shipped. A working stage check
+        beside it is the realistic regression: someone adds the number back as extra
+        reassurance, and it is stale from the next release onwards."""
+        problem = capability_problem(self.forged(floor="0.15.2"))
+        self.assertIsNotNone(problem, "a hand-maintained floor read as compliance")
         assert problem is not None
-        self.assertIn("0.11.6", problem)
-        self.assertIn("0.15.0", problem)
+        self.assertIn("0.15.2", problem)
 
-    def test_it_reports_a_skill_left_behind_a_bumped_manifest(self):
-        """The other direction, which a check reading only one file would miss."""
-        problem = disagreement("0.16.0", declared_minimum(self.forged("0.15.0")))
-        self.assertIsNotNone(problem, "a floor left behind the manifest read as agreeing")
-
-    def test_it_accepts_the_two_saying_the_same_thing(self):
-        """The steady state. A check that cannot pass gets switched off."""
-        self.assertIsNone(disagreement("0.15.0", declared_minimum(self.forged("0.15.0"))))
-
-    def test_it_reports_a_skill_that_declares_nothing(self):
-        """A reworded sentence must read as a problem, not as compliance: with no
-        number to read, `None == None` would otherwise be agreement."""
-        problem = disagreement("0.15.0", declared_minimum("This skill needs a recent library.\n"))
-        self.assertIsNotNone(problem)
+    def test_it_reports_a_skill_that_stops_listing_the_stages(self):
+        problem = capability_problem(self.forged(listing=False))
+        self.assertIsNotNone(problem, "a skill with no stage listing read as checked")
         assert problem is not None
-        self.assertIn("no library minimum", problem)
+        self.assertIn("list the stages", problem)
 
-    def test_it_reports_a_manifest_that_declares_nothing(self):
-        """The same absence on the other side, and for the same reason."""
-        problem = disagreement(None, "0.15.0")
-        self.assertIsNotNone(problem)
+    def test_it_reports_a_listing_with_no_instruction_to_stop(self):
+        """A listing a reader is not told to act on is a note, and this skill's failure
+        mode is continuing: the artefacts earlier stages commit are the cost."""
+        problem = capability_problem(self.forged(stop=False))
+        self.assertIsNotNone(problem, "a listing with no stop instruction read as a gate")
         assert problem is not None
-        self.assertIn("no version", problem)
+        self.assertIn("stop", problem)
 
-    def test_it_reports_two_absences_rather_than_calling_them_equal(self):
-        """The tautology this shape invites: both files losing their number is the
-        worst state, and comparing None with None is the way it reads as the best."""
-        self.assertIsNotNone(disagreement(None, None))
+    def test_it_reports_a_skill_that_does_not_name_the_fix(self):
+        problem = capability_problem(self.forged(upgrade=False))
+        self.assertIsNotNone(problem, "a check with no remedy read as complete")
+        assert problem is not None
+        self.assertIn("upgrade", problem)
+
+    def test_a_stage_invocation_does_not_count_as_the_listing(self):
+        """The vacuity this shape invites. The skill names more than twenty
+        `knowledgestore <stage>` commands, so a pattern loose enough to read one of those
+        as the listing would report every later version of this skill as checked.
+        """
+        stages_only = "## Setup\n\n```bash\nknowledgestore discover\nknowledgestore sync\n```\n"
+        self.assertIsNone(STAGE_LISTING.search(stages_only))
+        problem = capability_problem(stages_only + f"stop if any is absent. `{UPGRADE_COMMAND}`\n")
+        self.assertIsNotNone(problem, "a stage invocation read as the stage listing")
+        assert problem is not None
+        self.assertIn("list the stages", problem)
+
+    def test_the_stop_instruction_survives_a_line_wrap(self):
+        """Where the wrap falls is not a property of the instruction. The pattern was
+        written with literal spaces first and failed against the shipped skill, whose
+        sentence breaks between `if` and `any` - a check reporting a formatting choice
+        as a missing gate."""
+        wrapped = "and stop if\nany of them is absent."
+        self.assertIsNotNone(STOP_ON_A_MISSING_STAGE.search(wrapped))
+        self.assertIsNone(capability_problem(self.forged(stop=False) + wrapped))
+
+    def test_the_listing_is_found_with_and_without_a_trailing_comment(self):
+        """The two forms the command is written in, so the pattern is not pinned to the
+        comment that happens to be beside it today."""
+        for line in ("knowledgestore", "knowledgestore   # every stage this install has"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(STAGE_LISTING.search(f"```bash\n{line}\n```\n"))
 
 
 if __name__ == "__main__":
