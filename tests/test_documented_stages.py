@@ -11,10 +11,18 @@ This is the direction that can actually be checked here. Drift is a property of 
 installs, which a test in one repository cannot see; internal consistency of one release
 is a property of this commit, which it can.
 
-The version the build skill declares as its floor is the other half, and it is checked
-against the newest *release* rather than against this commit's own version -
-`TheBuildSkillDeclaresTheLibraryItNeeds` says why the second is not knowable before
-the tag exists, and what that cost.
+Two numbers in this repository are written by hand and derived from nothing: the plugin
+manifest's `version` and the library floor the build skill declares. What this file
+checks of them is that they agree with *each other*, which is a property of this commit
+and needs no tag - and which catches a drift neither of the checks it replaces could
+see, because two equally stale numbers satisfied both.
+
+Whether they agree with the newest release is a property of a *tag*, not of the tree, so
+it is not checked here. Comparing against `git describe` made this suite's result change
+when a tag was created rather than when a commit was made: the same `main` passed before
+a release and failed after it, with nothing to attribute the failure to. That comparison
+now lives in `scripts/check_release_versions.py`, which the release job runs before it
+publishes, and `tests/test_release_version_check.py` covers it.
 
 Historical plans under `docs/superpowers/plans/` are excluded deliberately: they record
 what was planned at a date, not what to run today, and one of them still names a stage
@@ -25,8 +33,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -39,20 +45,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # question, which is the failure mode this file exists to catch elsewhere.
 INVOCATION = re.compile(r"(?<!from )\bknowledgestore\s+([a-z][a-z0-9-]*)")
 
+MANIFEST = ROOT / ".claude-plugin/plugin.json"
 BUILD_SKILL = ROOT / "skills/knowledge-store-build/SKILL.md"
-# The sentence the build skill states its library floor in, and the shape of the
-# release tags this project cuts. hatch-vcs derives the version from those tags,
-# so the most recent one is the newest library `pip install` can reach.
+# The sentence the build skill states its library floor in.
 MINIMUM_DECLARATION = re.compile(r"assumes knowledge-store-builder (\d+\.\d+\.\d+) or newer")
-RELEASE_TAG = "v[0-9]*"
-
-
-def triple(version: str) -> tuple[int, int, int]:
-    """The comparable part of a version, tag prefix and dev suffix discarded."""
-    parts = re.match(r"v?(\d+)\.(\d+)\.(\d+)", version)
-    if parts is None:
-        raise AssertionError(f"unparseable version {version!r}")
-    return (int(parts[1]), int(parts[2]), int(parts[3]))
 
 
 def declared_minimum(skill: str) -> str | None:
@@ -61,59 +57,26 @@ def declared_minimum(skill: str) -> str | None:
     return found.group(1) if found else None
 
 
-def latest_release_tag(root: Path) -> str | None:
-    """The most recent release tag reachable from HEAD, or None when there is none.
+def disagreement(manifest_version: str | None, declared: str | None) -> str | None:
+    """The complaint if the two hand-maintained numbers differ, else None.
 
-    None covers an sdist, a tarball and a shallow clone with no tags fetched -
-    conditions of the checkout rather than defects in the skill, so the caller
-    skips rather than failing. `git describe` is asked for reachable tags only,
-    so a tag on some other branch does not count as shipped from here.
+    Separate from the assertion so the sensitivity check can drive it with forged
+    values rather than trusting a clean result from the one real pair.
+
+    Compared as text, not as version triples: both are written by hand in the
+    form N.N.N, and a release that publishes `0.15.0` beside `0.15.00` has the
+    drift this exists to catch even though the numbers order equally.
     """
-    try:
-        finished = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0", "--match", RELEASE_TAG],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:  # pragma: no cover - depends on the machine having git
-        return None
-    if finished.returncode != 0:
-        return None
-    return finished.stdout.strip() or None
-
-
-def behind_the_release(skill: str, tag: str) -> str | None:
-    """The complaint if the skill's declared minimum is older than `tag`, else None.
-
-    Separate from the assertion so the sensitivity checks can drive it with a
-    forged skill text and a fabricated tag, rather than trusting a clean result
-    from the one real pair.
-    """
-    declared = declared_minimum(skill)
+    if manifest_version is None:
+        return f"{MANIFEST.relative_to(ROOT)} declares no version"
     if declared is None:
         return f"{BUILD_SKILL.relative_to(ROOT)} declares no library minimum"
-    if triple(declared) < triple(tag):
+    if manifest_version != declared:
         return (
-            f"the build skill assumes {declared} or newer, but {tag} has shipped since. "
-            "A reader who installs the version it names gets `unknown stage` for every "
-            "stage added after it"
-        )
-    return None
-
-
-def plugin_version_behind(manifest_version: str, tag: str) -> str | None:
-    """The complaint if the plugin manifest's version is older than `tag`, else None.
-
-    Separate from the assertion so the sensitivity check can drive it with a
-    fabricated pair rather than trusting a clean result from the one real one.
-    """
-    if triple(manifest_version) < triple(tag):
-        return (
-            f"the plugin manifest says {manifest_version}, but {tag} has shipped since. "
-            "The manifest version is how a user tells one copy of the skills from "
-            "another, so a stale one makes a plugin/library mismatch undiagnosable"
+            f"{MANIFEST.relative_to(ROOT)} says {manifest_version} and the build skill "
+            f"assumes {declared} or newer. Both are bumped by hand for the same release, "
+            "so a release cut from this commit publishes a plugin and a floor that "
+            "describe different libraries"
         )
     return None
 
@@ -197,75 +160,27 @@ class ThePluginIsIdentifiable(unittest.TestCase):
     """
 
     def test_the_plugin_manifest_carries_a_version(self):
-        manifest = json.loads(
-            ROOT.joinpath(".claude-plugin/plugin.json").read_text(encoding="utf-8")
-        )
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertIn("version", manifest, "plugin.json carries no version")
         self.assertRegex(manifest["version"], r"^\d+\.\d+\.\d+$")
-
-    def test_the_plugin_version_is_not_behind_the_latest_release(self):
-        """Breaks if the manifest is left behind a release.
-
-        It sat at 0.11.6 across four releases while the test above was green, because
-        that test asks only whether a version exists and parses. The manifest is the
-        one file in this repository that names a version - `CLAUDE.md` records that
-        the version is the git tag and nothing else states it - so it is the one
-        place a release has to be carried by hand, and the only thing that keeps it
-        honest is a check comparing it to what shipped.
-
-        Ahead is accepted, as it is for the build skill's floor: that is a release
-        being prepared. Only behind is a defect.
-        """
-        tag = latest_release_tag(ROOT)
-        if tag is None:
-            raise unittest.SkipTest(
-                "no release tag is reachable from HEAD (an sdist, a tarball or a "
-                "shallow clone), so there is no shipped version to compare against"
-            )
-        manifest = json.loads(
-            ROOT.joinpath(".claude-plugin/plugin.json").read_text(encoding="utf-8")
-        )
-        problem = plugin_version_behind(manifest["version"], tag)
-        self.assertIsNone(problem, problem)
-
-    def test_this_gate_notices_a_manifest_left_behind(self):
-        """The sensitivity check, in the same run.
-
-        Drives the predicate with a fabricated pair. If this ever passes silently,
-        the assertion above is measuring that a string parses rather than that the
-        manifest kept up.
-        """
-        self.assertIsNotNone(plugin_version_behind("0.11.6", "v0.15.0"))
-        self.assertIsNone(plugin_version_behind("0.15.0", "v0.15.0"))
-        self.assertIsNone(plugin_version_behind("0.16.0", "v0.15.0"))
 
 
 class TheBuildSkillDeclaresTheLibraryItNeeds(unittest.TestCase):
     """The skill is the newer artefact when the two drift, so it states what it needs.
 
-    Only one direction of that is checkable here, and it is not the obvious one.
+    What this class checks is that the sentence stating it is there and readable.
+    Whether the version it names is current is checked twice, in the two places the
+    question can actually be answered:
 
-    **Not checkable: the declaration is not ahead of what this commit ships.** The
-    version is the git tag (hatch-vcs) and no file in the tree names it, so before
-    the tag exists there is nothing to compare against - and `tests.yml` runs on
-    `pull_request` and pushes to `main`, never on a tag, so the installed version
-    a test can read in CI is always a `devN` derived from the *previous* release.
-    Comparing the declaration against that made a release-preparing bump fail by
-    construction, which is how the declaration came to name 0.11.6 while the skill
-    documented ten stages that release does not have. `0.11.6 <= 0.14.1.devN` is
-    true, so the comparison passed the whole time.
-
-    **Checkable: the declaration is not behind the newest release.** A skill
-    documenting current stages cannot be followed with an older library, and the
-    most recent release tag is reachable in CI (`fetch-depth: 0`). Three states,
-    all deliberate:
-
-    - behind the latest tag - fails, the drift this exists to catch;
-    - equal to it - passes, the steady state between releases;
-    - ahead of it - passes, a release being prepared, as the bump to 0.15.0 was.
-
-    The obligation that follows is that the release-preparing change bumps this
-    sentence, because after the tag lands an unbumped declaration is behind.
+    - against the plugin manifest, by `TheTwoHandMaintainedNumbersAgree` below - a
+      property of this commit, so a test can hold it;
+    - against the tag being cut, by `scripts/check_release_versions.py` at release
+      time - a property of a tag, which is not knowable from a tree. A comparison
+      against the installed version was tried and could not fire: `tests.yml` never
+      runs on a tag, so that version is always a `devN` derived from the *previous*
+      release, and `0.11.6 <= 0.14.1.devN` stayed true while the skill documented ten
+      stages that release does not have. A comparison against `git describe` fired
+      correctly but made this suite's result change on a tag rather than on a commit.
     """
 
     def setUp(self):
@@ -274,8 +189,9 @@ class TheBuildSkillDeclaresTheLibraryItNeeds(unittest.TestCase):
     def test_the_build_skill_declares_a_library_minimum(self):
         """Breaks if the declaration is deleted or reworded past the pattern.
 
-        The guard on the instrument: the check below reads that one sentence, and
-        with no sentence to read it would report a clean result about nothing.
+        The guard on the instrument: the agreement check below and the release
+        script both read that one sentence, and with no sentence to read they would
+        report a clean result about nothing.
         """
         self.assertIsNotNone(
             declared_minimum(self.skill),
@@ -283,30 +199,38 @@ class TheBuildSkillDeclaresTheLibraryItNeeds(unittest.TestCase):
             "check their install against",
         )
 
-    def test_the_declared_minimum_is_not_behind_the_latest_release(self):
-        """Breaks when a release ships and the skill keeps naming an older library.
 
-        Which is the state this file found: stages landed release after release and
-        the declaration stayed at 0.11.6, so an operator who followed it literally
-        installed a library without them.
-        """
-        tag = latest_release_tag(ROOT)
-        if tag is None:
-            self.skipTest(
-                "no release tag is reachable from HEAD (an sdist, a tarball or a shallow "
-                "clone), so there is no shipped version to compare the declaration against"
-            )
-        problem = behind_the_release(self.skill, tag)
+class TheTwoHandMaintainedNumbersAgree(unittest.TestCase):
+    """The plugin manifest's version and the build skill's floor are bumped together.
+
+    Both are written by hand for the same release and nothing derives one from the
+    other, so they drift independently. This is the half of that property a tree can
+    hold, and it catches a defect the tag comparisons it replaces could not: two
+    equally stale numbers were behind nothing and passed both of them.
+
+    A release cut from a commit where they disagree publishes a plugin naming one
+    library beside a skill requiring another, which is the mismatch the manifest
+    version exists to make diagnosable in the first place.
+    """
+
+    def test_the_manifest_version_and_the_declared_floor_are_the_same(self):
+        """Breaks when a release-preparing change bumps one of the two and not the
+        other - the drift no comparison against a tag can see, because both numbers
+        can be equally stale or equally ahead and satisfy it."""
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        problem = disagreement(
+            manifest.get("version"), declared_minimum(BUILD_SKILL.read_text(encoding="utf-8"))
+        )
         self.assertIsNone(problem, problem)
 
 
-class TheMinimumCheckCanStillTell(unittest.TestCase):
-    """Break what the check protects, confirm it notices, restore - in this run.
+class TheAgreementCheckCanStillTell(unittest.TestCase):
+    """Break what the check protects, confirm it notices - in this run.
 
     The check above can only pass or fail; it cannot report that it has stopped
-    comparing. Its predecessor could not fire in CI at all and looked exactly like
-    this one from the outside, so the comparison is driven against forged text and
-    fabricated tags rather than trusted because the shipped pair happens to agree.
+    comparing. Its predecessor could not fire in CI at all and looked identical from
+    the outside, so the comparison is driven against forged values rather than
+    trusted because the shipped pair happens to agree.
     """
 
     def forged(self, minimum: str) -> str:
@@ -315,94 +239,42 @@ class TheMinimumCheckCanStillTell(unittest.TestCase):
         self.assertEqual(declared_minimum(text), minimum, "the fixture must be readable")
         return text
 
-    def test_it_reports_a_minimum_behind_the_latest_release(self):
-        """The bite. 0.11.6 against a 0.14.0 release is the real historical pair."""
-        problem = behind_the_release(self.forged("0.11.6"), "v0.14.0")
-        self.assertIsNotNone(problem, "a minimum two releases stale went unreported")
+    def test_it_reports_a_manifest_that_disagrees_with_the_skill(self):
+        """The bite. 0.11.6 beside a 0.15.0 floor is the real historical manifest."""
+        problem = disagreement("0.11.6", declared_minimum(self.forged("0.15.0")))
+        self.assertIsNotNone(problem, "a manifest four releases from the floor read as agreeing")
         assert problem is not None
         self.assertIn("0.11.6", problem)
-        self.assertIn("v0.14.0", problem)
+        self.assertIn("0.15.0", problem)
 
-    def test_it_accepts_a_minimum_equal_to_the_latest_release(self):
-        """The steady state between releases. Failing here would make every commit
-        after a release red until someone invented a version to name."""
-        self.assertIsNone(behind_the_release(self.forged("0.14.0"), "v0.14.0"))
+    def test_it_reports_a_skill_left_behind_a_bumped_manifest(self):
+        """The other direction, which a check reading only one file would miss."""
+        problem = disagreement("0.16.0", declared_minimum(self.forged("0.15.0")))
+        self.assertIsNotNone(problem, "a floor left behind the manifest read as agreeing")
 
-    def test_it_accepts_a_minimum_ahead_of_the_latest_release(self):
-        """A release being prepared - the case the previous comparison forbade, and
-        the reason the declaration could never name the release it ships in."""
-        self.assertIsNone(behind_the_release(self.forged("0.15.0"), "v0.14.0"))
+    def test_it_accepts_the_two_saying_the_same_thing(self):
+        """The steady state. A check that cannot pass gets switched off."""
+        self.assertIsNone(disagreement("0.15.0", declared_minimum(self.forged("0.15.0"))))
 
     def test_it_reports_a_skill_that_declares_nothing(self):
-        """A reworded sentence must read as a problem, not as compliance."""
-        problem = behind_the_release("This skill needs a recent library.\n", "v0.14.0")
+        """A reworded sentence must read as a problem, not as compliance: with no
+        number to read, `None == None` would otherwise be agreement."""
+        problem = disagreement("0.15.0", declared_minimum("This skill needs a recent library.\n"))
         self.assertIsNotNone(problem)
         assert problem is not None
         self.assertIn("no library minimum", problem)
 
-    def test_it_compares_minor_and_patch_numerically(self):
-        """String comparison would read 0.9.0 as newer than 0.14.0, and would keep
-        reading it that way for the whole 0.1x series."""
-        self.assertIsNotNone(behind_the_release(self.forged("0.9.0"), "v0.14.0"))
-        self.assertIsNone(behind_the_release(self.forged("0.14.10"), "v0.14.9"))
+    def test_it_reports_a_manifest_that_declares_nothing(self):
+        """The same absence on the other side, and for the same reason."""
+        problem = disagreement(None, "0.15.0")
+        self.assertIsNotNone(problem)
+        assert problem is not None
+        self.assertIn("no version", problem)
 
-
-class TheLatestReleaseTagComesFromGit(unittest.TestCase):
-    """The skip path, exercised rather than assumed.
-
-    A skip nothing has ever triggered is a class that could stop running with no
-    symptom, so both reasons for one are reproduced against real git rather than
-    reasoned about.
-    """
-
-    def test_it_reads_the_most_recent_release_tag_of_this_repository(self):
-        """The control for the two below: proves None means absent rather than that
-        nothing looked. Breaks if the tag pattern stops matching what is cut here."""
-        tag = latest_release_tag(ROOT)
-        if tag is None:
-            self.skipTest("no release tag is reachable from HEAD in this checkout")
-        self.assertRegex(tag, r"^v\d+\.\d+\.\d+$")
-
-    def test_it_reports_none_when_no_tag_is_reachable(self):
-        """Breaks if an untagged checkout raised or returned a junk version instead.
-
-        A shallow CI clone with no tags fetched lands here, and a test that fails
-        because git history is absent gets deleted rather than fixed.
-        """
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory) / "untagged"
-            repository.mkdir()
-            subprocess.run(["git", "init", "-q", str(repository)], check=True)
-            (repository / "file.txt").write_text("content\n", encoding="utf-8")
-            subprocess.run(["git", "-C", str(repository), "add", "file.txt"], check=True)
-            subprocess.run(
-                ["git", "-C", str(repository)]
-                + ["-c", "user.email=t@e", "-c", "user.name=t"]
-                + ["commit", "-q", "-m", "one"],
-                check=True,
-            )
-            tags = subprocess.run(
-                ["git", "-C", str(repository), "tag", "--list"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertEqual(tags.stdout, "", "the fixture repository must carry no tags")
-            self.assertIsNone(latest_release_tag(repository))
-
-    def test_it_reports_none_outside_a_repository(self):
-        """An sdist or an unpacked wheel has no git directory at all."""
-        with tempfile.TemporaryDirectory() as directory:
-            outside = Path(directory)
-            probe = subprocess.run(
-                ["git", "-C", str(outside), "rev-parse", "--git-dir"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if probe.returncode == 0:
-                self.skipTest(f"the temporary directory is inside a repository ({outside})")
-            self.assertIsNone(latest_release_tag(outside))
+    def test_it_reports_two_absences_rather_than_calling_them_equal(self):
+        """The tautology this shape invites: both files losing their number is the
+        worst state, and comparing None with None is the way it reads as the best."""
+        self.assertIsNotNone(disagreement(None, None))
 
 
 if __name__ == "__main__":

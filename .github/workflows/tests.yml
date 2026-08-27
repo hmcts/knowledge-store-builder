@@ -25,12 +25,12 @@ jobs:
         with:
           node-version: "22"
 
-      # Versions pinned, binary-only, no lifecycle scripts: the lint and test
-      # toolchain is fixed so a dependency release cannot fail an unrelated PR.
-      - name: Lint Python (ruff)
-        run: |
-          pip install --only-binary :all: ruff==0.16.0
-          ruff check src tests
+      # No ruff here: `lint.yml` runs `ruff check src tests scripts` on the same
+      # pinned 0.16.0, so this was the identical command twice per pull request -
+      # and two places to remember when the paths change, which is how `scripts/`
+      # came to be linted by neither for a while. `lint.yml` is skipped by
+      # paths-ignore only for changes that carry no Python, so nothing loses
+      # coverage.
 
       - name: Install the package
         run: pip install -e .
