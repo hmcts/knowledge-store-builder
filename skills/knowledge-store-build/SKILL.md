@@ -498,6 +498,45 @@ knowledgestore explorer            # the self-contained search page
 
 Stages are independent and idempotent — re-run one without repeating the rest.
 
+### Run local extractors before the stages that rewrite the archive
+
+Three stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+mid-pipeline `graphify-out/graph.json`:
+
+```bash
+# Stages that rewrite graphify-out/graph.json.gz
+knowledgestore gherkin
+knowledgestore packages
+knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+```
+
+A store with extractors of its own has one ordering to keep: **run them before
+those three, or remove the archive between them.** Nodes written into
+`graph.json` after the archive was last built leave the two files describing
+different graphs, and neither outcome from there is the one you want: either the
+stage refuses, in a message about communities and clustered nodes, or it
+rewrites the archive from `graph.json` and whatever the archive held that
+`graph.json` does not is gone.
+
+**The refusal names clustering; the cause is the ordering.** It counts
+communities and clustered nodes in both files, prints both totals and says one
+is stale — because losing a clustering is the worst thing the overwrite can do,
+not because clustering is what went wrong. Read it as "these two files hold
+different graphs", and ask what wrote `graph.json` last.
+
+**Do not follow the remedy it prints before answering that.** It offers
+`gunzip -kf graphify-out/graph.json.gz`, which decompresses the archive over
+`graph.json`: right when `graph.json` is a leftover from an abandoned run, and
+the loss of a whole layer when it is the file a local extractor has just
+written. Removing `graph.json`, the other half of the same message, discards it
+too.
+
+Removing the archive instead leaves the stage nothing to overwrite, so it writes
+both files from `graph.json` and the local nodes reach the archive. The archive
+is committed, so version control has it back if the run then fails. Say which
+of the two orders you used in your report: it is what explains the graph the
+store now ships.
+
 ### Ticket detail from the issue tracker: `fetch-tickets`
 
 Optional, and off unless the store has tracker credentials
