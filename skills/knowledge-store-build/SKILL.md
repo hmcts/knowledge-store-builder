@@ -1081,6 +1081,29 @@ them, and separates the artefacts that hold absolute paths by contract — graph
 `FILE_LIST` must be absolute verbatim — from the ones that should not. Convert with
 `knowledgestore.store_paths`, which still hands readers absolute paths.
 
+Add `--duplicates` to rank repositories by how much of their (label, path) pairs
+they share:
+
+```bash
+knowledgestore status --duplicates
+```
+
+It reports and ranks; **you** decide whether a copy is deliberate. A vendored
+fork, a template instantiated twice and a migration part-way through all look
+identical to this measurement, and there is no percentage above which it declares
+anything. Nothing else in the pipeline can see a near-copy: `merge-graphs`
+namespaces node ids per repository, so two copies of one file produce ids that
+cannot collide, and every count downstream reads as two ordinary repositories.
+What a copy costs is a second set of communities, a second set of LLM-authored
+summaries for the same code, and two equally good citations for one question.
+
+Each line gives the shared count and the percentage of *each* side, because the
+reading differs by direction: a small repository wholly inside a large one is 100%
+of itself and a few percent of the other. The ranking uses the larger repository
+as the denominator. The header states how many pairs were bounded and how many
+were actually intersected - the report streams the whole graph, so it is opt-in
+like `--central`.
+
 ## The semantic index
 
 ```bash

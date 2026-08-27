@@ -27,6 +27,7 @@ from pathlib import Path
 from . import (
     boundary,
     config,
+    duplicate_repositories,
     graph_files,
     io,
     merge_inputs,
@@ -1311,6 +1312,28 @@ def _report_central(enabled: bool) -> None:
         print(f"  {degree:>7,}  {label or node_id}")
 
 
+def _report_duplicates(enabled: bool) -> None:
+    """Print the repository (label, path) overlap ranking, or nothing when not asked.
+
+    Opt-in like `--central`, and for the same reason: it streams the whole graph,
+    and `status` is the cheap stage an operator runs constantly.
+
+    Reports and never adjudicates. A near-copy can be a vendored fork or a
+    migration part-way through, so the judgement needs the two names in front of a
+    person; a stage that classified one would be applying a constant that is wrong
+    on some estate.
+    """
+    if not enabled:
+        return
+    if not config.GRAPH_PATH.is_file():
+        print(f"Repository overlap: no graph at {config.GRAPH_PATH}")
+        return
+    for line in duplicate_repositories.lines(
+        duplicate_repositories.near_duplicates(config.GRAPH_PATH)
+    ):
+        print(line)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1322,6 +1345,11 @@ def main(argv=None) -> int:
         "--central",
         action="store_true",
         help="also report the most connected nodes, to show what dominates the graph (slow)",
+    )
+    parser.add_argument(
+        "--duplicates",
+        action="store_true",
+        help="also rank repositories by (label, path) overlap, to find near-copies (slow)",
     )
     parser.add_argument(
         "--drift",
@@ -1336,6 +1364,7 @@ def main(argv=None) -> int:
     arguments = parser.parse_args(argv)
 
     _report_central(arguments.central)
+    _report_duplicates(arguments.duplicates)
     recorded = provenance.read()
     print(
         f"Provenance: {len(recorded)} repositories recorded"
