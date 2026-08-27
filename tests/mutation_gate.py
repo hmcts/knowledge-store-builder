@@ -405,6 +405,48 @@ MUTATIONS = (
         "pointed at - indistinguishable from a graph with no edges",
     ),
     Mutation(
+        "the committed archive is no longer read when the plain graph is absent",
+        "graph_files.py",
+        "    return other if other is not None and other.is_file() else None",
+        "    return None",
+        "#262: reported from a store running 0.15.2 - `status --duplicates` and "
+        "`--central` refused with `no graph at .../graph.json` on a store holding "
+        "only the file it commits, which is the state a store spends most of its "
+        "life in and the state an operator reaches for `--duplicates` from; both "
+        "readers already accepted the `.gz` and only the guard refused, and the "
+        "way out was a multi-gigabyte gunzip for a report documented as cheap",
+    ),
+    Mutation(
+        "the archive is preferred over the graph a run has just written",
+        "graph_files.py",
+        "    if preferred.is_file():\n        return preferred",
+        "    if False:\n        return preferred",
+        "the fallback's other direction: mid-pipeline the plain file is the fresh "
+        "merge and the archive beside it is the previous build, so reading the "
+        "archive there reports on the graph the run has already superseded - the "
+        "rebuild case an operator reported when three stages refused in sequence",
+    ),
+    Mutation(
+        "the most-connected ranking stops naming the graph it read",
+        "status.py",
+        '        f"Most connected nodes in {graph.name} (would you name these if asked what the "',
+        '        "Most connected nodes (would you name these if asked what the "',
+        "a store holds two graph files that can disagree, and centrality is "
+        "degree-driven, so the two rank differently; the same silence about which "
+        "file was read is what made an operator diff two graphs by hand after a "
+        "stage reported confidently on a leftover",
+    ),
+    Mutation(
+        "the near-duplicate report stops naming the graph it read",
+        "status.py",
+        "        duplicate_repositories.near_duplicates(graph), described=graph.name",
+        "        duplicate_repositories.near_duplicates(graph)",
+        "the same escape on the other report: an overlap percentage from the "
+        "committed archive and the same percentage from a stale leftover are "
+        "different claims, and a header that does not name its file leaves the "
+        "reader to guess which of a store's two graphs the estate is described from",
+    ),
+    Mutation(
         "estate check stops matching name segments",
         "build_community_summaries.py",
         "            if len(normalised) >= MIN_SEGMENT_MATCH and normalised in segments:",
