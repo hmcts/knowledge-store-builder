@@ -306,6 +306,20 @@ MUTATIONS = (
         "artefact rather than describing one wrongly",
     ),
     Mutation(
+        "the stale refusal stops saying which of the two files is stale",
+        "graph_files.py",
+        '        f"{stale_direction(described, other)}\\n"',
+        '        ""',
+        "#243: the refusal named one way out - decompress the archive over "
+        "graph.json, or remove graph.json - and both destroy graph.json, so both "
+        "are right only if the archive is the good copy. Mid-rebuild it is the "
+        "other way round and the reader is told to discard the fresh merge, which "
+        "cost a full extraction pass; the command exits 0, so nothing reports the "
+        "loss. Reported firing on three stages in one documented sequence. Without "
+        "this sentence the message names two directions and no way to tell them "
+        "apart, which is a guess dressed as a choice",
+    ),
+    Mutation(
         "layer merge re-points edges at unrelated nodes",
         "merge_layers.py",
         "        renamed[node_id] = new_id",

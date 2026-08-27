@@ -274,14 +274,21 @@ def _graph_disagreement(members: dict[str, list[str]]) -> str:
 
     Reports, never refuses: the `.gz` is tracked, so both files exist on every
     refresh after the first, and refusing would fire on the normal case.
+
+    The remedy names both stale directions rather than one, via
+    `graph_files.stale_direction`: this note used to say to decompress the archive
+    over `graph.json` or remove it, which discards the fresh merge whenever the
+    stale file is the archive - the state for the whole of a full rebuild (#243).
     """
     counts = (len(members), sum(len(ids) for ids in members.values()))
+    other = graph_files.counterpart(config.GRAPH_PATH)
+    if other is None:
+        return ""  # nothing to disagree with; `disagreement` would say the same
     note = graph_files.disagreement(
         config.GRAPH_PATH,
         counts,
         "Snapshots key the remap, so a snapshot of the wrong graph mis-keys every "
-        "carried summary. Decompress the committed graph over graph.json, or remove "
-        "the stale graph.json, and re-run.",
+        f"carried summary. {graph_files.stale_direction(config.GRAPH_PATH, other)}",
     )
     return f"{note}\n" if note else ""
 
