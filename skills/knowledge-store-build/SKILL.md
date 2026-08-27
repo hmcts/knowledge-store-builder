@@ -23,11 +23,25 @@ come from the plugin cache, the library from pip - so the two drift, and the
 symptom is a stage documented here reported as `unknown stage`:
 
 ```bash
-knowledgestore --version        # older than 0.15.0? upgrade before following this
+knowledgestore --version
 ```
 
-A store deliberately pinned to an older library is a legitimate position; then
-follow the documentation for the version it pins rather than this text.
+**Stop if it reports below 0.15.0. Do not continue to any step below.** Say which
+version is installed, that this skill needs 0.15.0 or newer, and that the fix is
+`pip install --upgrade hmcts-knowledge-store-builder`. Continuing produces
+`unknown stage` partway through a build, after earlier stages have already written
+committed artefacts - a worse place to stop than here.
+
+Two things this check cannot tell you, so ask rather than assume:
+
+- **A store deliberately pinned to an older library is a legitimate position.** If
+  that is the case, follow the documentation for the version it pins rather than
+  this text - do not upgrade a pinned store to satisfy this skill.
+- **The plugin does not upgrade the library and never will**; they install
+  separately, and the plugin is not refreshed automatically either. If the version
+  looks older than expected, the plugin may also be stale - `.claude-plugin/plugin.json`
+  names the release these skills were shipped with, and `docs/asking-questions.md`
+  has the three commands that refresh it.
 
 ```bash
 pip install hmcts-knowledge-store-builder   # or: pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
