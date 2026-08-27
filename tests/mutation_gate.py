@@ -1691,6 +1691,27 @@ MUTATIONS = (
         "failure that reads as extra safety: a policy redacting everything answers no "
         "deployment question, and the stage reports the same key count either way",
     ),
+    Mutation(
+        "flagged terms reported as one class again",
+        "build_community_summaries.py",
+        "    classified = classify_absent(absent) if absent else None",
+        "    classified = None",
+        "#249: the state that shipped. A real ticket the history datasets record and an "
+        "invented class name were one figure, and measured on a large store the tickets were "
+        "nearly half of it - so the count an operator was told to act on was inflated by that "
+        "much and could not be split without chasing single terms by hand. The total was "
+        "correct throughout, which is why it read as a clean finding",
+    ),
+    Mutation(
+        "the history lookup no longer reads the datasets",
+        "build_community_summaries.py",
+        "        found |= _cited_in_dataset(dataset, outstanding)",
+        "        pass",
+        "#249: with the datasets unread every flagged term is absent from history, so the "
+        "class that can contain invention swallows the whole flagged total. The report still "
+        "reconciles and the actionable figure goes up, which reads as a stricter check rather "
+        "than a check that has stopped looking",
+    ),
 )
 
 

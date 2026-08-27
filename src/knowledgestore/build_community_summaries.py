@@ -1137,11 +1137,77 @@ def _sample_ids(ids: list[str], sample: int | None) -> list[str]:
     return [ids[int(i * step)] for i in range(sample)]
 
 
+def _report_absent_classes(
+    total_absent: int,
+    classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None,
+) -> None:
+    """The flagged total split by where each term was found, and the arithmetic.
+
+    One count answered two questions until #249, and they need different actions:
+    an invented identifier means the prose is wrong and has to be rewritten, while
+    a ticket the history datasets record and the graph does not means the summary
+    is keyed to a community that has moved. Measured on a large store, the second
+    class was nearly half of what the estate pass reported, so an operator was
+    told to act on a figure inflated by that much and could not tell which half
+    without chasing single terms by hand.
+
+    The arithmetic is printed because a breakdown that does not add up is worse
+    than none: `total_absent` is counted from the flagged terms and the two class
+    counts from the classification, so a term dropped from the split or counted
+    twice shows up in the line rather than in nobody's reading of it.
+    """
+    if classified is None:
+        print(
+            f"    no history datasets under {config.HISTORY_DIR}, so these are not split by "
+            "where they were found - run knowledgestore export-history, and a term a commit "
+            "records is separated from one nothing in the store has ever mentioned."
+        )
+        return
+    in_history, nowhere = classified
+    invention = sum(len(terms) for terms in nowhere.values())
+    recorded = sum(len(terms) for terms in in_history.values())
+    print(
+        f"    absent from the graph AND from history: {invention} term(s) - the only class that "
+        "can contain invention, and the one to act on: read the prose and rewrite or drop the "
+        "term."
+    )
+    print(
+        f"    in the history datasets but not the graph: {recorded} term(s) - the graph holds a "
+        "ticket node only for what the intent index mined, so a summary keyed to a community "
+        "that has moved cites a real ticket the graph does not hold. A remap question, not an "
+        "authoring one."
+    )
+    print(f"    reconciled: {invention} + {recorded} = {total_absent} flagged.")
+
+
+def _report_absent_terms(
+    absent: dict[str, set[str]],
+    classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None,
+) -> None:
+    """Which summary cites which absent term, under the label its class earns.
+
+    The class that can contain invention is printed first, because it is the one
+    an operator acts on. Both labels contain "not in graph", which is the claim
+    the estate pass can make about every term here; only the classification adds
+    to it.
+    """
+    if classified is None:
+        for cid, terms in sorted(absent.items()):
+            print(f"  [not in graph] community {cid} cites: {', '.join(sorted(terms))}")
+        return
+    in_history, nowhere = classified
+    for cid, terms in sorted(nowhere.items()):
+        print(f"  [not in graph or history] community {cid} cites: {', '.join(sorted(terms))}")
+    for cid, terms in sorted(in_history.items()):
+        print(f"  [not in graph, in history] community {cid} cites: {', '.join(sorted(terms))}")
+
+
 def _report_verify_totals(
     unsupported: list[tuple[str, set[str]]],
     speculative: list[tuple[str, list[str]]],
     orphaned: list[str],
     absent: dict[str, set[str]] | None,
+    classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None = None,
 ) -> None:
     """The counts, and what they do and do not mean."""
     if not (unsupported or speculative or orphaned):
@@ -1168,6 +1234,7 @@ def _report_verify_totals(
             "one estate: this narrowed 9 flagged summaries to 1, and that one cited two terms "
             "that did exist in the corpus."
         )
+        _report_absent_classes(total_absent, classified)
     else:
         print(
             "  Every one of them exists somewhere in the graph, so none is citing something "
@@ -1182,6 +1249,7 @@ def _report_verify(
     speculative: list[tuple[str, list[str]]],
     orphaned: list[str],
     absent: dict[str, set[str]] | None = None,
+    classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None = None,
 ) -> None:
     """Report the digest check for what it is, and the estate check for what it is.
 
@@ -1205,9 +1273,8 @@ def _report_verify(
     for cid in orphaned:
         print(f"  [no digest] community {cid} has prose but no evidence to check it against")
     if absent:
-        for cid, terms in sorted(absent.items()):
-            print(f"  [not in graph] community {cid} cites: {', '.join(sorted(terms))}")
-    _report_verify_totals(unsupported, speculative, orphaned, absent)
+        _report_absent_terms(absent, classified)
+    _report_verify_totals(unsupported, speculative, orphaned, absent, classified)
 
 
 def _ungrounded(text: str, digest: dict) -> set[str]:
@@ -1391,6 +1458,143 @@ def absent_from_estate(
     return absent, by_segment
 
 
+# The characters a name is spelled with. A flagged term is credited to history
+# only when it stands alone between them, so `svc-alpha` is not recorded by a
+# commit naming `svc-alpha-api`. That is stricter than `_normalise`, which the
+# graph check uses: a spelling difference therefore leaves a term in the class
+# that can contain invention, which is a candidate to read rather than a term
+# quietly explained away.
+_HISTORY_TOKEN_CHARS = r"A-Za-z0-9_.\-"
+
+
+def _history_token(term: str) -> re.Pattern[str]:
+    """One term as a whole token, case-insensitively - the graph check ignores case too."""
+    return re.compile(
+        rf"(?<![{_HISTORY_TOKEN_CHARS}]){re.escape(term)}(?![{_HISTORY_TOKEN_CHARS}])",
+        re.IGNORECASE,
+    )
+
+
+def _substring_alternation(terms: Iterable[str]) -> re.Pattern[str]:
+    """A prefilter over a raw dataset line: one automaton for every outstanding term.
+
+    Deliberately looser than `_history_token`, and every line it passes is then
+    confirmed field by field. A dataset line is JSON, so a commit body's newlines
+    arrive as `\\n` and a token check against the raw line would miss a term at the
+    start of a body - a prefilter that can say "no" wrongly is a defect, one that
+    says "maybe" too often costs a `json.loads`.
+    """
+    return re.compile("|".join(re.escape(term) for term in sorted(terms)), re.IGNORECASE)
+
+
+def _cites(record: object, pattern: re.Pattern[str]) -> bool:
+    """Whether one commit cites the term, in the fields `export-history` writes.
+
+    The message it was committed with, and the paths it touched. Confined to those
+    so the claim stays "history records this term" rather than "these bytes contain
+    it": a repository URL and an author's address are in the same line and neither
+    is a citation. Paths match a whole segment, because prose cites `AddressPipe`
+    or `address.pipe.ts` and not the repo-relative path around it.
+    """
+    if not isinstance(record, dict):
+        return False
+    for field in ("subject", "body"):
+        if pattern.search(str(record.get(field) or "")):
+            return True
+    for entry in record.get("files") or ():
+        path = entry.get("path") if isinstance(entry, dict) else entry
+        if any(pattern.fullmatch(part) for part in str(path or "").split("/")):
+            return True
+    return False
+
+
+def _cited_in_dataset(dataset: Path, outstanding: dict[str, re.Pattern[str]]) -> set[str]:
+    """One streaming pass over one repository's commits, for every outstanding term.
+
+    Deletes what it finds from `outstanding` and returns it, so the next dataset
+    scans for less and the whole lookup ends as soon as the last term is located.
+    """
+    found: set[str] = set()
+    candidates = _substring_alternation(outstanding)
+    with dataset.open(encoding="utf-8") as lines:
+        for line in lines:
+            if not candidates.search(line):
+                continue
+            record = json.loads(line)
+            cited = {term for term, pattern in outstanding.items() if _cites(record, pattern)}
+            if not cited:
+                continue
+            found |= cited
+            for term in cited:
+                del outstanding[term]
+            if not outstanding:
+                break
+            candidates = _substring_alternation(outstanding)
+    return found
+
+
+def cited_in_history(terms: set[str]) -> set[str] | None:
+    """Which of `terms` the history datasets record. `None` when there are none to read.
+
+    The graph holds a ticket node only for what the intent index mined, so a
+    summary citing a ticket real for the community it was written for reads as
+    absent from the estate. The datasets under `config.HISTORY_DIR` are where that
+    ticket does exist, and separating the two is what stops a remap question being
+    reported as an authoring one.
+
+    What this costs, because these datasets hold every commit of every repository
+    and a load per term would read them once per term: one pass, line by line, so
+    no dataset is ever held in memory; one alternation shared by every outstanding
+    term, so a line costs the same whether one term is outstanding or fifty;
+    `json.loads` only on a line that contains one of them; and the pass returns as
+    soon as the last term is located. The worst case - nothing found anywhere - is
+    one read of the datasets, and it runs only when the graph check left terms
+    unexplained.
+
+    `None` rather than an empty set when there is nothing to read: absent from
+    history and never looked for are different findings, and only one of them makes
+    a term a candidate for invention.
+    """
+    datasets = sorted(config.HISTORY_DIR.glob("*/commits.ndjson"))
+    if not datasets:
+        return None
+    outstanding = {term: _history_token(term) for term in terms if term}
+    found: set[str] = set()
+    for dataset in datasets:
+        if not outstanding:
+            break
+        found |= _cited_in_dataset(dataset, outstanding)
+    return found
+
+
+def classify_absent(
+    absent: dict[str, set[str]],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]] | None:
+    """The terms the graph does not hold, split by where else they were found.
+
+    Returns `(cited by the history datasets, found in neither)`, keyed by
+    community as `absent` is, or `None` when there are no datasets to read - the
+    split must not be claimed over an artefact nothing looked at.
+
+    Precedence is the order the places are checked, and it is deliberate: the graph
+    first, in `absent_from_estate`, and the history datasets second. The first
+    place a term is found decides its class, so the classes cannot overlap, they
+    sum to the flagged total, and the second class is exactly "found in neither" -
+    the only set that can contain invention.
+    """
+    cited = cited_in_history({term for terms in absent.values() for term in terms})
+    if cited is None:
+        return None
+    in_history: dict[str, set[str]] = {}
+    nowhere: dict[str, set[str]] = {}
+    for cid, terms in absent.items():
+        if terms & cited:
+            in_history[cid] = terms & cited
+        if terms - cited:
+            nowhere[cid] = terms - cited
+    return in_history, nowhere
+
+
 def verify(sample: int | None = None, strict: bool = False, estate: bool = False) -> int:
     """Check authored summaries cite only what their digests contain.
 
@@ -1408,6 +1612,11 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
     corpus in files nothing had extracted. Treat its findings as the shortlist
     worth a human read. Checking the corpus itself is the only true gate and is
     not implemented here.
+
+    Those findings are then split by where the term was found: recorded in the
+    history datasets but not held by the graph, which is a remap question, or
+    absent from both, which is the only class that can contain invention. The two
+    counts sum to the flagged total in the output.
     """
     loaded = io.read_json(config.SUMMARIES_INPUT_PATH, default=[]) or []
     digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
@@ -1437,12 +1646,15 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
             speculative.append((cid, hedges))
 
     absent, matched_by_segment = absent_from_estate(unsupported) if estate else (None, 0)
+    # What the graph does not hold, split by where else the term was found. The
+    # flagging predicate is untouched: this classifies what is already flagged.
+    classified = classify_absent(absent) if absent else None
     if estate and matched_by_segment:
         print(
             f"  {matched_by_segment} cited terms matched a name segment rather than a "
             "whole identifier (scoped packages, Java packages, module addresses)"
         )
-    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent)
+    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent, classified)
     _report_provenance_split(checked, unsupported)
     # Under --estate, fail on what is genuinely unbacked rather than on what a
     # 12-node sample failed to mention. Without it, the old behaviour stands so
