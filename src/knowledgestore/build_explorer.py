@@ -31,8 +31,10 @@ import gzip
 import json
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Mapping
 from importlib import resources
+from pathlib import Path
 
 
 from . import config
@@ -46,6 +48,13 @@ from . import telemetry
 MINIFIED = re.compile(r"^[A-Za-z_$]{1,3}(\(\))?$")
 MAX_CONNECTIONS = 5
 MAX_TICKETS = 6
+# A `__NAME__` slot in the page template. The byte breakdown is keyed on these
+# rather than on a hand-kept list, so a slot added to the template without a block
+# to fill it is a refusal instead of a silently unattributed layer.
+PLACEHOLDER = re.compile(r"__[A-Z][A-Z_]*__")
+# How many blocks the pre-write warning names. Three points at a layer and fits on
+# a line; the whole breakdown is printed either way.
+WARN_TOP_BLOCKS = 3
 # A page row is a positional list; this is its ticket column. Named because
 # three places count the join through it, and a report that counted a different
 # column would be correct code answering a neighbouring question - the shape of
@@ -465,7 +474,134 @@ __APP_JS__
 """
 
 
-def page_measurements(graph: dict, entries: list, edges: list, size_bytes: int) -> dict[str, int]:
+def block_name(placeholder: str) -> str:
+    """`__TICKETINFO__` -> `ticketinfo`: the breakdown's key for a block.
+
+    Derived from the placeholder rather than kept in a second list, which could
+    disagree with the template and would then name one block while measuring
+    another.
+    """
+    return placeholder.strip("_").lower()
+
+
+def page_breakdown(template: str, blocks: Mapping[str, str]) -> dict[str, int]:
+    """The bytes each substituted block contributes, plus the template's own.
+
+    Bytes rather than characters, because the page is written as UTF-8 and a
+    prose block holding one pound sign costs a byte more than its length.
+    Multiplied by occurrences, because `str.replace` fills every slot and
+    `__TITLE__` has two of them - a breakdown counting it once is short by the
+    title on every build.
+
+    The template's own line is what is left of it after the placeholder tokens
+    it no longer contains: the file on disk holds neither `__DATA__` nor the
+    template's copy of it, so charging the page for both would overstate the
+    total by the length of every slot.
+
+    Raises when the template and the blocks disagree in either direction. A slot
+    with no block is a placeholder left in the shipped page and a layer missing
+    from the breakdown; a block with no slot is a layer that no longer reaches
+    the page at all. Both are silent, and both stop the total meaning anything -
+    a breakdown that does not reconcile is worse than none.
+    """
+    found = Counter(PLACEHOLDER.findall(template))
+    unfilled = sorted(set(found) - set(blocks))
+    unplaced = sorted(set(blocks) - set(found))
+    if unfilled or unplaced:
+        raise ValueError(
+            "the explorer template and the blocks it is built from disagree: "
+            f"{unfilled} in the template with no block to fill them, {unplaced} with no "
+            "slot in the template. Every block is measured into the page's byte "
+            "breakdown, so an unattributed one would leave the total unable to "
+            "reconcile with the file - name the new block in `blocks`, or take its "
+            "slot out of the template."
+        )
+    sizes = {
+        block_name(placeholder): occurrences * len(blocks[placeholder].encode("utf-8"))
+        for placeholder, occurrences in found.items()
+    }
+    sizes["template"] = len(template.encode("utf-8")) - sum(
+        occurrences * len(placeholder.encode("utf-8")) for placeholder, occurrences in found.items()
+    )
+    return sizes
+
+
+def reconcile_breakdown(breakdown: Mapping[str, int], size_bytes: int) -> dict[str, int]:
+    """The breakdown with its residual against the file's actual size named.
+
+    The attribution is derived from the template and the blocks; the size is read
+    from the file system after the write. Two independent measurements of one
+    quantity, so their difference is a real number rather than a formality, and a
+    breakdown that reconciles by construction would prove nothing at all.
+
+    Normally zero. `write_text` translates line endings where the platform's
+    separator is not "\\n", which would give every page a residual, and a line
+    saying so is the honest form of that - the alternative is a difference
+    redistributed across the blocks, where nobody can see it.
+    """
+    return {**breakdown, "unattributed": size_bytes - sum(breakdown.values())}
+
+
+def ranked(breakdown: Mapping[str, int]) -> list[tuple[str, int]]:
+    """Blocks largest first, ties broken by name.
+
+    Two blocks of equal size must not swap places between builds: the report is
+    printed for a reader who compares it with the last one, and a listing that
+    reorders itself is one nobody can diff.
+    """
+    return sorted(breakdown.items(), key=lambda item: (-item[1], item[0]))
+
+
+def breakdown_report(breakdown: Mapping[str, int], size_bytes: int, path: Path) -> str:
+    """The attribution as an operator meets it, against the file's own size.
+
+    Printed rather than left in telemetry, because a store facing a page too large
+    to push needs to know which layer paid for it at the moment it reads the size,
+    not after finding and parsing a committed JSON file.
+    """
+    lines = [f"Page bytes by block, against {path} ({size_bytes:,} bytes on disk):"]
+    lines += [f"  {name:<14}{size:>14,}" for name, size in ranked(breakdown)]
+    return "\n".join(lines) + "\n"
+
+
+def size_warning(breakdown: Mapping[str, int], threshold: int) -> str:
+    """What to say before writing a page this large, or "" below the threshold.
+
+    Before the write, because the size's only use is deciding differently: after
+    the write it describes a file already in the working tree, and after the commit
+    it describes a push that will be refused.
+
+    Names the largest blocks, since the size alone is not actionable - a store told
+    only how large its page is has the problem it had before. It names no remedy
+    this library does not provide: two settings bound part of the page, the prose
+    layers have none, and what a store carries in those is the store's decision
+    rather than something this stage can trim.
+    """
+    total = sum(breakdown.values())
+    if total <= threshold:
+        return ""
+    largest = ", ".join(
+        f"{name} {size:,} bytes" for name, size in ranked(breakdown)[:WARN_TOP_BLOCKS]
+    )
+    return (
+        f"WARNING: the explorer page will be {total / 1_048_576:.1f} MB ({total:,} bytes), "
+        f"over the {threshold:,}-byte KSB_EXPLORER_WARN_BYTES threshold. GitHub warns above "
+        "50 MB per file and refuses a push carrying one above 100 MB, and this page is "
+        "committed, so the size is worth having before the file exists rather than after a "
+        "push is refused.\n"
+        f"Largest blocks: {largest}.\n"
+        "Nothing here drops a block: what the page carries is a store's decision. Two "
+        "settings bound part of it - KSB_MIN_ENTRY_DEGREE gates which code entries reach "
+        "`data` and `edges`, and KSB_TICKET_DETAIL_CHARS caps how much of each tracker "
+        "description reaches `ticketinfo`. The prose blocks have no such setting: "
+        "`summaries`, `topics` and `dives` are committed layers, so carrying less of them "
+        "in the page means holding less of them in the store.\n"
+    )
+
+
+def page_measurements(
+    graph: dict, entries: list, edges: list, size_bytes: int, breakdown: Mapping[str, int]
+) -> dict[str, int]:
     """What this page is, as counts a later build can compare itself against.
 
     `rows_with_tickets` and `rows_indexed` are the file-to-ticket join at the
@@ -478,6 +614,11 @@ def page_measurements(graph: dict, entries: list, edges: list, size_bytes: int) 
     Counted through `TICKETS_COLUMN` - the same column the join report counts -
     because a second expression for the same quantity is how two numbers
     describing one thing start disagreeing.
+
+    `page_bytes` keeps its meaning - the size of the file on disk - and the
+    per-block metrics account for it. One number can say the page grew and not
+    which layer did it, which leaves a store with the growth and no lever but
+    guessing; these are what let the next build name the block that moved.
     """
     return {
         "explorer.graph_nodes": len(graph.get("nodes", [])),
@@ -487,6 +628,7 @@ def page_measurements(graph: dict, entries: list, edges: list, size_bytes: int) 
         # the printed line above reports edges, not endpoints.
         "explorer.edges": len(edges) // 2,
         "explorer.page_bytes": size_bytes,
+        **{f"explorer.bytes_{name}": size for name, size in sorted(breakdown.items())},
     }
 
 
@@ -548,22 +690,31 @@ def main() -> int:
     synced = latest_synced(recorded)
     if synced:
         sub += f" &middot; sources synced to {synced}"
-    html = (
-        TEMPLATE.replace("__TITLE__", config.EXPLORER_TITLE)
-        .replace("__SUB__", sub)
-        .replace("__DATA__", json.dumps(entries, ensure_ascii=False).replace("</", "<\\/"))
-        .replace("__EDGES__", json.dumps(edges))
-        .replace("__TITLES__", json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"))
-        .replace("__SUMMARIES__", json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"))
-        .replace("__SYNONYMS__", json.dumps(synonyms, ensure_ascii=False).replace("</", "<\\/"))
-        .replace(
-            "__TICKETINFO__", json.dumps(ticket_info, ensure_ascii=False).replace("</", "<\\/")
-        )
-        .replace("__CONFIG__", json.dumps(page_config, ensure_ascii=False))
-        .replace("__TOPICS__", json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"))
-        .replace("__DIVES__", json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"))
-        .replace("__APP_JS__", app_js)
-    )
+    # One mapping rather than a chain of `.replace` calls, so each block's bytes can
+    # be counted before any of them is substituted. Insertion order is the order the
+    # chain used, and the substitution below keeps it: a block whose own text
+    # contained another block's placeholder would otherwise be filled differently.
+    blocks = {
+        "__TITLE__": config.EXPLORER_TITLE,
+        "__SUB__": sub,
+        "__DATA__": json.dumps(entries, ensure_ascii=False).replace("</", "<\\/"),
+        "__EDGES__": json.dumps(edges),
+        "__TITLES__": json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"),
+        "__SUMMARIES__": json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"),
+        "__SYNONYMS__": json.dumps(synonyms, ensure_ascii=False).replace("</", "<\\/"),
+        "__TICKETINFO__": json.dumps(ticket_info, ensure_ascii=False).replace("</", "<\\/"),
+        "__CONFIG__": json.dumps(page_config, ensure_ascii=False),
+        "__TOPICS__": json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"),
+        "__DIVES__": json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"),
+        "__APP_JS__": app_js,
+    }
+    breakdown = page_breakdown(TEMPLATE, blocks)
+    warning = size_warning(breakdown, config.EXPLORER_WARN_BYTES)
+    if warning:
+        print(warning, end="", file=sys.stderr)
+    html = TEMPLATE
+    for placeholder, block in blocks.items():
+        html = html.replace(placeholder, block)
     # Sonar S2083 misfires here: config.EXPLORER_PATH is a module constant derived from
     # configuration, not untrusted input; this is offline build tooling.
     config.EXPLORER_PATH.write_text(html, encoding="utf-8")  # NOSONAR(S2083)
@@ -586,11 +737,13 @@ def main() -> int:
     # embeds moves the size by kilobytes, which one decimal place of a megabyte
     # cannot show, and the growth is what a store's clone cost is measured in.
     size_bytes = config.EXPLORER_PATH.stat().st_size
+    breakdown = reconcile_breakdown(breakdown, size_bytes)
     print(
         f"{len(entries):,} entries, {len(edges) // 2:,} edges -> {config.EXPLORER_PATH} "
         f"({size_bytes / 1_048_576:.1f} MB, {size_bytes:,} bytes)"
     )
-    telemetry.record(page_measurements(graph, entries, edges, size_bytes))
+    print(breakdown_report(breakdown, size_bytes, config.EXPLORER_PATH), end="")
+    telemetry.record(page_measurements(graph, entries, edges, size_bytes, breakdown))
     return 0
 
 

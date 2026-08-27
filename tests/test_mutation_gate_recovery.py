@@ -332,6 +332,70 @@ class MutationGateRecoveryTest(unittest.TestCase):
             checked, 0, "no entry targets the gate's own file, so this check saw nothing"
         )
 
+    def test_an_ambiguous_find_is_refused_rather_than_applied_to_the_first_site(self):
+        """Catches an entry whose `find` matches its module twice. `apply` replaces
+        one occurrence, so an ambiguous entry mutates whichever site comes first: the
+        gate then reports `caught` about a line the entry does not describe, and a
+        run cannot say so - a pass and a fail are all it has. Checked here, on the
+        gate's own `apply`, rather than by walking the table from the suite: a suite
+        test comparing every `find` against its file fails while any mutation is
+        applied, which is every moment of a gate run, and would report each one as
+        caught whatever else the suite did.
+
+        The refusal has to leave the file alone. A gate that half-applies an entry it
+        is rejecting is the defect this module exists for.
+        """
+        root = self._workspace()
+        self._point_gate_at(root)
+        target = root / "source" / "target.py"
+        target.write_bytes(ORIGINAL + b"VALUE = 'ORIGINAL'\n")
+        ambiguous = gate.Mutation(
+            "twice over", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+        )
+
+        with self.assertRaises(SystemExit) as raised:
+            gate.apply(ambiguous)
+
+        self.assertIn("ambiguous", str(raised.exception))
+        self.assertIn("2 times", str(raised.exception))
+        self.assertEqual(target.read_bytes(), ORIGINAL + b"VALUE = 'ORIGINAL'\n")
+        self.assertFalse(gate.RECOVERY_PATH.is_file())
+
+    def test_a_find_naming_one_site_still_applies(self):
+        """The sensitivity control for the refusal above: a gate that refused every
+        entry would pass that test and test nothing at all."""
+        root = self._workspace()
+        self._point_gate_at(root)
+        unique = gate.Mutation(
+            "once only", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+        )
+
+        original = gate.apply(unique)
+
+        self.assertEqual(original, ORIGINAL)
+        self.assertEqual((root / "source" / "target.py").read_bytes(), MUTATED)
+        gate.restore(unique.module, original)
+
+    def test_every_table_entry_names_one_site_in_its_target(self):
+        """Runs the gate's own precondition over the shipped table, so an entry that
+        has become ambiguous is a failure now rather than a misattributed `caught` in
+        the next ten-minute gate run. Reads the tree, so it is skipped while a
+        mutation is applied - the count it depends on is only meaningful in an
+        unmutated tree, and a gate run mutates one file at a time."""
+        if gate.RECOVERY_PATH.is_file():
+            self.skipTest("a mutation is applied: its target does not hold its own `find`")
+        for mutation in gate.MUTATIONS:
+            with self.subTest(mutation=mutation.name):
+                target = gate.target_of(mutation.module)
+                occurrences = target.read_text(encoding="utf-8").count(mutation.find)
+                self.assertEqual(
+                    occurrences,
+                    1,
+                    f"{mutation.find!r} appears {occurrences} times in {mutation.module}: "
+                    "none means the entry no longer matches the file, more than one means "
+                    "the mutation applied is not the one the entry describes",
+                )
+
     def _point_gate_at(self, root: Path) -> None:
         self.addCleanup(setattr, gate, "SRC", gate.SRC)
         self.addCleanup(setattr, gate, "RECOVERY_PATH", gate.RECOVERY_PATH)
