@@ -30,7 +30,7 @@ jobs:
       - name: Lint Python (ruff)
         run: |
           pip install --only-binary :all: ruff==0.16.0
-          ruff check src tests
+          ruff check src tests scripts
 
       - name: Install the package
         run: pip install -e .

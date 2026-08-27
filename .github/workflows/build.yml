@@ -68,6 +68,17 @@ jobs:
         with:
           fetch-depth: 0 # hatch-vcs derives the version from tags
 
+      # Before anything is built or uploaded, and only on a release: the plugin
+      # manifest's version and the build skill's library floor are written by hand
+      # and derived from nothing, so a release can publish numbers that disagree
+      # with its own tag. The comparison lives here rather than in the unit suite
+      # because its input is the tag: as a test it made the same `main` commit pass
+      # before a release and fail after it. The tag already exists when this runs,
+      # so it prevents the publish, not the tag.
+      - name: Check the plugin manifest and skill floor against the tag
+        if: github.event_name == 'release'
+        run: python3 scripts/check_release_versions.py
+
       - name: Install uv
         uses: astral-sh/setup-uv@v10.0.1
         with:

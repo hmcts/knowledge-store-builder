@@ -59,8 +59,8 @@ Install the development tools and run the checks from the repository root:
 pip install -e '.[dev]'
 python3 -m unittest discover -s tests -v
 
-ruff check src tests
-ruff format --check src tests
+ruff check src tests scripts
+ruff format --check src tests scripts
 pyright
 
 tests/explorer/check-js.sh          # eslint + tsc --checkJs, the versions CI pins

@@ -1656,16 +1656,18 @@ MUTATIONS = (
         "what makes the next disagreement diagnosable",
     ),
     Mutation(
-        "the build skill's library floor is compared in the direction that cannot fire",
-        "tests/test_documented_stages.py",
-        "    if triple(declared) < triple(tag):",
-        "    if triple(declared) > triple(tag):",
-        "this restores the comparison that shipped. It read the declared minimum against "
-        "the INSTALLED version, and `tests.yml` never runs on a tag, so that version is "
-        "always a devN derived from the previous release - the check could not fail for a "
-        "floor that was behind and failed for one that was ahead. The build skill sat at "
-        "0.11.6 while documenting ten stages that release does not have, green throughout: "
-        "a comparison pointed at the quantity that cannot be wrong",
+        "the release check compares the version in the direction that cannot fire",
+        "scripts/check_release_versions.py",
+        "    if found < wanted:",
+        "    if found > wanted:",
+        "this restores the comparison that shipped, at the site it moved to. It read the "
+        "declared minimum against the INSTALLED version, and `tests.yml` never runs on a "
+        "tag, so that version is always a devN derived from the previous release - the "
+        "check could not fail for a floor that was behind and failed for one that was "
+        "ahead. The build skill sat at 0.11.6 while documenting ten stages that release "
+        "does not have, green throughout: a comparison pointed at the quantity that "
+        "cannot be wrong. The comparison against a tag now runs at release time, where "
+        "the same inversion would let a stale number publish",
     ),
     Mutation(
         "the suite subprocess caches bytecode again",

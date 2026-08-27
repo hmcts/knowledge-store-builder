@@ -82,7 +82,7 @@ max-complexity = 15
 pythonpath = ["src"]
 
 [tool.pyright]
-include = ["src"]
+include = ["src", "scripts"]
 # Stage modules read module-level path constants that tests and configure()
 # rebind, so inferred types are deliberately loose in places.
 typeCheckingMode = "basic"
