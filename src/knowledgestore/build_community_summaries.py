@@ -1144,6 +1144,36 @@ def _sample_ids(ids: list[str], sample: int | None) -> list[str]:
     return [ids[int(i * step)] for i in range(sample)]
 
 
+# What the dashed rule is, printed where an author meets a dashed finding. The
+# shape - three or more segments and a lowercase initial - was stated nowhere an
+# author could read it, so authors rewrote correct English defensively, most of it
+# two-segment compounds the rule never looks at (#248). The last sentence is the
+# operative half: the residual false positives are irreducible, because an
+# estate's identifiers are built from the same ordinary English words its prose
+# is, so no segment count and no dictionary separates them. Rephrasing is the
+# author's move; distrusting the check is not.
+_DASHED_RULE = (
+    "  Dashed terms: a term is checked as an identifier only if it has three or more "
+    "segments and a lowercase initial, so same-named and JDBC-backed are never flagged, "
+    "and a compound joined by a preposition or conjunction (end-to-end, point-in-time) is "
+    "exempt as well. A three-segment lowercase compound is flagged whether it is an "
+    "identifier or ordinary English, because an estate's identifiers are built from "
+    "ordinary English words. If a flagged term is English, rephrase it; do not assume the "
+    "check is wrong."
+)
+
+
+def _report_dashed_rule(flagged: set[str]) -> None:
+    """State the dashed rule when a dashed term is among the findings.
+
+    Conditional rather than always printed: a paragraph about dashed terms under
+    findings that hold none is noise inside the block the findings are in, and
+    noise in this report is what got its predecessor ignored.
+    """
+    if any(_DASHED.fullmatch(term) for term in flagged):
+        print(_DASHED_RULE)
+
+
 def _report_verify_totals(
     unsupported: list[tuple[str, set[str]]],
     speculative: list[tuple[str, list[str]]],
@@ -1158,6 +1188,7 @@ def _report_verify_totals(
         f"  {len(unsupported)} citing beyond their digest, {len(speculative)} speculative, "
         f"{len(orphaned)} without a digest."
     )
+    _report_dashed_rule({term for _, terms in unsupported for term in terms})
     if absent is None:
         print(
             "  A term absent from a 12-node digest is usually real content the digest did "

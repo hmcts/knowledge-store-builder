@@ -1056,6 +1056,18 @@ MUTATIONS = (
         "a label that claimed 98% more than it measured, so the gate got ignored",
     ),
     Mutation(
+        "the dashed rule no longer printed with its findings",
+        "build_community_summaries.py",
+        "    _report_dashed_rule({term for _, terms in unsupported for term in terms})",
+        "    pass",
+        "#248: a dashed token is checked only at three or more segments and a lowercase "
+        "initial, and nothing an author could read said so - so authors on a real store "
+        "rewrote correct English defensively, most of it compounds the rule never looks "
+        "at. Every structural and lexical narrowing was measured and rejected, which "
+        "leaves the printed statement as the whole fix: unreached, the report is back to "
+        "naming terms without saying what was checked",
+    ),
+    Mutation(
         "estate pass never narrows anything",
         "build_community_summaries.py",
         "            if normalised in estate:\n                continue",
