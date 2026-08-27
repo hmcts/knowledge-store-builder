@@ -357,6 +357,13 @@ MIN_ENTRY_DEGREE = _env_int("KSB_MIN_ENTRY_DEGREE", 3)
 # Name yours in KSB_E2E_REPOS (comma-separated); by default no repository is
 # treated this way.
 E2E_REPOS = _env_set("KSB_E2E_REPOS", set())
+# The page size above which the explorer stage says so before writing the file.
+# GitHub warns above 50 MB per file and rejects a push carrying one above 100 MB,
+# and the page is committed, so a store that learns its size after the commit has
+# an artefact it cannot ship and a rebuild it cannot repeat cheaply. Deliberately
+# under GitHub's own warning: the point is room to decide, not a second copy of
+# the same alarm. Raise it where a store has settled that its page is this large.
+EXPLORER_WARN_BYTES = _env_int("KSB_EXPLORER_WARN_BYTES", 40 * 1_048_576)
 
 # --- deployment evidence (the `deployments` stage) ------------------------
 # Off until an estate names the repository that holds its deployment config,

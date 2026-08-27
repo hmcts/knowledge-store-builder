@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import io
+import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import build_explorer as explorer  # noqa: E402
+from knowledgestore import io as store_io  # noqa: E402
+from knowledgestore import telemetry  # noqa: E402
 
 
 def node(
@@ -636,3 +642,286 @@ class TrackerEvidenceTest(SettingsIsolated):
             mined={}, tracker={"GPE-7": {"summary": "Welsh translation missing on the plea page"}}
         )
         self.assertEqual(merged["GPE-7"]["t"], "Welsh translation missing on the plea page")
+
+
+class PageByteAttributionTest(SettingsIsolated):
+    """The page's bytes, attributed to the blocks that carry them (#245).
+
+    A store facing a page too large to push had one number for it -
+    `explorer.page_bytes` - and no way to say which layer paid for it, so every
+    remedy was a guess. The standard these tests hold the attribution to is the
+    only one that makes it usable: it reconciles against the file on disk rather
+    than against the sum of what was measured, and it goes stale loudly rather
+    than quietly.
+    """
+
+    # 600 KB of prose in one block and 300 KB in another, so which block dominates
+    # this fixture is arithmetic rather than a guess. The margin over the inlined
+    # application is deliberately wide: app.js grows, and an ordering that depended
+    # on its current size would start failing for a reason unrelated to attribution.
+    # The pound sign is deliberate too - it costs two bytes and one character, so a
+    # breakdown measuring characters cannot reconcile with the file.
+    SUMMARIES = {"1": {"summary": "cost per case in £: " + "a" * 600_000}}
+    TOPICS = {"payments": {"brief": "b" * 300_000}}
+
+    # A breakdown line: two spaces, the block's name, its byte count. Anchored at
+    # both ends so telemetry's own indented lines cannot be read as blocks.
+    LINE = re.compile(r"^ {2}(?P<name>[a-z_]+) +(?P<bytes>[\d,]+)$")
+
+    # The nine JSON blocks the page delimits itself, as `<script id=...>` to
+    # breakdown name. Written out rather than derived, so this list disagreeing
+    # with the code is a failure rather than an agreement with itself.
+    EMBEDDED = (
+        ("data", "data"),
+        ("edges", "edges"),
+        ("titles", "titles"),
+        ("summaries", "summaries"),
+        ("synonyms", "synonyms"),
+        ("tickets", "ticketinfo"),
+        ("config", "config"),
+        ("topics", "topics"),
+        ("dives", "dives"),
+    )
+
+    def _store(self, root: Path) -> None:
+        """A real store root: a six-node clique whose degrees clear the entry gate,
+        plus two prose layers with content in them."""
+        config.configure(root=root)
+        nodes = [
+            node(f"n{i}", f"ServiceComponent{i}", source_file=f"src/f{i}.ts") for i in range(6)
+        ]
+        links = [
+            {"source": f"n{i}", "target": f"n{j}"} for i in range(6) for j in range(6) if i != j
+        ]
+        store_io.write_json(config.GRAPH_PATH, {"nodes": nodes, "links": links})
+        store_io.write_json(config.LABELS_PATH, {})
+        store_io.write_json(config.SUMMARIES_PATH, self.SUMMARIES)
+        store_io.write_json(config.TOPICS_BRIEFS_PATH, self.TOPICS)
+
+    def _build(self) -> tuple[str, str]:
+        """Build the real page through the real stage; return (stdout, stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(explorer.main(), 0)
+        return out.getvalue(), err.getvalue()
+
+    def _reported(self, stdout: str) -> dict[str, int]:
+        """The breakdown as the operator is shown it, parsed back to numbers."""
+        matched = (self.LINE.match(line) for line in stdout.splitlines())
+        return {m.group("name"): int(m.group("bytes").replace(",", "")) for m in matched if m}
+
+    def test_the_breakdown_reconciles_with_the_page_on_disk(self):
+        """Breaks if a block's bytes are counted as characters, if a placeholder
+        substituted twice is counted once, or if the template's own overhead keeps
+        the placeholder tokens it replaced. Each leaves the attribution disagreeing
+        with the file's size, which is the one figure it can be checked against and
+        the one it cannot produce itself.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            stdout, _ = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+            page = config.EXPLORER_PATH.read_bytes()
+
+        reported = self._reported(stdout)
+        self.assertEqual(len(page), size)
+        self.assertEqual(sum(reported.values()), size)
+        self.assertEqual(reported["unattributed"], 0)
+        self.assertIn(f"{size:,} bytes", stdout)
+
+    def test_every_reported_block_is_the_size_of_that_block_in_the_page(self):
+        """Breaks if a block's byte count measures something other than the text
+        substituted into the page - the way a breakdown starts describing a
+        neighbouring quantity while still adding up. Re-derived from the built
+        page's own script delimiters, not from the code that reported it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            stdout, _ = self._build()
+            page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+
+        reported = self._reported(stdout)
+        for tag, name in self.EMBEDDED:
+            with self.subTest(block=name):
+                opening = f'<script id="{tag}" type="application/json">'
+                embedded = page.split(opening)[1].split("</script>")[0]
+                self.assertEqual(reported[name], len(embedded.encode("utf-8")))
+
+    def test_every_substituted_block_appears_in_the_breakdown(self):
+        """Breaks if a block stops being attributed. The names are written out by
+        hand: a set derived from the same dict the page is built from would agree
+        with itself whatever that dict had lost.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            stdout, _ = self._build()
+
+        self.assertEqual(
+            set(self._reported(stdout)),
+            {
+                "title",
+                "sub",
+                "data",
+                "edges",
+                "titles",
+                "summaries",
+                "synonyms",
+                "ticketinfo",
+                "config",
+                "topics",
+                "dives",
+                "app_js",
+                "template",
+                "unattributed",
+            },
+        )
+
+    def test_a_new_template_block_is_refused_rather_than_left_unattributed(self):
+        """Breaks if a placeholder added to the template can be left out of the
+        breakdown - the drift that makes an attribution stop adding up months after
+        it was written, at the moment somebody needs it. The build has to stop: a
+        breakdown silently missing a block is worse than no breakdown.
+        """
+        self.addCleanup(setattr, explorer, "TEMPLATE", explorer.TEMPLATE)
+        explorer.TEMPLATE = explorer.TEMPLATE.replace(
+            '<div id="out"></div>', '<div id="out">__NEWLAYER__</div>'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(ValueError) as raised:
+                    explorer.main()
+
+        self.assertIn("__NEWLAYER__", str(raised.exception))
+
+    def test_a_block_whose_slot_left_the_template_is_refused(self):
+        """Breaks if a block that no longer reaches the page is reported as
+        contributing nothing instead of stopping the build. The page loses a whole
+        layer, the breakdown still reconciles, and both are silent.
+        """
+        self.addCleanup(setattr, explorer, "TEMPLATE", explorer.TEMPLATE)
+        explorer.TEMPLATE = explorer.TEMPLATE.replace(
+            '<script id="dives" type="application/json">__DIVES__</script>\n', ""
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(ValueError) as raised:
+                    explorer.main()
+
+        self.assertIn("__DIVES__", str(raised.exception))
+
+    def test_a_residual_between_the_attribution_and_the_file_is_named(self):
+        """Breaks if the residual is assumed to be zero rather than derived from the
+        file's size: a breakdown that reconciles by construction proves nothing, and
+        a platform whose line separator is not `\\n` would give every page a real
+        one. Hand-built numbers: 30 + 12 attributed against 50 written leaves 8.
+        """
+        self.assertEqual(
+            explorer.reconcile_breakdown({"data": 30, "template": 12}, 50),
+            {"data": 30, "template": 12, "unattributed": 8},
+        )
+
+    def test_the_warning_names_the_largest_blocks_above_the_threshold(self):
+        """Breaks if the warning is computed and never shown, or names the page's
+        size without saying which blocks carry it - a store told only how large its
+        page is has exactly the problem it had before. `summaries` holds 600 KB here
+        and `topics` 300 KB, an order of magnitude clear of every other block, so
+        the order of the three names is arithmetic.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_WARN_BYTES=100_000)
+            stdout, stderr = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+
+        reported = self._reported(stdout)
+        self.assertIn("WARNING", stderr)
+        self.assertIn(f"{size:,} bytes", stderr)
+        self.assertIn("100,000", stderr)
+        largest = re.findall(r"([a-z_]+) ([\d,]+) bytes", stderr.split("Largest blocks:")[1])
+        self.assertEqual([name for name, _ in largest], ["summaries", "topics", "app_js"])
+        for name, quoted in largest:
+            self.assertEqual(int(quoted.replace(",", "")), reported[name])
+
+    def test_the_warning_arrives_before_the_page_is_written(self):
+        """Breaks if the size is reported only after the write. The number's whole
+        use is deciding differently, and after the write it is a fact about a file
+        already in the working tree. Forced here by a write that cannot succeed:
+        the warning has to have been printed anyway.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_WARN_BYTES=100_000)
+            # A directory, so write_text raises where the write happens.
+            config.configure(EXPLORER_PATH=config.EXPLORER_PATH.parent)
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                with self.assertRaises(OSError):
+                    explorer.main()
+
+        self.assertIn("WARNING", err.getvalue())
+
+    def test_a_page_below_the_threshold_is_not_warned_about(self):
+        """The sensitivity control. Breaks if the warning fires on any page at all,
+        which makes it noise an operator learns to scroll past. This fixture's page
+        is around a megabyte against a shipped threshold of tens of them, and the
+        assertion below states that rather than assuming it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            _, stderr = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+
+        self.assertLess(size, config.EXPLORER_WARN_BYTES)
+        self.assertNotIn("WARNING", stderr)
+
+    def test_the_threshold_comes_from_the_environment(self):
+        """Breaks if the threshold is written at the call site: a store whose page is
+        legitimately large could not move the bar, and one wanting earlier notice
+        could not ask for it. The default is checked too - an override that happened
+        to equal the default would prove nothing.
+        """
+        self.assertEqual(config.EXPLORER_WARN_BYTES, 40 * 1_048_576)
+        with mock.patch.dict(os.environ, {"KSB_EXPLORER_WARN_BYTES": "100000"}):
+            importlib.reload(config)
+        try:
+            self.assertEqual(config.EXPLORER_WARN_BYTES, 100_000)
+            with tempfile.TemporaryDirectory() as tmp:
+                self._store(Path(tmp))
+                _, stderr = self._build()
+            self.assertIn("WARNING", stderr)
+        finally:
+            importlib.reload(config)
+
+    def test_telemetry_records_the_breakdown_beside_the_page_size(self):
+        """Breaks if the breakdown is printed and not recorded, so no later build can
+        say which block grew - which is the whole reason a number is recorded here.
+        Pins `explorer.page_bytes` to the file's size on disk at the same time: its
+        meaning is unchanged, and the new metrics account for it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            stdout, _ = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+            recorded = telemetry.read()
+
+        self.assertEqual(recorded["explorer.page_bytes"], size)
+        prefix = "explorer.bytes_"
+        # Named, because comparing two empty mappings is how this test would pass
+        # while nothing at all was recorded.
+        self.assertIn(f"{prefix}summaries", recorded)
+        self.assertEqual(
+            {
+                metric[len(prefix) :]: value
+                for metric, value in recorded.items()
+                if metric.startswith(prefix)
+            },
+            self._reported(stdout),
+        )
