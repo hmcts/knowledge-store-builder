@@ -4,6 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Tags too, and this is load-bearing rather than tidy. Two gates compare a
+    # hand-maintained number against the most recent reachable release tag - the
+    # plugin manifest's version and the build skill's declared library floor. A
+    # tag is the only moment those can newly become wrong, and it was the one
+    # moment nothing ran: `pull_request` and `push: branches` do not fire for a
+    # tag, so a release that broke them surfaced on the next unrelated pull
+    # request and was attributed to it. v0.15.1 did exactly that.
+    tags: ["v[0-9]*"]
 
 jobs:
   tests:
