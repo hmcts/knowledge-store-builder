@@ -343,6 +343,45 @@ MUTATIONS = (
         "module are the same shape",
     ),
     Mutation(
+        "near-duplicate report unwired",
+        "status.py",
+        "    _report_duplicates(arguments.duplicates)",
+        "    pass",
+        "#246: two repositories on one estate were near-copies of two others and no "
+        "count the pipeline reported made it visible; a report that never reaches the "
+        "CLI is the same silence with more code, and this is the most repeated escape "
+        "in this repository",
+    ),
+    Mutation(
+        "near-duplicate ranking loses its name tiebreak",
+        "duplicate_repositories.py",
+        "        best.sort(key=lambda o: (-o.fraction, o.left, o.right))",
+        "        best.sort(key=lambda o: -o.fraction)",
+        "the sort is stable, so without the tiebreak two equally overlapping pairs "
+        "print in whatever order the set sizes happened to evaluate them - two runs "
+        "on one store then differ, which hash-ordered iteration has already done here "
+        "once and which is invisible until somebody diffs two builds",
+    ),
+    Mutation(
+        "near-duplicate pruning stops being an exact bound",
+        "duplicate_repositories.py",
+        "        (-(min(sizes[a], sizes[b]) / max(sizes[a], sizes[b])), a, b)",
+        "        (-((min(sizes[a], sizes[b]) / max(sizes[a], sizes[b])) ** 2), a, b)",
+        "the whole report rests on `|A n B| <= min(|A|, |B|)` being an upper bound: "
+        "anything that shrinks it stops the walk before a pair that would have "
+        "ranked, and the skipped near-copy reads as a clean estate - the exact "
+        "failure #246 was raised about",
+    ),
+    Mutation(
+        "near-duplicate report finds something on an estate with nothing",
+        "duplicate_repositories.py",
+        "    if not report.overlaps:\n        return []",
+        "    if False:\n        return []",
+        "the sensitivity control: a report that always prints a top ten is a report "
+        "nobody reads, and this library has already shipped a check whose clean "
+        "verdict was printed over nothing it had read",
+    ),
+    Mutation(
         "most-connected loses its edge-key fallback",
         "graph_files.py",
         "    if not found:",

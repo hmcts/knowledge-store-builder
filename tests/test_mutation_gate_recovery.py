@@ -332,6 +332,36 @@ class MutationGateRecoveryTest(unittest.TestCase):
             checked, 0, "no entry targets the gate's own file, so this check saw nothing"
         )
 
+    def test_every_other_entry_matches_its_target_exactly_once(self):
+        """Catches an entry whose `find` appears twice in the module it mutates.
+
+        `apply` replaces the first occurrence, so two occurrences mean the gate
+        mutates a site it was not aiming at: the behaviour under test keeps working,
+        the mutation survives, and the reason is nowhere on screen. Zero occurrences
+        `apply` already refuses over; more than one it cannot see. The neighbouring
+        check above covers the entries targeting the gate's own file, where the
+        second occurrence is the table itself.
+        """
+        own = TESTS / "mutation_gate.py"
+
+        checked = 0
+        for mutation in gate.MUTATIONS:
+            target = gate.target_of(mutation.module)
+            if target == own:
+                continue
+            checked += 1
+            with self.subTest(mutation=mutation.name):
+                found = target.read_text(encoding="utf-8").count(mutation.find)
+                self.assertEqual(
+                    found,
+                    1,
+                    f"{mutation.find!r} appears {found} times in {mutation.module}: "
+                    "two means the gate rewrites the wrong site and the mutation "
+                    "survives for a reason nothing prints",
+                )
+
+        self.assertGreater(checked, 0, "no entry targets a source module")
+
     def _point_gate_at(self, root: Path) -> None:
         self.addCleanup(setattr, gate, "SRC", gate.SRC)
         self.addCleanup(setattr, gate, "RECOVERY_PATH", gate.RECOVERY_PATH)
