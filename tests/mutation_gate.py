@@ -1299,12 +1299,84 @@ MUTATIONS = (
     Mutation(
         "the join cardinality measured and discarded",
         "build_explorer.py",
-        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes))",
-        "    page_measurements(graph, entries, edges, size_bytes)",
+        "    telemetry.record(page_measurements(graph, entries, edges, size_bytes, breakdown))",
+        "    page_measurements(graph, entries, edges, size_bytes, breakdown)",
         "#154 over #149: the join report refuses zero and prints the rate, and the "
         "half-dead case is neither of those. Without a record the rate reaches a terminal "
         "and is gone, which is how a join that should have been three times larger read "
         "as a working join on a sparse estate",
+    ),
+    # The page's byte attribution (#245). A store watched its explorer page grow by a
+    # large fraction while the graph's node count barely moved, with one number for
+    # the whole file and no way to name the layer that paid for it. Every entry below
+    # removes one line and leaves the breakdown still printing, which is the shape
+    # that makes a wrong attribution worse than none: it is read and acted on.
+    Mutation(
+        "page bytes counted as characters",
+        "build_explorer.py",
+        '        block_name(placeholder): occurrences * len(blocks[placeholder].encode("utf-8"))',
+        "        block_name(placeholder): occurrences * len(blocks[placeholder])",
+        "#245: the page is UTF-8 and its prose blocks carry non-ASCII, so a character "
+        "count is a plausible number that is not the file's size - the exact class of "
+        "wrong measurement this pipeline has shipped, correct code answering a "
+        "neighbouring question",
+    ),
+    Mutation(
+        "a slot filled twice charged once",
+        "build_explorer.py",
+        '        block_name(placeholder): occurrences * len(blocks[placeholder].encode("utf-8"))',
+        '        block_name(placeholder): len(blocks[placeholder].encode("utf-8"))',
+        "#245: `str.replace` fills every slot and `__TITLE__` has two, so a breakdown "
+        "counting each block once is short by the title on every build - and it still "
+        "adds up, because the residual line absorbs exactly what was missed",
+    ),
+    Mutation(
+        "the residual assumed rather than derived",
+        "build_explorer.py",
+        '    return {**breakdown, "unattributed": size_bytes - sum(breakdown.values())}',
+        '    return {**breakdown, "unattributed": 0}',
+        "#245 states it as the requirement: the breakdown must reconcile against the "
+        "file's size on disk and not against the sum of what was measured. Zeroing the "
+        "residual makes the total add up by construction, which is a breakdown that "
+        "cannot report its own failure",
+    ),
+    Mutation(
+        "a new page block left unattributed",
+        "build_explorer.py",
+        "    if unfilled or unplaced:",
+        "    if False:",
+        "#245: the attribution is written once and read years later, so the way it goes "
+        "wrong is a block added to the template that nobody counts. Refusing is the only "
+        "form that survives that - a residual line would carry the loss, and the reader "
+        "would take the named blocks for the whole page",
+    ),
+    Mutation(
+        "the page-size warning computed and never shown",
+        "build_explorer.py",
+        '    if warning:\n        print(warning, end="", file=sys.stderr)',
+        "    pass",
+        "#245, and the wiring escape this gate records repeatedly: the size only has a "
+        "use before the write. GitHub refuses a push carrying a file above 100 MB, and "
+        "the store that reported this was already past GitHub's own warning with the "
+        "page committed",
+    ),
+    Mutation(
+        "the breakdown computed and never printed",
+        "build_explorer.py",
+        '    print(breakdown_report(breakdown, size_bytes, config.EXPLORER_PATH), end="")',
+        "    pass",
+        "#245: telemetry is a committed JSON file, and the operator meeting a page too "
+        "large to push is reading a terminal. A number recorded where nobody looks is "
+        "the reporting half of the same gap the issue was opened about",
+    ),
+    Mutation(
+        "the breakdown never reaches the record",
+        "build_explorer.py",
+        '        **{f"explorer.bytes_{name}": size for name, size in sorted(breakdown.items())},',
+        "        **{},",
+        "#245 over #154: one build's breakdown says where the bytes are, and only the "
+        "predecessor says which block grew. The jump this was reported for happened "
+        "between two builds, which no single build can attribute at all",
     ),
     Mutation(
         "the indexed inventory measured and discarded",
@@ -1825,16 +1897,31 @@ def apply(mutation: Mutation) -> bytes:
     Bytes rather than text, and recorded on disk before the file is touched: a
     re-decoded restore is a re-derivation of the original rather than the
     original, and a process that is killed cannot restore anything at all.
+
+    One occurrence exactly. Absent is the obvious failure and was always
+    refused; two is the quiet one, because the replacement below takes the
+    first and the run then reports on a line the entry does not describe - a
+    `caught` that proves something about code nobody named. This gate cannot
+    report that about itself from a pass or a fail, so it is checked here.
     """
     path = target_of(mutation.module)
     original = path.read_bytes()
     source = original.decode("utf-8")
-    if mutation.find not in source:
+    occurrences = source.count(mutation.find)
+    if occurrences == 0:
         raise SystemExit(
             f"mutation '{mutation.name}' no longer applies: its target is absent from "
             f"{mutation.module}. Either the code moved - update the mutation - or the "
             "behaviour was removed, in which case decide deliberately rather than "
             "letting this gate quietly stop testing it."
+        )
+    if occurrences > 1:
+        raise SystemExit(
+            f"mutation '{mutation.name}' is ambiguous: its target appears {occurrences} "
+            f"times in {mutation.module}, and only the first would be replaced. Widen the "
+            "`find` until it names one site, or split the entry into one per site - a "
+            "mutation reported as caught while a different line carried the defect says "
+            "nothing about the behaviour the entry names."
         )
     RECOVERY_PATH.write_bytes(mutation.module.encode("utf-8") + b"\n" + original)
     path.write_bytes(source.replace(mutation.find, mutation.replace, 1).encode("utf-8"))
