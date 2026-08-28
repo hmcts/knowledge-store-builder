@@ -1046,6 +1046,35 @@ MUTATIONS = (
         "filename",
     ),
     Mutation(
+        "a pin the lock does not deliver is reported as resolved",
+        "check_install_docs.py",
+        "        if locked.get(name) != version",
+        "        if False",
+        "the defect this was written from: a pin moved to a version an index had not "
+        "published, so the lock could not be recompiled and kept the previous one. "
+        "`pip install --require-hashes` reads the LOCK, so the build used a version the "
+        "store's requirements input did not name - and three checks passed, none of them "
+        "having opened that input for correctness",
+    ),
+    Mutation(
+        "a pin the lock omits entirely reads as resolved",
+        "check_install_docs.py",
+        "        (name, version, locked.get(name))",
+        "        (name, version, version)",
+        "resolving a requirement not at all installs no such package, which is a "
+        "different failure from resolving it at another version and needs a different "
+        "fix; folding the two together sends an operator to recompile a lock that is "
+        "missing the entry rather than holding a stale one",
+    ),
+    Mutation(
+        "the resolution half stops reaching the exit code",
+        "check_install_docs.py",
+        "    resolution = _report_unresolved(config.REQUIREMENTS_PATH, lock)",
+        "    resolution = 0",
+        "a check that prints a disagreement and exits 0 is worse than one that does not "
+        "look: the text scrolls past in a green run and nothing chains on it",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
