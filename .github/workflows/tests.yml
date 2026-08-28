@@ -70,6 +70,14 @@ jobs:
       # breaking the product on purpose and requiring the suite to notice. Every
       # mutation in it is a defect that was actually written, reviewed and caught
       # late - one of them shipped in a release.
+      #
+      # Each entry names the test modules that observe it and only those are run,
+      # which took this step from about 26 minutes to 81 seconds measured locally
+      # over 183 entries. That makes each entry's
+      # mapping load-bearing and invisible from a passing run, so
+      # `mutation-mapping.yml` checks every one of them against the whole suite,
+      # weekly and on demand. Do not add entries without running
+      # `--derive-mapping` for them: a hand-typed observer prints `caught` too.
       - name: Mutation gate
         run: python3 tests/mutation_gate.py
 
