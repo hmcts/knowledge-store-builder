@@ -173,6 +173,25 @@ How that looks in this codebase:
   incidental coverage cannot self-report. A named mutation entry caught it. Both
   halves are needed, and a separate mutation run is not a substitute for the
   first: it only catches a vacuous test if somebody wrote a mutation for it.
+- **Self-verification bottoms out, and the fix is naming what verifies the
+  verifier.** A check cannot establish that its own sensitivity loop ran: `for x in
+  []` reads as a passing loop, and no assertion inside a function proves the
+  assertion was reached. Three instances here, each a check that could not fail: a
+  suite test walking the mutation table failed under *every* mutation, because a
+  mutated file no longer holds its own `find` - it would have reported all of them
+  caught; `apply()` replaced the first of an ambiguous `find`'s matches and so
+  reported `caught` about a line the entry did not describe; and an equivalence
+  harness compared 81 call sites while probing only public functions, with the
+  refactor under test sitting in `_`-prefixed helpers, so it printed IDENTICAL over
+  a change it could not see. Every one was caught from **outside** - a harness that
+  mutated the checker and required it to fail.
+
+  So write the cover down where the check is, and write it falsifiably: not "this
+  gate is sensitivity-checked", which becomes advice, but *this comparison is
+  covered by that mutation entry* - which a later reader can test and find untrue.
+  Adding a fourth self-referential check feels like coverage and is not: it has the
+  same blind spot as the three below it.
+
 - **A check's silence only licenses a claim about the artefact it read.** A
   zero-tolerance rule running where the violation cannot occur reads as
   compliance for something it never looked at: `validate_chunk` forbids
