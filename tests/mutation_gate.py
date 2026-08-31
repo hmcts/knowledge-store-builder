@@ -1289,6 +1289,32 @@ MUTATIONS = (
         ("test_check_install_docs",),
     ),
     Mutation(
+        "an empty pin parse reads as a clean comparison",
+        "check_install_docs.py",
+        "    if not pinned:",
+        "    if False:",
+        "#277, and the state that shipped: an empty result has two causes the code could "
+        "not tell apart - every pin resolved, or no pin ever parsed - and the second "
+        'printed "resolves every one of the 0 pin(s)" and exited 0, on the same path, in '
+        "the same words and with the same exit code as a real pass. The route in is not a "
+        "store that pins nothing on purpose but the parse quietly ceasing to match, which "
+        "this library has shipped before in a repository-list reader that was green "
+        "because every fixture used bare names",
+    ),
+    Mutation(
+        "an empty set of documented installs claims every one of them passes",
+        "check_install_docs.py",
+        "    if not installs:",
+        "    if False:",
+        "#277 one function along, and also the state that shipped: the affirmative line "
+        "was printed over an empty list. The ways that list empties are invisible from the "
+        "message - a documentation suffix the walk does not read, a SKIP_DIRS entry that "
+        "grew to cover where the docs live, the lock renamed, a requirement-flag spelling "
+        "the pattern does not match - and every one of them reads as a store whose "
+        "commands are all correct. This half cannot refuse, because a store need not "
+        "document installing from its lock at all, so naming what it read is the fix",
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
