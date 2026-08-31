@@ -9,6 +9,8 @@ exact command fails with "No matching distribution found". A comment saying
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,10 +153,6 @@ class InstallDocsGateTest(SettingsIsolated):
             self.assertEqual(gate.main(), 0, "another repository's docs are not this store's")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheLockMustResolveThePinTest(unittest.TestCase):
     """A lock that does not deliver what the requirements input pins.
 
@@ -246,3 +244,123 @@ class TheLockMustResolveThePinTest(unittest.TestCase):
         lock = self.root / "requirements.lock"
         lock.write_text("alpha==1.0 \\\n", encoding="utf-8")
         self.assertEqual(gate.unresolved_pins(self.root / "absent.txt", lock), [])
+
+
+class NothingToCompareTest(SettingsIsolated):
+    """0 pins compared is not 0 pins wrong (#277).
+
+    The break this catches: `_report_unresolved` printed "resolves every one of the
+    0 pin(s)" and returned 0 when `pinned_versions` matched nothing - on the same
+    path, in the same words and with the same exit code as a real pass, so no reader
+    and no chained command could tell the two apart. The route in is not a store that
+    deliberately pins nothing; it is the parse quietly ceasing to match a construct,
+    which this library has shipped before in a `repositories.txt` reader that was
+    green because every fixture used bare names.
+
+    Each test drives `main()`, because the composed message and the exit code an
+    operator meets are the artefacts that can be wrong.
+    """
+
+    PINNED = f"--extra-index-url {FEED}\n--only-binary :all:\nthing==1.0\n"
+    UNPINNED = f"--extra-index-url {FEED}\n--only-binary :all:\nthing>=1.0\n"
+
+    def store(self, tmp: str, requirements: str | None, lock: str, files: dict[str, str]) -> Path:
+        root = Path(tmp)
+        (root / "requirements.lock").write_text(lock, encoding="utf-8")
+        if requirements is not None:
+            (root / "requirements.txt").write_text(requirements, encoding="utf-8")
+        for name, text in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        config.configure(root=str(root))
+        return root
+
+    def drive(self) -> tuple[int, str]:
+        """The exit code and everything the operator is shown, both streams."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gate.main()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved(self):
+        """The defect. A requirements input carrying only a range states no `==` pin,
+        which is also exactly what a parse that has stopped matching looks like from
+        here - so the honest answer is not 0.
+
+        The lock names its index, so the documented-command half has nothing to say
+        and a non-zero exit can only have come from the resolution half.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, self.UNPINNED, LOCK_WITH_INDEX, {})
+            code, shown = self.drive()
+        self.assertEqual(code, 1)
+        self.assertIn("states 0 `==` pins", shown, "the refusal must name the count")
+        self.assertNotIn("resolves every one of the", shown)
+
+    def test_an_absent_input_is_refused_rather_than_read_as_agreement(self):
+        """The same emptiness from the other cause, and the likelier one: a store
+        renames its input, or the reference layout's name changes, and the check reads
+        a file that is not there. `unresolved_pins` returns [] for that by design, so
+        without the guard the stage reports a clean comparison of a file it never
+        opened."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, None, LOCK_WITH_INDEX, {})
+            code, shown = self.drive()
+        self.assertEqual(code, 1)
+        self.assertIn("no requirements.txt", shown, "the refusal must name the missing input")
+        self.assertNotIn("resolves every one of the", shown)
+
+    def test_an_input_whose_pins_all_resolve_still_passes_and_still_says_so(self):
+        """The sensitivity half, and the part that actually protects this: a fix that
+        refused every empty-looking comparison, or refused outright, would pass the
+        two tests above and be useless. This is the one that fails for it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, self.PINNED, LOCK_WITH_INDEX, {})
+            code, shown = self.drive()
+        self.assertEqual(code, 0)
+        self.assertIn("resolves every one of the 1 pin(s) requirements.txt states", shown)
+
+    def test_no_documented_install_is_not_reported_as_every_install_passing(self):
+        """The same shape one function along: "every documented install from it passes
+        --extra-index-url" was printed over an empty list. The ways that list empties
+        are all invisible from here - a documentation suffix the walk does not read, a
+        `SKIP_DIRS` entry that grew to cover where the docs live, a flag spelling the
+        pattern does not match - and every one of them reads as a store whose commands
+        are all correct.
+
+        Exit 0 is right, and is asserted: a store need not document installing from
+        its lock at all. The claim is what was wrong, so this pins the wording.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                self.PINNED,
+                LOCK_WITHOUT_INDEX,
+                {"README.md": "Install the library, then build the store.\n"},
+            )
+            code, shown = self.drive()
+        self.assertEqual(code, 0)
+        self.assertIn("no documented command installs from it", shown)
+        self.assertNotIn("every documented install", shown)
+
+    def test_a_documented_install_that_passes_the_flag_is_counted(self):
+        """The sensitivity half of the pair above: a message that always said it read
+        nothing would pass that test and describe no store at all."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                self.PINNED,
+                LOCK_WITHOUT_INDEX,
+                {
+                    "README.md": "```bash\npip install "
+                    f"--extra-index-url {FEED} -r requirements.lock\n```\n"
+                },
+            )
+            code, shown = self.drive()
+        self.assertEqual(code, 0)
+        self.assertIn("all 1 documented install(s) from it pass", shown)
+
+
+if __name__ == "__main__":
+    unittest.main()
