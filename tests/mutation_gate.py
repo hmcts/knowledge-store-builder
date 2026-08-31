@@ -192,7 +192,10 @@ MUTATIONS = (
         "archive could not be read by any of them and no call site said why. The "
         "replacement is the code that was there, so this is the shipped defect rather "
         "than an invented one",
-        ("test_config_and_io",),
+        (
+            "test_config_and_io.TheGraphLoaderHandlesGzip.test_a_gzipped_graph_is_read",
+            "test_config_and_io.TheGraphLoaderHandlesGzip.test_an_unreadable_graph_raises_rather_than_returning_part_of_one",
+        ),
     ),
     Mutation(
         "stale counterpart no longer named",
@@ -1694,7 +1697,10 @@ MUTATIONS = (
         "store that pins nothing on purpose but the parse quietly ceasing to match, which "
         "this library has shipped before in a repository-list reader that was green "
         "because every fixture used bare names",
-        ("test_check_install_docs",),
+        (
+            "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
+            "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
+        ),
     ),
     Mutation(
         "an empty set of documented installs claims every one of them passes",
@@ -1708,7 +1714,9 @@ MUTATIONS = (
         "the pattern does not match - and every one of them reads as a store whose "
         "commands are all correct. This half cannot refuse, because a store need not "
         "document installing from its lock at all, so naming what it read is the fix",
-        ("test_check_install_docs",),
+        (
+            "test_check_install_docs.NothingToCompareTest.test_no_documented_install_is_not_reported_as_every_install_passing",
+        ),
     ),
     Mutation(
         "graph-report check unwired",
@@ -2084,7 +2092,9 @@ MUTATIONS = (
         "and before `test_two_builds_are_identical` none did. The page is "
         "committed in consumer repositories, so the cost is every rebuild landing "
         "as a spurious diff with any real change buried in it",
-        ("test_two_builds_are_identical",),
+        (
+            "test_two_builds_are_identical.TwoBuildsAreByteIdentical.test_every_artefact_is_byte_identical",
+        ),
     ),
     Mutation(
         "retained failure double-counted",
@@ -2187,7 +2197,9 @@ MUTATIONS = (
         "pages. The observer has to supply the arrival order itself: the fixture does hold "
         "a tied pair that reaches the page, but comparing two builds only sees the swap "
         "when the two seeds happen to disagree, which is a coin toss rather than a gate",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.EntryConnectionsTest.test_equal_degree_neighbours_are_ordered_by_id_not_by_arrival",
+        ),
     ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for
