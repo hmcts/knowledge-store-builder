@@ -20,6 +20,11 @@ from knowledgestore import check_install_docs as gate  # noqa: E402
 FEED = "https://pkgs.example.com/feed/pypi/simple/"
 LOCK_WITHOUT_INDEX = "thing==1.0 \\\n    --hash=sha256:abc\n"
 LOCK_WITH_INDEX = f"--extra-index-url {FEED}\n--only-binary :all:\n\nthing==1.0\n"
+# Names its index, so the documented-command half has nothing to say, and resolves a
+# version the requirements input does not pin - which is the only thing left to fail.
+LOCK_WITH_INDEX_WRONG_VERSION = (
+    f"--extra-index-url {FEED}\n--only-binary :all:\n\nthing==2.0 \\\n    --hash=sha256:abc\n"
+)
 
 
 class InstallDocsGateTest(SettingsIsolated):
@@ -35,6 +40,26 @@ class InstallDocsGateTest(SettingsIsolated):
             path.write_text(text, encoding="utf-8")
         config.configure(root=str(root))
         return root
+
+    def test_a_lock_that_does_not_deliver_the_pin_fails_the_stage(self):
+        """The wiring, not the comparison: `main` must carry the disagreement out.
+
+        A check that prints a disagreement and returns 0 is worse than one that does
+        not look - the text scrolls past in a green run and nothing chains on it. The
+        comparison is tested directly elsewhere; this drives the stage, with the
+        documented-command half deliberately satisfied so a non-zero exit can only
+        have come from the resolution half.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, LOCK_WITH_INDEX_WRONG_VERSION, {})
+            self.assertEqual(gate.main(), 1)
+
+    def test_agreeing_files_leave_the_stage_passing(self):
+        """The control. A stage that failed on an agreeing pair would be switched
+        off, and its mutation result would prove nothing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, LOCK_WITH_INDEX, {})
+            self.assertEqual(gate.main(), 0)
 
     def test_a_documented_command_that_cannot_work_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,3 +153,96 @@ class InstallDocsGateTest(SettingsIsolated):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLockMustResolveThePinTest(unittest.TestCase):
+    """A lock that does not deliver what the requirements input pins.
+
+    `pip install --require-hashes -r <lock>` reads the lock, so when the two files
+    disagree a build installs the lock's version while the store's requirements
+    input says another. Nothing reported that: this check read the input only for
+    an index URL to put in a hint, and the environment check compares the
+    installed version against the lock, so three checks agreed about a file none
+    of them had opened for correctness.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def _files(self, requirements: str, lock: str) -> tuple[Path, Path]:
+        req = self.root / "requirements.txt"
+        lck = self.root / "requirements.lock"
+        req.write_text(requirements, encoding="utf-8")
+        lck.write_text(lock, encoding="utf-8")
+        return req, lck
+
+    def test_a_lock_delivering_another_version_is_reported(self) -> None:
+        """The defect: a pin moved to a version the index had not published.
+
+        The lock could not be recompiled, so it kept the previous version, and the
+        store then claimed a version no build used.
+        """
+        req, lock = self._files("alpha==1.2.3\n", "alpha==1.2.4 \\\n    --hash=sha256:aa\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [("alpha", "1.2.3", "1.2.4")])
+
+    def test_a_pin_the_lock_omits_entirely_is_distinguished(self) -> None:
+        """Resolving nothing installs no such package; resolving another installs
+        the wrong one. The two need different fixes, so `None` is reported rather
+        than folded into a version mismatch."""
+        req, lock = self._files("alpha==1.2.3\n", "beta==9.9.9 \\\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [("alpha", "1.2.3", None)])
+
+    def test_extras_and_markers_do_not_read_as_a_disagreement(self) -> None:
+        """`pkg[extra]==1.2.3 ; marker` asks for the same version as `pkg==1.2.3`.
+
+        A lock never carries the pin's extras syntax, so comparing the raw strings
+        would report every extras-bearing pin as unresolved and the check would be
+        abandoned as noise.
+        """
+        req, lock = self._files(
+            "alpha[deploy,semantic]==1.2.3 ; python_version < '3.14'\n", "alpha==1.2.3 \\\n"
+        )
+        self.assertEqual(gate.unresolved_pins(req, lock), [])
+
+    def test_names_are_compared_by_pep_503_normalisation(self) -> None:
+        """A lock writes the normalised name, an input often writes the human one.
+
+        Without normalisation `Al_pha.Beta` and `al-pha-beta` read as two packages
+        and every such pin reports as unresolved.
+        """
+        req, lock = self._files("Al_pha.Beta==1.0\n", "al-pha-beta==1.0 \\\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [])
+
+    def test_a_requirement_that_is_not_pinned_is_not_compared(self) -> None:
+        """`>=` states a range, and a lock resolving 2.0 satisfies `>=1.0`.
+
+        Reporting that as a disagreement would be inventing one, and would make
+        the check unusable for any store that does not pin everything exactly.
+        """
+        req, lock = self._files("alpha>=1.0\n", "alpha==2.0 \\\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [])
+
+    def test_a_commented_pin_is_not_read(self) -> None:
+        """A store records superseded pins as comments; reading them would report a
+        disagreement with a line that is deliberately inert."""
+        req, lock = self._files("# alpha==9.9.9\nalpha==1.2.3\n", "alpha==1.2.3 \\\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [])
+
+    def test_every_pin_is_checked_rather_than_one_named_package(self) -> None:
+        """A store pinning several things must have all of them checked.
+
+        Naming one package would leave the rest unguarded, and the library cannot
+        know what a store pins.
+        """
+        req, lock = self._files("alpha==1.0\nbeta==2.0\n", "alpha==1.0 \\\nbeta==2.1 \\\n")
+        self.assertEqual(gate.unresolved_pins(req, lock), [("beta", "2.0", "2.1")])
+
+    def test_an_absent_requirements_input_is_not_a_disagreement(self) -> None:
+        """A store may install without a requirements input. Reporting every locked
+        package as unresolved there would fail a store that is doing nothing
+        wrong."""
+        lock = self.root / "requirements.lock"
+        lock.write_text("alpha==1.0 \\\n", encoding="utf-8")
+        self.assertEqual(gate.unresolved_pins(self.root / "absent.txt", lock), [])
