@@ -1360,6 +1360,19 @@ MUTATIONS = (
         "builds from different processes",
     ),
     Mutation(
+        "the page's edge list falls back to set order",
+        "build_explorer.py",
+        "        for neighbour in sorted(adjacency.get(node_id, ())):",
+        "        for neighbour in adjacency.get(node_id, ()):",
+        "#276: the observer for the two-build diff, and the reason that check had "
+        "to exist. `adjacency` holds sets, so without the sort the edge block is "
+        "emitted in hash order and the page differs between two builds of an "
+        "unchanged store - measured: with this applied, one test of 1,451 fails, "
+        "and before `test_two_builds_are_identical` none did. The page is "
+        "committed in consumer repositories, so the cost is every rebuild landing "
+        "as a spurious diff with any real change buried in it",
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
