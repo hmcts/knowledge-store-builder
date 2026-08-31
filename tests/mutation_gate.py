@@ -102,7 +102,15 @@ class Mutation:
     find: str
     replace: str
     escaped_as: str
-    observers: tuple[str, ...]
+    # Defaulted, not required, though every shipped entry must name observers and
+    # `check_mapping` refuses one that does not. A required argument turns an entry
+    # written against the older five-field form - which is what every branch opened
+    # before this change still carries - into a TypeError at import, which takes
+    # five unrelated test modules down with it and says nothing about the cause.
+    # Defaulted, the same entry imports and fails one named check that says which
+    # entry is unmapped and which command fills it in. The refusal is the same
+    # strictness, delivered where it can be acted on.
+    observers: tuple[str, ...] = ()
 
 
 # Ordered by the escape they represent rather than by module, because the
@@ -131,6 +139,7 @@ MUTATIONS = (
         "archive could not be read by any of them and no call site said why. The "
         "replacement is the code that was there, so this is the shipped defect rather "
         "than an invented one",
+        ("test_config_and_io",),
     ),
     Mutation(
         "stale counterpart no longer named",
