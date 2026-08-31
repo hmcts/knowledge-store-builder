@@ -3057,6 +3057,41 @@ MUTATIONS = (
             "test_mutation_gate_shards.ShardsPartitionTheTableTest.test_the_shipped_table_reconciles",
         ),
     ),
+    Mutation(
+        "the mapping check fails toward skipping when it cannot tell",
+        "tests/mapping_trigger.py",
+        '    return Decision(True, f"{why}, so nothing could be compared and it runs rather than guess.")',
+        '    return Decision(False, f"{why}, so nothing could be compared and it is skipped.")',
+        "#285: the sharded check now runs only when something has landed that could have "
+        "invalidated a mapping, and that decision is asymmetric - a run that should have "
+        "skipped costs 28 runner-minutes and says so, while a skip that should have run is "
+        "indistinguishable from a pass: no leg runs, the summary is green, and a mapping "
+        "nobody checked keeps being reported as checked. Every uncertainty ends at this "
+        "line, and none of them happens on a good day: no previous verification, a failed "
+        "API call, a base a shallow clone does not hold",
+        (
+            "test_mapping_trigger.FailTowardRunningTest.test_an_event_nothing_knows_how_to_compare_runs_the_check",
+            "test_mapping_trigger.FailTowardRunningTest.test_nothing_to_compare_against_runs_the_check",
+            "test_mapping_trigger.TheDecisionIsAnnouncedTest.test_a_nightly_with_no_previous_verification_runs_anyway",
+            "test_mapping_trigger.TheDecisionIsAnnouncedTest.test_a_push_that_names_no_previous_commit_runs_anyway",
+        ),
+    ),
+    Mutation(
+        "the nightly predicate becomes an allow-list",
+        "tests/mapping_trigger.py",
+        "    return path not in CANNOT_BE_READ",
+        "    return False",
+        "#285: the nightly decides from a deny-list - everything can invalidate a mapping "
+        "unless it provably cannot - because an allow-list fails toward skipping: a kind of "
+        "file that did not exist when the list was written reads as harmless, silently and "
+        "forever. Inverted, this reports every night as nothing having landed, which is the "
+        "one output of this policy that cannot be told from working",
+        (
+            "test_mapping_trigger.WhatWarrantsARunTest.test_a_path_nobody_thought_about_is_read_as_one_that_matters",
+            "test_mapping_trigger.WhatWarrantsARunTest.test_the_nightly_runs_for_a_document_the_table_mutates",
+            "test_mapping_trigger.WhatWarrantsARunTest.test_the_nightly_runs_when_only_source_changed",
+        ),
+    ),
 )
 
 

@@ -21,6 +21,10 @@ purpose-built tree of two entries where which entries a shard *ran* is readable
 from what it printed. The broken slicers are the point of the module - a
 reconciliation nobody has watched refuse is a reconciliation nobody knows can.
 
+*When* those legs run is a separate question with its own asymmetry, and it lives
+in `test_mapping_trigger.py`: they are nightly and per-merge now, and only when
+something has landed that could have invalidated a mapping.
+
 The last class reads `tests.yml`, because the layer above is where the same defect
 becomes invisible again: the reconciliation checks that the slices the gate would
 take are a partition, and it cannot know how many legs the matrix actually ran.
@@ -396,30 +400,40 @@ class WorkflowShardsTest(unittest.TestCase):
         self.assertGreater(len(environment), 1, "the mapping job sets nothing up")
         self.assertEqual(environment, self.jobs["tests"]["steps"][: len(environment)])
 
-    def test_a_leg_that_did_not_pass_fails_the_summary_job(self):
-        """Catches the summary reporting one verdict that cannot be a bad one.
+    def test_the_summary_is_a_verdict_over_both_the_decision_and_the_legs(self):
+        """Catches the summary reporting one verdict that cannot be a bad one, and the
+        case the trigger policy added: a skipped `mapping` means two different things.
 
-        GitHub reports each leg separately, so the summary is what a reader and a
-        required check would read - and it is driven here rather than matched, with
-        the result the runner would hand it. The result reaches the script through
-        the environment, which is what makes that possible; interpolating it into the
-        script is also the injection shape the analysers read.
+        Skipped because the decision said nothing could have invalidated a mapping is
+        a pass. Skipped for any other reason - the decision job failed, or it said run
+        and no leg started - is the wiring failing silently, which is exactly the shape
+        a conditional 28-minute check invites. Both inputs reach the script through the
+        environment, which is what lets this drive the real script with the values the
+        runner would supply rather than matching its text.
         """
-        summary = self.jobs["mapping-summary"]
-        step = summary["steps"][0]
+        step = self.jobs["mapping-summary"]["steps"][0]
+        self.assertIn("needs.mapping-decision.outputs.run", str(step["env"]))
         self.assertIn("needs.mapping.result", str(step["env"]))
 
-        for result, expected in (("success", 0), ("failure", 1), ("cancelled", 1), ("", 1)):
-            with self.subTest(result=result):
+        for decision, result, expected in (
+            ("true", "success", 0),
+            ("false", "skipped", 0),
+            ("true", "failure", 1),
+            ("true", "cancelled", 1),
+            ("true", "skipped", 1),
+            ("false", "success", 1),
+            ("", "skipped", 1),
+        ):
+            with self.subTest(decision=decision, result=result):
                 completed = subprocess.run(
                     ["bash", "-c", str(step["run"])],
-                    env={**os.environ, **{name: result for name in step["env"]}},
+                    env={**os.environ, "DECISION": decision, "RESULT": result},
                     capture_output=True,
                     text=True,
                 )
-                self.assertEqual(completed.returncode, expected, completed.stderr)
-                if expected and result:
-                    self.assertIn(result, completed.stdout + completed.stderr)
+                self.assertEqual(
+                    completed.returncode, expected, completed.stdout + completed.stderr
+                )
 
     def test_the_summary_runs_even_when_a_leg_failed(self):
         """Catches the summary being skipped by the failure it exists to report. A job
@@ -429,18 +443,55 @@ class WorkflowShardsTest(unittest.TestCase):
         summary = self.jobs["mapping-summary"]
 
         self.assertIn("mapping", summary["needs"])
+        self.assertIn("mapping-decision", summary["needs"])
         self.assertIn("always()", summary["if"])
+
+    def test_the_legs_run_only_when_the_decision_says_so(self):
+        """Catches the decision being computed and ignored, which is the whole policy
+        doing nothing at four runners' expense, and the reverse - a matrix gated on
+        something that is never `true` never runs again and reports nothing."""
+        mapping = self.jobs["mapping"]
+
+        self.assertIn("mapping-decision", str(mapping["needs"]))
+        self.assertEqual(mapping["if"], "needs.mapping-decision.outputs.run == 'true'")
+        self.assertEqual(
+            self.jobs["mapping-decision"]["outputs"]["run"], "${{ steps.decide.outputs.run }}"
+        )
+
+    def test_the_decision_is_made_by_the_module_the_suite_tests(self):
+        """Catches the reasoning migrating into the workflow. A decision written in
+        shell here is a decision nothing in the suite can drive, and this one hides its
+        own failure: a skip that should have run reports as a pass."""
+        steps = self.jobs["mapping-decision"]["steps"]
+        deciding = [step for step in steps if "mapping_trigger.py" in str(step.get("run", ""))]
+
+        self.assertEqual(len(deciding), 1, "the decision job does not run the decision module")
+        self.assertIn("github.event.before", str(deciding[0]["env"]))
+        self.assertIn("actions: read", yaml.dump(self.jobs["mapping-decision"]["permissions"]))
 
     def test_the_sharded_check_runs_on_what_the_fast_gate_does_not(self):
         """Catches the 28-minute check landing on pull requests, and the other way
-        round - the fast gate is what runs per pull request and this is what runs on
-        the schedule. Both conditions name the same two events, so a mapping check
-        that quietly started running on every push would be visible here."""
-        events = self.jobs["mapping"]["if"]
+        round - the fast gate is what runs per pull request, and this runs nightly, on
+        a merge to main and on demand. The events are now on the decision job, and a
+        pull request must not reach it: a legs-worth of runners per pull request is
+        the cost the mapping exists to avoid.
+
+        The nightly cron is named here too, because weekly was the setting this
+        replaced and the reason it changed - a disagreement a week after the commit
+        that caused it - is invisible from a cron expression.
+        """
+        events = self.jobs["mapping-decision"]["if"]
 
         self.assertIn("schedule", events)
         self.assertIn("workflow_dispatch", events)
+        self.assertIn("push", events)
         self.assertNotIn("pull_request", events)
+        # `self.workflow[True]`, because YAML reads a bare `on:` key as the boolean.
+        self.assertEqual(
+            [schedule["cron"].split()[2:] for schedule in self.workflow[True]["schedule"]],
+            [["*", "*", "*"]],
+            "the mapping check is no longer nightly",
+        )
         self.assertEqual(
             [
                 step

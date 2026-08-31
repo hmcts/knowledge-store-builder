@@ -4,11 +4,15 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The `mapping` job below runs only on these two, never on a pull request: it
-  # applies every entry against the whole suite, which is the cost the mapping
-  # exists to avoid paying per run.
+  # The `mapping` job below never runs on a pull request: it applies every entry
+  # against the whole suite, which is the cost the mapping exists to avoid paying
+  # per run. It runs nightly, on a merge that lands the known way an observer set
+  # goes stale, and on demand - and `mapping-decision` decides which of those
+  # actually needs the four legs. Weekly was the previous setting and too coarse:
+  # by the time a disagreement surfaced, the change that caused it was a week of
+  # commits back and nobody could say which one it was (#285).
   schedule:
-    - cron: "17 3 * * 1"
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -168,8 +172,53 @@ jobs:
   # costs a second job, and this is what keeps it from also costing a second
   # environment. A prefix rather than a hand-picked subset, because a prefix is
   # something a check can compare.
+  # Whether the four legs below are worth running, and why. Its own job rather
+  # than a step of theirs, because four legs would each decide separately and
+  # could each decide differently, and because a matrix cannot be conditional on
+  # something computed inside itself.
+  #
+  # The reasoning is `tests/mapping_trigger.py` and not this file: a decision
+  # written in shell here is a decision nothing can test, and this one is
+  # asymmetric in a way that hides its own failure - a skip that should have run
+  # reports as a pass. Every uncertainty in it runs the check, and the verdict and
+  # its reason reach the step summary every time, including when it skips.
+  mapping-decision:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # It reads this workflow's own previous runs to find the commit the last
+      # real verification ran against. Without it `gh api` fails, which is a
+      # case that runs the check rather than skipping it.
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison reaches back to the last verified commit, which is
+          # older than any default depth on a nightly.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Through the environment rather than interpolated into the script, which
+      # is the script-injection shape the analysers read. `github.event.before`
+      # is the only one of these Actions does not export by itself.
+      - name: Decide whether the mapping check needs to run
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSHED_FROM: ${{ github.event.before }}
+        run: python3 tests/mapping_trigger.py
+
   mapping:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: mapping-decision
+    if: needs.mapping-decision.outputs.run == 'true'
     runs-on: ubuntu-latest
     strategy:
       # Every leg runs, so two disagreeing entries in different shards are two
@@ -233,20 +282,36 @@ jobs:
   # condition is repeated because `always()` would otherwise run it on a pull
   # request, where `mapping` was skipped and its result is neither pass nor fail.
   mapping-summary:
-    needs: mapping
+    needs: [mapping-decision, mapping]
     if: >-
-      always() && (github.event_name == 'schedule'
+      always() && (github.event_name == 'push' || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
+      # Two inputs, because a skipped `mapping` means two different things and
+      # only one of them is a pass. Skipped because the decision said so is a
+      # verdict; skipped for any other reason - the decision failed, or said run
+      # and the legs never started - is the wiring failing silently, which is the
+      # shape this whole policy invites.
       - name: Every shard's entries agree with what the suite observed
         env:
+          DECISION: ${{ needs.mapping-decision.outputs.run }}
           RESULT: ${{ needs.mapping.result }}
         run: |
-          test "$RESULT" = success || {
-            echo "The sharded mapping check did not pass: $RESULT."
-            echo "Each shard verifies its own slice of the table against a whole-suite"
-            echo "run per entry, so the entries in a leg that did not pass are entries"
-            echo "whose observers nothing has checked. Read the failing leg's log."
-            exit 1
-          }
+          if [ "$DECISION" = true ] && [ "$RESULT" = success ]; then
+            echo "Every shard's entries agree with what the suite observed."
+            exit 0
+          fi
+          if [ "$DECISION" = false ] && [ "$RESULT" = skipped ]; then
+            echo "The mapping check did not need to run. Nothing landed that could"
+            echo "move an observer set - the decision job's summary says what it"
+            echo "compared against and what it found."
+            exit 0
+          fi
+          echo "The sharded mapping check did not pass: the decision was"
+          echo "'$DECISION' and the shards reported '$RESULT'."
+          echo "Each shard verifies its own slice of the table against a whole-suite"
+          echo "run per entry, so the entries in a leg that did not pass are entries"
+          echo "whose observers nothing has checked. A decision of 'true' with no"
+          echo "result at all is the legs never having started, which verifies nothing."
+          exit 1
