@@ -2642,6 +2642,7 @@ MUTATIONS = (
         (
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_record_left_by_a_killed_run_is_used_before_anything_else_runs",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
         ),
     ),
     Mutation(
@@ -2668,6 +2669,7 @@ MUTATIONS = (
         (
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
         ),
     ),
     Mutation(
@@ -2680,7 +2682,13 @@ MUTATIONS = (
         "nearly committed it, another read the tree mid-mutation and refused a job for a "
         "reason that was untrue a minute later. The pre-commit hook is this query, so a "
         "query that always reports clean is a hook that reads as protection and is none",
-        ("test_mutation_gate_recovery", "test_mutation_gate_visibility"),
+        (
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_a_record_the_query_cannot_read_is_refused_rather_than_ignored",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_pre_commit_hook_runs_the_query_and_refuses_a_live_mutation",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_carries_the_pid_for_a_caller_that_wants_to_signal_it",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_refuses_while_a_mutation_is_applied_and_names_the_path",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_tells_an_abandoned_record_from_a_live_run",
+        ),
     ),
     Mutation(
         "the record stops naming the run that holds the tree",
@@ -2692,7 +2700,9 @@ MUTATIONS = (
         "a match on this script's name found every clone on the machine and killed another "
         "worktree's wrapper. The root and the pid are what let a caller ask about the tree "
         "it cares about and signal the one process that holds it",
-        ("test_mutation_gate_recovery", "test_mutation_gate_visibility"),
+        (
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
+        ),
     ),
     Mutation(
         "the file-list route grows a directory walk",
