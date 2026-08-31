@@ -273,7 +273,7 @@ def near_duplicates(path: Path, top: int = 10) -> Report:
     )
 
 
-def lines(report: Report) -> list[str]:
+def lines(report: Report, described: str = "") -> list[str]:
     """The report as printed, or nothing at all when there is no overlap to state.
 
     Silence is the answer for an estate whose repositories share no (label, path)
@@ -282,11 +282,18 @@ def lines(report: Report) -> list[str]:
     The one thing it will not stay silent about is having had nothing to compare:
     a graph with nodes but no `repo` attribute produces no signatures, and that is
     a broken precondition rather than a clean estate.
+
+    `described` is the graph file the caller read, and it belongs on the header
+    rather than on a line of its own: a store holds two graphs which can disagree,
+    so the same overlap figure means different things depending on which was read -
+    but printing the name unconditionally would end the silence above. Empty for a
+    caller ranking signatures it already held, where there is no file to name.
     """
+    where = f" in {described}" if described else ""
     if report.unattributed and not report.nodes:
         return [
             f"Repository overlap: nothing compared - none of the {report.unattributed:,} "
-            "node(s) carries a `repo` attribute, so the graph cannot be grouped by "
+            f"node(s){where} carries a `repo` attribute, so the graph cannot be grouped by "
             "repository. Not a clean result."
         ]
     if not report.overlaps:
@@ -297,8 +304,8 @@ def lines(report: Report) -> list[str]:
     silent = report.repositories - report.compared
     left_out = f" ({silent:,} carried no (label, path) pair)" if silent > 0 else ""
     out = [
-        "Repository (label, path) overlap - a measurement, not a verdict: a copy may be "
-        "deliberate, and only you can say. Ranked by the shared pairs over the larger "
+        f"Repository (label, path) overlap{where} - a measurement, not a verdict: a copy may "
+        "be deliberate, and only you can say. Ranked by the shared pairs over the larger "
         f"repository. {report.compared:,} repositories compared{left_out}, "
         f"{report.considered:,} pair(s) bounded, {report.intersected:,} intersected:"
     ]

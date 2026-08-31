@@ -1297,17 +1297,25 @@ def _report_central(enabled: bool) -> None:
     a name belongs in an estate is a judgement about provenance, and a stage that
     guessed would exclude an estate's own declarations as readily as a vendored
     bundle.
+
+    Reads whichever graph the store holds and names it (#262, `graph_to_read`). A
+    ranking is degree-driven, so the two files can rank differently, and a reader
+    who cannot tell which one produced this list cannot check it against anything.
     """
     if not enabled:
         return
-    if not config.GRAPH_PATH.is_file():
-        print(f"Most connected: no graph at {config.GRAPH_PATH}")
+    graph = graph_files.graph_to_read(config.GRAPH_PATH)
+    if graph is None:
+        print(f"Most connected: no graph at {config.GRAPH_PATH} or its .gz counterpart")
         return
-    ranked = graph_files.most_connected(config.GRAPH_PATH)
+    ranked = graph_files.most_connected(graph)
     if not ranked:
-        print("Most connected: the graph holds no edges")
+        print(f"Most connected: {graph.name} holds no edges")
         return
-    print("Most connected nodes (would you name these if asked what the estate is built from?):")
+    print(
+        f"Most connected nodes in {graph.name} (would you name these if asked what the "
+        "estate is built from?):"
+    )
     for node_id, label, degree in ranked:
         print(f"  {degree:>7,}  {label or node_id}")
 
@@ -1322,14 +1330,20 @@ def _report_duplicates(enabled: bool) -> None:
     migration part-way through, so the judgement needs the two names in front of a
     person; a stage that classified one would be applying a constant that is wrong
     on some estate.
+
+    Reads whichever graph the store holds and names it (#262, `graph_to_read`). The
+    name goes inside the report's own header rather than on a line of its own,
+    because silence is this report's answer for an estate with no near-copies and a
+    report that always speaks is a report nobody reads.
     """
     if not enabled:
         return
-    if not config.GRAPH_PATH.is_file():
-        print(f"Repository overlap: no graph at {config.GRAPH_PATH}")
+    graph = graph_files.graph_to_read(config.GRAPH_PATH)
+    if graph is None:
+        print(f"Repository overlap: no graph at {config.GRAPH_PATH} or its .gz counterpart")
         return
     for line in duplicate_repositories.lines(
-        duplicate_repositories.near_duplicates(config.GRAPH_PATH)
+        duplicate_repositories.near_duplicates(graph), described=graph.name
     ):
         print(line)
 

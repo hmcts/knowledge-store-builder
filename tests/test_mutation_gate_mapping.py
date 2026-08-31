@@ -63,7 +63,7 @@ import unittest
 
 class Bystander(unittest.TestCase):
     def test_nothing_about_the_target(self):
-        self.assertEqual(2, 1 + 1)
+        self.assertEqual(1 + 1, 2)
 """
 
 # Ends the child before it can report, the way a segfault or an OOM kill would.
@@ -169,7 +169,7 @@ class MutationGateMappingTest(unittest.TestCase):
 
         code, _, reported = self._verify(self._entry("test_subtest_watcher", "test_watcher"))
 
-        self.assertEqual(0, code, f"a correct mapping was refused: {reported}")
+        self.assertEqual(code, 0, f"a correct mapping was refused: {reported}")
 
     def test_a_module_failing_only_in_a_subtest_still_reads_as_failing(self):
         """The control for the test above, and it does not carry its assurance.
@@ -184,7 +184,7 @@ class MutationGateMappingTest(unittest.TestCase):
 
         code, printed = self._sweep(self._entry("test_subtest_watcher"))
 
-        self.assertEqual(0, code, printed)
+        self.assertEqual(code, 0, printed)
         self.assertIn("caught", printed)
 
     def test_an_entry_naming_no_observer_is_refused_before_anything_is_applied(self):
@@ -194,9 +194,10 @@ class MutationGateMappingTest(unittest.TestCase):
         nothing. Louder than the alternative on purpose: the entry has to be named,
         with the command that fills it in."""
         root = self._tree()
+        unmappable = self._entry()
 
         with self.assertRaises(SystemExit) as raised:
-            gate.sweep((self._entry(),))
+            gate.sweep((unmappable,))
 
         self.assertIn("the target loses its value", str(raised.exception))
         self.assertIn("--derive-mapping", str(raised.exception))
@@ -211,9 +212,10 @@ class MutationGateMappingTest(unittest.TestCase):
         its own sake and the gate reports `caught` - about a mutation whose modules were
         never even loaded."""
         root = self._tree()
+        departed = self._entry("test_departed")
 
         with self.assertRaises(SystemExit) as raised:
-            gate.sweep((self._entry("test_departed"),))
+            gate.sweep((departed,))
 
         self.assertIn("test_departed", str(raised.exception))
         self.assertIn(str(root / "tests" / "test_departed.py"), str(raised.exception))
