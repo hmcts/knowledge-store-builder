@@ -13,6 +13,7 @@ would have stopped the thing that actually happened.
 
     python3 tests/mutation_gate.py                   # all mutations
     python3 tests/mutation_gate.py --list            # names, targets, observers
+    python3 tests/mutation_gate.py --status          # is one applied right now?
     python3 tests/mutation_gate.py --only recovery   # entries whose name matches
     python3 tests/mutation_gate.py --derive-mapping  # the observers, from a full run
     python3 tests/mutation_gate.py --verify-mapping  # check every entry's observers
@@ -52,6 +53,30 @@ handled: `apply` therefore records the original bytes in
 `tests/.mutation-gate-recovery` before touching a file, and the next run restores
 from that record before it does anything else.
 
+While a run is going, that mutation is genuinely on disk and nothing in the tree
+says so - `git status` reports an ordinary edit. The record therefore names the
+run as well as the file, and answers for it:
+
+    python3 tests/mutation_gate.py --status         # is a mutation applied here?
+    python3 tests/mutation_gate.py --status --json  # the same, for a caller
+
+Both exit non-zero while one is applied, and the pre-commit hook is that command,
+so a mutated file cannot be committed (#268).
+
+`live` means four facts agree: the checkout, the host, the pid, and the start time
+`ps` reports for that pid. A pid alone is not evidence - pids are reused, and a
+record written on another machine names a process that was never here - and
+anything the four cannot settle is reported as undecidable rather than guessed. It
+can still be wrong in three ways, which a reader acting on `live` should know: a
+pid reused within the same second reads live, a process that has exited and not
+been reaped reads live because it can still be signalled, and a container sharing
+this host's name and paths is indistinguishable from this host.
+
+Stop a live run by signalling it - `kill -TERM <pid>` restores the tree on the way
+out. Not `kill -9`, which cannot be handled and leaves the mutation applied, and
+not a `pgrep` on this script's name: that matches every checkout on the machine,
+and killed the wrong worktree's run once.
+
 A surviving mutation is a failure of this gate, not a curiosity: it means the
 behaviour it describes could be removed today and the suite would stay green.
 
@@ -69,6 +94,7 @@ import argparse
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -85,6 +111,15 @@ SRC = ROOT / "src" / "knowledgestore"
 # cannot be handled, so nothing in this process can put the file back - only
 # something already on disk can.
 RECOVERY_PATH = ROOT / "tests" / ".mutation-gate-recovery"
+
+# The four answers `liveness` can give about the run a record names, and the whole
+# reason the record carries a root and a pid: "a mutation is applied" does not say
+# which checkout holds it, so it cannot stop a session stopping the wrong one - and
+# a stale record and a live run read identically without them (#268).
+LIVE = "live"
+ABANDONED = "abandoned"
+ELSEWHERE = "elsewhere"
+UNDECIDABLE = "undecidable"
 
 # The signals that end the process without unwinding, so a `finally` never
 # runs: a timeout, a job kill and a cancelled CI step all send SIGTERM. SIGINT
@@ -2599,7 +2634,7 @@ MUTATIONS = (
     Mutation(
         "the record a SIGKILL cannot destroy is never written",
         "tests/mutation_gate.py",
-        '    RECOVERY_PATH.write_bytes(mutation.module.encode("utf-8") ' + '+ b"\\n" + original)',
+        "    RECOVERY_PATH.write_bytes(_header(mutation.module) " + '+ b"\\n" + original)',
         "    pass",
         "#227: no signal handler covers SIGKILL, so the only thing that can put a file "
         "back is bytes already on disk when the process died. Without them the tree keeps "
@@ -2634,6 +2669,30 @@ MUTATIONS = (
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
         ),
+    ),
+    Mutation(
+        "the query cannot tell a mutated tree from a clean one",
+        "tests/mutation_gate.py",
+        "    present = RECOVERY_PATH.is_file" + "()",
+        "    present = False",
+        "#268: a mutation sits in a real file while the gate runs, and from "
+        "outside the process it looks like an ordinary edit - one reader staged it and "
+        "nearly committed it, another read the tree mid-mutation and refused a job for a "
+        "reason that was untrue a minute later. The pre-commit hook is this query, so a "
+        "query that always reports clean is a hook that reads as protection and is none",
+        ("test_mutation_gate_recovery", "test_mutation_gate_visibility"),
+    ),
+    Mutation(
+        "the record stops naming the run that holds the tree",
+        "tests/mutation_gate.py",
+        '        "root": str(ROOT),\n        "pid": os.getpid' + "(),",
+        '        "root": "",\n        "pid": 0,',
+        "#268: existence is not identity. A record saying a mutation is applied somewhere "
+        "cannot stop a session stopping the wrong checkout's run, which is what happened - "
+        "a match on this script's name found every clone on the machine and killed another "
+        "worktree's wrapper. The root and the pid are what let a caller ask about the tree "
+        "it cares about and signal the one process that holds it",
+        ("test_mutation_gate_recovery", "test_mutation_gate_visibility"),
     ),
     Mutation(
         "the file-list route grows a directory walk",
@@ -3073,6 +3132,100 @@ def target_of(module: str) -> Path:
     return ROOT / module if "/" in module else SRC / module
 
 
+@dataclass(frozen=True)
+class Record:
+    """What the gate leaves on disk while a file is mutated: the file, the original
+    bytes, and enough about the run to tell a live one from an abandoned one from
+    outside the process that started it."""
+
+    module: str
+    original: bytes
+    root: str
+    pid: int
+    host: str
+    started: str
+
+
+def run_ps(pid: int) -> str:
+    """The start time `ps` reports for one pid, or "" when it names no process.
+
+    `ps` because there is no portable way to read a process start time - macOS has
+    no `/proc` - and that start time is the whole difference between "the process
+    that wrote this record is still running" and "something else holds its pid
+    now". A missing or failing `ps` returns "", which reads through as undecidable
+    rather than as a dead process: this must never be why a gate run cannot start.
+    """
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+def _header(module: str) -> bytes:
+    """The identity line written above the original bytes: which file, which
+    checkout, which process. One line, because everything after the first newline
+    is the file, and sorted so two records of the same run are byte-identical."""
+    identity = {
+        "module": module,
+        "root": str(ROOT),
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "started": run_ps(os.getpid()),
+    }
+    return json.dumps(identity, sort_keys=True).encode("utf-8")
+
+
+def read_record() -> Record | None:
+    """The record on disk, or None when there is nothing a caller can act on.
+
+    None for absent, for a header that will not parse, and for one naming a path
+    outside the tree. The callers refuse on all three rather than reading past
+    them: something wrote the record before mutating a file, so a record that
+    cannot be read still means a file may hold a deliberately introduced defect.
+    """
+    if not RECOVERY_PATH.is_file():
+        return None
+    header, separator, original = RECOVERY_PATH.read_bytes().partition(b"\n")
+    if not separator:
+        return None
+    try:
+        parsed = json.loads(header)
+        record = Record(
+            module=str(parsed["module"]),
+            original=original,
+            root=str(parsed.get("root", "")),
+            pid=int(parsed.get("pid", 0)),
+            host=str(parsed.get("host", "")),
+            started=str(parsed.get("started", "")),
+        )
+    # ValueError covers the JSON itself (JSONDecodeError is one) and a pid that is
+    # not a number; TypeError and KeyError cover a header that parses to something
+    # other than an object with a module in it.
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None if _traversal(record.module) else record
+
+
+def liveness(record: Record, run=run_ps) -> str:
+    """Whether the run a record names is still going, as far as this machine can
+    tell - and a named answer where it cannot tell, because both wrong readings
+    are expensive and opposite: a dead run reported live sends a session to wait
+    for something that will never finish, and a live one reported dead gets it
+    killed. `ps` is the seam, so a reused pid can be exercised without one.
+    """
+    if record.root != str(ROOT) or record.host != socket.gethostname():
+        return ELSEWHERE
+    if not record.started:
+        return UNDECIDABLE
+    return LIVE if run(record.pid) == record.started else ABANDONED
+
+
 def recover() -> int:
     """Restore a file a killed run left mutated. Non-zero when a run must not start.
 
@@ -3082,10 +3235,9 @@ def recover() -> int:
     """
     if not RECOVERY_PATH.is_file():
         return 0
-    name, separator, original = RECOVERY_PATH.read_bytes().partition(b"\n")
-    module = name.decode("utf-8", "replace")
-    target = target_of(module) if separator and not _traversal(module) else None
-    if target is None or not target.is_file():
+    record = read_record()
+    target = target_of(record.module) if record else None
+    if record is None or target is None or not target.is_file():
         print(
             f"{RECOVERY_PATH} records a mutation from an earlier run but does not name a "
             f"file this gate can restore, so a source file may still hold a deliberately "
@@ -3093,10 +3245,10 @@ def recover() -> int:
             file=sys.stderr,
         )
         return 1
-    target.write_bytes(original)
+    target.write_bytes(record.original)
     RECOVERY_PATH.unlink()
     print(
-        f"Recovered {module}: an earlier run was killed with a mutation applied, and "
+        f"Recovered {record.module}: an earlier run was killed with a mutation applied, and "
         f"{RECOVERY_PATH} held the original bytes."
     )
     return 0
@@ -3405,9 +3557,100 @@ def apply(mutation: Mutation) -> bytes:
             "mutation reported as caught while a different line carried the defect says "
             "nothing about the behaviour the entry names."
         )
-    RECOVERY_PATH.write_bytes(mutation.module.encode("utf-8") + b"\n" + original)
+    RECOVERY_PATH.write_bytes(_header(mutation.module) + b"\n" + original)
     path.write_bytes(source.replace(mutation.find, mutation.replace, 1).encode("utf-8"))
     return original
+
+
+def _remedy(record: Record, state: str) -> str:
+    """What to do about the record, which differs by state and is the whole point
+    of naming the run: the same words for a live run and an abandoned one send
+    half the readers at the wrong action."""
+    if state == LIVE:
+        return (
+            f"A run is live: pid {record.pid} in {record.root}. Wait for it, or stop it "
+            f"with `kill -TERM {record.pid}`, which restores the file on the way out. Not "
+            "`kill -9`, which cannot be handled and leaves the mutation applied, and not a "
+            "`pgrep` on this script's name, which matches every checkout on this machine."
+        )
+    if state == ABANDONED:
+        return (
+            f"No run holds it: pid {record.pid} in {record.root} is gone, so an earlier run "
+            f"was killed with the mutation applied. `PYTHONPATH=src python3 "
+            f"tests/mutation_gate.py` in that checkout restores the file from this record "
+            "before it does anything else."
+        )
+    if state == ELSEWHERE:
+        return (
+            f"This record was written by pid {record.pid} on {record.host} in "
+            f"{record.root}, and this is {socket.gethostname()} in {ROOT}, so nothing here "
+            f"can say whether that run is still going. Ask in that checkout, or restore "
+            f"{record.module} from git and delete {RECOVERY_PATH}."
+        )
+    return (
+        f"The record names pid {record.pid} but no start time for it, so a pid that exists "
+        f"proves nothing - it is reused. Check by hand whether a gate run is going in "
+        f"{record.root}, and if none is, run `PYTHONPATH=src python3 "
+        f"tests/mutation_gate.py` there to restore the file from this record."
+    )
+
+
+def status(*, as_json: bool = False, run=run_ps) -> int:
+    """Report whether a mutation is applied in this tree. Non-zero when one is.
+
+    The readable half of the record, and the only one anything outside the gate
+    has: a person about to commit and a job deciding whether to trust the tree
+    both got this wrong from `git status`, which reports a mutation as an ordinary
+    edit and a mutated tree as merely dirty. `--json` carries the pid so a caller
+    that wants to stop the run can signal that process rather than matching
+    command lines, which finds every checkout on the machine.
+    """
+    present = RECOVERY_PATH.is_file()
+    if not present:
+        if as_json:
+            print(json.dumps({"applied": False}, sort_keys=True))
+        else:
+            print(f"No mutation is applied in {ROOT}.")
+        return 0
+
+    record = read_record()
+    if record is None:
+        if as_json:
+            print(json.dumps({"applied": True, "readable": False}, sort_keys=True))
+        print(
+            f"{RECOVERY_PATH} cannot be read as a mutation record, so a file in {ROOT} may "
+            f"hold a deliberately introduced defect and nothing here can say which. "
+            f"Restore the tree from git, then delete {RECOVERY_PATH}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    state = liveness(record, run=run)
+    path = target_of(record.module)
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "applied": True,
+                    "readable": True,
+                    "state": state,
+                    "path": str(path),
+                    "module": record.module,
+                    "root": record.root,
+                    "pid": record.pid,
+                    "host": record.host,
+                    "started": record.started,
+                },
+                sort_keys=True,
+            )
+        )
+    print(
+        f"{path} is mutated: the mutation gate has a deliberately introduced defect in it "
+        f"right now, so nothing read from this tree means what it says - and committing it "
+        f"commits the defect.\n{_remedy(record, state)}",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def each_mutation(mutations: Sequence[Mutation], observe: Callable[[Mutation], None]) -> int | None:
@@ -3592,6 +3835,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="print the mutations and exit")
     parser.add_argument(
+        "--status",
+        action="store_true",
+        help="report whether a mutation is applied in this tree, non-zero while one is",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="with --status, print the record so a caller can read the pid",
+    )
+    parser.add_argument(
         "--only",
         action="append",
         default=[],
@@ -3621,6 +3874,9 @@ def main(argv: list[str] | None = None) -> int:
             for observer in mutation.observers:
                 print(f"    observed by {observer}")
         return 0
+
+    if arguments.status:
+        return status(as_json=arguments.json)
 
     if recover():
         return 1
