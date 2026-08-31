@@ -38,8 +38,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      # `--no-deps` and `--only-binary :all:` state on the command line what is
+      # already true of this install: the default package declares no runtime
+      # dependencies, so there is nothing to resolve and nothing to build from an
+      # sdist. The GitHub Actions rules read the command rather than the files it
+      # references, so a flag that goes without saying still has to be said. Block
+      # scalar because `--only-binary :all:` carries a colon-space, which YAML would
+      # otherwise read as a nested mapping.
       - name: Install the package
-        run: pip install -e .
+        run: |
+          pip install --no-deps --only-binary :all: -e .
 
       # The same versions `tests.yml` pins, and for the same reason twice over
       # here: without them 20 tests skip, and a module whose tests skipped cannot
