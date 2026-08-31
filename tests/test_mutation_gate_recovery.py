@@ -52,7 +52,7 @@ MUTATED = ORIGINAL.replace(b"ORIGINAL", b"MUTATED")
 # out - and the two runners record what the tree looked like at each call, which is
 # the only way to see whether a mutation was applied when the suite ran. Both
 # runners, because the gate runs the whole suite once for the pre-check and the
-# entry's own modules after that: leaving `run_modules` real would run this
+# entry's own modules after that: leaving `run_observers` real would run this
 # repository's suite from inside a test in it. `check_import_path` is the third
 # such call and returns 0 here, because it asks a child where it imports
 # knowledgestore from and answers about this repository, while the source
@@ -71,8 +71,8 @@ import mutation_gate as gate
 gate.SRC = Path(settings["source"])
 gate.RECOVERY_PATH = Path(settings["sidecar"])
 gate.MUTATIONS = (
-    # The observer names a module of this repository because `check_mapping` reads
-    # the real tests directory, and nothing runs it: `run_modules` below is what
+    # The observer names a test of this repository because `check_mapping` reads
+    # the real tests directory, and nothing runs it: `run_observers` below is what
     # the gate calls instead.
     gate.Mutation(
         "harness",
@@ -80,7 +80,10 @@ gate.MUTATIONS = (
         "ORIGINAL",
         "MUTATED",
         "a purpose-built target",
-        ("test_mutation_gate_recovery",),
+        (
+            "test_mutation_gate_recovery.MutationGateRecoveryTest."
+            "test_a_clean_run_leaves_no_record_behind",
+        ),
     ),
 )
 
@@ -102,22 +105,25 @@ def observe():
 
 def run_suite():
     observe()
-    # A SuiteRun rather than a bool: the refusal that reads it names the modules
+    # A SuiteRun rather than a bool: the refusal that reads it names the tests
     # that failed, so a red pre-check has to carry one.
     return gate.SuiteRun(settings["suite_passes"], () if settings["suite_passes"] else ("harness",))
 
 
-def run_modules(*_):
+def run_observers(observers):
     observe()
     if settings["hang"]:
         Path(settings["ready"]).write_text("mutated", encoding="utf-8")
         time.sleep(120)
-    return False
+    # Every named observer, which is what a caught mutation looks like: the gate
+    # reads emptiness as SURVIVED, so returning a falsy value here would make the
+    # clean run this harness drives exit non-zero for a reason of its own.
+    return tuple(observers)
 
 
 gate.check_import_path = lambda: 0
 gate.run_suite = run_suite
-gate.run_modules = run_modules
+gate.run_observers = run_observers
 raise SystemExit(gate.main([]))
 """
 
@@ -336,7 +342,13 @@ class MutationGateRecoveryTest(unittest.TestCase):
         in the file, so `apply` - which replaces the first occurrence - would rewrite
         the entry instead of the code: the mutation then survives, with the reason
         nowhere on screen. Splitting each `find` across adjacent literals is what
-        prevents it, and only a count can tell that it was done."""
+        prevents it, and only a count can tell that it was done.
+
+        Named in the gate's `TABLE_GUARDS`, so it never counts as an observer. It
+        reads the table, and applying any entry that targets that file makes it red
+        whatever the mutation did - which is correct here and meaningless there
+        (#274). The gate subtracts it rather than this test skipping, so the check
+        stays live in an ordinary suite run."""
         own = TESTS / "mutation_gate.py"
         text = own.read_text(encoding="utf-8")
 
@@ -418,7 +430,11 @@ class MutationGateRecoveryTest(unittest.TestCase):
         has become ambiguous is a failure now rather than a misattributed `caught` in
         the next ten-minute gate run. Reads the tree, so it is skipped while a
         mutation is applied - the count it depends on is only meaningful in an
-        unmutated tree, and a gate run mutates one file at a time."""
+        unmutated tree, and a gate run mutates one file at a time.
+
+        Named in the gate's `TABLE_GUARDS` as well, which is belt and braces: the
+        skip means it does not fail during a run, and the exclusion means it would
+        not be read as an observation if the skip were ever removed (#274)."""
         if gate.RECOVERY_PATH.is_file():
             self.skipTest("a mutation is applied: its target does not hold its own `find`")
         for mutation in gate.MUTATIONS:

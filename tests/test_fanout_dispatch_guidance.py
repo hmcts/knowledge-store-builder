@@ -181,6 +181,12 @@ class FanoutDispatchGuidanceTest(unittest.TestCase):
             completed = subprocess.run(
                 [
                     sys.executable,
+                    # `-B` because this child imports the tree the mutation gate
+                    # rewrites and the environment below is a replacement, so the
+                    # gate's bytecode suppression does not reach it - a `.pyc`
+                    # left here is one a mutated run reads back, reporting on
+                    # code that was never in the tree (#228).
+                    "-B",
                     "-c",
                     "from knowledgestore.cli import main; raise SystemExit(main())",
                     *arguments,

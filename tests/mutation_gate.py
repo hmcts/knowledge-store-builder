@@ -17,16 +17,26 @@ would have stopped the thing that actually happened.
     python3 tests/mutation_gate.py --derive-mapping  # the observers, from a full run
     python3 tests/mutation_gate.py --verify-mapping  # check every entry's observers
 
-Each entry names the test modules that observe it, and a run applies the
-mutation and runs only those. The whole suite per entry cost 8.7 seconds against
-0.6 for a module, which is the difference between 26 minutes and 2 - but the
-mapping is worth more than the time. An entry that names its observer can be
-falsified by a later reader; a gate that merely claims to be sensitive cannot.
+Each entry names the tests that observe it. A run applies the mutation, runs the
+modules holding those tests, and asks whether the *named* ones failed. Whole
+modules because that costs no more than one test and is what the mapping was
+derived from; the named tests because a module fails for reasons an entry does
+not describe. The whole suite per entry cost 8.7 seconds against 0.6 for a
+module, which is the difference between 26 minutes and 2 - but the mapping is
+worth more than the time. An entry that names its observer can be falsified by a
+later reader; a gate that merely claims to be sensitive cannot.
+
+Tests rather than modules because module granularity cannot tell an observation
+from a coincidence, and the coincidence was inside this gate: the guards over the
+table below fail for every entry that targets this file, whatever the mutation
+did, so `caught` meant "a guard noticed the file changed" for four entries whose
+only named module was the one holding them (#274). Those guards are named in
+`TABLE_GUARDS` and subtracted from every set this gate derives or verifies.
 
 The two slow modes are what keep the mapping honest, and neither runs in the
 `tests` job: `--derive-mapping` fills in a new entry from a full suite run, and
 `--verify-mapping` applies every entry against the whole suite and refuses a
-named set that does not match the modules that failed. The `tests` workflow runs
+named set that does not match the tests that failed. The `tests` workflow runs
 the second one on its schedule and on `workflow_dispatch`, in the same job that
 runs the fast mode on a pull request.
 
@@ -61,7 +71,7 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,21 +93,53 @@ TERMINATION_SIGNALS = tuple(
     getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
 )
 
+# The tests that read the table below rather than any behaviour of the product,
+# so nothing they say is an observation of a defect: each asserts that an entry's
+# `find` names exactly one site in its target. A mutation whose target is this
+# file replaces that site, so the count drops to zero and the check fails - for
+# every such entry, every time, whatever the mutation did.
+#
+# Counting that as an observation made `caught` mean "a guard noticed the file
+# changed" for four entries that named no other module, so these names are
+# subtracted from every set this gate derives or verifies, and refused if an
+# entry names one (#274).
+#
+# Subtracted rather than skipped while a mutation is applied, which was the other
+# way out. Skipping removes the false signal without adding a true one: those
+# four entries would have become survivors rather than observed behaviours, and
+# it takes a live check out of the ordinary suite run to correct a claim this
+# table makes. The exclusion is also readable from here, which a skip inside
+# another module is not.
+TABLE_GUARDS = (
+    "test_mutation_gate_recovery.MutationGateRecoveryTest."
+    + "test_a_mutation_of_this_gate_cannot_rewrite_its_own_table",
+    "test_mutation_gate_recovery.MutationGateRecoveryTest."
+    + "test_every_table_entry_names_one_site_in_its_target",
+)
+
 
 @dataclass(frozen=True)
 class Mutation:
     """One real defect, the escape it represents, and what observes it.
 
-    `observers` names the test modules that fail when this entry is applied, and
-    they are the only ones the gate runs for it. Two things follow, and the
-    second is the reason the field exists rather than a consequence of it:
+    `observers` names the tests that fail when this entry is applied, as
+    `module.Class.test`, and the modules holding them are the only ones the gate
+    runs for it. Three things follow, and the second is the reason the field
+    exists rather than a consequence of it:
 
     - a run costs one module rather than the whole suite, which took 8.7 seconds
       per entry and 26 minutes over the table;
     - the entry becomes falsifiable by a later reader. "This gate is
       sensitivity-checked" cannot be checked; "this behaviour is observed by
       `test_x`" can, by `--verify-mapping`, which runs the whole suite and
-      refuses a set that does not match.
+      refuses a set that does not match;
+    - a module that fails for a reason the entry does not describe no longer
+      reads as an observation, which is the hole a module name left open (#274).
+
+    A name carrying no test - the module alone - is what unittest reports when a
+    failure is not inside a test at all: a module that could not be imported, or
+    a `setUpModule` that raised. It is a legitimate observation and no shipped
+    entry currently has one.
 
     Derived rather than typed: `--derive-mapping` prints what actually failed.
     A hand-written name that no test module holds, or holds without observing,
@@ -124,7 +166,11 @@ MUTATIONS = (
         "shipped in v0.12.0 and found by an operator: `record-clustering --graph "
         "graph.json.gz` died on the gzip magic byte, so the escape hatch the stage's "
         "own warning names was unavailable for the only artefact that store ships",
-        ("test_config_and_io", "test_read_path_policy"),
+        (
+            "test_config_and_io.TheJsonReaderHandlesGzip.test_a_gzipped_json_object_is_read",
+            "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_outside_the_configured_store_root_succeeds",
+            "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_path_that_climbs_upward_is_accepted",
+        ),
     ),
     Mutation(
         "stale counterpart no longer named",
@@ -133,7 +179,9 @@ MUTATIONS = (
         '        disagreement = ""',
         "the same operator had to diff two graph files by hand to find that the "
         "record described a stale leftover; every count in it reconciled",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.TheCommittedGraphCanBeDescribed.test_a_stale_counterpart_is_named_with_both_counts",
+        ),
     ),
     Mutation(
         "summaries snapshot no longer names a stale graph",
@@ -145,7 +193,11 @@ MUTATIONS = (
         "graph.json mis-keys the entire remap carry; reported by a store operator, "
         "and invisible to `_remap_refusal` because the snapshot and the stale file "
         "share every node id",
-        ("test_stale_remedy_directions", "test_summaries_graph_ambiguity"),
+        (
+            "test_stale_remedy_directions.TheAdvisoryNotesCarryItToo.test_the_snapshot_note_gives_no_unconditional_destroying_instruction",
+            "test_summaries_graph_ambiguity.GraphAmbiguityTest.test_snapshot_names_the_other_graph_file_when_both_exist",
+            "test_summaries_graph_ambiguity.GraphAmbiguityTest.test_snapshot_reports_the_disagreeing_counts",
+        ),
     ),
     Mutation(
         "summaries remap no longer names a stale graph",
@@ -155,7 +207,9 @@ MUTATIONS = (
         "the second call site of the same warning, and the one that rewrites the "
         "committed summaries file - the snapshot half being covered is exactly how "
         "a half-wired check reads as done",
-        ("test_summaries_graph_ambiguity",),
+        (
+            "test_summaries_graph_ambiguity.GraphAmbiguityTest.test_remap_names_the_other_graph_file_too",
+        ),
     ),
     Mutation(
         "explorer built from a stale graph in silence",
@@ -165,7 +219,9 @@ MUTATIONS = (
         "the page is tracked and ships to readers who have no graph and no CLI to "
         "check it against; an operator hit the same shape when a refresh embedded a "
         "stale semantic layer beside a newly built graph and every gate passed",
-        ("test_summaries_graph_ambiguity",),
+        (
+            "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_explorer_names_the_other_graph",
+        ),
     ),
     Mutation(
         "deep dives built from a stale graph in silence",
@@ -173,7 +229,9 @@ MUTATIONS = (
         '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "dives.json"),\n        end="",\n        file=sys.stderr,\n    )',
         "    pass",
         "dives.json is a committed artefact, so a stale read is published rather than merely reported",
-        ("test_summaries_graph_ambiguity",),
+        (
+            "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_deep_dives_names_the_other_graph",
+        ),
     ),
     Mutation(
         "semantic layer built from a stale graph in silence",
@@ -181,7 +239,9 @@ MUTATIONS = (
         '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the semantic layer"),\n        end="",\n        file=sys.stderr,\n    )',
         "    pass",
         "the layer is committed and the explorer page embeds it, so the stale read reaches the page twice over",
-        ("test_summaries_graph_ambiguity",),
+        (
+            "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_semantic_index_names_the_other_graph",
+        ),
     ),
     Mutation(
         "the estate check runs against a stale graph in silence",
@@ -189,7 +249,9 @@ MUTATIONS = (
         '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),\n        end="",\n        file=sys.stderr,\n    )',
         "    pass",
         "the strongest form of the class: a truthfulness gate reading the wrong artefact passes on the wrong data, and its silence then licenses a claim about something it never looked at",
-        ("test_summaries_graph_ambiguity",),
+        (
+            "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_the_estate_check_names_the_other_graph",
+        ),
     ),
     Mutation(
         "upward write paths accepted again",
@@ -199,7 +261,13 @@ MUTATIONS = (
         "reported by SonarCloud as pythonsecurity:S8707 on write_json: a path "
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
-        ("test_io_write_targets", "test_read_path_policy"),
+        (
+            "test_io_write_targets.WriteTargetTest.test_gzip_text_refuses_an_upward_path",
+            "test_io_write_targets.WriteTargetTest.test_the_check_is_lexical_not_resolved",
+            "test_io_write_targets.WriteTargetTest.test_the_guard_reports_which_path_it_refused",
+            "test_io_write_targets.WriteTargetTest.test_write_json_refuses_an_upward_path",
+            "test_read_path_policy.ReadsAreNotConfinedTest.test_the_same_upward_path_is_refused_for_writing",
+        ),
     ),
     Mutation(
         "the write guard applied to the reads",
@@ -214,7 +282,10 @@ MUTATIONS = (
         "instead of suppressing was measured twice on the write side, at 48 and 4 "
         "failing tests, and nothing on the read path observed either until "
         "test_read_path_policy; with this applied the whole suite failed only there",
-        ("test_read_path_policy",),
+        (
+            "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_path_that_climbs_upward_is_accepted",
+            "test_read_path_policy.ReadsAreNotConfinedTest.test_the_same_upward_path_is_refused_for_writing",
+        ),
     ),
     Mutation(
         "deployments overwrites the committed graph from a stale one",
@@ -225,7 +296,7 @@ MUTATIONS = (
         "back, so a leftover graph.json overwrites the committed archive and "
         "loses its clustering - the only failure in this class that destroys an "
         "artefact rather than describing one wrongly",
-        ("test_stale_graph_refusal",),
+        ("test_stale_graph_refusal.StaleRefusalTest.test_deployments_refuses_and_writes_nothing",),
     ),
     Mutation(
         "one repository's several components lose their deployment joins",
@@ -238,7 +309,16 @@ MUTATIONS = (
         "also ships. Their deployment configuration then reached no code in the "
         "graph - a missing edge, which nothing in the report distinguishes from a "
         "service nobody deploys",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.DeploymentEdges.test_each_component_reaches_its_repository_and_the_stranger_is_reported",
+            "test_deployment_prefix_match.PrefixClaims.test_a_separator_inside_the_repository_name_is_not_a_difference",
+            "test_deployment_prefix_match.PrefixClaims.test_one_repository_claims_the_components_it_ships",
+            "test_deployment_prefix_match.PrefixClaims.test_the_longest_repository_name_claims_the_service",
+            "test_deployment_prefix_match.PrefixClaims.test_the_service_is_segmented_before_it_is_normalised",
+            "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
+            "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
+            "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+        ),
     ),
     Mutation(
         "the deployment leading-run rule runs before the rules it must not move",
@@ -249,7 +329,9 @@ MUTATIONS = (
         "re-points joins the segment and substring rules already made - "
         "`delta-agent` from `svc-deltaagent` to `delta` - which is not a new join "
         "but the same configuration silently attached to different code",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.PrefixClaims.test_the_segment_and_substring_rules_keep_precedence",
+        ),
     ),
     Mutation(
         "the deployment join crosses a word boundary again",
@@ -262,7 +344,10 @@ MUTATIONS = (
         "declared - valid on the page, wrong, and counted as a join, so it raised "
         "the match rate rather than showing as the gap it is. The floor cannot "
         "catch it: `alpha` is above the floor",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.PrefixClaims.test_a_namesake_does_not_claim_a_service_it_merely_starts",
+            "test_deployment_prefix_match.PrefixClaims.test_the_service_is_segmented_before_it_is_normalised",
+        ),
     ),
     Mutation(
         "the deployment leading-run rule matches in both directions",
@@ -273,7 +358,16 @@ MUTATIONS = (
         "inverts the join - a service named `alpha` would take a repository named "
         "`alpha-agent`, attaching one component's configuration to another's code, "
         "and the components the rule exists for lose their joins in the same move",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.DeploymentEdges.test_each_component_reaches_its_repository_and_the_stranger_is_reported",
+            "test_deployment_prefix_match.PrefixClaims.test_a_separator_inside_the_repository_name_is_not_a_difference",
+            "test_deployment_prefix_match.PrefixClaims.test_one_repository_claims_the_components_it_ships",
+            "test_deployment_prefix_match.PrefixClaims.test_the_longest_repository_name_claims_the_service",
+            "test_deployment_prefix_match.PrefixClaims.test_the_service_is_segmented_before_it_is_normalised",
+            "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
+            "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
+            "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+        ),
     ),
     Mutation(
         "a short repository name collects a whole naming convention",
@@ -285,7 +379,9 @@ MUTATIONS = (
         "need it. There the entire stem matched; here a leading run did, so at one "
         "to three characters the claimant is convention vocabulary (`ops-`, `ui-`) "
         "and a repository with that name takes every service behind the prefix",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.PrefixClaims.test_a_repository_name_below_the_floor_claims_nothing",
+        ),
     ),
     Mutation(
         "the deployment join normalises before it segments",
@@ -298,7 +394,16 @@ MUTATIONS = (
         "is a character prefix - which is how `alpha` came to claim "
         "`alphabet-agent`, a deployment relationship nothing declared. Reported by "
         "a store operator reading the implementation rather than its tests",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.DeploymentEdges.test_each_component_reaches_its_repository_and_the_stranger_is_reported",
+            "test_deployment_prefix_match.PrefixClaims.test_a_separator_inside_the_repository_name_is_not_a_difference",
+            "test_deployment_prefix_match.PrefixClaims.test_one_repository_claims_the_components_it_ships",
+            "test_deployment_prefix_match.PrefixClaims.test_the_longest_repository_name_claims_the_service",
+            "test_deployment_prefix_match.PrefixClaims.test_the_service_is_segmented_before_it_is_normalised",
+            "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
+            "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
+            "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+        ),
     ),
     Mutation(
         "the more specific repository loses the deployment claim",
@@ -309,7 +414,9 @@ MUTATIONS = (
         "one line to copy by mistake. Both `alpha` and `alpha-agent` are leading "
         "runs of `alpha-agent-worker`, and the shorter hands one real "
         "repository's production configuration to another",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.PrefixClaims.test_the_longest_repository_name_claims_the_service",
+        ),
     ),
     Mutation(
         "two deployment runs disagree about which repository was claimed",
@@ -321,7 +428,9 @@ MUTATIONS = (
         "whatever the hash seed put first in a set. Two runs of one build then "
         "write the deployment edge to different nodes, and the committed graph "
         "diff is the only place it is visible",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
+        ),
     ),
     Mutation(
         "a service no repository could match reads as a matcher gap",
@@ -334,7 +443,9 @@ MUTATIONS = (
         "them. Measured on one estate, that was every unmatched service, so the "
         "instruction the report gave was wrong for all of them and the match rate "
         "read as a matcher missing half its joins",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+        ),
     ),
     Mutation(
         "a shared abbreviation counts as a repository worth looking at",
@@ -345,7 +456,9 @@ MUTATIONS = (
         "them as name material hides the scope fact behind a coincidence - the "
         "expensive direction, because a suppressed scope fact reads as matcher work "
         "that can be done",
-        ("test_deployment_prefix_match",),
+        (
+            "test_deployment_prefix_match.Reachability.test_a_word_too_short_to_identify_is_not_a_candidate",
+        ),
     ),
     Mutation(
         "packages overwrites the committed graph from a stale one",
@@ -356,7 +469,9 @@ MUTATIONS = (
         "back, so a leftover graph.json overwrites the committed archive and "
         "loses its clustering - the only failure in this class that destroys an "
         "artefact rather than describing one wrongly",
-        ("test_stale_graph_refusal",),
+        (
+            "test_stale_graph_refusal.StaleRefusalTest.test_package_edges_refuses_and_writes_nothing",
+        ),
     ),
     Mutation(
         "gherkin overwrites the committed graph from a stale one",
@@ -367,7 +482,7 @@ MUTATIONS = (
         "back, so a leftover graph.json overwrites the committed archive and "
         "loses its clustering - the only failure in this class that destroys an "
         "artefact rather than describing one wrongly",
-        ("test_stale_graph_refusal",),
+        ("test_stale_graph_refusal.StaleRefusalTest.test_gherkin_refuses_and_writes_nothing",),
     ),
     Mutation(
         "the stale refusal stops saying which of the two files is stale",
@@ -382,7 +497,9 @@ MUTATIONS = (
         "loss. Reported firing on three stages in one documented sequence. Without "
         "this sentence the message names two directions and no way to tell them "
         "apart, which is a guess dressed as a choice",
-        ("test_stale_remedy_directions",),
+        (
+            "test_stale_remedy_directions.TheRefusalCarriesItsUncertainty.test_the_refusal_states_the_signal_that_separates_them",
+        ),
     ),
     Mutation(
         "layer merge re-points edges at unrelated nodes",
@@ -393,7 +510,10 @@ MUTATIONS = (
         "and concatenates its edges anyway, so every relationship it asserted about "
         "one entity becomes an assertion about another - 98 collisions carrying 311 "
         "edges on one estate, and the graph builds cleanly",
-        ("test_merge_layers",),
+        (
+            "test_merge_layers.MergeLayersTest.test_a_colliding_edge_never_points_at_the_ast_node",
+            "test_merge_layers.MergeLayersTest.test_main_writes_the_merged_extract",
+        ),
     ),
     Mutation(
         "layer merge keeps an edge whose endpoint is in neither layer",
@@ -403,7 +523,9 @@ MUTATIONS = (
         "guessing at a dangling endpoint is how a concatenation invents "
         "relationships; dropping it silently would be the same defect one step on, "
         "which is why the count is asserted too",
-        ("test_merge_layers",),
+        (
+            "test_merge_layers.MergeLayersTest.test_an_edge_with_no_endpoint_in_either_layer_is_dropped_and_counted",
+        ),
     ),
     Mutation(
         "layer merge accepts an empty layer",
@@ -413,7 +535,7 @@ MUTATIONS = (
         "every stage in this library that shipped doing nothing did so with a "
         "passing suite, and an empty input layer merges to a smaller graph that "
         "looks like a successful run",
-        ("test_merge_layers",),
+        ("test_merge_layers.MergeLayersTest.test_it_refuses_an_empty_layer",),
     ),
     Mutation(
         "most-connected report unwired",
@@ -423,7 +545,14 @@ MUTATIONS = (
         "#112: reporting through the function while nothing drives the CLI is the "
         "most repeated escape in this repository, and three existing entries in this "
         "module are the same shape",
-        ("test_most_connected",),
+        (
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_ranks_from_the_archive_alone",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_reads_the_plain_graph_when_both_exist",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_refuses_when_neither_file_exists",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_neither_refusal_points_at_only_one_of_the_two_files",
+            "test_most_connected.StatusCentralTest.test_the_flag_reports_the_ranking",
+        ),
     ),
     Mutation(
         "near-duplicate report unwired",
@@ -434,7 +563,16 @@ MUTATIONS = (
         "count the pipeline reported made it visible; a report that never reaches the "
         "CLI is the same silence with more code, and this is the most repeated escape "
         "in this repository",
-        ("test_duplicate_repositories",),
+        (
+            "test_duplicate_repositories.StatusDuplicatesTest.test_an_absent_graph_is_named_rather_than_reported_as_clean",
+            "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
+            "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_ranks_from_the_archive_alone",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_reads_the_plain_graph_when_both_exist",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_refuses_when_neither_file_exists",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_neither_refusal_points_at_only_one_of_the_two_files",
+        ),
     ),
     Mutation(
         "near-duplicate ranking loses its name tiebreak",
@@ -445,7 +583,10 @@ MUTATIONS = (
         "print in whatever order the set sizes happened to evaluate them - two runs "
         "on one store then differ, which hash-ordered iteration has already done here "
         "once and which is invisible until somebody diffs two builds",
-        ("test_duplicate_repositories",),
+        (
+            "test_duplicate_repositories.DeterminismTest.test_equal_overlaps_are_ordered_by_name",
+            "test_duplicate_repositories.PruningTest.test_a_bound_equal_to_the_worst_kept_overlap_is_still_evaluated",
+        ),
     ),
     Mutation(
         "near-duplicate pruning stops being an exact bound",
@@ -456,7 +597,10 @@ MUTATIONS = (
         "anything that shrinks it stops the walk before a pair that would have "
         "ranked, and the skipped near-copy reads as a clean estate - the exact "
         "failure #246 was raised about",
-        ("test_duplicate_repositories",),
+        (
+            "test_duplicate_repositories.PruningTest.test_a_bound_equal_to_the_worst_kept_overlap_is_still_evaluated",
+            "test_duplicate_repositories.PruningTest.test_an_underestimating_bound_would_stop_before_a_pair_that_ranks",
+        ),
     ),
     Mutation(
         "near-duplicate report finds something on an estate with nothing",
@@ -466,7 +610,10 @@ MUTATIONS = (
         "the sensitivity control: a report that always prints a top ten is a report "
         "nobody reads, and this library has already shipped a check whose clean "
         "verdict was printed over nothing it had read",
-        ("test_duplicate_repositories",),
+        (
+            "test_duplicate_repositories.OverlapMeasurementTest.test_an_estate_sharing_no_pair_prints_nothing",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_an_estate_sharing_no_pair_still_prints_nothing",
+        ),
     ),
     Mutation(
         "most-connected loses its edge-key fallback",
@@ -476,7 +623,7 @@ MUTATIONS = (
         "graphify writes `links` in node-link JSON and `edges` in its extract files, "
         "so reading one key silently ranks nothing on half the artefacts this is "
         "pointed at - indistinguishable from a graph with no edges",
-        ("test_most_connected",),
+        ("test_most_connected.MostConnectedTest.test_it_reads_edges_as_well_as_links",),
     ),
     Mutation(
         "the committed archive is no longer read when the plain graph is absent",
@@ -489,7 +636,16 @@ MUTATIONS = (
         "life in and the state an operator reaches for `--duplicates` from; both "
         "readers already accepted the `.gz` and only the guard refused, and the "
         "way out was a multi-gigabyte gunzip for a report documented as cheap",
-        ("test_graph_to_read", "test_summaries_membership_drift"),
+        (
+            "test_graph_to_read.GraphToReadTest.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_an_estate_sharing_no_pair_still_prints_nothing",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_ranks_from_the_archive_alone",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_ranks_from_the_archive_alone",
+            "test_summaries_membership_drift.AdriftStage.test_a_refusal_message_names_the_file_that_was_actually_read",
+            "test_summaries_membership_drift.AdriftStage.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
+        ),
     ),
     Mutation(
         "the archive is preferred over the graph a run has just written",
@@ -501,10 +657,19 @@ MUTATIONS = (
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
         (
-            "test_duplicate_repositories",
-            "test_graph_to_read",
-            "test_most_connected",
-            "test_summaries_membership_drift",
+            "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
+            "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
+            "test_graph_to_read.GraphToReadTest.test_the_archive_is_offered_from_a_path_that_already_names_it",
+            "test_graph_to_read.GraphToReadTest.test_the_plain_graph_is_preferred_when_both_exist",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_reads_the_plain_graph_when_both_exist",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_reads_the_plain_graph_when_both_exist",
+            "test_most_connected.StatusCentralTest.test_the_flag_reports_the_ranking",
+            "test_summaries_membership_drift.AdriftStage.test_a_healthy_store_exits_zero",
+            "test_summaries_membership_drift.AdriftStage.test_drift_exits_non_zero_so_a_refresh_can_gate_on_it",
+            "test_summaries_membership_drift.AdriftStage.test_no_membership_in_the_graph_exits_two_and_names_the_cause",
+            "test_summaries_membership_drift.AdriftStage.test_the_check_names_the_graph_file_it_read",
+            "test_summaries_membership_drift.AdriftStage.test_the_report_reconciles_its_populations_against_the_committed_summaries",
+            "test_summaries_membership_drift.AdriftStage.test_the_subcommand_is_reachable_and_takes_its_flags",
         ),
     ),
     Mutation(
@@ -516,7 +681,10 @@ MUTATIONS = (
         "degree-driven, so the two rank differently; the same silence about which "
         "file was read is what made an operator diff two graphs by hand after a "
         "stage reported confidently on a leftover",
-        ("test_graph_to_read",),
+        (
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_reads_the_plain_graph_when_both_exist",
+        ),
     ),
     Mutation(
         "the near-duplicate report stops naming the graph it read",
@@ -527,7 +695,10 @@ MUTATIONS = (
         "committed archive and the same percentage from a stale leftover are "
         "different claims, and a header that does not name its file leaves the "
         "reader to guess which of a store's two graphs the estate is described from",
-        ("test_graph_to_read",),
+        (
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_names_the_file_it_read",
+            "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_reads_the_plain_graph_when_both_exist",
+        ),
     ),
     Mutation(
         "estate check stops matching name segments",
@@ -537,7 +708,9 @@ MUTATIONS = (
         "#179: a whole-label match reported `NgRx` absent while the estate held it "
         "under eight scoped package names across 228 labels - a check that fires on "
         "an entire ecosystem's naming convention gets switched off",
-        ("test_estate_segment_match",),
+        (
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_scoped_package_no_longer_reads_as_absent",
+        ),
     ),
     Mutation(
         "the segment floor is removed",
@@ -547,7 +720,10 @@ MUTATIONS = (
         "without a floor the looser match becomes a substring match in effect, and "
         "a two-character segment would corroborate a two-character claim - the "
         "false-negative direction, which fails reassuringly",
-        ("test_estate_segment_match",),
+        (
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_short_term_is_not_matched_against_a_segment",
+            "test_estate_segment_match.NameSegmentTest.test_segments_below_the_floor_are_not_offered",
+        ),
     ),
     Mutation(
         "the stem basis option stops affecting ids",
@@ -557,7 +733,9 @@ MUTATIONS = (
         "#115: threading an option through and having it change nothing is the "
         "wiring escape this gate already records four times, and here it would "
         "leave a store believing it had adopted the extension basis",
-        ("test_stem_basis",),
+        (
+            "test_stem_basis.MigrationCostTest.test_the_opt_in_basis_keeps_two_extension_siblings_apart",
+        ),
     ),
     Mutation(
         "the migration cost stops being counted",
@@ -567,7 +745,10 @@ MUTATIONS = (
         "#115 can only be decided on each estate's own number; the issue's figures "
         "are one estate's, and a cost nobody can measure locally is one nobody acts "
         "on",
-        ("test_stem_basis",),
+        (
+            "test_stem_basis.CliTest.test_main_reports_the_cost",
+            "test_stem_basis.MigrationCostTest.test_the_cost_is_counted_on_a_default_run",
+        ),
     ),
     Mutation(
         "AST ids stop being namespaced by repository",
@@ -578,7 +759,11 @@ MUTATIONS = (
         "inside a file, so one estate had one shared id across most of its "
         "repositories - a dedupe then makes it a single node adjacent to many "
         "unrelated services and the highest-degree node in the graph",
-        ("test_merge_layers",),
+        (
+            "test_merge_layers.NamespaceByRepositoryTest.test_an_edge_inside_one_repository_is_rewritten",
+            "test_merge_layers.NamespaceByRepositoryTest.test_an_edge_spanning_two_repositories_is_left_alone_and_counted",
+            "test_merge_layers.NamespaceByRepositoryTest.test_the_same_declaration_in_two_repositories_stays_two_nodes",
+        ),
     ),
     Mutation(
         "a cross-repository AST edge is attributed to one side",
@@ -588,7 +773,9 @@ MUTATIONS = (
         "the fix is exact only while both endpoints belong to one repository; "
         "attributing an edge that spans two is the guess the rewrite exists to "
         "avoid",
-        ("test_merge_layers",),
+        (
+            "test_merge_layers.NamespaceByRepositoryTest.test_an_edge_spanning_two_repositories_is_left_alone_and_counted",
+        ),
     ),
     Mutation(
         "iter_array matches a nested key again",
@@ -603,7 +790,14 @@ MUTATIONS = (
         "fully clustered graph. Two guards built on those counts then read (0, 0) "
         "against (0, 0) as agreement, and one of them was a refusal protecting an "
         "irreversible overwrite. Shipped in v0.14.0",
-        ("test_top_level_array",),
+        (
+            "test_top_level_array.TopLevelArrayTest.test_a_nested_array_of_the_same_name_is_ignored",
+            "test_top_level_array.TopLevelArrayTest.test_graph_counts_is_not_zero_on_a_clustered_graph",
+            "test_top_level_array.TopLevelArrayTest.test_it_reads_a_gzipped_graph",
+            "test_top_level_array.TopLevelArrayTest.test_it_yields_nodes_not_hyperedge_id_strings",
+            "test_top_level_array.TopLevelArrayTest.test_the_data_loss_refusal_fires_on_a_graph_with_hyperedges",
+            "test_top_level_array.TopLevelArrayTest.test_the_mismatch_line_fires_on_a_graph_with_hyperedges",
+        ),
     ),
     Mutation(
         "a stale graph is ranked rather than refused",
@@ -615,7 +809,11 @@ MUTATIONS = (
         "re-take the snapshot and re-author what the report names - which on that "
         "store would have destroyed five thousand correct summaries. A read failure "
         "answered by rewriting prose is the worst outcome this check has",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.AdriftStage.test_a_stale_counterpart_graph_refuses_rather_than_ranking",
+            "test_summaries_membership_drift.AdriftStage.test_no_count_is_stated_before_the_staleness_check",
+            "test_summaries_membership_drift.AdriftStage.test_the_disagreement_line_ends_with_a_newline",
+        ),
     ),
     Mutation(
         "nothing compares the snapshot to the graph",
@@ -626,7 +824,14 @@ MUTATIONS = (
         "reports counts derived from it, and nothing checked that it still described the "
         "graph - so every summary could sit on a community it no longer describes with "
         "`status` reporting the same coverage either way",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.AdriftStage.test_drift_exits_non_zero_so_a_refresh_can_gate_on_it",
+            "test_summaries_membership_drift.AdriftStage.test_the_subcommand_is_reachable_and_takes_its_flags",
+            "test_summaries_membership_drift.MembershipDrift.test_a_community_whose_members_scattered_is_adrift",
+            "test_summaries_membership_drift.MembershipDrift.test_communities_are_reported_in_a_stable_order",
+            "test_summaries_membership_drift.MembershipDrift.test_ids_are_compared_exactly_as_the_remap_compares_them",
+            "test_summaries_membership_drift.MembershipDrift.test_the_snapshot_taken_from_a_stale_graph_is_caught",
+        ),
     ),
     Mutation(
         "summaries with no snapshot entry silently excluded",
@@ -636,7 +841,11 @@ MUTATIONS = (
         "the `if cid in snapshot` shape: prose that can be neither checked nor re-keyed - a "
         "remap cannot even withdraw it - dropped from the population, after which the count "
         "reads as though it had covered everything",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.AdriftStage.test_the_report_reconciles_its_populations_against_the_committed_summaries",
+            "test_summaries_membership_drift.MembershipDrift.test_a_summary_with_no_snapshot_entry_is_reported_not_skipped",
+            "test_summaries_membership_drift.MembershipDrift.test_an_empty_snapshot_entry_counts_as_unsnapshotted_not_as_total_loss",
+        ),
     ),
     Mutation(
         "a graph carrying no membership reported as total drift",
@@ -647,7 +856,9 @@ MUTATIONS = (
         "that printed success without writing its result makes every comparison fail; read as "
         "drift that would send someone re-authoring an entire store over a one-line read "
         "failure",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.MembershipDrift.test_no_membership_read_is_named_as_its_own_cause",
+        ),
     ),
     Mutation(
         "an id-space mismatch reported as moved membership",
@@ -657,7 +868,9 @@ MUTATIONS = (
         "a first implementation of this check elsewhere reported 58 communities adrift of "
         "which 57 were not, because the snapshot's ids were bare and the graph's carried a "
         "`<repo>::` prefix; naming it is what keeps the fix from being a looser comparison",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.MembershipDrift.test_an_id_space_mismatch_is_named_rather_than_silently_corrected",
+        ),
     ),
     Mutation(
         "status leaves its summary count to be read as a verdict",
@@ -667,7 +880,10 @@ MUTATIONS = (
         "the count is identical whether the prose still describes its community or not, and an "
         "operator read exactly that line as healthy; `status` cannot read the graph, so naming "
         "the blind spot is the only honest thing it can do there",
-        ("test_summaries_membership_drift",),
+        (
+            "test_summaries_membership_drift.StatusNamesItsBlindSpot.test_a_missing_snapshot_is_named_where_the_count_is_reported",
+            "test_summaries_membership_drift.StatusNamesItsBlindSpot.test_status_says_the_summary_count_does_not_mean_the_prose_still_fits",
+        ),
     ),
     Mutation(
         "declared boundary never reaches the manifest",
@@ -677,7 +893,13 @@ MUTATIONS = (
         "the unwired-check class this library has shipped twice - the parse works, "
         "the rendering works, and the committed artefact a reader opens says none of "
         "it, which is indistinguishable from an estate that declared nothing",
-        ("test_estate_boundary",),
+        (
+            "test_estate_boundary.ManifestTest.test_a_malformed_declaration_stops_the_manifest_build",
+            "test_estate_boundary.ManifestTest.test_a_snapshot_or_alias_with_no_ruling_still_reaches_the_manifest",
+            "test_estate_boundary.ManifestTest.test_completeness_is_never_claimed_either_way",
+            "test_estate_boundary.ManifestTest.test_the_declaration_reaches_the_written_manifest",
+            "test_estate_boundary.ManifestTest.test_the_manifest_says_when_no_boundary_is_declared",
+        ),
     ),
     Mutation(
         "store stops saying it does not claim completeness",
@@ -687,7 +909,7 @@ MUTATIONS = (
         "a declaration that reads as `this is all of it` is a new false claim "
         "replacing the old silent one; the estate that prompted this had enumerated "
         "its hosts and was still hunting services with no locatable repository",
-        ("test_estate_boundary",),
+        ("test_estate_boundary.ManifestTest.test_completeness_is_never_claimed_either_way",),
     ),
     Mutation(
         "declared repository with no ruling vanishes from the manifest",
@@ -697,7 +919,9 @@ MUTATIONS = (
         "written this way first, and found by re-reading the artefact rather than by a "
         "test: a repository declared only by a snapshot date or only by an alias parsed "
         "cleanly, was counted in the status summary, and reached no reader at all",
-        ("test_estate_boundary",),
+        (
+            "test_estate_boundary.ManifestTest.test_a_snapshot_or_alias_with_no_ruling_still_reaches_the_manifest",
+        ),
     ),
     Mutation(
         "status no longer says the boundary is undeclared",
@@ -707,7 +931,7 @@ MUTATIONS = (
         "silence is the state every store starts in, so a report that speaks only "
         "for the configured case never reaches the stores that most need telling "
         "what their own absences mean",
-        ("test_estate_boundary",),
+        ("test_estate_boundary.StatusTest.test_the_report_is_wired_into_the_status_run",),
     ),
     Mutation(
         "off-host name stops resolving to the repository held",
@@ -717,7 +941,10 @@ MUTATIONS = (
         "the false absence the declaration exists to remove, reintroduced inside it: "
         "a ruling written under the off-host name keys itself under a name no store "
         "holds, so `status` reports a held repository as missing",
-        ("test_estate_boundary",),
+        (
+            "test_estate_boundary.ParsingTest.test_a_ruling_under_an_off_host_name_lands_on_the_repository_held",
+            "test_estate_boundary.ParsingTest.test_two_rulings_for_one_repository_are_refused",
+        ),
     ),
     Mutation(
         "declaration stops being reconciled against disk",
@@ -727,7 +954,10 @@ MUTATIONS = (
         "a declaration nothing checks is a second artefact that can be quietly "
         "wrong, and a repository ruled live and not held is the exact shape of the "
         "published finding that was drawn honestly and was false",
-        ("test_estate_boundary",),
+        (
+            "test_estate_boundary.StatusTest.test_it_names_a_repository_declared_active_and_not_held",
+            "test_estate_boundary.StatusTest.test_it_names_a_repository_held_and_ruled_out",
+        ),
     ),
     Mutation(
         "fan-out progress derived from the dispatch log again",
@@ -739,7 +969,14 @@ MUTATIONS = (
         "announced by diffing the plan against a log that did not cover the early "
         "rounds, and a redundant round of a dozen agents launched for it. Every "
         "extraction was on disk the whole time",
-        ("test_chunk_status", "test_fanout_dispatch_guidance"),
+        (
+            "test_chunk_status.ChunkStatusTest.test_a_chunk_in_the_log_with_no_output_is_not_done",
+            "test_chunk_status.ChunkStatusTest.test_a_chunk_on_disk_but_absent_from_the_log_counts_as_done",
+            "test_chunk_status.ChunkStatusTest.test_a_well_formed_file_with_no_nodes_key_is_not_done",
+            "test_chunk_status.ChunkStatusTest.test_an_unusable_chunk_file_is_not_counted_as_done",
+            "test_chunk_status.ChunkStatusTest.test_output_for_an_unplanned_chunk_is_reported",
+            "test_fanout_dispatch_guidance.FanoutDispatchGuidanceTest.test_the_command_the_skill_documents_runs_and_reports",
+        ),
     ),
     Mutation(
         "never-sent folded back into in-flight",
@@ -750,7 +987,14 @@ MUTATIONS = (
         "of 'no output' need opposite responses - and merging them is what left a run "
         "of rejected low-numbered chunks sitting behind ninety higher-numbered ids "
         "under plan-ordered dispatch",
-        ("test_chunk_status", "test_fanout_dispatch_guidance"),
+        (
+            "test_chunk_status.ChunkStatusTest.test_a_fused_token_is_diagnosed_but_never_repaired",
+            "test_chunk_status.ChunkStatusTest.test_a_log_token_matching_no_chunk_is_reported_not_counted",
+            "test_chunk_status.ChunkStatusTest.test_never_sent_is_separated_from_in_flight",
+            "test_chunk_status.ChunkStatusTest.test_several_logs_are_read_together",
+            "test_chunk_status.ChunkStatusTest.test_without_a_log_the_split_is_reported_as_unknown",
+            "test_fanout_dispatch_guidance.FanoutDispatchGuidanceTest.test_the_command_the_skill_documents_runs_and_reports",
+        ),
     ),
     Mutation(
         "corrupt log tokens counted rather than reported",
@@ -762,7 +1006,10 @@ MUTATIONS = (
         "flight` and deflated `NEVER SENT` for several rounds while every total "
         "stayed plausible. A status tool that launders a corrupt log into a confident "
         "number is worse than no tool, because it is trusted",
-        ("test_chunk_status",),
+        (
+            "test_chunk_status.ChunkStatusTest.test_a_log_token_matching_no_chunk_is_reported_not_counted",
+            "test_chunk_status.ChunkStatusTest.test_fused_ids_are_diagnosed_as_a_concatenation",
+        ),
     ),
     Mutation(
         "never-sent asserted where it cannot be known",
@@ -773,7 +1020,7 @@ MUTATIONS = (
         "log every outstanding chunk falls out of `classify` as never-sent, and "
         "printing that as a finding tells an operator to redispatch work in progress "
         "- the opposite error, and equally expensive",
-        ("test_chunk_status",),
+        ("test_chunk_status.ChunkStatusTest.test_without_a_log_the_split_is_reported_as_unknown",),
     ),
     Mutation(
         "an unusable chunk file counted as progress",
@@ -784,7 +1031,9 @@ MUTATIONS = (
         "leave a file, so a reader that counts files reports the chunk extracted and "
         "it is never redone. `merge-chunks` refuses the same file, so the gap would "
         "surface only once the archive had been assembled",
-        ("test_chunk_status",),
+        (
+            "test_chunk_status.ChunkStatusTest.test_a_well_formed_file_with_no_nodes_key_is_not_done",
+        ),
     ),
     Mutation(
         "a truncated chunk file aborts the report",
@@ -795,7 +1044,7 @@ MUTATIONS = (
         "cannot proceed, fatal for the one stage whose job is to describe the mess. "
         "One truncated file would take the whole progress report with it, at the "
         "moment it is most needed",
-        ("test_chunk_status",),
+        ("test_chunk_status.ChunkStatusTest.test_an_unusable_chunk_file_is_not_counted_as_done",),
     ),
     Mutation(
         "the chunk plan counted as an extraction",
@@ -806,7 +1055,11 @@ MUTATIONS = (
         "own denominator would arrive as a completed chunk - a wrong numerator and a "
         "wrong denominator at once. `merge-chunks` carries the same guard, which is "
         "why it is worth having twice",
-        ("test_chunk_status",),
+        (
+            "test_chunk_status.ChunkStatusTest.test_a_well_formed_file_with_no_nodes_key_is_not_done",
+            "test_chunk_status.ChunkStatusTest.test_an_unusable_chunk_file_is_not_counted_as_done",
+            "test_chunk_status.ChunkStatusTest.test_the_plan_is_not_mistaken_for_an_extraction",
+        ),
     ),
     Mutation(
         "progress estimated with no plan to measure against",
@@ -816,7 +1069,7 @@ MUTATIONS = (
         "the plan is the only map from chunk number to file list, so without it "
         "there is no denominator and nothing to name as missing. Reporting `0 of 0` "
         "reads as a finished fan-out",
-        ("test_chunk_status",),
+        ("test_chunk_status.ChunkStatusTest.test_no_plan_is_refused_rather_than_estimated",),
     ),
     Mutation(
         "content set written empty",
@@ -826,7 +1079,11 @@ MUTATIONS = (
         "an empty path list makes every search over it return no matches, and no "
         "matches reads as a confident answer about the estate rather than as a "
         "missing detect result - the exact failure mode the artefact exists to end",
-        ("test_content_set", "test_refusal_remedies_are_runnable"),
+        (
+            "test_content_set.StageTest.test_it_refuses_to_write_an_empty_set",
+            "test_refusal_remedies_are_runnable.TheRefusalsAnOperatorActuallySees.test_every_refusal_names_the_call_that_produces_the_file",
+            "test_refusal_remedies_are_runnable.TheRefusalsAnOperatorActuallySees.test_every_stage_refuses_rather_than_writing_something",
+        ),
     ),
     Mutation(
         "refusal sends an operator to a step nothing provides",
@@ -838,7 +1095,11 @@ MUTATIONS = (
         "`graphify detect` subcommand and `graphify update` at the store root writes "
         "no detect result, so the remedy named a step an operator could not perform "
         "and the only route to the file was undocumented",
-        ("test_refusal_remedies_are_runnable",),
+        (
+            "test_refusal_remedies_are_runnable.TheRefusalsAnOperatorActuallySees.test_every_refusal_names_the_call_that_produces_the_file",
+            "test_refusal_remedies_are_runnable.TheRefusalsAnOperatorActuallySees.test_every_refusal_resolves_under_the_sweep",
+            "test_refusal_remedies_are_runnable.TheSweepOverEveryOperatorMessage.test_no_message_names_a_step_nothing_provides",
+        ),
     ),
     Mutation(
         "noise figure claimed from a tree nobody measured",
@@ -848,7 +1109,11 @@ MUTATIONS = (
         "a sparse clone has no corpus, so the tree count is zero and zero renders "
         "as 'no noise' - the most flattering reading of the least measured case, on "
         "the one artefact whose whole purpose is to say the tree is mostly noise",
-        ("test_content_set",),
+        (
+            "test_content_set.StageTest.test_it_claims_no_noise_figure_when_the_corpus_is_not_on_disk",
+            "test_content_set.StageTest.test_it_warns_when_a_path_could_not_be_made_relative",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_claims_no_tree_percentage_when_the_manifest_did_not_measure_one",
+        ),
     ),
     Mutation(
         "content files counted as noise",
@@ -858,7 +1123,13 @@ MUTATIONS = (
         "written and caught during #213: `bearing` holds directories, so no file "
         "path is ever in it and every content file was tallied as noise. The "
         "percentage came out higher, which is the direction that gets believed",
-        ("test_content_set",),
+        (
+            "test_content_set.NoiseAttributionTest.test_a_content_file_is_never_counted_as_noise",
+            "test_content_set.NoiseAttributionTest.test_a_non_content_file_beside_content_is_named_rather_than_dropped",
+            "test_content_set.NoiseAttributionTest.test_every_non_content_file_is_attributed_exactly_once",
+            "test_content_set.NoiseAttributionTest.test_the_order_is_stable_when_two_directories_tie",
+            "test_content_set.StageTest.test_it_names_the_dominant_noise_directory_and_reconciles_the_tally",
+        ),
     ),
     Mutation(
         "noise attributed to the file's own directory",
@@ -868,7 +1139,10 @@ MUTATIONS = (
         "the shallowest contentless directory is the finding; the deepest one is "
         "thousands of content-hash directories holding one file each, which turns a "
         "single dominant noise source into an unreadable list",
-        ("test_content_set",),
+        (
+            "test_content_set.NoiseAttributionTest.test_a_repository_holding_no_content_is_named_as_a_whole",
+            "test_content_set.NoiseAttributionTest.test_noise_is_attributed_to_the_shallowest_directory_holding_no_content",
+        ),
     ),
     Mutation(
         "noise roots lose their tiebreak",
@@ -879,7 +1153,9 @@ MUTATIONS = (
         "supplied the tree in, so a committed manifest differs between two builds "
         "that changed nothing - the class of non-determinism that is invisible "
         "until somebody diffs two stores",
-        ("test_content_set",),
+        (
+            "test_content_set.NoiseAttributionTest.test_the_order_is_stable_when_two_directories_tie",
+        ),
     ),
     Mutation(
         "directory symlinks walked again",
@@ -889,7 +1165,7 @@ MUTATIONS = (
         "a followed link reports the same files twice under two paths, inflating "
         "the tree count that is the denominator of every percentage this stage "
         "prints; symlink duplication has already produced three wrong figures here",
-        ("test_content_set",),
+        ("test_content_set.TreeWalkTest.test_a_directory_symlink_is_not_followed",),
     ),
     Mutation(
         "content set report unwired",
@@ -899,7 +1175,12 @@ MUTATIONS = (
         "the fourth instance of this repository's most repeated escape, and #213 "
         "itself is the consequence: the pipeline knew what it considered content "
         "and nothing said so, so every consumer re-derived it badly",
-        ("test_content_set",),
+        (
+            "test_content_set.StatusReportsTheContentSetTest.test_it_claims_no_tree_percentage_when_the_manifest_did_not_measure_one",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_does_not_call_a_set_stale_when_there_is_no_detect_result_to_compare",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_says_a_content_set_is_stale_when_detect_has_moved_on",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_says_the_content_set_is_not_exposed_when_nothing_wrote_one",
+        ),
     ),
     Mutation(
         "a set that cannot be judged reported as stale",
@@ -909,7 +1190,9 @@ MUTATIONS = (
         "detect is a graphify working file a store need not keep, so a store "
         "without one would be told its content set was stale on every single run - "
         "which is how a real warning stops being read",
-        ("test_content_set",),
+        (
+            "test_content_set.StatusReportsTheContentSetTest.test_it_does_not_call_a_set_stale_when_there_is_no_detect_result_to_compare",
+        ),
     ),
     Mutation(
         "only the store root's output is refused",
@@ -922,7 +1205,7 @@ MUTATIONS = (
         "clone sync deliberately preserves and every repository in the corpus can "
         "hold one. A refusal anchored at the store root alone passes the corpus copies "
         "through, which is where most of them are",
-        ("test_extract_ast",),
+        ("test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",),
     ),
     Mutation(
         "the pipeline parses its own output again",
@@ -935,7 +1218,11 @@ MUTATIONS = (
         "handed to the parser as source. Found by watching a run parse a graph file, "
         "because an exclusion list has no failing case: correct the day it is written "
         "and silently wrong at the next new artefact",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",
+            "test_extract_ast.ExtractAstTest.test_the_pipelines_own_output_is_refused",
+            "test_extract_ast.ExtractAstTest.test_the_refusal_covers_an_explicit_file_list_too",
+        ),
     ),
     Mutation(
         "one repository's failure loses the estate again",
@@ -947,7 +1234,13 @@ MUTATIONS = (
         "produced no output at all, with nothing to attribute it to. Reverting to an "
         "unisolated loop restores exactly that, and the run reads as a parser problem "
         "rather than as one repository's",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.ExtractAstTest.test_a_partial_layer_still_exits_non_zero",
+            "test_extract_ast.ExtractAstTest.test_one_repository_failing_does_not_lose_the_others",
+            "test_extract_ast.MovementTest.test_a_failed_repository_is_not_recorded_as_zero",
+            "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
+            "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+        ),
     ),
     Mutation(
         "a partial layer reports success",
@@ -959,7 +1252,15 @@ MUTATIONS = (
         "green over a layer missing whole repositories - the shape of every escape "
         "found in this library, a check that reads one artefact and is silent about "
         "the one that matters",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.ExtractAstTest.test_a_partial_layer_still_exits_non_zero",
+            "test_extract_ast.ExtractAstTest.test_one_repository_failing_does_not_lose_the_others",
+            "test_extract_ast.MovementTest.test_a_failed_repository_is_not_recorded_as_zero",
+            "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
+            "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+            "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
+            "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+        ),
     ),
     Mutation(
         "a repository that shrank is never named",
@@ -971,7 +1272,12 @@ MUTATIONS = (
         "decreases on one refresh. Reconciling a run against its own input catches input "
         "dropped within a run; it cannot catch a repository extracting less than last "
         "time, where every count reconciles and the store loses structure quietly",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
+            "test_extract_ast.MovementTest.test_a_repository_that_shrank_is_named_and_does_not_fail_the_run",
+            "test_extract_ast.MovementTest.test_gone_and_new_are_reported_as_different_things",
+            "test_extract_ast.MovementTest.test_nothing_moving_says_so_rather_than_printing_a_movement_report",
+        ),
     ),
     Mutation(
         "a decrease is reported as no movement",
@@ -982,7 +1288,10 @@ MUTATIONS = (
         "new repositories, an operator sees a movement section and reads its silence on "
         "decreases as an all-clear. A report that runs is the strongest possible "
         "disguise for a check that does not",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
+            "test_extract_ast.MovementTest.test_a_repository_that_shrank_is_named_and_does_not_fail_the_run",
+        ),
     ),
     Mutation(
         "a failed repository is dropped from the baseline",
@@ -994,7 +1303,10 @@ MUTATIONS = (
         "the next run and new on the one after, and the count its recovery would be "
         "compared against was gone. With every repository failing, the whole baseline was "
         "replaced with nothing - a failed run erasing the record of what it cost",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
+            "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+        ),
     ),
     Mutation(
         "the per-repository bound never fires",
@@ -1005,7 +1317,10 @@ MUTATIONS = (
         "to an operator who is asleep - the run has to end. The first version of this "
         "stage had the attribution and no bound, so a pathological parse was identifiable "
         "and still unbounded",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
+            "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+        ),
     ),
     Mutation(
         "files the extractor could not read are discarded again",
@@ -1017,7 +1332,7 @@ MUTATIONS = (
         "doing so, and this stage dropped that field on the floor. A repository that "
         "parsed none of its files reported as extracted with a node count of zero and "
         "no explanation - the information existed, was handed over, and was not read",
-        ("test_extract_ast",),
+        ("test_extract_ast.UnreadFilesTest.test_files_the_extractor_could_not_read_are_named",),
     ),
     Mutation(
         "the bound is swallowed by the extractor's own error handling",
@@ -1031,7 +1346,9 @@ MUTATIONS = (
         "exact failure the movement check exists to catch a whole run later - while "
         "reporting the repository as extracted. Deriving from Exception reads like a "
         "tidy-up",
-        ("test_extract_ast",),
+        (
+            "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+        ),
     ),
     Mutation(
         "the alarm is left armed for a later stage",
@@ -1042,7 +1359,7 @@ MUTATIONS = (
         "runs next in the same process and names a repository that stage never touched. "
         "The hardest class of failure to attribute, introduced by the fix for the one "
         "above",
-        ("test_extract_ast",),
+        ("test_extract_ast.TimeLimitTest.test_the_alarm_is_cleared_afterwards",),
     ),
     Mutation(
         "an empty layer looks like a successful extraction",
@@ -1053,7 +1370,7 @@ MUTATIONS = (
         "reason: an empty layer merged silently produces a smaller graph that reads "
         "as a successful run. Without it here the symptom surfaces two stages later "
         "as a merge failure rather than at the stage that produced it",
-        ("test_extract_ast",),
+        ("test_extract_ast.ExtractAstTest.test_an_empty_content_set_is_refused",),
     ),
     Mutation(
         "a cut's edges counted per endpoint rather than per edge",
@@ -1065,7 +1382,14 @@ MUTATIONS = (
         "misled it. On the reporting estate a file-level cut kept tens of thousands of "
         "nodes joined by low hundreds of edges - with `|` that cut reports as keeping a "
         "graph, and nothing downstream disagrees until clustering",
-        ("test_size_cuts",),
+        (
+            "test_size_cuts.SurvivingEdges.test_a_file_level_cut_keeps_mass_and_no_structure",
+            "test_size_cuts.SurvivingEdges.test_an_edge_between_two_survivors_is_kept",
+            "test_size_cuts.SurvivingEdges.test_an_edge_with_one_surviving_endpoint_is_not_kept",
+            "test_size_cuts.SurvivingEdges.test_ids_are_not_shared_between_graph_files",
+            "test_size_cuts.TheStageAsRun.test_the_counts_reach_the_telemetry_record_as_integers",
+            "test_size_cuts.WhatTheReportSays.test_a_cut_that_keeps_nodes_and_no_edges_is_named",
+        ),
     ),
     Mutation(
         "an unmatched cut rule reported as a rule with nothing to do",
@@ -1075,7 +1399,9 @@ MUTATIONS = (
         "#116: a glob written for a path form the graph does not use selects nothing and "
         "reads exactly like a clean run - the same silence a `match` rule that selected "
         "no repository already has a reporter for, one artefact along",
-        ("test_size_cuts",),
+        (
+            "test_size_cuts.WhatTheReportSays.test_a_rule_that_matched_nothing_is_named_with_its_line",
+        ),
     ),
     Mutation(
         "a cut that strands every node it keeps reported as a smaller graph",
@@ -1085,7 +1411,7 @@ MUTATIONS = (
         "#116: mass without structure is the failure the issue found counter-intuitive, "
         "and clustering, centrality and summaries are all degree-driven, so the estate "
         "prose is generated from a layer nothing joins",
-        ("test_size_cuts",),
+        ("test_size_cuts.WhatTheReportSays.test_a_cut_that_keeps_nodes_and_no_edges_is_named",),
     ),
     Mutation(
         "sizing zeros written over the last refresh's counts",
@@ -1096,7 +1422,7 @@ MUTATIONS = (
         "comparison available, because two estates measured layer ratios a hundredfold "
         "apart. A run pointed at a path holding no `nodes` array would record zeros over "
         "the only baseline there is, and report a successful run doing it",
-        ("test_size_cuts",),
+        ("test_size_cuts.TheStageAsRun.test_reading_no_node_refuses_and_records_nothing",),
     ),
     Mutation(
         "the cut sizing measured and discarded",
@@ -1106,7 +1432,12 @@ MUTATIONS = (
         "#116 over #154: without the record a candidate's counts live in one afternoon's "
         "scrollback, so the next refresh cannot say whether the cut it applied still "
         "keeps what it kept - the wiring escape this gate already records six times",
-        ("test_size_cuts",),
+        (
+            "test_size_cuts.TheStageAsRun.test_a_compressed_per_repository_graph_is_read",
+            "test_size_cuts.TheStageAsRun.test_it_reads_the_layer_as_extracted_by_default",
+            "test_size_cuts.TheStageAsRun.test_the_counts_reach_the_telemetry_record_as_integers",
+            "test_size_cuts.TheStageAsRun.test_the_uncompressed_graph_wins_and_the_pair_is_reported",
+        ),
     ),
     Mutation(
         "a `**` glob accepted and read as a single wildcard",
@@ -1117,7 +1448,10 @@ MUTATIONS = (
         "separator and silently drops a file at a repository's root. A rule that matches "
         "less than it says is the class that put a whole extension's nodes outside a cut "
         "nobody could see was narrow",
-        ("test_size_cuts",),
+        (
+            "test_size_cuts.CutsFileRefusals.test_a_double_star_glob_is_refused",
+            "test_size_cuts.TheStageAsRun.test_an_unreadable_cuts_file_is_named_before_any_graph_is_read",
+        ),
     ),
     Mutation(
         "merge inputs read from the declaration again",
@@ -1131,7 +1465,18 @@ MUTATIONS = (
         "discarded, and the glob-driven merge read it. Any reconciliation walking "
         "config/repositories.txt skips exactly that input and reports clean, which is "
         "worse than no check at all",
-        ("test_merge_inputs",),
+        (
+            "test_merge_inputs.DiscoveryWalksTheGlob.test_a_graph_no_declaration_names_is_still_found",
+            "test_merge_inputs.ReconciliationNamesEachDivergence.test_an_undeclared_input_is_named",
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_caps_the_names_it_prints",
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_names_the_undeclared_input",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_all_four_divergences_are_reported_together",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_the_stage_names_every_divergence_and_the_dashboard_caps_them",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_the_undeclared_repository_appears_in_the_text",
+            "test_merge_inputs.TheStageIsWired.test_it_reports_an_undeclared_input_and_still_exits_zero",
+            "test_merge_inputs.TheStageIsWired.test_paths_writes_the_inputs_to_stdout_and_the_report_to_stderr",
+            "test_merge_inputs.TheStageIsWired.test_strict_fails_on_an_undeclared_input",
+        ),
     ),
     Mutation(
         "provenance closure no longer checked",
@@ -1141,7 +1486,11 @@ MUTATIONS = (
         "the sharp half of the same report: provenance records what was read, and a "
         "glob-driven merge can read something it has no entry for, so an answer citing "
         "those nodes cannot name the commit they were read at",
-        ("test_merge_inputs",),
+        (
+            "test_merge_inputs.ReconciliationNamesEachDivergence.test_an_input_provenance_cannot_date_is_named",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_all_four_divergences_are_reported_together",
+            "test_merge_inputs.TheStageIsWired.test_strict_fails_on_an_input_provenance_cannot_date",
+        ),
     ),
     Mutation(
         "an undeclared input is counted but not named",
@@ -1150,7 +1499,15 @@ MUTATIONS = (
         "    if False:",
         "the divergence the issue asked to have named rather than counted - an operator "
         "given a number knows something is wrong and not which repository to look at",
-        ("test_merge_inputs",),
+        (
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_caps_the_names_it_prints",
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_names_the_undeclared_input",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_all_four_divergences_are_reported_together",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_the_stage_names_every_divergence_and_the_dashboard_caps_them",
+            "test_merge_inputs.TheReportNamesRatherThanCounts.test_the_undeclared_repository_appears_in_the_text",
+            "test_merge_inputs.TheStageIsWired.test_it_reports_an_undeclared_input_and_still_exits_zero",
+            "test_merge_inputs.TheStageIsWired.test_paths_writes_the_inputs_to_stdout_and_the_report_to_stderr",
+        ),
     ),
     Mutation(
         "an empty merge glob reads as a clean run",
@@ -1160,7 +1517,10 @@ MUTATIONS = (
         "the vacuity this library keeps meeting: a check over an empty set has nothing "
         "to report and exits 0, so a build that produced no per-repository graphs at "
         "all passes the gate meant to notice it",
-        ("test_merge_inputs",),
+        (
+            "test_merge_inputs.TheStageIsWired.test_an_empty_glob_fails_without_strict",
+            "test_merge_inputs.TheStageIsWired.test_an_unreadable_declaration_fails_without_strict",
+        ),
     ),
     Mutation(
         "status stops reporting the merge inputs",
@@ -1170,7 +1530,10 @@ MUTATIONS = (
         "the operator who reported this was reading `status`, which described an "
         "entirely healthy store over a graph it could not account for; a stage nobody "
         "runs is how a reconciliation ships and changes nothing",
-        ("test_merge_inputs",),
+        (
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_caps_the_names_it_prints",
+            "test_merge_inputs.StatusReportsItAndStillSucceeds.test_status_names_the_undeclared_input",
+        ),
     ),
     Mutation(
         "secret-bearing content reported instead of refused",
@@ -1184,7 +1547,10 @@ MUTATIONS = (
         "Reachable today only through a constructed content set - detect classifies no "
         ".tfstate, so the refusal is dormant defence-in-depth and this entry keeps its "
         "shape alive until the peer version changes",
-        ("test_content_set",),
+        (
+            "test_content_set.NamedFormatStageTest.test_a_state_file_in_the_content_set_refuses_the_run",
+            "test_content_set.NamedFormatStageTest.test_the_refusal_names_every_offending_path_and_the_way_past_it",
+        ),
     ),
     Mutation(
         "the estate's own ruling ignored",
@@ -1197,7 +1563,10 @@ MUTATIONS = (
         "exactly like one that was honoured, because the refusal simply stands. Same "
         "dormancy as the entry above - constructed input only, until detect classifies "
         "the format",
-        ("test_content_set",),
+        (
+            "test_content_set.NamedFormatStageTest.test_a_declared_state_file_is_exposed_rather_than_refused",
+            "test_content_set.NamedFormatStageTest.test_the_flag_lets_one_run_through_without_committing_a_declaration",
+        ),
     ),
     Mutation(
         "emulator dumps dropped in silence",
@@ -1208,7 +1577,10 @@ MUTATIONS = (
         "there, and this one changes a committed path list. The same escape as every "
         "other unwired report in this file, with the count that reconciles the set "
         "against what detect classified as its only observer",
-        ("test_content_set",),
+        (
+            "test_content_set.NamedFormatStageTest.test_a_truncated_list_of_dumps_says_how_many_it_did_not_name",
+            "test_content_set.NamedFormatStageTest.test_an_emulator_dump_is_excluded_and_counted_but_does_not_refuse",
+        ),
     ),
     Mutation(
         "the state-file rule anchored to the repository root",
@@ -1220,7 +1592,15 @@ MUTATIONS = (
         "them - and passing cleanly is how it reads as compliance for files it never "
         "looked at. Constructed input only while the refusal is dormant; the emulator "
         "half of the same matcher is exercised on input the real detect pass produces",
-        ("test_content_set",),
+        (
+            "test_content_set.NamedFormatStageTest.test_a_state_file_in_the_content_set_refuses_the_run",
+            "test_content_set.NamedFormatStageTest.test_the_refusal_names_every_offending_path_and_the_way_past_it",
+            "test_content_set.NamedFormatsTest.test_a_state_file_is_caught_at_any_depth",
+            "test_content_set.StageTest.test_it_reports_content_files_that_are_no_longer_on_disk",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_claims_no_tree_percentage_when_the_manifest_did_not_measure_one",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_does_not_call_a_set_stale_when_there_is_no_detect_result_to_compare",
+            "test_content_set.StatusReportsTheContentSetTest.test_it_says_a_content_set_is_stale_when_detect_has_moved_on",
+        ),
     ),
     Mutation(
         "the emulator-dump rule widened to a substring",
@@ -1232,7 +1612,10 @@ MUTATIONS = (
         "compose file, a fixture directory - all authored content, removed from a "
         "committed path list by a rule that was only ever meant to drop one generated "
         "filename",
-        ("test_content_set",),
+        (
+            "test_content_set.NamedFormatStageTest.test_an_ordinary_infrastructure_store_is_untouched",
+            "test_content_set.NamedFormatsTest.test_an_emulator_dump_is_matched_by_filename_and_a_neighbour_is_not",
+        ),
     ),
     Mutation(
         "a pin the lock does not deliver is reported as resolved",
@@ -1244,7 +1627,12 @@ MUTATIONS = (
         "`pip install --require-hashes` reads the LOCK, so the build used a version the "
         "store's requirements input did not name - and three checks passed, none of them "
         "having opened that input for correctness",
-        ("test_check_install_docs",),
+        (
+            "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
+        ),
     ),
     Mutation(
         "a pin the lock omits entirely reads as resolved",
@@ -1255,7 +1643,11 @@ MUTATIONS = (
         "different failure from resolving it at another version and needs a different "
         "fix; folding the two together sends an operator to recompile a lock that is "
         "missing the entry rather than holding a stale one",
-        ("test_check_install_docs",),
+        (
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
+        ),
     ),
     Mutation(
         "the resolution half stops reaching the exit code",
@@ -1264,7 +1656,9 @@ MUTATIONS = (
         "    resolution = 0",
         "a check that prints a disagreement and exits 0 is worse than one that does not "
         "look: the text scrolls past in a green run and nothing chains on it",
-        ("test_check_install_docs",),
+        (
+            "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+        ),
     ),
     Mutation(
         "graph-report check unwired",
@@ -1272,7 +1666,11 @@ MUTATIONS = (
         "    _report_graph_report(arguments.verify_graph)",
         "    pass",
         "behaviour tested through the function; nothing drove `main()`",
-        ("test_graph_report_staleness",),
+        (
+            "test_graph_report_staleness.WiredIntoStatusTest.test_status_reports_a_stale_report",
+            "test_graph_report_staleness.WiredIntoStatusTest.test_the_verify_graph_flag_is_accepted_and_reaches_the_check",
+            "test_graph_report_staleness.WiredIntoStatusTest.test_verify_graph_also_reports_contentless_nodes",
+        ),
     ),
     Mutation(
         "contentless check unwired",
@@ -1280,7 +1678,9 @@ MUTATIONS = (
         "    _report_contentless(nodes)",
         "    pass",
         "same escape as above, three days later, in a different check",
-        ("test_graph_report_staleness",),
+        (
+            "test_graph_report_staleness.WiredIntoStatusTest.test_verify_graph_also_reports_contentless_nodes",
+        ),
     ),
     Mutation(
         "manifest scope statement unwired",
@@ -1288,7 +1688,14 @@ MUTATIONS = (
         "            *scope_statement(len(repository_dirs)),",
         "",
         "the statement was tested; that it reached the written file was not",
-        ("test_estate_boundary", "test_manifest_scope"),
+        (
+            "test_estate_boundary.ManifestTest.test_a_malformed_declaration_stops_the_manifest_build",
+            "test_estate_boundary.ManifestTest.test_a_snapshot_or_alias_with_no_ruling_still_reaches_the_manifest",
+            "test_estate_boundary.ManifestTest.test_completeness_is_never_claimed_either_way",
+            "test_estate_boundary.ManifestTest.test_the_declaration_reaches_the_written_manifest",
+            "test_estate_boundary.ManifestTest.test_the_manifest_says_when_no_boundary_is_declared",
+            "test_manifest_scope.ScopeStatementTest.test_the_statement_reaches_the_written_manifest",
+        ),
     ),
     Mutation(
         "precision floor defaults to off",
@@ -1296,7 +1703,10 @@ MUTATIONS = (
         "DEFAULT_PRECISION = 0.2",
         "DEFAULT_PRECISION = 0.0",
         "every test passed the floor explicitly, so the shipped default was unheld",
-        ("test_summaries_remap",),
+        (
+            "test_summaries_remap.RemapCliTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
+            "test_summaries_remap.RemapTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
+        ),
     ),
     Mutation(
         "symlink exclusions ignored",
@@ -1304,7 +1714,9 @@ MUTATIONS = (
         "        elif ignored(path):",
         "        elif False:",
         "a check that could not see its own mitigation, reported by an operator",
-        ("test_missing_extractors",),
+        (
+            "test_missing_extractors.DuplicatingSymlinkTest.test_an_excluded_symlink_is_not_reported_as_exposed",
+        ),
     ),
     Mutation(
         "distinct-target count dropped",
@@ -1312,7 +1724,9 @@ MUTATIONS = (
         'found["targets"] = len(targets)',
         'found["targets"] = 0',
         "the test drove a stub, so it pinned the wording and not the computation",
-        ("test_missing_extractors",),
+        (
+            "test_missing_extractors.DuplicatingSymlinkTest.test_links_sharing_a_target_are_counted_once_as_a_target",
+        ),
     ),
     Mutation(
         "verify finding renamed back to 'unsupported'",
@@ -1320,7 +1734,9 @@ MUTATIONS = (
         '"  [not in digest] community',
         '"  [unsupported] community',
         "a label that claimed 98% more than it measured, so the gate got ignored",
-        ("test_summaries_verify",),
+        (
+            "test_summaries_verify.VerifyNamesWhatItMeasuresTest.test_the_digest_finding_is_not_called_unsupported",
+        ),
     ),
     Mutation(
         "the dashed rule no longer printed with its findings",
@@ -1333,7 +1749,11 @@ MUTATIONS = (
         "at. Every structural and lexical narrowing was measured and rejected, which "
         "leaves the printed statement as the whole fix: unreached, the report is back to "
         "naming terms without saying what was checked",
-        ("test_dashed_token_guidance",),
+        (
+            "test_dashed_token_guidance.DashedRuleInTheReportTest.test_the_digest_pass_prints_the_rule_and_the_instruction",
+            "test_dashed_token_guidance.DashedRuleInTheReportTest.test_the_estate_pass_prints_it_too",
+            "test_dashed_token_guidance.DashedRuleInTheReportTest.test_this_gate_notices_a_dropped_element",
+        ),
     ),
     Mutation(
         "estate pass never narrows anything",
@@ -1344,9 +1764,16 @@ MUTATIONS = (
         "Retargeted when #179 replaced the comprehension with an explicit loop - "
         "the gate refused to run rather than quietly stop testing this",
         (
-            "test_estate_segment_match",
-            "test_summaries_flagged_term_classes",
-            "test_summaries_verify",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_genuinely_absent_term_is_still_reported",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_scoped_package_no_longer_reads_as_absent",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_short_term_is_not_matched_against_a_segment",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_store_with_no_history_datasets_does_not_claim_the_split",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_a_recorded_file_path_names_is_credited_to_history",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_in_neither_the_graph_nor_history_is_the_class_that_can_contain_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_ticket_the_history_datasets_cite_is_not_counted_as_possible_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_history_credits_a_whole_token_rather_than_a_longer_name_containing_it",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_the_two_classes_sum_to_the_flagged_total",
+            "test_summaries_verify.VerifyNamesWhatItMeasuresTest.test_a_term_in_neither_is_reported_as_a_candidate_not_a_fabrication",
         ),
     ),
     Mutation(
@@ -1355,7 +1782,7 @@ MUTATIONS = (
         "    _report_clustering()",
         "    pass",
         "the third instance of this escape: reported through the function, never through main()",
-        ("test_clustering_partitioner",),
+        ("test_clustering_partitioner.Reported.test_status_main_drives_the_check",),
     ),
     Mutation(
         "unrecorded partitioner defaults to a partitioner",
@@ -1363,7 +1790,10 @@ MUTATIONS = (
         "    return named if named in PARTITIONER_NAMES else None",
         "    return named or LOUVAIN",
         "an absent measurement reading as a clean result - shipped twice in one week",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.Recording.test_an_unrecognised_recorded_value_reads_as_unknown",
+            "test_clustering_partitioner.Recording.test_no_record_at_all_reads_as_unknown",
+        ),
     ),
     Mutation(
         "a broken graspologic reported as the fallback",
@@ -1371,7 +1801,9 @@ MUTATIONS = (
         '        return None, f"importing graspologic raised',
         '        return LOUVAIN, f"importing graspologic raised',
         "graphify does not catch that import error, so Louvain there is a guess, not a probe",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.Detection.test_a_broken_graspologic_is_undeterminable_not_louvain",
+        ),
     ),
     Mutation(
         "seed state not recorded",
@@ -1379,7 +1811,9 @@ MUTATIONS = (
         '"hash_randomised": hash_randomisation(),',
         "",
         "a store that clustered unseeded then looks identical to one that did not",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.DescribesTheGraphThatShips.test_the_record_captures_whether_hashes_were_randomised",
+        ),
     ),
     Mutation(
         "unpinned hashes not reported at record time",
@@ -1387,7 +1821,9 @@ MUTATIONS = (
         "    if hash_randomisation():",
         "    if False:",
         "the record would say unseeded while the run said nothing",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.DescribesTheGraphThatShips.test_an_unpinned_run_says_so_at_record_time",
+        ),
     ),
     Mutation(
         "record does not say which file it described",
@@ -1395,7 +1831,11 @@ MUTATIONS = (
         '"described": config.GRAPH_PATH.name,',
         "",
         "a reader then guesses which of a store's two graph files it refers to",
-        ("test_clustering_partitioner",),
+        (
+            "test_clustering_partitioner.DescribesTheGraphThatShips.test_an_explicit_graph_overrides_the_default",
+            "test_clustering_partitioner.DescribesTheGraphThatShips.test_the_record_says_which_file_it_described",
+            "test_clustering_partitioner.TheCommittedGraphCanBeDescribed.test_a_gzipped_graph_can_be_read",
+        ),
     ),
     Mutation(
         "absolute-path check unwired",
@@ -1405,7 +1845,7 @@ MUTATIONS = (
         "#176: the fifth instance of this repository's most repeated escape - four "
         "entries above are the same shape, in the same module, and each was written "
         "after the previous one was fixed",
-        ("test_status_absolute_paths",),
+        ("test_status_absolute_paths.ReachableFromTheCommandLine.test_the_flag_reaches_the_check",),
     ),
     Mutation(
         "absolute-path check reports every absolute path",
@@ -1416,7 +1856,9 @@ MUTATIONS = (
         "'every absolute path' rather than 'every path this store wrote absolute' "
         "makes /etc/hosts and an API route findings, and a check whose first run is "
         "mostly false positives is switched off before it reports a real one",
-        ("test_status_absolute_paths",),
+        (
+            "test_status_absolute_paths.WhatCounts.test_an_absolute_path_outside_the_store_is_not_a_finding",
+        ),
     ),
     Mutation(
         "unreadable tracked files reported as a clean store",
@@ -1426,7 +1868,9 @@ MUTATIONS = (
         "the '0 checked, none dangling' defect the corpus-citation check in this same "
         "module already shipped once - a measurement of nothing paired with a clean "
         "verdict, which reads as a pass",
-        ("test_status_absolute_paths",),
+        (
+            "test_status_absolute_paths.TheReport.test_a_store_whose_files_could_not_be_read_is_not_reported_as_clean",
+        ),
     ),
     Mutation(
         "absolute paths lost at a read-block boundary",
@@ -1436,7 +1880,18 @@ MUTATIONS = (
         "the scan streams because a store's tracked artefacts run to gigabytes "
         "decompressed, and a path cut in half by a block boundary is the silent half "
         "of that trade: no count can show what it failed to see",
-        ("test_status_absolute_paths",),
+        (
+            "test_status_absolute_paths.ReachableFromTheCommandLine.test_the_flag_reaches_the_check",
+            "test_status_absolute_paths.TheIntendedException.test_an_in_flight_artefact_is_separated_from_the_findings",
+            "test_status_absolute_paths.TheReport.test_more_files_than_the_report_names_are_counted_but_summarised",
+            "test_status_absolute_paths.TheReport.test_the_finding_names_the_count_the_file_and_the_rule",
+            "test_status_absolute_paths.WhatCounts.test_a_path_this_store_wrote_absolute_is_counted_and_its_file_named",
+            "test_status_absolute_paths.WhatCounts.test_an_absolute_path_from_another_machine_is_still_a_finding",
+            "test_status_absolute_paths.WhatIsRead.test_a_compressed_tracked_file_is_read",
+            "test_status_absolute_paths.WhatIsRead.test_a_corrupt_archive_does_not_take_the_stage_down",
+            "test_status_absolute_paths.WhatIsRead.test_a_path_straddling_a_read_block_boundary_is_counted_once",
+            "test_status_absolute_paths.WhatIsRead.test_an_unreadable_tracked_file_is_named_rather_than_passed_over",
+        ),
     ),
     Mutation(
         "the deferred path's own start is not resumed from",
@@ -1448,7 +1903,9 @@ MUTATIONS = (
         "the scan reported - the ones spanning the hold-back point lost their head, the "
         "lookbehind refused the remainder, and neither pass counted them. 0.03% wrong, "
         "in the direction that reads as clean",
-        ("test_status_absolute_paths",),
+        (
+            "test_status_absolute_paths.WhatIsRead.test_a_path_spanning_the_hold_back_point_is_not_lost",
+        ),
     ),
     Mutation(
         "ambiguous endpoints folded into the recovered total",
@@ -1459,7 +1916,12 @@ MUTATIONS = (
         "this rate resolves only where the name is unambiguous, so a rate that "
         "counted the ambiguous ones promises recoveries the repair must refuse - "
         "and the totals still add up, so nothing else notices",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.Classification.test_an_endpoint_naming_exactly_one_node_is_recoverable",
+            "test_dangling_endpoints.Classification.test_an_endpoint_naming_two_nodes_is_ambiguous_and_not_recovered",
+            "test_dangling_endpoints.Classification.test_the_rate_is_recovered_over_dangling_and_excludes_ambiguity",
+            "test_dangling_endpoints.TheStageIsWiredAndWritesNothing.test_the_json_output_reconciles_with_the_printed_report",
+        ),
     ),
     Mutation(
         "entity names matched against the whole path-qualified id",
@@ -1469,7 +1931,10 @@ MUTATIONS = (
         "#162, and the shape this codebase has shipped most often: a name matched "
         "against a path-qualified id cannot match, so the rate comes back a clean "
         "0.0% and reads as an estate with nothing to fix",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.EntityNaming.test_a_node_answering_to_one_name_twice_counts_once",
+            "test_dangling_endpoints.EntityNaming.test_the_final_scope_segment_is_the_entity_name",
+        ),
     ),
     Mutation(
         "recovery stops looking at local_id",
@@ -1479,7 +1944,9 @@ MUTATIONS = (
         "#162's whole claim is that local_id carries the entity name; without it "
         "the estate whose endpoints dangle because a chunk named an id defined in "
         "another chunk measures zero, which is the answer that closes the issue",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.LocalIdIsWhatMakesRecoveryPossible.test_a_node_is_found_by_local_id_when_its_id_shares_nothing",
+        ),
     ),
     Mutation(
         "an empty walk reports a clean rate",
@@ -1489,7 +1956,10 @@ MUTATIONS = (
         "#162: every stage in this library that shipped doing nothing did so with "
         "a passing suite, and '0 dangling endpoints' over a walk that read no "
         "files is indistinguishable from an estate that has none",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.AntiVacuity.test_a_walk_that_finds_no_graphs_fails_rather_than_reporting_a_rate",
+            "test_dangling_endpoints.AntiVacuity.test_the_merged_estate_graph_is_named_as_not_a_substitute",
+        ),
     ),
     Mutation(
         "graphs that could not be measured reported as a measured zero",
@@ -1499,7 +1969,7 @@ MUTATIONS = (
         "#162: a graph with no edges has no endpoints to dangle, so every count "
         "is zero and the rate is undefined - printed as a result it says the "
         "store is clean",
-        ("test_dangling_endpoints",),
+        ("test_dangling_endpoints.AntiVacuity.test_a_graph_with_no_edges_is_not_measured",),
     ),
     Mutation(
         "the merged estate graph offered as a substitute",
@@ -1510,7 +1980,9 @@ MUTATIONS = (
         "tautology, because it read the file its own merge had already cleaned. "
         "That file is at the store root and is the one an operator reaches for "
         "next, so it has to be refused by name rather than merely not walked",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.AntiVacuity.test_the_merged_estate_graph_is_named_as_not_a_substitute",
+        ),
     ),
     Mutation(
         "the same graph measured twice from one clone",
@@ -1520,7 +1992,9 @@ MUTATIONS = (
         "#162: a clone holding both graph forms would have every count doubled "
         "while the rate stayed put - an error that reconciles internally, which "
         "is the kind nobody finds",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.SaysWhatItRead.test_one_clone_holding_both_graph_forms_is_measured_once_and_says_so",
+        ),
     ),
     Mutation(
         "the report stops naming the artefacts it read",
@@ -1530,7 +2004,11 @@ MUTATIONS = (
         "#162: a rate measured downstream of a store's own fix is not a rate, and "
         "the only way a reader can tell which it got is the list of files. A "
         "check's silence licenses a claim only about the artefact it read",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.SaysWhatItRead.test_every_graph_read_is_named_in_the_output",
+            "test_dangling_endpoints.SaysWhatItRead.test_one_clone_holding_both_graph_forms_is_measured_once_and_says_so",
+            "test_dangling_endpoints.TheStageIsWiredAndWritesNothing.test_an_unreadable_graph_is_named_rather_than_taking_the_stage_down",
+        ),
     ),
     Mutation(
         "named endpoints printed in set order",
@@ -1540,7 +2018,9 @@ MUTATIONS = (
         "#162: two runs on the same graph must be byte-identical, and hash "
         "randomisation makes an unsorted list invisible until someone diffs two "
         "builds from different processes",
-        ("test_dangling_endpoints",),
+        (
+            "test_dangling_endpoints.Determinism.test_named_endpoints_come_out_sorted_whatever_order_they_were_read_in",
+        ),
     ),
     Mutation(
         "retained failure double-counted",
@@ -1548,7 +2028,9 @@ MUTATIONS = (
         "total = len({*entries, *(name for name, _ in failures)})",
         "total = len(entries) + len(failures)",
         "shipped in v0.11.5; found by an estate, not by this suite",
-        ("test_repo_list_and_sync",),
+        (
+            "test_repo_list_and_sync.FailedSyncKeepsProvenanceTest.test_the_failure_count_does_not_double_count_a_retained_record",
+        ),
     ),
     Mutation(
         "telemetry overwrites the record without reading it",
@@ -1559,7 +2041,15 @@ MUTATIONS = (
         "one build's scrollback, so nothing could notice it moving. A record written and "
         "never read looks identical to one that was compared, because the file afterwards "
         "is the same either way",
-        ("test_telemetry",),
+        (
+            "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
+            "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.TelemetryRecordTest.test_a_measurement_that_fell_to_zero_is_a_warning_not_a_statistic",
+            "test_telemetry.TelemetryRecordTest.test_a_measurement_that_merely_fell_stays_a_statistic",
+            "test_telemetry.TelemetryRecordTest.test_a_metric_that_was_zero_and_is_not_reads_as_recovery",
+            "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
+            "test_telemetry.TelemetryRecordTest.test_the_second_record_reports_what_moved_since_the_first",
+        ),
     ),
     Mutation(
         "a collapsed measurement reported as an ordinary statistic",
@@ -1570,7 +2060,11 @@ MUTATIONS = (
         "join that matched nothing was green on one store across its whole graph. Losing "
         "the routing prints the collapse among the healthy numbers, which is the shape of "
         "output people are already caught skimming",
-        ("test_telemetry",),
+        (
+            "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
+            "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.TelemetryRecordTest.test_a_measurement_that_fell_to_zero_is_a_warning_not_a_statistic",
+        ),
     ),
     Mutation(
         "each stage's record erases the last stage's",
@@ -1581,7 +2075,9 @@ MUTATIONS = (
         "record surviving only until the next stage runs and every comparison is against "
         "nothing - a mechanism that reads green and measures nothing, which is the class "
         "this gate exists for",
-        ("test_telemetry",),
+        (
+            "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
+        ),
     ),
     Mutation(
         "layer sizes measured and discarded",
@@ -1592,7 +2088,10 @@ MUTATIONS = (
         "a store's own last build, because two estates measured it a hundredfold apart. "
         "Computing the counts and not recording them is the wiring escape this gate "
         "already records five times",
-        ("test_telemetry",),
+        (
+            "test_telemetry.LayerMergeWiringTest.test_the_recorded_counts_recover_the_previous_ratio",
+            "test_telemetry.LayerMergeWiringTest.test_the_stage_records_both_layer_sizes",
+        ),
     ),
     Mutation(
         "the join cardinality measured and discarded",
@@ -1603,7 +2102,12 @@ MUTATIONS = (
         "half-dead case is neither of those. Without a record the rate reaches a terminal "
         "and is gone, which is how a join that should have been three times larger read "
         "as a working join on a sparse estate",
-        ("test_build_explorer", "test_telemetry"),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_telemetry_records_the_breakdown_beside_the_page_size",
+            "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
+            "test_telemetry.ExplorerWiringTest.test_the_page_records_the_join_it_shipped",
+            "test_telemetry.ExplorerWiringTest.test_the_recorded_join_counts_the_column_the_page_ships",
+        ),
     ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for
@@ -1619,7 +2123,11 @@ MUTATIONS = (
         "count is a plausible number that is not the file's size - the exact class of "
         "wrong measurement this pipeline has shipped, correct code answering a "
         "neighbouring question",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_every_reported_block_is_the_size_of_that_block_in_the_page",
+            "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
+            "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
+        ),
     ),
     Mutation(
         "a slot filled twice charged once",
@@ -1629,7 +2137,10 @@ MUTATIONS = (
         "#245: `str.replace` fills every slot and `__TITLE__` has two, so a breakdown "
         "counting each block once is short by the title on every build - and it still "
         "adds up, because the residual line absorbs exactly what was missed",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
+            "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
+        ),
     ),
     Mutation(
         "the residual assumed rather than derived",
@@ -1640,7 +2151,9 @@ MUTATIONS = (
         "file's size on disk and not against the sum of what was measured. Zeroing the "
         "residual makes the total add up by construction, which is a breakdown that "
         "cannot report its own failure",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_a_residual_between_the_attribution_and_the_file_is_named",
+        ),
     ),
     Mutation(
         "a new page block left unattributed",
@@ -1651,7 +2164,10 @@ MUTATIONS = (
         "wrong is a block added to the template that nobody counts. Refusing is the only "
         "form that survives that - a residual line would carry the loss, and the reader "
         "would take the named blocks for the whole page",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_a_block_whose_slot_left_the_template_is_refused",
+            "test_build_explorer.PageByteAttributionTest.test_a_new_template_block_is_refused_rather_than_left_unattributed",
+        ),
     ),
     Mutation(
         "the page-size warning computed and never shown",
@@ -1662,7 +2178,11 @@ MUTATIONS = (
         "use before the write. GitHub refuses a push carrying a file above 100 MB, and "
         "the store that reported this was already past GitHub's own warning with the "
         "page committed",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_the_threshold_comes_from_the_environment",
+            "test_build_explorer.PageByteAttributionTest.test_the_warning_arrives_before_the_page_is_written",
+            "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
+        ),
     ),
     Mutation(
         "the breakdown computed and never printed",
@@ -1672,7 +2192,13 @@ MUTATIONS = (
         "#245: telemetry is a committed JSON file, and the operator meeting a page too "
         "large to push is reading a terminal. A number recorded where nobody looks is "
         "the reporting half of the same gap the issue was opened about",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_every_reported_block_is_the_size_of_that_block_in_the_page",
+            "test_build_explorer.PageByteAttributionTest.test_every_substituted_block_appears_in_the_breakdown",
+            "test_build_explorer.PageByteAttributionTest.test_telemetry_records_the_breakdown_beside_the_page_size",
+            "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
+            "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
+        ),
     ),
     Mutation(
         "the breakdown never reaches the record",
@@ -1682,7 +2208,9 @@ MUTATIONS = (
         "#245 over #154: one build's breakdown says where the bytes are, and only the "
         "predecessor says which block grew. The jump this was reported for happened "
         "between two builds, which no single build can attribute at all",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_telemetry_records_the_breakdown_beside_the_page_size",
+        ),
     ),
     Mutation(
         "the indexed inventory measured and discarded",
@@ -1691,7 +2219,10 @@ MUTATIONS = (
         "    summarise(index, commits_seen, report)",
         "#154: a corpus inventory that collapsed reported a plausible smaller number and "
         "read as a smaller estate; nothing but its predecessor contradicts it",
-        ("test_telemetry",),
+        (
+            "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
     ),
     Mutation(
         "the record never reaches an operator",
@@ -1701,7 +2232,10 @@ MUTATIONS = (
         "#154: reporting through a function while nothing drives the CLI is the most "
         "repeated escape in this repository, and `status` alone accounts for three "
         "existing entries here",
-        ("test_telemetry",),
+        (
+            "test_telemetry.StatusReportsTheRecordTest.test_status_prints_every_recorded_measurement",
+            "test_telemetry.StatusReportsTheRecordTest.test_status_says_when_nothing_has_been_recorded",
+        ),
     ),
     # Ingestion candidates (#101). The stage's whole value is that its numbers
     # answer the question its columns claim to, so the entries below are the
@@ -1716,10 +2250,11 @@ MUTATIONS = (
         "report is right, and nothing a user or a skill can type reaches it - while "
         "the documentation that tells them to type it still passes review",
         (
-            "test_cli_help",
-            "test_documented_stages",
-            "test_ingestion_gaps",
-            "test_repo_list_and_sync",
+            "test_cli_help.SelfParsingStaysHonest.test_every_self_parsing_stage_really_builds_a_parser",
+            "test_cli_help.SelfParsingStaysHonest.test_no_stage_outside_the_list_builds_a_parser",
+            "test_documented_stages.DocumentedStagesExist.test_every_documented_stage_is_a_real_stage",
+            "test_ingestion_gaps.TheStageIsWired.test_the_cli_runs_the_stage_and_reports_a_finding_without_failing",
+            "test_repo_list_and_sync.CliTest.test_stages_are_listed_in_pipeline_order",
         ),
     ),
     Mutation(
@@ -1730,7 +2265,11 @@ MUTATIONS = (
         "the whole stage reduced to `list your internal dependencies`, which is a "
         "list nobody can act on; it still ranks, still classifies and still prints a "
         "confident table, with the estate's own artefacts at the top of it",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.RankingAndSubtraction.test_a_coordinate_the_estate_builds_is_not_a_candidate",
+            "test_ingestion_gaps.TheReport.test_the_limit_says_how_much_it_hid",
+            "test_ingestion_gaps.TheReport.test_the_scope_of_what_was_read_is_stated",
+        ),
     ),
     Mutation(
         "framework plumbing ranks above domain again",
@@ -1741,7 +2280,9 @@ MUTATIONS = (
         "plumbing, so a weight-ordered ranking puts test utilities at the top and the "
         "repository actually worth adding below the fold - a correct number answering "
         "the wrong question, and the reason classification is ordered before weight",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.RankingAndSubtraction.test_a_domain_namespace_ranks_above_a_heavier_framework_one",
+        ),
     ),
     Mutation(
         "equal-weight namespaces fall back to hash order",
@@ -1752,7 +2293,9 @@ MUTATIONS = (
         "grouped out of a set, so without it the order is the process's hash seed, "
         "and hash randomisation has broken determinism here before and been invisible "
         "until somebody diffed two builds",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.RankingAndSubtraction.test_namespaces_of_equal_weight_are_ordered_by_name",
+        ),
     ),
     Mutation(
         "test scope is blended into the main column",
@@ -1763,7 +2306,9 @@ MUTATIONS = (
         "test-scope dependency counted as main says the estate's product needs "
         "something when what it says is that the estate writes tests against it. A "
         "single blended figure is worse than no figure, because its scope is invisible",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.RankingAndSubtraction.test_the_weights_are_declaring_files_split_by_scope",
+        ),
     ),
     Mutation(
         "directories of copies are read as this estate's dependencies",
@@ -1775,7 +2320,14 @@ MUTATIONS = (
         "the report ranks other projects' dependencies as this estate's gaps. The "
         "same shape as the merge that picked up a previous run's outputs and looked "
         "healthy",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.RankingAndSubtraction.test_a_coordinate_the_estate_builds_is_not_a_candidate",
+            "test_ingestion_gaps.RankingAndSubtraction.test_generated_and_vendored_directories_are_not_read_as_this_estate",
+            "test_ingestion_gaps.RankingAndSubtraction.test_the_estate_reads_every_build_format_it_holds",
+            "test_ingestion_gaps.RankingAndSubtraction.test_the_weights_are_declaring_files_split_by_scope",
+            "test_ingestion_gaps.TheReport.test_the_built_side_says_how_much_of_it_is_convention",
+            "test_ingestion_gaps.TheReport.test_the_scope_of_what_was_read_is_stated",
+        ),
     ),
     Mutation(
         "an off-host alias becomes a repository to ingest",
@@ -1785,7 +2337,9 @@ MUTATIONS = (
         "a false absence invented inside the report whose subject is false absence: "
         "a module consumed under the off-host name of a repository the store already "
         "holds is reported as something to go and find",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.BoundaryIntegration.test_a_module_consumed_under_an_off_host_alias_of_a_held_repository_is_no_gap",
+        ),
     ),
     Mutation(
         "an unscoped package makes every public dependency internal",
@@ -1795,7 +2349,9 @@ MUTATIONS = (
         "one unscoped npm package published by the estate turns the empty namespace "
         "into an internal one, after which the whole of npm is a candidate to ingest - "
         "a check that cannot fire on Maven and fires on everything under npm",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.NamespaceDerivation.test_an_unscoped_built_package_does_not_make_every_dependency_internal",
+        ),
     ),
     Mutation(
         "an unreadable declaration reads as an estate that declared nothing",
@@ -1806,7 +2362,9 @@ MUTATIONS = (
         "declaration that fails to parse is indistinguishable from an estate that "
         "wrote none, so a repository already ruled out is ranked as a candidate and "
         "one held under another name is reported absent - and the run still exits 0",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.BoundaryIntegration.test_an_unreadable_declaration_is_reported_not_read_as_no_boundary",
+        ),
     ),
     Mutation(
         "the refusal to resolve a coordinate stops reaching the reader",
@@ -1816,7 +2374,9 @@ MUTATIONS = (
         "an operator who is not told a coordinate is unresolved reads the namespace as "
         "a repository name and searches the forge for it, which returns nothing for an "
         "artefact published to a binary repository and rate-limits while doing so",
-        ("test_ingestion_gaps",),
+        (
+            "test_ingestion_gaps.TheReport.test_the_report_refuses_to_resolve_a_coordinate_to_a_repository",
+        ),
     ),
     Mutation(
         "a corpus no clone contributed to is reported, not refused",
@@ -1828,7 +2388,11 @@ MUTATIONS = (
         "The set is small rather than empty, so the empty-set refusal is stepped around, "
         "and every other guard in the library is comparative - which leaves it "
         "undetectable on a first build, the one build with no baseline to compare",
-        ("test_content_set",),
+        (
+            "test_content_set.ClonesThatContributedNothingTest.test_a_repository_only_the_detect_result_names_is_neither_clone_nor_contributor",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_store_whose_single_clone_is_all_but_empty_is_refused_and_told_why",
+            "test_content_set.ClonesThatContributedNothingTest.test_it_refuses_when_no_clone_on_disk_contributed_anything",
+        ),
     ),
     Mutation(
         "clones that contributed nothing are counted but not named",
@@ -1839,7 +2403,10 @@ MUTATIONS = (
         "created and never populated contributes nothing and appears in none of "
         "detect's exclusion buckets - so a bare number sends an operator hunting a "
         "defect that is not there. Reading one name settles it in seconds",
-        ("test_content_set",),
+        (
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_that_contributed_nothing_is_named_and_the_run_still_passes",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_the_declaration_never_named_still_counts_as_a_clone",
+        ),
     ),
     Mutation(
         "the clone count taken from the declaration instead of the directory",
@@ -1851,7 +2418,13 @@ MUTATIONS = (
         "merge walks the corpus, and a guard against a first-build failure that reads "
         "the declaration inherits its blind spot precisely on a first build, where the "
         "declaration is most likely absent or behind the disk",
-        ("test_content_set",),
+        (
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_that_contributed_nothing_is_named_and_the_run_still_passes",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_the_declaration_never_named_still_counts_as_a_clone",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_repository_only_the_detect_result_names_is_neither_clone_nor_contributor",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_store_whose_single_clone_is_all_but_empty_is_refused_and_told_why",
+            "test_content_set.ClonesThatContributedNothingTest.test_it_refuses_when_no_clone_on_disk_contributed_anything",
+        ),
     ),
     Mutation(
         "the zero-contributor report unwired",
@@ -1862,7 +2435,10 @@ MUTATIONS = (
         "performs: noise_roots aggregates non-content files by directory across "
         "repositories, so a clone that contributed nothing is visible in no other "
         "output the stage prints",
-        ("test_content_set",),
+        (
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_that_contributed_nothing_is_named_and_the_run_still_passes",
+            "test_content_set.ClonesThatContributedNothingTest.test_a_clone_the_declaration_never_named_still_counts_as_a_clone",
+        ),
     ),
     # This gate's own file, mutated through the same machinery: a run that is
     # killed used to leave a deliberately introduced defect in the working tree,
@@ -1883,7 +2459,10 @@ MUTATIONS = (
         "`finally` never ran - and SIGTERM is what a timeout, a job kill and a cancelled "
         "CI step send, which makes it the interrupt that actually happens. The comment on "
         "that `finally` claimed to cover it, which is why nobody looked",
-        ("test_mutation_gate_recovery",),
+        (
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_the_signal_handlers_are_removed_once_the_loop_is_over",
+        ),
     ),
     Mutation(
         "the record a SIGKILL cannot destroy is never written",
@@ -1893,7 +2472,10 @@ MUTATIONS = (
         "#227: no signal handler covers SIGKILL, so the only thing that can put a file "
         "back is bytes already on disk when the process died. Without them the tree keeps "
         "the mutation and the next suite run in it reports real-looking failures in real code",
-        ("test_mutation_gate_recovery",),
+        (
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_record_left_by_a_killed_run_is_used_before_anything_else_runs",
+        ),
     ),
     Mutation(
         "a recovery record is left unread at startup",
@@ -1904,7 +2486,9 @@ MUTATIONS = (
         "pre-check - a mutation still applied makes the suite fail for a reason that has "
         "nothing to do with the tree, which the pre-check then reports as the suite being "
         "broken. Written and never consulted is the half-wired shape this whole gate is for",
-        ("test_mutation_gate_recovery",),
+        (
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_record_left_by_a_killed_run_is_used_before_anything_else_runs",
+        ),
     ),
     Mutation(
         "a used recovery record is left on disk",
@@ -1914,7 +2498,10 @@ MUTATIONS = (
         "#227: a record that outlives its restore describes a file that is no longer "
         "mutated, so the next run overwrites a healthy file with older bytes - a stale "
         "artefact read as current, the same class as the leftover graph refusals above",
-        ("test_mutation_gate_recovery",),
+        (
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
+            "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
+        ),
     ),
     Mutation(
         "the file-list route grows a directory walk",
@@ -1926,7 +2513,18 @@ MUTATIONS = (
         "predecessor went stale when code changed and NOTHING failed - it was caught by "
         "reading. A walk added here as a convenience keeps every behavioural test green "
         "while reintroducing the second exclusion model the stage exists to remove",
-        ("test_extract_ast", "test_file_list_route_guidance"),
+        (
+            "test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",
+            "test_extract_ast.ExtractAstTest.test_kinds_the_parser_cannot_read_are_not_handed_to_it",
+            "test_extract_ast.ExtractAstTest.test_one_repository_failing_does_not_lose_the_others",
+            "test_extract_ast.ExtractAstTest.test_the_content_set_is_consumed_rather_than_re_derived",
+            "test_extract_ast.ExtractAstTest.test_the_pipelines_own_output_is_refused",
+            "test_extract_ast.MovementTest.test_gone_and_new_are_reported_as_different_things",
+            "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
+            "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+            "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
+            "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",
+        ),
     ),
     Mutation(
         "the guide keeps the conclusion and loses the mechanism",
@@ -1937,7 +2535,9 @@ MUTATIONS = (
         "stage has no scan root. An instruction whose reason has been removed is the one "
         "someone talks themselves out of, and this one competes with graphify's own "
         "printed instructions",
-        ("test_file_list_route_guidance",),
+        (
+            "test_file_list_route_guidance.TheGuideStillExplainsWhy.test_the_guide_states_the_mechanism",
+        ),
     ),
     Mutation(
         "the placement table stops naming the version it was measured against",
@@ -1948,7 +2548,9 @@ MUTATIONS = (
         "written against, and there was no way to tell which - so the correction could "
         "not be distinguished from a contradiction. A version beside a measurement is "
         "what makes the next disagreement diagnosable",
-        ("test_file_list_route_guidance",),
+        (
+            "test_file_list_route_guidance.TheGuideStillExplainsWhy.test_the_version_the_table_was_measured_against_is_named",
+        ),
     ),
     Mutation(
         "the build skill lists the stages without telling anyone to stop",
@@ -1961,7 +2563,9 @@ MUTATIONS = (
         "its failure is the vacuous form of the same check - it reads as informative, and "
         "a reader who continues reaches the missing stage only after earlier stages have "
         "written committed artefacts into a store repository",
-        ("test_documented_stages",),
+        (
+            "test_documented_stages.TheBuildSkillChecksTheStagesItUses.test_the_build_skill_tells_a_reader_to_check_for_them",
+        ),
     ),
     Mutation(
         "the suite subprocess caches bytecode again",
@@ -1973,7 +2577,9 @@ MUTATIONS = (
         "second are indistinguishable to it. Two entries added for #227 did exactly that, "
         "and the second run reported a wrong-but-plausible failure set - a spurious "
         "`caught` or `SURVIVED` about code that was never in the tree",
-        ("test_mutation_gate_bytecode", "test_mutation_gate_recovery"),
+        (
+            "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_is_told_not_to_write_bytecode",
+        ),
     ),
     Mutation(
         "bytecode writing is disabled with a value CPython ignores",
@@ -1983,7 +2589,9 @@ MUTATIONS = (
         '#228: the variable is read as a flag, so "0" and "" both leave bytecode '
         "writing on while the name sits in the environment looking correct - the defect "
         "class this gate exists for, a check present and doing nothing",
-        ("test_mutation_gate_bytecode", "test_mutation_gate_recovery"),
+        (
+            "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_is_told_not_to_write_bytecode",
+        ),
     ),
     Mutation(
         "the suite subprocess environment is replaced rather than extended",
@@ -1994,7 +2602,9 @@ MUTATIONS = (
         "the suite reaches src/ on a machine holding a non-editable install - so the fix "
         "for a stale .pyc would silently move every mutation run onto the installed "
         "package, which is a worse version of the same defect",
-        ("test_mutation_gate_bytecode", "test_mutation_gate_recovery"),
+        (
+            "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_keeps_the_environment_it_inherits",
+        ),
     ),
     Mutation(
         "the second interpolation dialect dropped",
@@ -2004,7 +2614,13 @@ MUTATIONS = (
         "#88: two deployment layouts interpolate differently, `{{ }}` and `${ }`, and the "
         "second going unstripped publishes the variable names the first withholds. Nothing "
         "counts a name that was not withheld, so both layouts' output reads as healthy",
-        ("test_deploy_values", "test_flux_kustomize_deployments"),
+        (
+            "test_deploy_values.StripTemplateDollarDialect.test_a_dollar_brace_interpolation_loses_the_variable_name",
+            "test_deploy_values.StripTemplateDollarDialect.test_an_escaped_interpolation_is_withheld_rather_than_kept_literal",
+            "test_deploy_values.StripTemplateDollarDialect.test_an_interpolation_spanning_lines_is_stripped_whole",
+            "test_deploy_values.StripTemplateDollarDialect.test_both_dialects_withhold_the_same_name_identically",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+        ),
     ),
     Mutation(
         "the secret-location policy unwired",
@@ -2015,7 +2631,13 @@ MUTATIONS = (
         "which is a map of where each credential lives, and the flattened output is "
         "committed. Every test of the primitive itself still passes with the call site "
         "gone - the wiring-never-asserted class this gate exists for",
-        ("test_deploy_values", "test_flux_kustomize_deployments"),
+        (
+            "test_deploy_values.SecretReferences.test_a_nested_store_reference_is_withheld_whole",
+            "test_deploy_values.SecretReferences.test_a_reference_keeps_the_variable_and_withholds_store_and_entry",
+            "test_deploy_values.SecretReferences.test_the_policy_keeps_the_sorted_cap_and_ignores_insertion_order",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
+        ),
     ),
     Mutation(
         "a nested secret store walked into",
@@ -2028,7 +2650,7 @@ MUTATIONS = (
         "#88: the store half is frequently a mapping rather than a scalar, so withholding "
         "only scalars leaves the store name one level down, published under a key that "
         "reads as structure - a redaction that looks applied and is not",
-        ("test_deploy_values",),
+        ("test_deploy_values.SecretReferences.test_a_nested_store_reference_is_withheld_whole",),
     ),
     Mutation(
         "the second deployment layout unwired",
@@ -2038,7 +2660,30 @@ MUTATIONS = (
         "#88: the stage read one layout, so a Kustomize/Flux repository returned exactly the "
         "pair count the run returned without it. Every test of the reader itself still passes "
         "with the call site gone, which is the class of escape this gate exists for",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_facts_hang_off_the_one_environment_by_an_edge",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_routes_reached_prod",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_each_fact_records_the_route_that_produced_it",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_prod_is_one_environment_node_not_one_per_route",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_hold_keeps_its_repository",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_not_hold_claims_no_repository",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_and_its_pinned_version_travel_on_the_fact",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_every_fact_cites_a_file_that_exists_and_names_the_layers_it_composed",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_base_layer_is_a_fact_of_its_own_named_as_the_base",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_fact_takes_the_node_shape_the_stage_already_emits",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_service_joins_the_repository_that_holds_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_named_rather_than_resolved_quietly",
+            "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
+            "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_malformed_document_is_counted_and_named_and_the_run_continues",
+            "test_flux_kustomize_deployments.TheTerraformModuleLayerIsLeftAlone.test_the_module_node_and_its_edge_survive_two_deployment_runs",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
+            "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
+        ),
     ),
     Mutation(
         "both layouts' facts appended rather than reconciled",
@@ -2049,7 +2694,10 @@ MUTATIONS = (
         "appending both puts two nodes with one id into the graph. A duplicate id raises "
         "nothing downstream - it is two answers to one question, and the run reports a higher "
         "pair count for it",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_named_rather_than_resolved_quietly",
+            "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_one_node_and_the_existing_route_keeps_it",
+        ),
     ),
     Mutation(
         "the base layer dropped from an environment's composition",
@@ -2059,7 +2707,12 @@ MUTATIONS = (
         "#88: an overlay declares only what it overrides, so a fact built from the patches "
         "alone reports a partial configuration as a whole one - the keys it does carry are "
         "right, which is why nothing looks wrong",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_and_its_pinned_version_travel_on_the_fact",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+        ),
     ),
     Mutation(
         "only the first directory a cluster reconciles is read",
@@ -2068,7 +2721,9 @@ MUTATIONS = (
         "        if any(_under(rel, directory) for directory in directories[:1]):",
         "#88: a cluster reconciles an environment overlay and its stack overlays together, so "
         "reading one of them loses limits that are really set and reports nothing missing",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+        ),
     ),
     Mutation(
         "composed values share the parsed document",
@@ -2078,7 +2733,11 @@ MUTATIONS = (
         "#88: one base declaration is composed into every environment, so overlaying onto the "
         "parsed document instead of a copy gives the environments composed later the earlier "
         "ones' overrides - both facts stay well-formed and one of them is fiction",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+        ),
     ),
     Mutation(
         "an unparsable Kustomize/Flux file skipped in silence",
@@ -2087,7 +2746,9 @@ MUTATIONS = (
         "        if documents is None:\n            continue",
         "#88's premise is a silent omission: a file this reader cannot parse is a service "
         "absent from every answer, and a walk that drops it reports the same clean run",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_malformed_document_is_counted_and_named_and_the_run_continues",
+        ),
     ),
     Mutation(
         "the layout that contributed nothing says nothing",
@@ -2097,7 +2758,9 @@ MUTATIONS = (
         "#88: the finding is a repository adding no nodes and no message. Counting documents "
         "for a tree that declared none reads as a healthy run, and the sensitivity control "
         "that proves this reader can tell the two apart is the report line itself",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_tree_without_this_layout_yields_nothing_and_says_so",
+        ),
     ),
     Mutation(
         "the chart source dropped from a chart reference",
@@ -2107,7 +2770,13 @@ MUTATIONS = (
         "#88 and #122: `sourceRef` is a repository-to-repository dependency nothing else in a "
         "store holds. Losing it leaves the chart name and version on the node, so the fact "
         "reads as fully parsed",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_hold_keeps_its_repository",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_not_hold_claims_no_repository",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
+            "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
+            "test_flux_kustomize_deployments.TheTerraformModuleLayerIsLeftAlone.test_the_module_node_and_its_edge_survive_two_deployment_runs",
+        ),
     ),
     Mutation(
         "every fact claims one route",
@@ -2117,7 +2786,10 @@ MUTATIONS = (
         "#88: two layouts emit onto one set of environments, so the route is what makes "
         '"which services reach this environment by which route" answerable. The key is still '
         "present and every node still carries a value, which is how a wrong one survives",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_each_fact_records_the_route_that_produced_it",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_prod_is_one_environment_node_not_one_per_route",
+        ),
     ),
     Mutation(
         "every environment named after the root of the cluster tree",
@@ -2128,7 +2800,24 @@ MUTATIONS = (
         "wrong segment collapses every environment into one - and a single environment holding "
         "every service is a plausible-looking answer, which is the failure this stage was "
         "built to avoid",
-        ("test_flux_kustomize_deployments",),
+        (
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_facts_hang_off_the_one_environment_by_an_edge",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_routes_reached_prod",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_each_fact_records_the_route_that_produced_it",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_prod_is_one_environment_node_not_one_per_route",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_and_its_pinned_version_travel_on_the_fact",
+            "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_every_fact_cites_a_file_that_exists_and_names_the_layers_it_composed",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_fact_takes_the_node_shape_the_stage_already_emits",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_run_reports_what_it_read",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_service_joins_the_repository_that_holds_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_named_rather_than_resolved_quietly",
+            "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
+            "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_malformed_document_is_counted_and_named_and_the_run_continues",
+        ),
     ),
     Mutation(
         "one role word is enough to redact",
@@ -2139,7 +2828,7 @@ MUTATIONS = (
         "rule satisfied by one of them withholds real configuration facts. This is the "
         "failure that reads as extra safety: a policy redacting everything answers no "
         "deployment question, and the stage reports the same key count either way",
-        ("test_deploy_values",),
+        ("test_deploy_values.SecretReferences.test_an_ordinary_mapping_is_untouched",),
     ),
     Mutation(
         "flagged terms reported as one class again",
@@ -2151,7 +2840,14 @@ MUTATIONS = (
         "nearly half of it - so the count an operator was told to act on was inflated by that "
         "much and could not be split without chasing single terms by hand. The total was "
         "correct throughout, which is why it read as a clean finding",
-        ("test_summaries_flagged_term_classes",),
+        (
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_a_recorded_file_path_names_is_credited_to_history",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_in_neither_the_graph_nor_history_is_the_class_that_can_contain_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_ticket_the_history_datasets_cite_is_not_counted_as_possible_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_history_credits_a_whole_token_rather_than_a_longer_name_containing_it",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_the_two_classes_sum_to_the_flagged_total",
+            "test_summaries_flagged_term_classes.TheMutationEntriesForThisChangeTest.test_each_entry_matches_exactly_one_line_of_the_stage",
+        ),
     ),
     Mutation(
         "the history lookup no longer reads the datasets",
@@ -2162,7 +2858,15 @@ MUTATIONS = (
         "class that can contain invention swallows the whole flagged total. The report still "
         "reconciles and the actionable figure goes up, which reads as a stricter check rather "
         "than a check that has stopped looking",
-        ("test_summaries_flagged_term_classes",),
+        (
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_a_recorded_file_path_names_is_credited_to_history",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_in_neither_the_graph_nor_history_is_the_class_that_can_contain_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_ticket_the_history_datasets_cite_is_not_counted_as_possible_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_the_two_classes_sum_to_the_flagged_total",
+            "test_summaries_flagged_term_classes.TheHistoryLookupIsBoundedTest.test_no_further_dataset_is_opened_once_every_term_is_located",
+            "test_summaries_flagged_term_classes.TheHistoryLookupIsBoundedTest.test_the_pass_stops_reading_a_dataset_once_every_term_is_located",
+            "test_summaries_flagged_term_classes.TheMutationEntriesForThisChangeTest.test_each_entry_matches_exactly_one_line_of_the_stage",
+        ),
     ),
     Mutation(
         "a subTest failure loses the module that saw it",
@@ -2176,7 +2880,10 @@ MUTATIONS = (
         "under-names what protects it and `check_mapping` refuses a file that cannot exist. "
         "Deriving this table with the branch removed produced `runTest` 14 times and hid 6 "
         "real observers behind it, while every affected entry still looked plausible",
-        ("test_mutation_gate_mapping", "test_mutation_gate_recovery"),
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_failure_inside_a_subtest_is_attributed_to_its_own_module",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_module_failing_only_in_a_subtest_still_reads_as_failing",
+        ),
     ),
     Mutation(
         "the tree the child reads goes unchecked",
@@ -2192,7 +2899,9 @@ MUTATIONS = (
         "targeting a file outside the installed package is still seen - one run derived 7 "
         "observed and 72 unobserved, printed no warning, and cost half an hour of deriving "
         "an artefact that had to be thrown away",
-        ("test_mutation_gate_recovery", "test_mutation_gate_refusals"),
+        (
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_the_wrong_tree_is_refused_before_the_tests_are_blamed",
+        ),
     ),
 )
 
@@ -2278,31 +2987,35 @@ def restore(module: str, original: bytes) -> None:
 # would hand back a line that is not JSON.
 REPORT_MARKER = "mutation-gate-report "
 
-# Run by `_run` in the suite's own directory. It reports which test modules
-# failed rather than only whether the run passed, because the observers in the
-# table above are derived from that set and checked against it. The module comes
-# off the test object rather than out of unittest's printed failure header: a
-# header is a display format, and reading a mapping this gate depends on out of
-# one would be a parser that breaks silently.
+# Run by `_run` in the suite's own directory. It reports which tests failed
+# rather than only whether the run passed, because the observers in the table
+# above are derived from that set and checked against it. The name comes off the
+# test object rather than out of unittest's printed failure header: a header is a
+# display format, and reading a mapping this gate depends on out of one would be
+# a parser that breaks silently. `test.id()` is not it either - for a subTest it
+# carries the parameters of the case that failed, which vary from run to run.
 REPORTER = """
 import json
 import sys
 import unittest
 
 
-def module_of(test):
-    # A failure inside a test class carries its module on the class. A module
-    # that failed to import, or whose setUpModule raised, is reported through
-    # unittest's own stand-ins instead: _FailedTest keeps the module name where
-    # a method name would go, and _ErrorHolder puts it in brackets after the
-    # name of the hook that raised, and a subTest failure is reported through a
-    # _SubTest whose own module is unittest's, with the real case hanging off it.
-    module = type(test).__module__
-    if not module.startswith("unittest"):
-        return module
+def observer_of(test):
+    # A subTest failure is reported through a _SubTest, whose own module is
+    # unittest's, with the real case hanging off it - so unwrap before asking
+    # anything about the test. A failure inside a test class then carries its
+    # module and class on the class and its name on the instance. A module that
+    # failed to import, or whose setUpModule raised, is reported through
+    # unittest's other stand-ins, which have no test behind them at all:
+    # _FailedTest keeps the module name where a method name would go, and
+    # _ErrorHolder puts it in brackets after the name of the hook that raised.
+    # Those name the module alone, because there is no test to name.
     case = getattr(test, "test_case", None)
     if case is not None:
-        return type(case).__module__
+        test = case
+    module = type(test).__module__
+    if not module.startswith("unittest"):
+        return f"{module}.{type(test).__qualname__}.{test._testMethodName}"
     described = getattr(test, "description", "")
     if described:
         return described.partition("(")[2].rstrip(")").split(".")[0]
@@ -2314,17 +3027,17 @@ marker = sys.argv[2]
 loader = unittest.TestLoader()
 suite = loader.loadTestsFromNames(names) if names else loader.discover(".")
 result = unittest.TextTestRunner(stream=sys.stderr, verbosity=0).run(suite)
-failed = {module_of(test) for test, _ in result.failures + result.errors} - {""}
-print(marker + json.dumps({"passed": result.wasSuccessful(), "modules": sorted(failed)}))
+failed = {observer_of(test) for test, _ in result.failures + result.errors} - {""}
+print(marker + json.dumps({"passed": result.wasSuccessful(), "observers": sorted(failed)}))
 """
 
 
 @dataclass(frozen=True)
 class SuiteRun:
-    """What one suite run reported: whether it passed, and which modules failed."""
+    """What one suite run reported: whether it passed, and which tests failed."""
 
     passed: bool
-    modules: tuple[str, ...]
+    observers: tuple[str, ...]
 
 
 def _run(names: tuple[str, ...] | None) -> SuiteRun:
@@ -2366,7 +3079,7 @@ def _run(names: tuple[str, ...] | None) -> SuiteRun:
             f"{os.linesep.join(completed.stderr.splitlines()[-20:])}"
         )
     parsed = json.loads(reported[-1].partition(REPORT_MARKER)[2])
-    return SuiteRun(bool(parsed["passed"]), tuple(parsed["modules"]))
+    return SuiteRun(bool(parsed["passed"]), tuple(parsed["observers"]))
 
 
 # Asked of a child spawned where the suite is spawned, because the question is
@@ -2431,59 +3144,99 @@ def run_suite() -> SuiteRun:
     """What a whole-suite run of the tree as it stands reported.
 
     The run rather than a verdict, because the refusal that reads it names the
-    modules that failed: a red suite the reader cannot see from where they are
+    tests that failed: a red suite the reader cannot see from where they are
     standing is the case that costs, and the names are already in hand.
     """
     return _run(None)
 
 
-def run_modules(modules: Sequence[str]) -> bool:
-    """True when every named test module passes, run on its own.
+def module_of(observer: str) -> str:
+    """The test module holding an observer: everything before the first dot.
+
+    An observer is `module.Class.test` for a failure inside a test, and the
+    module alone for one that is not inside a test at all - an import that
+    raised, or a `setUpModule`. Both name their module the same way.
+    """
+    return observer.partition(".")[0]
+
+
+def run_observers(observers: Sequence[str]) -> tuple[str, ...]:
+    """The named observers that failed, from a run of the modules holding them.
+
+    Whole modules are run, because a module costs no more than one test of it and
+    that is what the mapping was derived from - but the answer is which *named*
+    tests failed, not whether the run passed. A module fails for reasons an entry
+    does not describe: the guards over the table above fail for every entry
+    targeting this file, and reading the run's verdict reported four such entries
+    as caught while nothing had observed them (#274).
 
     An empty selection is refused rather than run. `unittest` reports a suite of
     no tests as a success, so an entry that named nothing would run no test at
     all and be reported as `caught` - a gate saying it had observed a defect it
     never looked for, which is worse than the whole-suite run this replaces.
     """
-    if not modules:
+    if not observers:
         raise SystemExit(
-            "a mutation reached the runner naming no test module. Running nothing "
+            "a mutation reached the runner naming no observing test. Running nothing "
             "reports success, which this gate would print as `caught`."
         )
-    return _run(tuple(modules)).passed
+    modules = tuple(dict.fromkeys(module_of(observer) for observer in observers))
+    failed = set(_run(modules).observers)
+    return tuple(observer for observer in observers if observer in failed)
 
 
-def failing_modules() -> tuple[str, ...]:
-    """The test modules that fail with the current tree, from a whole-suite run."""
-    return _run(None).modules
+def failing_observers() -> tuple[str, ...]:
+    """The tests that fail with the current tree, from a whole-suite run."""
+    return _run(None).observers
 
 
-def observer_path(module: str) -> Path:
-    """The file an entry's observer names."""
-    return ROOT / "tests" / f"{module}.py"
+def behavioural(observers: Iterable[str]) -> tuple[str, ...]:
+    """`observers` without the table guards, which observe the table and nothing else.
+
+    Applied wherever a set is derived from or compared against a suite run, so
+    that a guard firing because this file changed cannot be read as a test having
+    seen the defect. `sweep` needs no such filter: it asks whether a *named*
+    observer failed, and `check_mapping` refuses an entry that names a guard.
+    """
+    return tuple(observer for observer in observers if observer not in TABLE_GUARDS)
+
+
+def observer_path(observer: str) -> Path:
+    """The file holding an entry's observer."""
+    return ROOT / "tests" / f"{module_of(observer)}.py"
 
 
 def check_mapping(mutations: Sequence[Mutation]) -> None:
-    """Refuse a table whose entries do not name test modules this tree holds.
+    """Refuse a table whose entries do not name tests this tree can observe with.
 
-    Both refusals close the same hole, which is the one failure mode this change
-    introduced. An entry naming nothing runs nothing; an entry naming a module
-    that was renamed or misspelt loads a `_FailedTest` and fails for that reason
-    rather than for the mutation. Either would print `caught` from a run that
-    proved nothing, and neither is visible in a pass.
+    All three refusals close the same hole, which is the failure mode naming
+    observers introduced. An entry naming nothing runs nothing; an entry naming a
+    module that was renamed or misspelt loads a `_FailedTest` and fails for that
+    reason rather than for the mutation; an entry naming a guard over this table
+    names something that fails whenever this file changes. Each would print
+    `caught` from a run that proved nothing, and none is visible in a pass.
     """
     for mutation in mutations:
         if not mutation.observers:
             raise SystemExit(
-                f"mutation '{mutation.name}' names no observing test module. Run "
+                f"mutation '{mutation.name}' names no observing test. Run "
                 f"`--derive-mapping --only '{mutation.name}'` and paste what it prints: "
                 "an unmapped entry cannot be run, because running nothing passes."
             )
-        for module in mutation.observers:
-            if not observer_path(module).is_file():
+        for observer in mutation.observers:
+            if observer in TABLE_GUARDS:
                 raise SystemExit(
-                    f"mutation '{mutation.name}' names '{module}' as an observer and "
-                    f"{observer_path(module)} does not exist. A module unittest cannot "
+                    f"mutation '{mutation.name}' names the table guard '{observer}' as an "
+                    "observer. That check reads this table rather than any behaviour, and "
+                    "it fails for every entry targeting this file whatever the mutation "
+                    "did, so it protects nothing. Derive the set again with "
+                    f"`--derive-mapping --only '{mutation.name}'`: if it comes back empty, "
+                    "the behaviour has no test and that is the finding."
+                )
+            if not observer_path(observer).is_file():
+                raise SystemExit(
+                    f"mutation '{mutation.name}' names '{observer}' as an observer and "
+                    f"{observer_path(observer)} does not exist. A module unittest cannot "
                     "load fails the run, which this gate would report as `caught`."
                 )
 
@@ -2555,14 +3308,14 @@ def each_mutation(mutations: Sequence[Mutation], observe: Callable[[Mutation], N
 
 
 def sweep(mutations: Sequence[Mutation]) -> int:
-    """Apply each entry and run the test modules it names. The gate proper."""
+    """Apply each entry and check that the tests it names failed. The gate proper."""
     check_mapping(mutations)
     survived: list[Mutation] = []
 
     def observe(mutation: Mutation) -> None:
-        caught = not run_modules(mutation.observers)
-        print(f"  {'caught ' if caught else 'SURVIVED'}  {mutation.name}")
-        if not caught:
+        observed = run_observers(mutation.observers)
+        print(f"  {'caught ' if observed else 'SURVIVED'}  {mutation.name}")
+        if not observed:
             survived.append(mutation)
 
     interrupted = each_mutation(mutations, observe)
@@ -2580,9 +3333,11 @@ def sweep(mutations: Sequence[Mutation]) -> int:
         print(
             "\nA surviving mutation means that behaviour could be removed today with the "
             "suite still green. It is not a curiosity. Check `--verify-mapping --only` on "
-            "the entry before changing the code: the modules it names may no longer be "
-            "the ones that observe it. If they nearly all survived, the suite is not "
-            "reading this tree at all - see `_run` on a relative PYTHONPATH.",
+            "the entry before changing the code: the tests it names may no longer be the "
+            "ones that observe it, and a named test that was renamed or deleted is a "
+            "survivor here whatever the rest of its module did. If they nearly all "
+            "survived, the suite is not reading this tree at all - see `_run` on a "
+            "relative PYTHONPATH.",
             file=sys.stderr,
         )
     return 1 if survived else 0
@@ -2595,17 +3350,21 @@ def derive_mapping(mutations: Sequence[Mutation]) -> int:
     full suite per entry - and that is the trade the field exists to take: paid
     once when an entry is written rather than on every run.
 
+    The table guards are subtracted before anything is printed, so an entry whose
+    only failures were theirs derives as observed by nothing rather than as
+    protected by the check that noticed this file had changed (#274).
+
     An entry nothing observes is a survivor of the whole suite, so this refuses
     rather than printing an empty tuple to be pasted in.
     """
     unobserved: list[Mutation] = []
 
     def observe(mutation: Mutation) -> None:
-        modules = failing_modules()
-        if not modules:
+        observers = behavioural(failing_observers())
+        if not observers:
             unobserved.append(mutation)
-        print(json.dumps({"name": mutation.name, "observers": list(modules)}), flush=True)
-        print(f"  {len(modules) or 'NOTHING'} <- {mutation.name}", file=sys.stderr)
+        print(json.dumps({"name": mutation.name, "observers": list(observers)}), flush=True)
+        print(f"  {len(observers) or 'NOTHING'} <- {mutation.name}", file=sys.stderr)
 
     interrupted = each_mutation(mutations, observe)
     if interrupted is not None:
@@ -2631,10 +3390,12 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
 
     A wrong name is invisible to a normal run, which is the cost of running only
     what an entry names: the gate would print `caught` either way. So the claim
-    each entry makes - these modules and no others observe this defect - is
-    checked here in both directions. A module that failed and is not named means
-    the entry under-describes what protects it; a named module that did not fail
-    means the entry describes protection that is not there.
+    each entry makes - these tests and no others observe this defect - is checked
+    here in both directions. A test that failed and is not named means the entry
+    under-describes what protects it; a named test that did not fail means the
+    entry describes protection that is not there. The table guards are subtracted
+    from what failed, so an entry whose behavioural observer was deleted
+    disagrees here instead of agreeing with a guard (#274).
     """
     check_mapping(mutations)
     wrong: list[str] = []
@@ -2642,7 +3403,7 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
 
     def observe(mutation: Mutation) -> None:
         complaints = len(wrong)
-        failed = set(failing_modules())
+        failed = set(behavioural(failing_observers()))
         named = set(mutation.observers)
         if not failed:
             wrong.append(f"{mutation.name}: nothing observes it, so it is a survivor")
@@ -2671,9 +3432,9 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
         print(f"  WRONG MAPPING: {entry}", file=sys.stderr)
     if wrong:
         print(
-            "\nEvery run of this gate ran only the modules named above, so a mapping that "
-            "disagrees with the suite means those runs proved less than they reported. Take "
-            "the set from `--derive-mapping` rather than editing by hand.",
+            "\nEvery run of this gate concluded from only the tests named above, so a "
+            "mapping that disagrees with the suite means those runs proved less than they "
+            "reported. Take the set from `--derive-mapping` rather than editing by hand.",
             file=sys.stderr,
         )
     return 1 if wrong else 0
@@ -2720,10 +3481,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if arguments.list:
         for mutation in mutations:
-            print(
-                f"{mutation.name:<38} {mutation.module:<32} "
-                f"{','.join(mutation.observers):<40} {mutation.escaped_as}"
-            )
+            # The observers on their own lines: a full test name runs to about a
+            # hundred characters, so joining three of them onto the entry's line
+            # puts the escape - the reason the entry exists - past any width a
+            # terminal has.
+            print(f"{mutation.name:<38} {mutation.module:<32} {mutation.escaped_as}")
+            for observer in mutation.observers:
+                print(f"    observed by {observer}")
         return 0
 
     if recover():
@@ -2742,10 +3506,10 @@ def main(argv: list[str] | None = None) -> int:
         # over the table below fails this run while every test in the module they
         # are editing passes, and an anonymous refusal sends them there.
         blamed = (
-            f"these failed: {', '.join(baseline.modules)}"
-            if baseline.modules
-            else "the run named no failing module, so it did not fail inside a test - run "
-            "the suite directly and read what it printed"
+            f"these failed: {', '.join(baseline.observers)}"
+            if baseline.observers
+            else "the run named no failing test, so it did not fail inside one - run the "
+            "suite directly and read what it printed"
         )
         print(
             "The suite is already failing, so nothing can be concluded about any "

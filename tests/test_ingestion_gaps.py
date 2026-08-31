@@ -765,7 +765,15 @@ _RENDER = (
 def _render_in_subprocess(root: Path, seed: str) -> str:
     src = str(Path(__file__).resolve().parent.parent / "src")
     completed = subprocess.run(
-        [sys.executable, "-c", _RENDER.format(src=src), str(root)],
+        # `-B` because this child imports a module of the tree the mutation gate
+        # rewrites, while the environment below replaces rather than extends the
+        # one it was given - so the gate's PYTHONDONTWRITEBYTECODE never reaches
+        # it. A `.pyc` written here is one a later mutated run reads back:
+        # CPython invalidates on (mtime seconds, size), and this module's two
+        # entries produce a file of identical size inside one second, so the
+        # second of them ran the first's bytecode and reported on code that was
+        # never in the tree (#228, found again by #274).
+        [sys.executable, "-B", "-c", _RENDER.format(src=src), str(root)],
         capture_output=True,
         text=True,
         check=True,
