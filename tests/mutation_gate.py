@@ -2317,7 +2317,10 @@ MUTATIONS = (
         "per-process hash order - three distinct pages across four hash seeds, with the "
         "suite and the page regression both green. The tiebreak was present, correct and "
         "unobserved, which is indistinguishable from absent",
-        ("test_build_explorer", "test_two_builds_are_identical"),
+        (
+            "test_build_explorer.KeptEdgesTest.test_the_pair_order_does_not_follow_the_arrival_order_of_the_neighbours",
+            "test_two_builds_are_identical.TwoBuildsAreByteIdentical.test_every_artefact_is_byte_identical",
+        ),
     ),
     Mutation(
         "equal-degree entries fall back to the graph file's order",
@@ -2331,7 +2334,9 @@ MUTATIONS = (
         "client-side ranking of equally-weighted entries falls back to it, so anything "
         "rebuilding `nodes` from a set or a dict would reorder rankings throughout the "
         "page with no check here able to notice",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.BuildIndexTest.test_equal_degree_entries_are_ordered_by_id_whatever_order_the_graph_lists_them",
+        ),
     ),
     Mutation(
         "the indexed inventory measured and discarded",

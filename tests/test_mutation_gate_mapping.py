@@ -457,9 +457,10 @@ class MutationGateMappingTest(unittest.TestCase):
         protected on none - and the refusal has to leave the tree alone, because an
         entry rejected half-applied is a defect left in the working copy."""
         root = self._tree(guard=True)
+        names_a_guard = self._entry(GUARDS_THE_TABLE)
 
         with self.assertRaises(SystemExit) as raised:
-            gate.sweep((self._entry(GUARDS_THE_TABLE),))
+            gate.sweep((names_a_guard,))
 
         self.assertIn("table guard", str(raised.exception))
         self.assertIn(GUARDS_THE_TABLE, str(raised.exception))
