@@ -2328,7 +2328,11 @@ MUTATIONS = (
         "`git push`, which names neither the stage nor the layer that grew. The mutation "
         "leaves the text intact and removes only the refusal, because the text was never "
         "the missing half",
-        ("test_build_explorer",),
+        (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
+            "test_build_explorer.PageByteAttributionTest.test_a_refused_build_leaves_the_page_the_store_already_had",
+            "test_build_explorer.PageByteAttributionTest.test_the_hard_limit_comes_from_the_environment",
+        ),
     ),
     Mutation(
         "the breakdown computed and never printed",
