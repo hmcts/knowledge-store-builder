@@ -1416,6 +1416,21 @@ MUTATIONS = (
         "and is gone, which is how a join that should have been three times larger read "
         "as a working join on a sparse estate",
     ),
+    Mutation(
+        "equal-degree connections fall back to hash order",
+        "build_explorer.py",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: (-degree[n], n)):",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: -degree[n]):",
+        "#280 measured it before this entry had an observer: dropping the `n` passed the "
+        "entire suite, and the page regression with it. `adjacency` holds sets and the "
+        "sort is stable, so without the name half two equally connected neighbours print "
+        "in whatever order the process's hash seed iterated them, and the connection line "
+        "on a committed page differs between two builds of one graph - hash randomisation "
+        "has broken determinism here before and is invisible until somebody diffs two "
+        "pages. The observer has to supply the arrival order itself: the fixture does hold "
+        "a tied pair that reaches the page, but comparing two builds only sees the swap "
+        "when the two seeds happen to disagree, which is a coin toss rather than a gate",
+    ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for
     # the whole file and no way to name the layer that paid for it. Every entry below
