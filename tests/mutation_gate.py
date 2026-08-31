@@ -146,6 +146,7 @@ MUTATIONS = (
         "archive could not be read by any of them and no call site said why. The "
         "replacement is the code that was there, so this is the shipped defect rather "
         "than an invented one",
+        ("test_config_and_io",),
     ),
     Mutation(
         "stale counterpart no longer named",
