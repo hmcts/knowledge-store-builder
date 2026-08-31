@@ -42,8 +42,13 @@ jobs:
       # paths-ignore only for changes that carry no Python, so nothing loses
       # coverage.
 
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
       - name: Install the package
-        run: pip install -e .
+        run: pip install -e . # NOSONAR
 
       # The default install declares no runtime dependencies, and this run proves
       # it: every test that needs an optional extra skips rather than fails, so a
@@ -239,8 +244,13 @@ jobs:
         with:
           node-version: "22"
 
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
       - name: Install the package
-        run: pip install -e .
+        run: pip install -e . # NOSONAR
 
       - name: Unit tests, default install
         run: python3 -m unittest discover -s tests -v
