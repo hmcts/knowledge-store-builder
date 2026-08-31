@@ -30,6 +30,14 @@ named set that does not match the modules that failed. The `tests` workflow runs
 the second one on its schedule and on `workflow_dispatch`, in the same job that
 runs the fast mode on a pull request.
 
+The first of them is also the one mode that does not require a valid mapping. It
+reads no `observers` at all, and the check that refuses an entry without them runs
+inside the suite - so an unmapped entry made the suite red and the red suite
+blocked the command the refusal named. Deriving therefore excuses exactly the
+entries that name nothing, for exactly as long as it runs; every other reason a
+suite is red still stops it, because a mapping derived from a red suite describes
+whatever was already failing (#287).
+
 Every conclusion here rests on the suite reading this tree, and it is asserted
 rather than assumed. The suite runs in `tests/`, so a relative `PYTHONPATH=src`
 resolves to `tests/src` in the child, which does not exist, and the child imports
@@ -83,6 +91,19 @@ TERMINATION_SIGNALS = tuple(
     getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
 )
 
+# How a run tells the suite it spawns which entries it is in the middle of
+# mapping, as a JSON list of names. `check_mapping` runs inside the suite, so an
+# entry naming no observer makes every child run red - the baseline that decides
+# whether anything can be concluded, and the per-entry runs the observers are read
+# out of. `--derive-mapping` exists to fill that field in, so it is the one mode
+# that cannot require it to be filled in already (#287).
+#
+# Set by `excusing_unmapped` for the duration of a run and removed afterwards, and
+# set to an empty list by every other mode: the variable is a run's channel to its
+# own children rather than an operator's switch, so a value left in a shell cannot
+# widen the excusal to a sweep.
+DERIVING = "MUTATION_GATE_DERIVING"
+
 
 @dataclass(frozen=True)
 class Mutation:
@@ -116,7 +137,8 @@ class Mutation:
     # five unrelated test modules down with it and says nothing about the cause.
     # Defaulted, the same entry imports and fails one named check that says which
     # entry is unmapped and which command fills it in. The refusal is the same
-    # strictness, delivered where it can be acted on.
+    # strictness, delivered where it can be acted on - and `--derive-mapping`, the
+    # command it names, is excused from it so that the remedy can be run (#287).
     observers: tuple[str, ...] = ()
 
 
@@ -2274,6 +2296,26 @@ MUTATIONS = (
         "an artefact that had to be thrown away",
         ("test_mutation_gate_recovery", "test_mutation_gate_refusals"),
     ),
+    Mutation(
+        "the entries being mapped are refused by the guard over the mapping",
+        "tests/mutation_gate.py",
+        "            if mutation.name in " + "excused:",
+        "            if False:",
+        "#287: this check runs inside the suite, so an entry naming no observer makes the "
+        "suite red - and a red suite is what the baseline refusal stops a run on, including "
+        "`--derive-mapping`, the command the refusal itself prints. The remedy for an "
+        "unmapped entry could not be run, and the way round it was to paste a plausible "
+        "observer set in, derive, and take it back out: the gate reports `caught` with that "
+        "placeholder in place because the named module fails for its own reasons, and a "
+        "find-and-replace that matches nothing looks exactly like success. Hit repeatedly in "
+        "one day while giving observer sets to entries arriving from other branches",
+        # Derived twice on purpose. The first run had the entry itself unmapped - the
+        # state this change exists to make workable - so the guard failed for that
+        # absence as well as for the mutation, and named a third module that stops
+        # observing the moment the entry is mapped. The set below is the fixed point:
+        # derived again with the field filled in, and `--verify-mapping` agrees.
+        ("test_mutation_gate_recovery", "test_mutation_gate_refusals"),
+    ),
 )
 
 
@@ -2543,6 +2585,35 @@ def observer_path(module: str) -> Path:
     return ROOT / "tests" / f"{module}.py"
 
 
+@contextmanager
+def excusing_unmapped(mutations: Sequence[Mutation]) -> Iterator[None]:
+    """Let `check_mapping` past the unmapped entries, in this process and its children.
+
+    Narrow in three ways on purpose, because the refusal it suspends is what stops
+    a gate printing `caught` from a run that looked for nothing: only entries that
+    name no observer are excused, only those entries by name, and only while the
+    block runs. Everything else `check_mapping` refuses still refuses, and
+    `run_modules` still refuses an empty selection - so a mode that runs what an
+    entry names stops at an excused entry rather than passing it.
+
+    Entered by every mode, with no names by all but one. An empty list excuses
+    nothing and overwrites whatever the environment arrived holding, which is what
+    makes the variable a channel rather than a switch.
+    """
+    excused = sorted(mutation.name for mutation in mutations if not mutation.observers)
+    os.environ[DERIVING] = json.dumps(excused)
+    try:
+        yield
+    finally:
+        os.environ.pop(DERIVING, None)
+
+
+def excused_from_mapping() -> frozenset[str]:
+    """The entries a `--derive-mapping` run has asked `check_mapping` to let past."""
+    recorded = os.environ.get(DERIVING)
+    return frozenset(json.loads(recorded)) if recorded else frozenset()
+
+
 def check_mapping(mutations: Sequence[Mutation]) -> None:
     """Refuse a table whose entries do not name test modules this tree holds.
 
@@ -2551,9 +2622,17 @@ def check_mapping(mutations: Sequence[Mutation]) -> None:
     that was renamed or misspelt loads a `_FailedTest` and fails for that reason
     rather than for the mutation. Either would print `caught` from a run that
     proved nothing, and neither is visible in a pass.
+
+    The first refusal is suspended for the entries a `--derive-mapping` run is
+    mapping, and only for those. This check runs inside the suite, so refusing an
+    unmapped entry made the suite red, and a red suite blocked the mode named in
+    the refusal - the remedy could not be run (#287).
     """
+    excused = excused_from_mapping()
     for mutation in mutations:
         if not mutation.observers:
+            if mutation.name in excused:
+                continue
             raise SystemExit(
                 f"mutation '{mutation.name}' names no observing test module. Run "
                 f"`--derive-mapping --only '{mutation.name}'` and paste what it prints: "
@@ -2816,29 +2895,34 @@ def main(argv: list[str] | None = None) -> int:
     if check_import_path():
         return 1
 
-    baseline = run_suite()
-    if not baseline.passed:
-        # Named, because the reader is not always looking at the failure: a guard
-        # over the table below fails this run while every test in the module they
-        # are editing passes, and an anonymous refusal sends them there.
-        blamed = (
-            f"these failed: {', '.join(baseline.modules)}"
-            if baseline.modules
-            else "the run named no failing module, so it did not fail inside a test - run "
-            "the suite directly and read what it printed"
-        )
-        print(
-            "The suite is already failing, so nothing can be concluded about any "
-            f"mutation. Fix that first - {blamed}.",
-            file=sys.stderr,
-        )
-        return 1
+    # The whole table rather than the selection, because the guard inside the suite
+    # reads the whole table: excusing only `--only`'s entries would leave the child
+    # red over an entry this run is not touching, and every derived set would then
+    # name the guard's own module alongside the real observers.
+    with excusing_unmapped(MUTATIONS if arguments.derive_mapping else ()):
+        baseline = run_suite()
+        if not baseline.passed:
+            # Named, because the reader is not always looking at the failure: a guard
+            # over the table below fails this run while every test in the module they
+            # are editing passes, and an anonymous refusal sends them there.
+            blamed = (
+                f"these failed: {', '.join(baseline.modules)}"
+                if baseline.modules
+                else "the run named no failing module, so it did not fail inside a test - run "
+                "the suite directly and read what it printed"
+            )
+            print(
+                "The suite is already failing, so nothing can be concluded about any "
+                f"mutation. Fix that first - {blamed}.",
+                file=sys.stderr,
+            )
+            return 1
 
-    if arguments.derive_mapping:
-        return derive_mapping(mutations)
-    if arguments.verify_mapping:
-        return verify_mapping(mutations)
-    return sweep(mutations)
+        if arguments.derive_mapping:
+            return derive_mapping(mutations)
+        if arguments.verify_mapping:
+            return verify_mapping(mutations)
+        return sweep(mutations)
 
 
 if __name__ == "__main__":

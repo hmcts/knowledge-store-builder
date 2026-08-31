@@ -28,6 +28,16 @@ named no module, which is fine when the reader is already looking at a red suite
 and expensive in the case that happens: a table-level guard failing while every
 test in the module under edit passes. The name was available to the gate and
 thrown away.
+
+The last part is what that refusal did to the one mode that cannot obey it.
+`check_mapping` runs in the suite, so an entry naming no observer makes the
+baseline red, and the baseline refusal then blocks `--derive-mapping` - the
+command the refusal itself prints. The remedy was unrunnable, and the workaround
+was to paste a plausible observer set in and take it back out, which is the
+defect the mapping exists to stop reached through the tool meant to prevent it
+(#287). The checks for it drive `main` over a tree carrying a stand-in for the
+shipped guard, because the circularity only exists when a test module calls the
+gate's own `check_mapping` over the table.
 """
 
 from __future__ import annotations
@@ -44,6 +54,11 @@ from unittest import mock
 import mutation_gate as gate
 
 ORIGINAL = 'VALUE = "ORIGINAL"\n'
+
+# Where the child has to look to import the gate itself. The tree below is a
+# temporary directory and the child runs inside it, so nothing on its path leads
+# back here unless the module that needs it says so.
+GATE_DIRECTORY = Path(gate.__file__).resolve().parent
 
 # Reads the file the entry below mutates, so it fails while the mutation is
 # applied and passes when it is not. The path comes from its own location: the
@@ -72,6 +87,34 @@ class GuardTheTable(unittest.TestCase):
         self.assertEqual(1, 2, "a guard over the table, red for its own reasons")
 """
 
+# Stands in for `test_every_shipped_entry_names_test_modules_this_repository_holds`,
+# which is what makes an unmapped entry a red suite rather than a quiet one. The
+# gate's real `check_mapping` over a real entry with no observers, so the
+# circularity here is the repository's own and not a description of it.
+MAPPING_GUARD = f"""
+import sys
+import unittest
+
+sys.path.insert(0, {str(GATE_DIRECTORY)!r})
+
+import mutation_gate as gate
+
+
+class GuardTheMapping(unittest.TestCase):
+    def test_the_entry_names_a_test_module(self):
+        gate.check_mapping(
+            (
+                gate.Mutation(
+                    "the target loses its value",
+                    "target.py",
+                    "ORIGINAL",
+                    "MUTATED",
+                    "a purpose-built target",
+                ),
+            )
+        )
+"""
+
 ENTRY = gate.Mutation(
     "the target loses its value",
     "target.py",
@@ -81,14 +124,33 @@ ENTRY = gate.Mutation(
     ("test_observer",),
 )
 
+# The same entry before anyone has mapped it, which is the state every entry
+# arrives in. Same name as the one the guard above checks, because the excusal is
+# by name: an entry the run is not mapping is refused as it always was.
+UNMAPPED = gate.Mutation(
+    "the target loses its value",
+    "target.py",
+    "ORIGINAL",
+    "MUTATED",
+    "a purpose-built target",
+)
+
 
 class MutationGateRefusalsTest(unittest.TestCase):
-    def _tree(self, *, red: bool = False) -> Path:
+    def _tree(
+        self, *, red: bool = False, unmapped: bool = False, mapping_guard: bool = False
+    ) -> Path:
         """A repository the gate can be pointed at, and a second copy of the package.
 
         `elsewhere/` stands for whatever the child would otherwise import: an
         installed release, another checkout, another worktree. Same package name,
         a tree nobody is mutating.
+
+        `unmapped` gives the table the entry as it arrives, naming no observer;
+        `mapping_guard` adds the test module that refuses one. They are separate
+        because the pair is the circularity and each half alone is not: the entry
+        with no guard reaches the sweep's own refusal, and the guard with a mapped
+        entry passes.
         """
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -105,6 +167,8 @@ class MutationGateRefusalsTest(unittest.TestCase):
         (root / "tests" / "test_observer.py").write_text(OBSERVER, encoding="utf-8")
         if red:
             (root / "tests" / "test_table_guard.py").write_text(TABLE_GUARD, encoding="utf-8")
+        if mapping_guard:
+            (root / "tests" / "test_mapping_guard.py").write_text(MAPPING_GUARD, encoding="utf-8")
 
         self.addCleanup(setattr, gate, "ROOT", gate.ROOT)
         self.addCleanup(setattr, gate, "SRC", gate.SRC)
@@ -113,7 +177,7 @@ class MutationGateRefusalsTest(unittest.TestCase):
         gate.ROOT = root
         gate.SRC = root / "src" / "knowledgestore"
         gate.RECOVERY_PATH = root / "sidecar"
-        gate.MUTATIONS = (ENTRY,)
+        gate.MUTATIONS = (UNMAPPED,) if unmapped else (ENTRY,)
         return root
 
     def _child_reads(self, directory: Path) -> None:
@@ -128,10 +192,10 @@ class MutationGateRefusalsTest(unittest.TestCase):
         os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
 
     @staticmethod
-    def _drive_main() -> tuple[int, str, str]:
+    def _drive_main(*arguments: str) -> tuple[int, str, str]:
         printed, reported = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(reported):
-            code = gate.main([])
+            code = gate.main(list(arguments))
         return code, printed.getvalue(), reported.getvalue()
 
     def test_a_child_importing_another_tree_is_refused_and_the_path_is_named(self):
@@ -273,6 +337,101 @@ class MutationGateRefusalsTest(unittest.TestCase):
         self.assertEqual(code, 0, f"a correct tree was refused: {reported}")
         self.assertIn("1 of 1 mutations caught", printed)
         self.assertEqual(reported, "")
+        self.assertEqual(
+            (root / "src" / "knowledgestore" / "target.py").read_text(encoding="utf-8"), ORIGINAL
+        )
+
+    def test_an_entry_with_no_observers_can_still_be_derived(self):
+        """Catches the remedy for an unmapped entry being unrunnable (#287).
+
+        `check_mapping` runs inside the suite, so an entry naming no observer turns
+        the whole-suite baseline red, and the baseline refusal then blocks
+        `--derive-mapping` - the command that refusal prints. The way round it was to
+        paste a plausible observer set in, derive, and take it out again: the gate
+        reports `caught` with a placeholder in place, because the named module fails
+        for its own reasons, so the workaround is the defect the mapping exists to
+        stop.
+
+        The derived set is asserted exactly rather than by containment, and that is
+        the half worth having. Excusing only the baseline would leave the guard
+        failing inside every per-entry run, so `test_mapping_guard` would be named
+        alongside the real observer in what the mode printed to be pasted in - a
+        mapping wrong in the direction nothing downstream can see.
+
+        The last assertion is a second break. The excusal reaches the suite through
+        the environment, so one left set outlives the run that meant it: a later
+        sweep in the same process, or a suite run started from the same shell, would
+        find the guard over the table quietly agreeing to an entry that names
+        nothing.
+        """
+        root = self._tree(unmapped=True, mapping_guard=True)
+        self._child_reads(root / "src")
+
+        code, printed, reported = self._drive_main("--derive-mapping")
+
+        self.assertEqual(code, 0, f"an entry could not be derived without a mapping: {reported}")
+        self.assertIn(
+            '{"name": "the target loses its value", "observers": ["test_observer"]}',
+            printed,
+            f"the derived set is not the modules that failed: {printed}",
+        )
+        self.assertNotIn("The suite is already failing", reported)
+        self.assertEqual(
+            (root / "src" / "knowledgestore" / "target.py").read_text(encoding="utf-8"), ORIGINAL
+        )
+        self.assertNotIn(gate.DERIVING, os.environ, "the excusal outlived the run that meant it")
+
+    def test_a_suite_red_for_its_own_reasons_still_refuses_to_derive(self):
+        """The half that matters: excusing the mapping guard must not become not
+        checking the baseline.
+
+        Deriving against a red suite yields a mapping that describes nothing - every
+        entry comes back observed by whatever was already failing - so the refusal has
+        to survive for every cause but the absence this mode exists to fill. A fix
+        that switched the baseline off for the mode would pass the check above and
+        leave nothing here.
+
+        The unmapped entry and its guard are in this tree too, so the refusal also has
+        to name the module that is really broken and not the one it excused: a run
+        blocked by a red suite while blaming the mapping sends the reader back into
+        the circle they just left.
+        """
+        root = self._tree(unmapped=True, mapping_guard=True, red=True)
+        self._child_reads(root / "src")
+
+        code, printed, reported = self._drive_main("--derive-mapping")
+
+        self.assertEqual(code, 1, f"a mapping was derived from a red suite: {printed}")
+        self.assertIn("The suite is already failing", reported)
+        self.assertIn("test_table_guard", reported)
+        self.assertNotIn("test_mapping_guard", reported)
+        self.assertEqual(
+            (root / "src" / "knowledgestore" / "target.py").read_text(encoding="utf-8"),
+            ORIGINAL,
+            "a run that could conclude nothing applied a mutation anyway",
+        )
+
+    def test_a_sweep_still_refuses_the_entry_that_names_no_observer(self):
+        """Catches the excusal widening from the mode that derives to every mode.
+
+        Only `--derive-mapping` can ignore the field, because it computes the
+        observers from a whole-suite run and never reads it. A sweep runs what the
+        entry names, and an entry naming nothing runs no test at all - which
+        `unittest` reports as a success and this gate prints as `caught`.
+
+        No mapping guard in this tree, so the baseline is green and the run reaches
+        the sweep. The refusal that has to arrive is the one naming the entry and the
+        command that fills it in; `run_modules` complaining about an empty selection
+        later is the same run stopped by the backstop rather than by the check.
+        """
+        root = self._tree(unmapped=True)
+        self._child_reads(root / "src")
+
+        with self.assertRaises(SystemExit) as raised:
+            self._drive_main()
+
+        self.assertIn("names no observing test module", str(raised.exception))
+        self.assertIn("--derive-mapping", str(raised.exception))
         self.assertEqual(
             (root / "src" / "knowledgestore" / "target.py").read_text(encoding="utf-8"), ORIGINAL
         )
