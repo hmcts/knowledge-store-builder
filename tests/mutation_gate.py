@@ -1780,6 +1780,19 @@ MUTATIONS = (
         ("test_build_explorer",),
     ),
     Mutation(
+        "the oversized page refused in the message and written anyway",
+        "build_explorer.py",
+        '        print(refusal, end="", file=sys.stderr)\n        return 1',
+        '        print(refusal, end="", file=sys.stderr)',
+        "#245's last part, and the shape the stage shipped in: the size was printed, the "
+        "page was written, and the stage exited 0. A message an exit code contradicts is "
+        "read as advice - the build was committed and the store met the real refusal at "
+        "`git push`, which names neither the stage nor the layer that grew. The mutation "
+        "leaves the text intact and removes only the refusal, because the text was never "
+        "the missing half",
+        ("test_build_explorer",),
+    ),
+    Mutation(
         "the breakdown computed and never printed",
         "build_explorer.py",
         '    print(breakdown_report(breakdown, size_bytes, config.EXPLORER_PATH), end="")',
