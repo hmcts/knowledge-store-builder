@@ -286,7 +286,14 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
         for node_id, node in nodes.items()
         if include_entry(node, node_kind(node), degree[node_id])
     ]
-    kept.sort(key=lambda item: -degree[item[0]])
+    # id tiebreak: the entry order is the page's own tiebreak - app.js documents
+    # DATA as degree-sorted and every client-side ranking of equally-weighted
+    # entries falls back to it. Without the id half, equal degrees come out in
+    # whatever order the graph file listed its nodes in, which makes the page a
+    # property of a peer tool's serialisation rather than of the graph's content.
+    # The id, not the label: ids are unique because they key `nodes`, labels are
+    # not, so only the id makes this order total.
+    kept.sort(key=lambda item: (-degree[item[0]], item[0]))
     index_of = {node_id: i for i, (node_id, _, _) in enumerate(kept)}
 
     entries = [
