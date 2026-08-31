@@ -21,6 +21,12 @@ would leave a mutation in this working tree.
 The last check here is about the gate's table rather than its signals: the
 entries covering this behaviour target the gate's own file, which is the one file
 whose text quotes the strings it mutates.
+
+The records written by hand below are spelt out field by field rather than built
+with the gate's own writer: what the header carries is part of what a killed run
+hands its successor, so a field silently dropped from it has to fail here rather
+than be reproduced on both sides. What a *reader outside the process* does with
+those fields is `tests/test_mutation_gate_visibility.py`.
 """
 
 from __future__ import annotations
@@ -28,7 +34,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -46,6 +54,22 @@ TESTS = Path(__file__).resolve().parent
 # reason at the encoding layer.
 ORIGINAL = b"# harness target\r\nVALUE = 'ORIGINAL'\n# caf\xc3\xa9\n"
 MUTATED = ORIGINAL.replace(b"ORIGINAL", b"MUTATED")
+
+
+def record_for(module: str) -> bytes:
+    """A recovery record as a killed run leaves it: one JSON header line naming
+    the file and the run that mutated it, then the original bytes verbatim. The
+    header is written out here rather than taken from the gate, so a field the
+    gate stops writing is a failure rather than a value agreeing with itself."""
+    header = {
+        "module": module,
+        "root": str(gate.ROOT),
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "started": "",
+    }
+    return json.dumps(header).encode("utf-8") + b"\n" + ORIGINAL
+
 
 # Drives the real gate over a purpose-built source directory. Only the calls that
 # start a child are replaced - the process boundary the gate's own docstring calls
@@ -286,7 +310,7 @@ class MutationGateRecoveryTest(unittest.TestCase):
         root = self._workspace()
         self._point_gate_at(root)
         (root / "source" / "target.py").write_bytes(MUTATED)
-        (root / "sidecar").write_bytes(b"target.py\n" + ORIGINAL)
+        (root / "sidecar").write_bytes(record_for("target.py"))
 
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(gate.recover(), 0)
@@ -300,7 +324,7 @@ class MutationGateRecoveryTest(unittest.TestCase):
         screen to say so - so the refusal has to carry the path to remove by hand."""
         root = self._workspace()
         self._point_gate_at(root)
-        (root / "sidecar").write_bytes(b"absent-module.py\n" + ORIGINAL)
+        (root / "sidecar").write_bytes(record_for("absent-module.py"))
 
         reported = io.StringIO()
         with contextlib.redirect_stderr(reported):
