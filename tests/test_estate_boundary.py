@@ -355,7 +355,11 @@ _RENDER = (
 def _render_in_subprocess(path: Path, seed: str) -> str:
     src = str(Path(__file__).resolve().parent.parent / "src")
     completed = subprocess.run(
-        [sys.executable, "-c", _RENDER.format(src=src), str(path)],
+        # `-B` because this child imports the tree the mutation gate rewrites and
+        # the environment below is a replacement, so the gate's bytecode
+        # suppression does not reach it - a `.pyc` left here is one a mutated run
+        # reads back, reporting on code that was never in the tree (#228).
+        [sys.executable, "-B", "-c", _RENDER.format(src=src), str(path)],
         check=True,
         text=True,
         stdout=subprocess.PIPE,
