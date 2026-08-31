@@ -1501,6 +1501,33 @@ MUTATIONS = (
         "predecessor says which block grew. The jump this was reported for happened "
         "between two builds, which no single build can attribute at all",
     ),
+    # The page's own order (#284). Both of these were verified by mutation against
+    # the fixture rather than by reading, and both change the built page - the entries
+    # and the edge index are a permutation of themselves, so a consumer diffing two
+    # committed pages sees the tie groups move.
+    Mutation(
+        "the page's edge pairs follow hash order again",
+        "build_explorer.py",
+        "        for neighbour in sorted(adjacency.get(node_id, ())):",
+        "        for neighbour in adjacency.get(node_id, ()):",
+        "#284: `adjacency` holds sets, so dropping the sort emits the edge pairs in "
+        "per-process hash order - three distinct pages across four hash seeds, with the "
+        "suite and the page regression both green. The tiebreak was present, correct and "
+        "unobserved, which is indistinguishable from absent",
+    ),
+    Mutation(
+        "equal-degree entries fall back to the graph file's order",
+        "build_explorer.py",
+        "    kept.sort(key=lambda item: (-degree[item[0]], item[0]))",
+        "    kept.sort(key=lambda item: -degree[item[0]])",
+        "#284, and the more serious half: this sort shipped with no name tiebreak at all, "
+        "deterministic only because `nodes` preserves the order the graph file listed its "
+        "nodes in - an assumption about a peer tool's serialisation that nothing stated "
+        "and nothing checked. The entry order is the page's own tiebreak, since every "
+        "client-side ranking of equally-weighted entries falls back to it, so anything "
+        "rebuilding `nodes` from a set or a dict would reorder rankings throughout the "
+        "page with no check here able to notice",
+    ),
     Mutation(
         "the indexed inventory measured and discarded",
         "build_intent_index.py",

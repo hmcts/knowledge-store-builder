@@ -89,6 +89,42 @@ class BuildIndexTest(SettingsIsolated):
         self.assertEqual(len(edges), 2)
         self.assertTrue(all(0 <= i < len(entries) for i in edges))
 
+    def test_equal_degree_entries_are_ordered_by_id_whatever_order_the_graph_lists_them(self):
+        """Break it catches: sorting `kept` on the degree alone, with no name half.
+
+        The entry order is the page's own tiebreak. `app.js` documents DATA as
+        degree-sorted and every client-side ranking of equally-weighted entries
+        falls back to it, so two builds that differ in tie order are two different
+        pages. With no name half the order is whichever order the graph file
+        happened to list its nodes in - a load-bearing assumption about a peer
+        tool's serialisation that nothing here stated and nothing checked.
+
+        Run twice, because a single already-favourable arrival order is a test that
+        cannot fail: the nodes arrive in two orders, neither of them the answer,
+        and both must produce it.
+
+        The labels descend as the ids ascend, so an id tiebreak and a label
+        tiebreak give opposite answers and this pins the id. Ids are unique by
+        construction - they key `nodes` - and labels are not: the explorer's own
+        fixture estate carries two `AddressPipe`s. Only the id makes the order
+        total, and only a total order is independent of the arrival order.
+
+        Degree still leads: `z-hub` sorts last by id and comes out first.
+        """
+        labels = {
+            "z-hub": "HubService",
+            "n-a": "ZetaPipe",
+            "n-b": "YankeeForm",
+            "n-c": "XrayView",
+        }
+        links = [{"source": "z-hub", "target": nid} for nid in ("n-a", "n-b", "n-c")]
+        expected = ["HubService", "ZetaPipe", "YankeeForm", "XrayView"]
+
+        for arrival in (["n-c", "z-hub", "n-a", "n-b"], ["n-b", "n-a", "z-hub", "n-c"]):
+            graph = {"nodes": [node(nid, labels[nid]) for nid in arrival], "links": links}
+            entries, _edges = explorer.build_index(graph, {}, {})
+            self.assertEqual([entry[0] for entry in entries], expected, arrival)
+
     def test_intent_tickets_attach_to_code_entries(self):
         graph = {"nodes": [node("n1", "AddressPipe")], "links": []}
         intent = {
@@ -194,6 +230,32 @@ class KeptEdgesTest(SettingsIsolated):
         adjacency = {"a": {"b", "dropped"}, "b": {"a"}}
         index_of = {"a": 0, "b": 1}
         self.assertEqual(explorer.kept_edges(kept, adjacency, index_of), [0, 1])
+
+    def test_the_pair_order_does_not_follow_the_arrival_order_of_the_neighbours(self):
+        """Break it catches: dropping the `sorted()` over each node's neighbours.
+
+        In the build `adjacency` holds sets, so without the sort the pairs are
+        emitted in per-process hash order: dropping it produced three distinct
+        pages across four hash seeds while this suite and the page regression both
+        stayed green. The tiebreak was present, correct and unobserved, which is
+        indistinguishable from absent.
+
+        A same-process comparison cannot see it - two sets holding the same ids
+        iterate identically however they were filled - so the neighbours arrive
+        here as lists, in two orders that are each different from the answer, and
+        both must produce it.
+
+        The expected pairs are derived by hand from the neighbour *ids*: `a` sorts
+        before `b` before `c`, and their entry indexes are 1, 3 and 2, so the pairs
+        come out 0-1, 0-3, 0-2. Ordering by index instead would give 0-1, 0-2, 0-3
+        - a different page, so a change to declare rather than a refactor.
+        """
+        kept = [(node_id, {}, "code") for node_id in ("d", "a", "c", "b")]
+        index_of = {"d": 0, "a": 1, "c": 2, "b": 3}
+
+        for arrival in (["c", "a", "b"], ["b", "c", "a"]):
+            got = explorer.kept_edges(kept, {"d": arrival}, index_of)
+            self.assertEqual(got, [0, 1, 0, 3, 0, 2], arrival)
 
 
 class LatestSyncedTest(SettingsIsolated):
