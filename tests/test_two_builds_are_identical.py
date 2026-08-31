@@ -55,7 +55,12 @@ COVERS = (
 def _build(store: Path, seed: str) -> None:
     """Run the real fixture build in its own interpreter under `seed`."""
     completed = subprocess.run(
-        [sys.executable, str(FIXTURE), "--out", str(store)],
+        # `-B` because the environment below is built rather than extended, so
+        # `run_suite`'s bytecode suppression does not reach this grandchild - and a
+        # `.pyc` left here is one a mutated run reads back, reporting on code that
+        # was never in the tree (#228). Bytecode is also per-seed-invariant, so
+        # caching it would let one seed's compile serve the other's build.
+        [sys.executable, "-B", str(FIXTURE), "--out", str(store)],
         capture_output=True,
         text=True,
         env={"PYTHONHASHSEED": seed, "PATH": os.environ.get("PATH", "/usr/bin:/bin")},

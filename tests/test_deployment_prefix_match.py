@@ -187,7 +187,11 @@ _CLAIMANT = (
 def _claimant_in_subprocess(seed: str, service: str, repos: tuple[str, ...]) -> str:
     src = str(Path(__file__).resolve().parent.parent / "src")
     completed = subprocess.run(
-        [sys.executable, "-c", _CLAIMANT, src, service, *repos],
+        # `-B` because this child imports the tree the mutation gate rewrites and
+        # the environment below is a replacement, so the gate's bytecode
+        # suppression does not reach it - a `.pyc` left here is one a mutated run
+        # reads back, reporting on code that was never in the tree (#228).
+        [sys.executable, "-B", "-c", _CLAIMANT, src, service, *repos],
         capture_output=True,
         text=True,
         check=True,
