@@ -121,7 +121,7 @@ ENTRY = gate.Mutation(
     "ORIGINAL",
     "MUTATED",
     "a purpose-built target",
-    ("test_observer",),
+    ("test_observer.Observe.test_the_target_is_unmutated",),
 )
 
 # The same entry before anyone has mapped it, which is the state every entry
@@ -301,17 +301,21 @@ class MutationGateRefusalsTest(unittest.TestCase):
             "a run that could not observe a mutation applied one anyway",
         )
 
-    def test_the_refusal_names_the_test_module_that_failed(self):
+    def test_the_refusal_names_the_test_that_failed(self):
         """Catches a refusal that reports a red suite and keeps the suspect to itself.
 
         The reader is not always looking at the failure: a guard over the mutation
         table fails the whole-suite pre-check while every test in the module the
         author is editing passes, so the gate refuses over a module that is green
-        and names nothing. `_run` returns the failing modules already, so the
-        answer was in hand and discarded.
+        and names nothing. `_run` returns the failing tests already, so the answer
+        was in hand and discarded.
+
+        The test rather than its module, which is the precision the observer
+        mapping is recorded at: a module name sends the reader to a file and the
+        test name sends them to the assertion.
 
         Names what failed rather than everything it ran, which is the half that
-        can go vacuous: a refusal listing every module, or an empty list, reads as
+        can go vacuous: a refusal listing every test, or an empty list, reads as
         informative and says nothing.
         """
         root = self._tree(red=True)
@@ -321,7 +325,7 @@ class MutationGateRefusalsTest(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("The suite is already failing", reported)
-        self.assertIn("test_table_guard", reported)
+        self.assertIn("test_table_guard.GuardTheTable.test_every_entry_names_one_site", reported)
         self.assertNotIn("test_observer", reported)
 
     def test_a_green_tree_reaches_the_mutations_and_neither_refusal_fires(self):
@@ -371,7 +375,7 @@ class MutationGateRefusalsTest(unittest.TestCase):
 
         self.assertEqual(code, 0, f"an entry could not be derived without a mapping: {reported}")
         self.assertIn(
-            '{"name": "the target loses its value", "observers": ["test_observer"]}',
+            '{"name": "the target loses its value", "observers": ["test_observer.Observe.test_the_target_is_unmutated"]}',
             printed,
             f"the derived set is not the modules that failed: {printed}",
         )
@@ -430,7 +434,7 @@ class MutationGateRefusalsTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             self._drive_main()
 
-        self.assertIn("names no observing test module", str(raised.exception))
+        self.assertIn("names no observing test", str(raised.exception))
         self.assertIn("--derive-mapping", str(raised.exception))
         self.assertEqual(
             (root / "src" / "knowledgestore" / "target.py").read_text(encoding="utf-8"), ORIGINAL

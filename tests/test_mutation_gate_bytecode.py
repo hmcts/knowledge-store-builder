@@ -11,7 +11,7 @@ The result is not a crash but a spurious `caught` or `SURVIVED` - the gate
 reporting confidently about a mutation it never ran (issue #228). Two mutations
 producing files of 56,347 bytes were observed doing exactly that.
 
-Two halves, in the order they matter:
+Three halves, in the order they matter:
 
 - the stale read is constructed directly, on this interpreter, with `os.utime`
   forcing the identical mtime rather than racing the clock, and shown to happen
@@ -24,10 +24,20 @@ Two halves, in the order they matter:
   still present. A fix that dropped `PYTHONPATH` would make every suite run
   exercise the installed package instead of `src/`, which is worse than the defect
   being fixed.
+- the variable only reaches a process that inherits it, and four tests in this
+  suite start a child with an environment built from scratch - to fix
+  `PYTHONHASHSEED`, which cannot be changed after interpreter start. Those
+  children import this tree, so each was free to cache bytecode of a mutated
+  module, and one of them did: two adjacent entries rewriting one module to the
+  same size inside one second, and the second run reading the first's `.pyc`
+  while the gate reported on it. The last check here reads the suite's own source
+  for that shape, because the environment those calls pass is the reason the
+  first two checks cannot see them.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -39,6 +49,8 @@ from typing import Any
 from unittest import mock
 
 import mutation_gate as gate
+
+TESTS = Path(__file__).resolve().parent
 
 # Two bodies of identical length, so `(mtime, size)` cannot tell them apart once
 # the mtimes match. Hand-counted: 16 bytes each.
@@ -209,6 +221,69 @@ class SuiteSubprocessBytecodeTest(unittest.TestCase):
             check=True,
         )
         return completed.stdout.strip()
+
+    def test_no_test_starts_a_child_with_a_built_environment_and_bytecode_writing_on(self):
+        """Catches the fix above being reached around rather than broken.
+
+        `run_suite` sets the variable for the process it starts, and a child that
+        builds its own environment from scratch does not inherit it. Four tests do
+        exactly that, to fix `PYTHONHASHSEED`, and they import this tree - so each
+        may leave a `.pyc` of whatever mutation was applied. One did: two adjacent
+        entries rewrite `report_ingestion_gaps` to files of identical size, a
+        sweep applies them inside one second, and the second run imported the
+        first's bytecode. Module granularity reported it as caught, because the
+        first mutation's failures were still in the module (#274).
+
+        Says what it read: `subprocess` calls whose `env=` is a dict literal that
+        does not spread `os.environ`. A call handing over a variable is not
+        analysable from the source and is left alone - one exists in this module,
+        deliberately, because writing bytecode is what it measures.
+        """
+        checked = 0
+        for source in sorted(TESTS.glob("test_*.py")):
+            for call in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+                if not self._builds_its_own_environment(call):
+                    continue
+                checked += 1
+                with self.subTest(test=source.name, line=call.lineno):
+                    self.assertIn(
+                        "-B",
+                        [
+                            argument.value
+                            for argument in ast.walk(call.args[0])
+                            if isinstance(argument, ast.Constant)
+                        ],
+                        f"{source.name}:{call.lineno} starts a child with an environment "
+                        "built from scratch, so PYTHONDONTWRITEBYTECODE cannot reach it. "
+                        "Pass `-B` on the command line, where rebuilding the environment "
+                        "cannot drop it: a .pyc of a mutated module is one a later run of "
+                        "the mutation gate reads back",
+                    )
+
+        self.assertGreater(
+            checked, 0, "no call of that shape was found, so this check read nothing"
+        )
+
+    @staticmethod
+    def _builds_its_own_environment(node: ast.AST) -> bool:
+        """True for a `subprocess` call passing a dict literal that is not `os.environ`.
+
+        A replacement rather than an extension is the whole condition: `{**os.environ,
+        ...}` keeps whatever the parent was given, and a name cannot be read from here.
+        """
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            return False
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != "subprocess":
+            return False
+        given = next((word.value for word in node.keywords if word.arg == "env"), None)
+        if not isinstance(given, ast.Dict) or not node.args:
+            return False
+        spread = any(key is None for key in given.keys)
+        suppressed = any(
+            isinstance(key, ast.Constant) and key.value == "PYTHONDONTWRITEBYTECODE"
+            for key in given.keys
+        )
+        return not spread and not suppressed
 
     def _workspace(self) -> str:
         temporary = tempfile.TemporaryDirectory()
