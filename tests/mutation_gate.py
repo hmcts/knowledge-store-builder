@@ -16,6 +16,7 @@ would have stopped the thing that actually happened.
     python3 tests/mutation_gate.py --only recovery   # entries whose name matches
     python3 tests/mutation_gate.py --derive-mapping  # the observers, from a full run
     python3 tests/mutation_gate.py --verify-mapping  # check every entry's observers
+    python3 tests/mutation_gate.py --verify-mapping --shard 2/4  # one runner's slice
 
 Each entry names the tests that observe it. A run applies the mutation, runs the
 modules holding those tests, and asks whether the *named* ones failed. Whole
@@ -37,8 +38,11 @@ The two slow modes are what keep the mapping honest, and neither runs in the
 `tests` job: `--derive-mapping` fills in a new entry from a full suite run, and
 `--verify-mapping` applies every entry against the whole suite and refuses a
 named set that does not match the tests that failed. The `tests` workflow runs
-the second one on its schedule and on `workflow_dispatch`, in the same job that
-runs the fast mode on a pull request.
+the second one on its schedule and on `workflow_dispatch`, sharded over four
+runners with `--shard N/M` and summarised by one job that fails if any of them
+did: it costs a whole suite run per entry, which was 28 minutes in one job (#285).
+The slices are reconciled against the table before anything is applied, because a
+shard that drops an entry prints `N of N` over a smaller N and reads as a pass.
 
 Every conclusion here rests on the suite reading this tree, and it is asserted
 rather than assumed. The suite runs in `tests/`, so a relative `PYTHONPATH=src`
@@ -71,6 +75,7 @@ import os
 import signal
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -2995,6 +3000,23 @@ MUTATIONS = (
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_the_wrong_tree_is_refused_before_the_tests_are_blamed",
         ),
     ),
+    Mutation(
+        "a shard of the table drops an entry",
+        "tests/mutation_gate.py",
+        "    return tuple(mutations[index - 1" + " :: count])",
+        "    return tuple(mutations[index :: count])",
+        "#285 named this as the defect sharding the mapping check invites, and it is "
+        "invisible from the run that took it: the first entry of the table lands in no "
+        "shard, every leg prints `N of N entries name what observes them` over its own "
+        "smaller N, and the entry nobody applied is one whose mapping nobody checked. "
+        "Only the reconciliation against the whole table disagrees",
+        (
+            "test_mutation_gate_shards.OneShardRunsItsOwnSliceTest.test_a_shard_says_how_its_entries_reconcile_with_the_whole_table",
+            "test_mutation_gate_shards.OneShardRunsItsOwnSliceTest.test_each_shard_runs_its_own_entries_and_between_them_they_run_the_table",
+            "test_mutation_gate_shards.ShardsPartitionTheTableTest.test_every_entry_lands_in_exactly_one_shard_of_every_count",
+            "test_mutation_gate_shards.ShardsPartitionTheTableTest.test_the_shipped_table_reconciles",
+        ),
+    ),
 )
 
 
@@ -3532,6 +3554,109 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
     return 1 if wrong else 0
 
 
+def shard(mutations: Sequence[Mutation], index: int, count: int) -> tuple[Mutation, ...]:
+    """The `index`th of `count` interleaved slices of `mutations`, counting from one.
+
+    Interleaved rather than contiguous blocks: the partition is then one expression
+    to get right rather than two bounds to keep in step, and there is nothing for a
+    contiguous split to balance, because every entry here costs the same - one whole
+    suite run. The mode this exists for shards cleanly for the same reason (#285):
+    every entry runs the same thing, so there is no ordering, no accumulation and no
+    cross-entry state, and one runner per shard means no two of them are mutating
+    one tree.
+
+    This expression is covered by the entry `a shard of the table drops an entry`
+    above, which replaces it with the off-by-one and requires
+    `test_mutation_gate_shards` to notice: a later reader can delete that entry and
+    watch the four tests it names go quiet, which is what makes the claim checkable
+    rather than a note saying this is checked.
+    """
+    return tuple(mutations[index - 1 :: count])
+
+
+def check_shards(mutations: Sequence[Mutation], count: int) -> None:
+    """Refuse unless the `count` slices hold every entry exactly once.
+
+    The check on the sharding, and it has to run before anything is applied,
+    because a slice that drops entries is invisible from the run that took it: the
+    leg counts its verdicts against the entries it held, so it prints `N of N` over
+    a smaller N and passes. The only thing that disagrees is the table.
+
+    Counted *and* compared as a set, which is two checks rather than one written
+    twice. A sum against `len(mutations)` catches a drop and catches a duplicate,
+    but not one of each - two shards overlapping while a third entry falls out
+    comes to the same total, and the entry nobody applied is the one whose mapping
+    nobody checked.
+
+    What it cannot see is how many legs actually ran: it checks the slices `1..M`
+    of the count it was given, and a matrix that ran three of them is not a
+    question it was asked. That belongs to the workflow, where the divisor is
+    `strategy.job-total` so a leg cannot disagree with it, and to
+    `test_mutation_gate_shards.WorkflowShardsTest`.
+    """
+    held = Counter(
+        entry.name for index in range(1, count + 1) for entry in shard(mutations, index, count)
+    )
+    total = sum(held.values())
+    missing = [entry.name for entry in mutations if not held[entry.name]]
+    twice = sorted(name for name, times in held.items() if times > 1)
+    if not missing and not twice:
+        return
+
+    def few(names: Sequence[str]) -> str:
+        listed = ", ".join(names[:3])
+        return listed if len(names) <= 3 else f"{listed} and {len(names) - 3} more"
+
+    raise SystemExit(
+        f"the {count} shards hold {total} entries between them and this table has "
+        f"{len(mutations)}, so they are not a partition of it"
+        + (f"; no shard holds {few(missing)}" if missing else "")
+        + (f"; more than one shard holds {few(twice)}" if twice else "")
+        + ". A shard that drops an entry reports `N of N` over a smaller N and reads as a "
+        "pass, and a duplicate pays for a drop in the total - so the union is compared as "
+        "a set rather than only summed."
+    )
+
+
+def shard_argument(specification: str) -> tuple[int, int]:
+    """`N/M` as (index, count), refusing anything that would run a slice nobody chose.
+
+    Refused rather than defaulted, because every wrong form is quiet. `M` alone and
+    `0/M` run an empty slice, and every mode here reports an empty table as a pass.
+    `5/4` is worse than empty: `MUTATIONS[4::4]` is a real slice of real entries
+    that overlaps shard 1 and misses three quarters of the table, and
+    `check_shards` cannot see it - the four slices it reconciles are the four the
+    count names, not the fifth the run took.
+    """
+    index, separator, count = specification.partition("/")
+    if not separator or not index.isdigit() or not count.isdigit():
+        raise SystemExit(
+            f"--shard takes N/M, the Nth of M slices of the table: {specification!r} is "
+            "neither, and a wrong one runs a slice nobody chose over a table that reports "
+            "an empty selection as a pass."
+        )
+    number, total = int(index), int(count)
+    if not 1 <= number <= total:
+        raise SystemExit(
+            f"--shard {specification} asks for shard {number} of {total}, and the shards "
+            f"run from 1 to {total}. An index outside them is still a slice of real "
+            "entries - it overlaps another shard and misses most of the table - and the "
+            "reconciliation cannot see it, because it is not one of the slices it checks."
+        )
+    return number, total
+
+
+def sharded(mutations: Sequence[Mutation], specification: str) -> tuple[tuple[Mutation, ...], str]:
+    """One shard of `mutations`, and the sentence reconciling it with all of them."""
+    index, count = shard_argument(specification)
+    check_shards(mutations, count)
+    slice_ = shard(mutations, index, count)
+    return slice_, (
+        f"That was shard {index} of {count}: {len(slice_)} of {len(mutations)} entries. "
+        f"The {count} shards hold all {len(mutations)} between them, each in exactly one."
+    )
+
+
 def selected(patterns: Sequence[str]) -> tuple[Mutation, ...]:
     """The entries whose name contains one of `patterns`, or all of them.
 
@@ -3568,8 +3693,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check each entry's observers against a whole-suite run per entry (slow)",
     )
+    parser.add_argument(
+        "--shard",
+        metavar="N/M",
+        help="run the Nth of M interleaved slices of the entries, one runner per shard",
+    )
     arguments = parser.parse_args(argv)
     mutations = selected(arguments.only)
+    # Before `--list`, before the recovery record and before the pre-check: a slice
+    # that is not a partition means nothing this run prints can be believed, and the
+    # cheapest place to say so is with the tree untouched.
+    reconciliation = ""
+    if arguments.shard:
+        mutations, reconciliation = sharded(mutations, arguments.shard)
 
     if arguments.list:
         for mutation in mutations:
@@ -3611,10 +3747,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if arguments.derive_mapping:
-        return derive_mapping(mutations)
-    if arguments.verify_mapping:
-        return verify_mapping(mutations)
-    return sweep(mutations)
+        code = derive_mapping(mutations)
+    elif arguments.verify_mapping:
+        code = verify_mapping(mutations)
+    else:
+        code = sweep(mutations)
+    if reconciliation:
+        # After the mode's own count rather than before it, because that count is
+        # over the shard and reads exactly like one over the table: `47 of 47
+        # entries name what observes them` is what a leg prints and what the whole
+        # check prints, and only this line beside it says which.
+        print(reconciliation)
+    return code
 
 
 if __name__ == "__main__":
