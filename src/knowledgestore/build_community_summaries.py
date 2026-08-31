@@ -562,22 +562,6 @@ def _namespace_note(result: dict) -> str:
     )
 
 
-def _graph_to_check() -> Path | None:
-    """The graph file this check reads: the one `remap` reads, or the committed one.
-
-    `config.GRAPH_PATH` is the uncompressed graph every store gitignores, so it is
-    both the file `remap` reads and the file that is absent on a fresh checkout.
-    Stopping there would make the check unrunnable exactly where an operator wants
-    it, and streaming the `.gz` costs the same - so fall back to the committed
-    archive, and name the file that was read rather than leaving a reader to guess
-    which of a store's two graphs a count describes.
-    """
-    if config.GRAPH_PATH.is_file():
-        return config.GRAPH_PATH
-    other = graph_files.counterpart(config.GRAPH_PATH)
-    return other if other is not None and other.is_file() else None
-
-
 def _report_population(label: str, entries: list, note: str = "") -> None:
     if not entries:
         return
@@ -639,7 +623,7 @@ def adrift(
             file=sys.stderr,
         )
         return 2
-    graph = _graph_to_check()
+    graph = graph_files.graph_to_read(config.GRAPH_PATH)
     if graph is None:
         print(
             f"No graph at {config.GRAPH_PATH} or its .gz counterpart, so the snapshot cannot be "
@@ -662,7 +646,7 @@ def adrift(
     # is to re-take the snapshot and re-author. On their store that instruction
     # would have destroyed five thousand correct summaries.
     #
-    # It is the cause an operator is most likely to meet, because `_graph_to_check`
+    # It is the cause an operator is most likely to meet, because `graph_to_read`
     # prefers the gitignored file - the one most likely to be a stale leftover -
     # over the committed archive, which by definition is not.
     stale = graph_files.disagreement(

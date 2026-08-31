@@ -471,6 +471,48 @@ MUTATIONS = (
         ("test_most_connected",),
     ),
     Mutation(
+        "the committed archive is no longer read when the plain graph is absent",
+        "graph_files.py",
+        "    return other if other is not None and other.is_file() else None",
+        "    return None",
+        "#262: reported from a store running 0.15.2 - `status --duplicates` and "
+        "`--central` refused with `no graph at .../graph.json` on a store holding "
+        "only the file it commits, which is the state a store spends most of its "
+        "life in and the state an operator reaches for `--duplicates` from; both "
+        "readers already accepted the `.gz` and only the guard refused, and the "
+        "way out was a multi-gigabyte gunzip for a report documented as cheap",
+    ),
+    Mutation(
+        "the archive is preferred over the graph a run has just written",
+        "graph_files.py",
+        "    if preferred.is_file():\n        return preferred",
+        "    if False:\n        return preferred",
+        "the fallback's other direction: mid-pipeline the plain file is the fresh "
+        "merge and the archive beside it is the previous build, so reading the "
+        "archive there reports on the graph the run has already superseded - the "
+        "rebuild case an operator reported when three stages refused in sequence",
+    ),
+    Mutation(
+        "the most-connected ranking stops naming the graph it read",
+        "status.py",
+        '        f"Most connected nodes in {graph.name} (would you name these if asked what the "',
+        '        "Most connected nodes (would you name these if asked what the "',
+        "a store holds two graph files that can disagree, and centrality is "
+        "degree-driven, so the two rank differently; the same silence about which "
+        "file was read is what made an operator diff two graphs by hand after a "
+        "stage reported confidently on a leftover",
+    ),
+    Mutation(
+        "the near-duplicate report stops naming the graph it read",
+        "status.py",
+        "        duplicate_repositories.near_duplicates(graph), described=graph.name",
+        "        duplicate_repositories.near_duplicates(graph)",
+        "the same escape on the other report: an overlap percentage from the "
+        "committed archive and the same percentage from a stale leftover are "
+        "different claims, and a header that does not name its file leaves the "
+        "reader to guess which of a store's two graphs the estate is described from",
+    ),
+    Mutation(
         "estate check stops matching name segments",
         "build_community_summaries.py",
         "            if len(normalised) >= MIN_SEGMENT_MATCH and normalised in segments:",
@@ -1174,6 +1216,35 @@ MUTATIONS = (
         "committed path list by a rule that was only ever meant to drop one generated "
         "filename",
         ("test_content_set",),
+    ),
+    Mutation(
+        "a pin the lock does not deliver is reported as resolved",
+        "check_install_docs.py",
+        "        if locked.get(name) != version",
+        "        if False",
+        "the defect this was written from: a pin moved to a version an index had not "
+        "published, so the lock could not be recompiled and kept the previous one. "
+        "`pip install --require-hashes` reads the LOCK, so the build used a version the "
+        "store's requirements input did not name - and three checks passed, none of them "
+        "having opened that input for correctness",
+    ),
+    Mutation(
+        "a pin the lock omits entirely reads as resolved",
+        "check_install_docs.py",
+        "        (name, version, locked.get(name))",
+        "        (name, version, version)",
+        "resolving a requirement not at all installs no such package, which is a "
+        "different failure from resolving it at another version and needs a different "
+        "fix; folding the two together sends an operator to recompile a lock that is "
+        "missing the entry rather than holding a stale one",
+    ),
+    Mutation(
+        "the resolution half stops reaching the exit code",
+        "check_install_docs.py",
+        "    resolution = _report_unresolved(config.REQUIREMENTS_PATH, lock)",
+        "    resolution = 0",
+        "a check that prints a disagreement and exits 0 is worse than one that does not "
+        "look: the text scrolls past in a green run and nothing chains on it",
     ),
     Mutation(
         "graph-report check unwired",
