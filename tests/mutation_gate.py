@@ -31,6 +31,13 @@ named set that does not match the modules that failed. The `tests` workflow runs
 the second one on its schedule and on `workflow_dispatch`, in the same job that
 runs the fast mode on a pull request.
 
+Every conclusion here rests on the suite reading this tree, and it is asserted
+rather than assumed. The suite runs in `tests/`, so a relative `PYTHONPATH=src`
+resolves to `tests/src` in the child, which does not exist, and the child imports
+whatever `knowledgestore` is installed instead - after which no mutation of this
+tree is visible to any run. A run therefore starts by asking a child where it
+imports the package from, and refuses if the answer is not this tree's `src/`.
+
 A run that is killed can leave a mutation applied, because SIGKILL cannot be
 handled: `apply` therefore records the original bytes in
 `tests/.mutation-gate-recovery` before touching a file, and the next run restores
@@ -1317,6 +1324,34 @@ MUTATIONS = (
         ("test_check_install_docs",),
     ),
     Mutation(
+        "an empty pin parse reads as a clean comparison",
+        "check_install_docs.py",
+        "    if not pinned:",
+        "    if False:",
+        "#277, and the state that shipped: an empty result has two causes the code could "
+        "not tell apart - every pin resolved, or no pin ever parsed - and the second "
+        'printed "resolves every one of the 0 pin(s)" and exited 0, on the same path, in '
+        "the same words and with the same exit code as a real pass. The route in is not a "
+        "store that pins nothing on purpose but the parse quietly ceasing to match, which "
+        "this library has shipped before in a repository-list reader that was green "
+        "because every fixture used bare names",
+        ("test_check_install_docs",),
+    ),
+    Mutation(
+        "an empty set of documented installs claims every one of them passes",
+        "check_install_docs.py",
+        "    if not installs:",
+        "    if False:",
+        "#277 one function along, and also the state that shipped: the affirmative line "
+        "was printed over an empty list. The ways that list empties are invisible from the "
+        "message - a documentation suffix the walk does not read, a SKIP_DIRS entry that "
+        "grew to cover where the docs live, the lock renamed, a requirement-flag spelling "
+        "the pattern does not match - and every one of them reads as a store whose "
+        "commands are all correct. This half cannot refuse, because a store need not "
+        "document installing from its lock at all, so naming what it read is the fix",
+        ("test_check_install_docs",),
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -1593,6 +1628,20 @@ MUTATIONS = (
         ("test_dangling_endpoints",),
     ),
     Mutation(
+        "the page's edge list falls back to set order",
+        "build_explorer.py",
+        "        for neighbour in sorted(adjacency.get(node_id, ())):",
+        "        for neighbour in adjacency.get(node_id, ()):",
+        "#276: the observer for the two-build diff, and the reason that check had "
+        "to exist. `adjacency` holds sets, so without the sort the edge block is "
+        "emitted in hash order and the page differs between two builds of an "
+        "unchanged store - measured: with this applied, one test of 1,451 fails, "
+        "and before `test_two_builds_are_identical` none did. The page is "
+        "committed in consumer repositories, so the cost is every rebuild landing "
+        "as a spurious diff with any real change buried in it",
+        ("test_two_builds_are_identical",),
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
@@ -1654,6 +1703,22 @@ MUTATIONS = (
         "and is gone, which is how a join that should have been three times larger read "
         "as a working join on a sparse estate",
         ("test_build_explorer", "test_telemetry"),
+    ),
+    Mutation(
+        "equal-degree connections fall back to hash order",
+        "build_explorer.py",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: (-degree[n], n)):",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: -degree[n]):",
+        "#280 measured it before this entry had an observer: dropping the `n` passed the "
+        "entire suite, and the page regression with it. `adjacency` holds sets and the "
+        "sort is stable, so without the name half two equally connected neighbours print "
+        "in whatever order the process's hash seed iterated them, and the connection line "
+        "on a committed page differs between two builds of one graph - hash randomisation "
+        "has broken determinism here before and is invisible until somebody diffs two "
+        "pages. The observer has to supply the arrival order itself: the fixture does hold "
+        "a tied pair that reaches the page, but comparing two builds only sees the swap "
+        "when the two seeds happen to disagree, which is a coin toss rather than a gate",
+        ("test_build_explorer",),
     ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for
@@ -2252,6 +2317,22 @@ MUTATIONS = (
         "real observers behind it, while every affected entry still looked plausible",
         ("test_mutation_gate_mapping", "test_mutation_gate_recovery"),
     ),
+    Mutation(
+        "the tree the child reads goes unchecked",
+        "tests/mutation_gate.py",
+        "    if check_import" + "_path():",
+        "    if False:",
+        "#269: the suite runs in `tests/`, so a relative `PYTHONPATH=src` resolves to "
+        "`tests/src` in the child and it imports whatever copy is installed instead - after "
+        "which no mutation of this tree is visible to any run. Both symptoms point away "
+        "from the cause: the gate blames tests that pass when run directly, and "
+        "`--derive-mapping` reports entries as observed by nothing. The heuristic watching "
+        "for the second one does not fire on the case that happens, because an entry "
+        "targeting a file outside the installed package is still seen - one run derived 7 "
+        "observed and 72 unobserved, printed no warning, and cost half an hour of deriving "
+        "an artefact that had to be thrown away",
+        ("test_mutation_gate_recovery", "test_mutation_gate_refusals"),
+    ),
 )
 
 
@@ -2520,9 +2601,72 @@ def _run(names: tuple[str, ...] | None) -> SuiteRun:
     return SuiteRun(bool(parsed["passed"]), tuple(parsed["modules"]))
 
 
-def run_suite() -> bool:
-    """True when the whole suite passes."""
-    return _run(None).passed
+# Asked of a child spawned where the suite is spawned, because the question is
+# about that child and not about this process: the gate is started from the
+# repository root and its children run in `tests/`, so a relative path on
+# PYTHONPATH means two different things in the two places.
+IMPORT_PROBE = "import knowledgestore, sys; sys.stdout.write(knowledgestore.__file__ or '')"
+
+
+def check_import_path(run=subprocess.run) -> int:
+    """Refuse a run whose suite subprocess reads a different tree. Non-zero to stop.
+
+    The precondition every conclusion here rests on, asserted rather than
+    inferred from its symptoms. With the child importing an installed copy,
+    nothing this gate does to the tree is visible to any run it starts: every
+    entry survives, or `--derive-mapping` reports every one as observed by
+    nothing, and both readings are about a library nobody is changing (#269).
+
+    Watching for the symptom was tried and is not enough. The warning for "every
+    entry unobserved" does not fire on the case that happens, because an entry
+    targeting a file outside the installed package - `tests/`, `docs/` - is still
+    seen: one run derived 7 entries observed and 72 observed by nothing, printed
+    no warning, and produced a mapping that looked like a mapping.
+
+    `-B` rather than the variable `_run` sets, for two reasons: the child's
+    environment has to arrive exactly as an operator left it, since that is the
+    thing being measured, and a probe that wrote a `.pyc` of an unmutated module
+    would leave one for a mutated run to read back (#228).
+    """
+    completed = run(
+        [sys.executable, "-B", "-c", IMPORT_PROBE],
+        cwd=ROOT / "tests",
+        capture_output=True,
+        text=True,
+    )
+    printed = (completed.stdout or "").strip()
+    expected = SRC.resolve()
+    if printed and Path(printed).resolve().parent == expected:
+        return 0
+    if printed:
+        where = f"from {Path(printed).resolve()}"
+    else:
+        said = (completed.stderr or "").strip().splitlines()
+        where = "from nowhere - it imported no such package at all: " + (
+            said[-1] if said else f"it printed nothing and exited {completed.returncode}"
+        )
+    print(
+        f"A test process started in {ROOT / 'tests'}, which is where this gate runs the "
+        f"suite, imports knowledgestore {where} rather than from {expected}. Every "
+        "mutation of this tree would be invisible to it, so nothing could be concluded "
+        "about any of them - a surviving entry would mean the suite never saw the file "
+        f"change. Give the child an absolute path (PYTHONPATH={ROOT / 'src'}), or install "
+        f"this tree in place with `pip install -e .` from {ROOT}: a relative "
+        f"`PYTHONPATH=src` resolves to {ROOT / 'tests' / 'src'} in that child and finds "
+        "nothing.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def run_suite() -> SuiteRun:
+    """What a whole-suite run of the tree as it stands reported.
+
+    The run rather than a verdict, because the refusal that reads it names the
+    modules that failed: a red suite the reader cannot see from where they are
+    standing is the case that costs, and the names are already in hand.
+    """
+    return _run(None)
 
 
 def run_modules(modules: Sequence[str]) -> bool:
@@ -2921,10 +3065,27 @@ def main(argv: list[str] | None = None) -> int:
     if recover():
         return 1
 
-    if not run_suite():
+    # Before the pre-check below, so that refusal is unreachable for this cause.
+    # A child reading an installed release of a branch that adds functions fails
+    # the suite, and the message would then send the reader to tests that pass
+    # when run directly - correct about the suite, wrong about the suspect.
+    if check_import_path():
+        return 1
+
+    baseline = run_suite()
+    if not baseline.passed:
+        # Named, because the reader is not always looking at the failure: a guard
+        # over the table below fails this run while every test in the module they
+        # are editing passes, and an anonymous refusal sends them there.
+        blamed = (
+            f"these failed: {', '.join(baseline.modules)}"
+            if baseline.modules
+            else "the run named no failing module, so it did not fail inside a test - run "
+            "the suite directly and read what it printed"
+        )
         print(
             "The suite is already failing, so nothing can be concluded about any "
-            "mutation. Fix that first.",
+            f"mutation. Fix that first - {blamed}.",
             file=sys.stderr,
         )
         return 1

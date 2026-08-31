@@ -422,7 +422,10 @@ the version on the
 [knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases),
 then change `X.Y.Z` in the store's pinned requirements file — `requirements.txt`
 in a store that follows the reference layout. Keep the exact `==` pin, so that
-rebuilding the store resolves the same versions it was built with.
+rebuilding the store resolves the same versions it was built with —
+`check-install-docs` refuses rather than passing when the input states no `==`
+pin, because a lock compared against nothing reports the same clean result as a
+lock that resolves everything.
 
 ```text
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/

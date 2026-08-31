@@ -6,10 +6,15 @@ semantic neighbour and a topic brief - then runs the explorer stage over it.
 
     python3 tests/explorer/fixture.py
     node tests/explorer/page-regression.mjs
+
+`--out` puts the store somewhere else, which is what lets a caller build twice
+and diff the results: `tests/test_two_builds_are_identical.py` runs this script
+in two processes under different hash seeds and compares every file it wrote.
 """
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import sys
 from pathlib import Path
@@ -284,16 +289,25 @@ DIVE = (
 )
 
 
-def main() -> int:
-    if STORE.exists():
-        shutil.rmtree(STORE)
-    (STORE / "graphify-out").mkdir(parents=True)
-    (STORE / "docs" / "topics").mkdir(parents=True)
-    (STORE / "docs" / "deep-dives").mkdir(parents=True)
-    (STORE / "knowledge" / "deep-dives").mkdir(parents=True)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build the fixture store.")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=STORE,
+        help="where to write the store (default: .fixture-store at the repository root)",
+    )
+    store = parser.parse_args(argv).out.expanduser().resolve()
+
+    if store.exists():
+        shutil.rmtree(store)
+    (store / "graphify-out").mkdir(parents=True)
+    (store / "docs" / "topics").mkdir(parents=True)
+    (store / "docs" / "deep-dives").mkdir(parents=True)
+    (store / "knowledge" / "deep-dives").mkdir(parents=True)
 
     config.configure(
-        root=STORE,
+        root=store,
         EXPLORER_TITLE="Demo Estate Explorer",
         BRIEF_REQUEST_URL="https://example.invalid/issues/new",
         # A tracker URL is estate configuration that reaches the page and is
@@ -313,7 +327,7 @@ def main() -> int:
     io.write_gzip_json(config.TICKET_TITLES_PATH, TICKET_TITLES)
     io.write_gzip_json(config.SYNONYMS_PATH, SYNONYMS)
     (config.TOPICS_DOCS_DIR / "addresses.md").write_text(BRIEF, encoding="utf-8")
-    (STORE / "config").mkdir(exist_ok=True)
+    (store / "config").mkdir(exist_ok=True)
     config.TOPICS_CONFIG_PATH.write_text(
         "addresses | Addresses in the demo estate | address, addresses, postcode\n",
         encoding="utf-8",
@@ -340,7 +354,7 @@ def main() -> int:
     build_explorer.DIVES_PATH = config.DEEPDIVES_PATH
     if build_explorer.main() != 0:
         return 1
-    print(f"fixture store -> {STORE}")
+    print(f"fixture store -> {store}")
     return 0
 
 

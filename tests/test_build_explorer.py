@@ -187,6 +187,37 @@ class EntryConnectionsTest(SettingsIsolated):
         self.assertLessEqual(len(got), explorer.MAX_CONNECTIONS)
         self.assertEqual(len(got), len(set(got)))  # deduped
 
+    def test_equal_degree_neighbours_are_ordered_by_id_not_by_arrival(self):
+        """Break it catches: `key=lambda n: (-degree[n], n)` losing the `n`.
+
+        Upstream `adjacency` holds sets, so the order neighbours arrive in is the
+        process's hash seed. Python's sort is stable, so with the name half gone
+        equal-degree neighbours keep that arrival order and two builds of one graph
+        put a different connection line on the card - the non-determinism this
+        repository has shipped before and which is invisible until somebody diffs
+        two pages.
+
+        The arrival order is therefore supplied, and supplied both ways: passing a
+        set would make the assertion depend on the seed the test happened to run
+        under, and passing only the order the answer needs would let a stable sort
+        produce it with no tiebreak at all, which is a test that cannot fail.
+        Expected order derived by hand - the degree-9 neighbour first, then the
+        three tied ones by id.
+        """
+        nodes = {
+            "n-zebra": {"label": "ZebraGateway"},
+            "n-a": {"label": "AlphaService"},
+            "n-b": {"label": "BetaService"},
+            "n-c": {"label": "GammaService"},
+        }
+        degree = {"n-zebra": 9, "n-a": 4, "n-b": 4, "n-c": 4}
+        expected = ["ZebraGateway", "AlphaService", "BetaService", "GammaService"]
+        arrivals = [["n-zebra", "n-a", "n-b", "n-c"], ["n-c", "n-b", "n-a", "n-zebra"]]
+        for arrival in arrivals:
+            with self.subTest(arrival=arrival):
+                got = explorer.entry_connections("root", {"root": arrival}, degree, nodes)
+                self.assertEqual(got, expected)
+
 
 class KeptEdgesTest(SettingsIsolated):
     def test_emits_each_kept_edge_once_and_skips_dropped_nodes(self):
@@ -268,7 +299,16 @@ class BuildPageSmokeTest(SettingsIsolated):
         import json as _json
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # Resolved, because `configure(root=...)` resolves what it is given:
+            # an unresolved override under a symlinked temporary directory is then
+            # not relative to `ROOT`, and `status.EMBEDDED_LAYERS` refuses it.
+            root = Path(tmp).resolve()
+            # The root first, then the individual overrides. Overriding only the
+            # inputs left `ROOT` - and so `EXPLORER_INPUTS_PATH` - pointing at the
+            # working directory, and `main()` wrote its build manifest into the
+            # checkout on every run. Invisible because a store's `graphify-out/` is
+            # gitignored here for an unrelated reason.
+            config.configure(root=root)
             config.configure(GRAPH_PATH=root / "graph.json")
             config.configure(LABELS_PATH=root / "labels.json")
             config.configure(INTENT_INDEX_PATH=root / "missing-intent.json.gz")

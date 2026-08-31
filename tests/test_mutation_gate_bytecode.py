@@ -158,8 +158,10 @@ class SuiteSubprocessBytecodeTest(unittest.TestCase):
         self.addCleanup(setattr, gate, "ROOT", gate.ROOT)
         gate.ROOT = root
 
+        # `.passed` rather than the run itself: a `SuiteRun` is truthy whatever it
+        # reports, so asserting on the object would pass over a suite that failed.
         self.assertTrue(
-            gate.run_suite(), "the throwaway suite did not pass, so it observed nothing"
+            gate.run_suite().passed, "the throwaway suite did not pass, so it observed nothing"
         )
         self.assertTrue(observation.is_file(), "the throwaway suite never ran")
         return json.loads(observation.read_text(encoding="utf-8"))
