@@ -175,6 +175,8 @@ MUTATIONS = (
         "graph.json.gz` died on the gzip magic byte, so the escape hatch the stage's "
         "own warning names was unavailable for the only artefact that store ships",
         (
+            "test_config_and_io.TheGraphLoaderHandlesGzip.test_a_gzipped_graph_is_read",
+            "test_config_and_io.TheGraphLoaderHandlesGzip.test_an_unreadable_graph_raises_rather_than_returning_part_of_one",
             "test_config_and_io.TheJsonReaderHandlesGzip.test_a_gzipped_json_object_is_read",
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_outside_the_configured_store_root_succeeds",
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_path_that_climbs_upward_is_accepted",
@@ -1683,6 +1685,9 @@ MUTATIONS = (
         "look: the text scrolls past in a green run and nothing chains on it",
         (
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+            "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
+            "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
+            "test_check_install_docs.NothingToCompareTest.test_an_input_whose_pins_all_resolve_still_passes_and_still_says_so",
         ),
     ),
     Mutation(
@@ -2093,6 +2098,7 @@ MUTATIONS = (
         "committed in consumer repositories, so the cost is every rebuild landing "
         "as a spurious diff with any real change buried in it",
         (
+            "test_build_explorer.KeptEdgesTest.test_the_pair_order_does_not_follow_the_arrival_order_of_the_neighbours",
             "test_two_builds_are_identical.TwoBuildsAreByteIdentical.test_every_artefact_is_byte_identical",
         ),
     ),
