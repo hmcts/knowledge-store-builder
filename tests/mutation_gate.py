@@ -1300,6 +1300,7 @@ MUTATIONS = (
         "store that pins nothing on purpose but the parse quietly ceasing to match, which "
         "this library has shipped before in a repository-list reader that was green "
         "because every fixture used bare names",
+        ("test_check_install_docs",),
     ),
     Mutation(
         "an empty set of documented installs claims every one of them passes",
@@ -1313,6 +1314,7 @@ MUTATIONS = (
         "the pattern does not match - and every one of them reads as a store whose "
         "commands are all correct. This half cannot refuse, because a store need not "
         "document installing from its lock at all, so naming what it read is the fix",
+        ("test_check_install_docs",),
     ),
     Mutation(
         "graph-report check unwired",
@@ -1602,6 +1604,7 @@ MUTATIONS = (
         "and before `test_two_builds_are_identical` none did. The page is "
         "committed in consumer repositories, so the cost is every rebuild landing "
         "as a spurious diff with any real change buried in it",
+        ("test_two_builds_are_identical",),
     ),
     Mutation(
         "retained failure double-counted",
@@ -1680,6 +1683,7 @@ MUTATIONS = (
         "pages. The observer has to supply the arrival order itself: the fixture does hold "
         "a tied pair that reaches the page, but comparing two builds only sees the swap "
         "when the two seeds happen to disagree, which is a coin toss rather than a gate",
+        ("test_build_explorer",),
     ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for
