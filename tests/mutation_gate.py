@@ -151,7 +151,15 @@ class Mutation:
     find: str
     replace: str
     escaped_as: str
-    observers: tuple[str, ...]
+    # Defaulted, not required, though every shipped entry must name observers and
+    # `check_mapping` refuses one that does not. A required argument turns an entry
+    # written against the older five-field form - which is what every branch opened
+    # before this change still carries - into a TypeError at import, which takes
+    # five unrelated test modules down with it and says nothing about the cause.
+    # Defaulted, the same entry imports and fails one named check that says which
+    # entry is unmapped and which command fills it in. The refusal is the same
+    # strictness, delivered where it can be acted on.
+    observers: tuple[str, ...] = ()
 
 
 # Ordered by the escape they represent rather than by module, because the
@@ -171,6 +179,20 @@ MUTATIONS = (
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_outside_the_configured_store_root_succeeds",
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_path_that_climbs_upward_is_accepted",
         ),
+    ),
+    Mutation(
+        "graph loader stops reading the archive",
+        "io.py",
+        '    """\n    return _read_json_file(path)\n',
+        '    """\n    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707)\n',
+        "the same defect one function along, and it shipped because the first fix "
+        "looked complete: the dispatch went into `read_json` while `load_graph` read "
+        "the same artefact for the explorer, deep dives, topic briefs, community "
+        "summaries and `status --verify-graph`, so a store holding only its committed "
+        "archive could not be read by any of them and no call site said why. The "
+        "replacement is the code that was there, so this is the shipped defect rather "
+        "than an invented one",
+        ("test_config_and_io",),
     ),
     Mutation(
         "stale counterpart no longer named",
@@ -272,9 +294,9 @@ MUTATIONS = (
     Mutation(
         "the write guard applied to the reads",
         "io.py",
-        '    if not path.exists():\n        return default\n    if path.suffix == ".gz":',
+        "    if not path.exists():\n        return default\n    return _read_json_file(path)",
         "    checked_write_target(path)\n    if not path.exists():\n"
-        '        return default\n    if path.suffix == ".gz":',
+        "        return default\n    return _read_json_file(path)",
         "the one-line answer to the same rule's second report - S8707 on read_json, "
         "code-scanning alert 53 - which this library rejects: the guard is in the "
         "module already, so calling it on a read is one line, and it then refuses "
@@ -1661,6 +1683,34 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an empty pin parse reads as a clean comparison",
+        "check_install_docs.py",
+        "    if not pinned:",
+        "    if False:",
+        "#277, and the state that shipped: an empty result has two causes the code could "
+        "not tell apart - every pin resolved, or no pin ever parsed - and the second "
+        'printed "resolves every one of the 0 pin(s)" and exited 0, on the same path, in '
+        "the same words and with the same exit code as a real pass. The route in is not a "
+        "store that pins nothing on purpose but the parse quietly ceasing to match, which "
+        "this library has shipped before in a repository-list reader that was green "
+        "because every fixture used bare names",
+        ("test_check_install_docs",),
+    ),
+    Mutation(
+        "an empty set of documented installs claims every one of them passes",
+        "check_install_docs.py",
+        "    if not installs:",
+        "    if False:",
+        "#277 one function along, and also the state that shipped: the affirmative line "
+        "was printed over an empty list. The ways that list empties are invisible from the "
+        "message - a documentation suffix the walk does not read, a SKIP_DIRS entry that "
+        "grew to cover where the docs live, the lock renamed, a requirement-flag spelling "
+        "the pattern does not match - and every one of them reads as a store whose "
+        "commands are all correct. This half cannot refuse, because a store need not "
+        "document installing from its lock at all, so naming what it read is the fix",
+        ("test_check_install_docs",),
+    ),
+    Mutation(
         "graph-report check unwired",
         "status.py",
         "    _report_graph_report(arguments.verify_graph)",
@@ -2023,6 +2073,20 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the page's edge list falls back to set order",
+        "build_explorer.py",
+        "        for neighbour in sorted(adjacency.get(node_id, ())):",
+        "        for neighbour in adjacency.get(node_id, ()):",
+        "#276: the observer for the two-build diff, and the reason that check had "
+        "to exist. `adjacency` holds sets, so without the sort the edge block is "
+        "emitted in hash order and the page differs between two builds of an "
+        "unchanged store - measured: with this applied, one test of 1,451 fails, "
+        "and before `test_two_builds_are_identical` none did. The page is "
+        "committed in consumer repositories, so the cost is every rebuild landing "
+        "as a spurious diff with any real change buried in it",
+        ("test_two_builds_are_identical",),
+    ),
+    Mutation(
         "retained failure double-counted",
         "sync_repositories.py",
         "total = len({*entries, *(name for name, _ in failures)})",
@@ -2108,6 +2172,22 @@ MUTATIONS = (
             "test_telemetry.ExplorerWiringTest.test_the_page_records_the_join_it_shipped",
             "test_telemetry.ExplorerWiringTest.test_the_recorded_join_counts_the_column_the_page_ships",
         ),
+    ),
+    Mutation(
+        "equal-degree connections fall back to hash order",
+        "build_explorer.py",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: (-degree[n], n)):",
+        "    for neighbour in sorted(adjacency.get(node_id, ()), key=lambda n: -degree[n]):",
+        "#280 measured it before this entry had an observer: dropping the `n` passed the "
+        "entire suite, and the page regression with it. `adjacency` holds sets and the "
+        "sort is stable, so without the name half two equally connected neighbours print "
+        "in whatever order the process's hash seed iterated them, and the connection line "
+        "on a committed page differs between two builds of one graph - hash randomisation "
+        "has broken determinism here before and is invisible until somebody diffs two "
+        "pages. The observer has to supply the arrival order itself: the fixture does hold "
+        "a tied pair that reaches the page, but comparing two builds only sees the swap "
+        "when the two seeds happen to disagree, which is a coin toss rather than a gate",
+        ("test_build_explorer",),
     ),
     # The page's byte attribution (#245). A store watched its explorer page grow by a
     # large fraction while the graph's node count barely moved, with one number for

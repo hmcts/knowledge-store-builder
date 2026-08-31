@@ -10,8 +10,9 @@ sys.path[0] pointing at scripts/.
 filesystem, so whatever assembles those arguments decides what this process
 reads. It was reported on `read_json`, and the taint flows the analyser prints
 all have one shape - `argparse` in a stage, through `read_json_dict`, to the read
-here - so the answer belongs to the class: `read_json`, `read_gzip_json`,
-`load_graph` and `layer_digests` all carry it.
+here - so the answer belongs to the class: `_read_json_file` (the read behind
+both `read_json` and `load_graph`), `read_gzip_json` and `layer_digests` all
+carry it.
 
 The grounds are the ones recorded in `build_community_summaries.merge`, cited
 rather than restated so the two cannot drift into two different policies:
@@ -84,25 +85,38 @@ def checked_write_target(path: Path) -> Path:
     return Path(path)
 
 
+def _read_json_file(path: Path):
+    """Parse a JSON file that exists, gzipped or not. The suffix decides.
+
+    The one implementation of "read this, compressed or not", because there were
+    two and they disagreed. This dispatch was added after a stage handed a `.gz`
+    path died on the gzip magic byte - `UnicodeDecodeError: 0x8b in position 1` -
+    and on one estate that made `record-clustering --graph
+    graphify-out/graph.json.gz` impossible, which was the only artefact that
+    store ships. It went into `read_json` and not into `load_graph`, which reads
+    the same artefact for a different set of stages, so the fix covered part of
+    the class and the part it missed was invisible from either call site.
+
+    Private and existence-blind on purpose: the two public readers that call it
+    disagree about an absent file, deliberately and in opposite directions, and
+    that is the only difference left between them. Folding the existence check in
+    here would force one answer on both.
+    """
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as handle:  # NOSONAR(S8707) - read policy
+            return json.load(handle)
+    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707) - read policy
+
+
 def read_json(path: Path, default=None):
     """Parse a JSON file, gzipped or not; return `default` if it does not exist.
-
-    The suffix decides. Without this, a stage handed a `.gz` path died on the gzip
-    magic byte - `UnicodeDecodeError: 0x8b in position 1` - and on one estate that
-    made `record-clustering --graph graphify-out/graph.json.gz` impossible, which
-    was the only artefact that store ships. The dispatch is here rather than in
-    that stage because three other call sites read `GRAPH_PATH` the same way, so
-    fixing it once fixes the class.
 
     Adding capability, never changing behaviour: a caller passing an uncompressed
     path takes exactly the branch it always took.
     """
     if not path.exists():
         return default
-    if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8") as handle:  # NOSONAR(S8707) - read policy
-            return json.load(handle)
-    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707) - read policy
+    return _read_json_file(path)
 
 
 def read_json_dict(path: Path) -> dict:
@@ -172,9 +186,25 @@ def write_gzip_json(path: Path, data) -> None:
 
 
 def load_graph(path: Path) -> dict:
-    """The estate graph (node-link JSON). Raises if absent - callers treat a
-    missing graph as a hard error with their own message."""
-    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707) - read policy
+    """The estate graph (node-link JSON), gzipped or not. Raises if absent -
+    callers treat a missing graph as a hard error with their own message.
+
+    Every store gitignores the uncompressed graph and commits the archive beside
+    it, so the compressed file is the one a fresh checkout has. This read had no
+    suffix dispatch while `read_json` did, and the stages reading through it -
+    the explorer, deep dives, topic briefs, community summaries and
+    `status --verify-graph` - could therefore open only the file that is usually
+    absent. Nothing said so at the call site; the archive fallback simply stopped
+    at the boundary of a function that could not read an archive.
+
+    Shares `_read_json_file` rather than repeating the dispatch, which is the
+    whole point: one implementation cannot disagree with itself. Delegating to
+    `read_json` instead would be the shorter change and the wrong one, because it
+    answers an absent file with a default and this must raise - a default would
+    turn a missing graph into an empty estate that every downstream count then
+    reports as real.
+    """
+    return _read_json_file(path)
 
 
 def warn_if_no_repo_attribute(nodes: list, consequence: str) -> bool:

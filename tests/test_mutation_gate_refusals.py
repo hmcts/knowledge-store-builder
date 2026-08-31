@@ -180,7 +180,7 @@ class MutationGateRefusalsTest(unittest.TestCase):
         self.assertEqual(code, 0, f"a child reading this tree was refused: {reported.getvalue()}")
         self.assertEqual(reported.getvalue(), "")
         self.assertEqual(
-            [], list((root / "src").rglob("__pycache__")), "the probe cached bytecode of the tree"
+            list((root / "src").rglob("__pycache__")), [], "the probe cached bytecode of the tree"
         )
 
     def test_a_child_that_imports_nothing_is_refused_rather_than_read_as_reading_this_tree(self):
