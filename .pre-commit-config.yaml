@@ -38,11 +38,12 @@ repos:
   - repo: local
     hooks:
       # The mutation gate holds a deliberately introduced defect in a real file
-      # under src/ for the length of a suite run, and from outside that process it
-      # looks like an ordinary edit: a reader staged one and nearly committed it
-      # (#268). The gate's own recovery record is the signal, and this is the only
-      # reader of it that sits in front of a commit. Untracked, so pre-commit's
-      # stash of unstaged tracked changes leaves it in place for the check.
+      # under src/ for as long as the tests that entry names take to run, and from
+      # outside that process it looks like an ordinary edit: a reader staged one
+      # and nearly committed it (#268). The gate's own recovery record is the
+      # signal, and this is the only reader of it that sits in front of a commit.
+      # Untracked, so pre-commit's stash of unstaged tracked changes leaves it in
+      # place for the check.
       #
       # First in this file's local hooks on purpose: there is nothing worth
       # scanning in a tree whose contents are not what they say.

@@ -71,10 +71,13 @@ def record_for(module: str) -> bytes:
     return json.dumps(header).encode("utf-8") + b"\n" + ORIGINAL
 
 
-# Drives the real gate over a purpose-built source directory. Only `run_suite` is
-# replaced - the process boundary the gate's own docstring calls out - and it
-# records what the tree looked like at each call, which is the only way to see
-# whether a mutation was applied when the suite ran.
+# Drives the real gate over a purpose-built source directory. Only the two suite
+# runners are replaced - the process boundary the gate's own docstring calls out -
+# and they record what the tree looked like at each call, which is the only way to
+# see whether a mutation was applied when the suite ran. Both, because the gate
+# runs the whole suite once for the pre-check and the entry's own modules after
+# that: leaving `run_modules` real would run this repository's suite from inside
+# a test in it.
 HARNESS = """
 import json
 import sys
@@ -89,13 +92,23 @@ import mutation_gate as gate
 gate.SRC = Path(settings["source"])
 gate.RECOVERY_PATH = Path(settings["sidecar"])
 gate.MUTATIONS = (
-    gate.Mutation("harness", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"),
+    # The observer names a module of this repository because `check_mapping` reads
+    # the real tests directory, and nothing runs it: `run_modules` below is what
+    # the gate calls instead.
+    gate.Mutation(
+        "harness",
+        "target.py",
+        "ORIGINAL",
+        "MUTATED",
+        "a purpose-built target",
+        ("test_mutation_gate_recovery",),
+    ),
 )
 
 calls = []
 
 
-def run_suite():
+def run_suite(*_):
     calls.append(None)
     Path(settings["observations"], f"{len(calls)}.json").write_text(
         json.dumps(
@@ -115,6 +128,7 @@ def run_suite():
 
 
 gate.run_suite = run_suite
+gate.run_modules = run_suite
 raise SystemExit(gate.main([]))
 """
 
@@ -374,7 +388,12 @@ class MutationGateRecoveryTest(unittest.TestCase):
         target = root / "source" / "target.py"
         target.write_bytes(ORIGINAL + b"VALUE = 'ORIGINAL'\n")
         ambiguous = gate.Mutation(
-            "twice over", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+            "twice over",
+            "target.py",
+            "ORIGINAL",
+            "MUTATED",
+            "a purpose-built target",
+            ("test_mutation_gate_recovery",),
         )
 
         with self.assertRaises(SystemExit) as raised:
@@ -391,7 +410,12 @@ class MutationGateRecoveryTest(unittest.TestCase):
         root = self._workspace()
         self._point_gate_at(root)
         unique = gate.Mutation(
-            "once only", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+            "once only",
+            "target.py",
+            "ORIGINAL",
+            "MUTATED",
+            "a purpose-built target",
+            ("test_mutation_gate_recovery",),
         )
 
         original = gate.apply(unique)

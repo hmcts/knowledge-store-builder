@@ -1,14 +1,14 @@
 """A mutation-gate run must be visible from outside the process that started it.
 
 `tests/mutation_gate.py` puts a deliberately introduced defect into a real file
-under `src/` for as long as one suite run takes, then restores it. While that is
-true the working tree cannot be read for anything, and nothing on disk says so:
-`git status` reports an ordinary edit. Three readers were misled by that in one
-day (issue #268). One staged the mutated file and nearly committed it. One
-checked the suite was green before starting a long job and refused against a tree
-that ran green minutes later. And one, stopping a run it believed was stale,
-matched the script's name with `pgrep -f` - which finds every checkout on the
-machine - and killed the wrapper of a different worktree's run.
+under `src/` for as long as the test modules that entry names take to run, then
+restores it. While that is true the working tree cannot be read for anything, and
+nothing on disk says so: `git status` reports an ordinary edit. Three readers were
+misled by that in one day (issue #268). One staged the mutated file and nearly
+committed it. One checked the suite was green before starting a long job and
+refused against a tree that ran green minutes later. And one, stopping a run it
+believed was stale, matched the script's name with `pgrep -f` - which finds every
+checkout on the machine - and killed the wrapper of a different worktree's run.
 
 The record the gate already writes before it touches a file is the signal. What
 it lacked was identity: "a mutation is applied" does not say which checkout holds
