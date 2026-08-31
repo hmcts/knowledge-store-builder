@@ -26,8 +26,9 @@ falsified by a later reader; a gate that merely claims to be sensitive cannot.
 The two slow modes are what keep the mapping honest, and neither runs in the
 `tests` job: `--derive-mapping` fills in a new entry from a full suite run, and
 `--verify-mapping` applies every entry against the whole suite and refuses a
-named set that does not match the modules that failed. `.github/workflows/
-mutation-mapping.yml` runs the second one weekly and on demand.
+named set that does not match the modules that failed. The `tests` workflow runs
+the second one on its schedule and on `workflow_dispatch`, in the same job that
+runs the fast mode on a pull request.
 
 A run that is killed can leave a mutation applied, because SIGKILL cannot be
 handled: `apply` therefore records the original bytes in
@@ -481,6 +482,7 @@ MUTATIONS = (
         "life in and the state an operator reaches for `--duplicates` from; both "
         "readers already accepted the `.gz` and only the guard refused, and the "
         "way out was a multi-gigabyte gunzip for a report documented as cheap",
+        ("test_graph_to_read", "test_summaries_membership_drift"),
     ),
     Mutation(
         "the archive is preferred over the graph a run has just written",
@@ -491,6 +493,12 @@ MUTATIONS = (
         "merge and the archive beside it is the previous build, so reading the "
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
+        (
+            "test_duplicate_repositories",
+            "test_graph_to_read",
+            "test_most_connected",
+            "test_summaries_membership_drift",
+        ),
     ),
     Mutation(
         "the most-connected ranking stops naming the graph it read",
@@ -501,6 +509,7 @@ MUTATIONS = (
         "degree-driven, so the two rank differently; the same silence about which "
         "file was read is what made an operator diff two graphs by hand after a "
         "stage reported confidently on a leftover",
+        ("test_graph_to_read",),
     ),
     Mutation(
         "the near-duplicate report stops naming the graph it read",
@@ -511,6 +520,7 @@ MUTATIONS = (
         "committed archive and the same percentage from a stale leftover are "
         "different claims, and a header that does not name its file leaves the "
         "reader to guess which of a store's two graphs the estate is described from",
+        ("test_graph_to_read",),
     ),
     Mutation(
         "estate check stops matching name segments",
@@ -1227,6 +1237,7 @@ MUTATIONS = (
         "`pip install --require-hashes` reads the LOCK, so the build used a version the "
         "store's requirements input did not name - and three checks passed, none of them "
         "having opened that input for correctness",
+        ("test_check_install_docs",),
     ),
     Mutation(
         "a pin the lock omits entirely reads as resolved",
@@ -1237,6 +1248,7 @@ MUTATIONS = (
         "different failure from resolving it at another version and needs a different "
         "fix; folding the two together sends an operator to recompile a lock that is "
         "missing the entry rather than holding a stale one",
+        ("test_check_install_docs",),
     ),
     Mutation(
         "the resolution half stops reaching the exit code",
@@ -1245,6 +1257,7 @@ MUTATIONS = (
         "    resolution = 0",
         "a check that prints a disagreement and exits 0 is worse than one that does not "
         "look: the text scrolls past in a green run and nothing chains on it",
+        ("test_check_install_docs",),
     ),
     Mutation(
         "graph-report check unwired",

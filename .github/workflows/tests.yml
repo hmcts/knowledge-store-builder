@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The mapping check below runs only on these two, never on a pull request: it
+  # applies every entry against the whole suite, which is the cost the mapping
+  # exists to avoid paying per run.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -73,13 +79,30 @@ jobs:
       #
       # Each entry names the test modules that observe it and only those are run,
       # which took this step from about 26 minutes to 81 seconds measured locally
-      # over 183 entries. That makes each entry's
-      # mapping load-bearing and invisible from a passing run, so
-      # `mutation-mapping.yml` checks every one of them against the whole suite,
-      # weekly and on demand. Do not add entries without running
-      # `--derive-mapping` for them: a hand-typed observer prints `caught` too.
+      # over 183 entries. That makes each entry's mapping load-bearing and
+      # invisible from a passing run: a wrong name prints `caught` either way,
+      # once because the mutation was seen and once because a module that cannot
+      # see it failed for its own reasons. Do not add an entry without running
+      # `--derive-mapping` for it.
+      #
+      # `--verify-mapping` is the check for that. It applies every entry against
+      # the whole suite and refuses a set that disagrees with what actually
+      # failed, in both directions. Too slow for a pull request, so it runs on the
+      # schedule and on `workflow_dispatch` instead - in this job rather than a
+      # workflow of its own, so there is one environment to keep correct rather
+      # than two that can drift.
+      #
+      # Two steps with conditions rather than one step branching in shell:
+      # interpolating an expression into a `run:` block is the script-injection
+      # shape the analysers read, and it is worth not writing even where the
+      # value is an enum the runner controls.
       - name: Mutation gate
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: python3 tests/mutation_gate.py
+
+      - name: Mutation gate, verifying every entry's observers against the whole suite
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python3 tests/mutation_gate.py --verify-mapping
 
       # One script, run here and by contributors, so the pinned versions and the
       # checked paths cannot differ between the two.
