@@ -17,6 +17,11 @@ snapshot keyed to the wrong graph mis-keys the entire carry of committed prose.
 Two stages needing the same warning is the reason it lives here rather than in
 either of them.
 
+Which of the two a reading stage should open is the same question one step earlier,
+so `graph_to_read` lives here too (#262): three stages were about to hold their own
+copy of the answer, and three copies is how they come to disagree about which graph
+a store's numbers describe.
+
 **It reports; it never adjudicates and never refuses.** An earlier version of the
 `record-clustering` warning refused when both files existed, and that was wrong
 for a reason worth keeping written down: the `.gz` is *tracked*, so it is present
@@ -46,6 +51,39 @@ def counterpart(path: Path) -> Path | None:
     if path.suffix == ".json":
         return path.with_name(path.name + ".gz")
     return None
+
+
+def graph_to_read(preferred: Path) -> Path | None:
+    """The graph file a *reading* stage should read, or None when neither exists.
+
+    `config.GRAPH_PATH` is the uncompressed graph every store gitignores, so it is
+    both the file `remap` reads and the file that is absent on a fresh checkout.
+    Stopping there would make a check unrunnable exactly where an operator wants
+    it, and streaming the `.gz` costs the same - so fall back to the committed
+    archive, and name the file that was read rather than leaving a reader to guess
+    which of a store's two graphs a count describes.
+
+    `preferred` wins when both exist, because mid-pipeline it is the merge this run
+    has just written and the archive beside it is the previous build.
+
+    Both directions, through `counterpart`: a caller may already hold the archive's
+    path, and returning the plain file's path for a store that does not ship it
+    would hand back something that cannot be opened.
+
+    **Reading stages only.** A stage that writes the graph back must not follow
+    this fallback - it would rewrite the plain file from the archive and lose
+    whatever the newer clustering produced. `stale_refusal` guards those, and the
+    #262 refusals this replaced were in `status`, which only reads.
+
+    Three call sites share it: `status --central`, `status --duplicates` and the
+    `summaries adrift` check, whose own copy this was promoted from. Repeating the
+    fallback is how three stages come to disagree about which graph a store's
+    numbers describe.
+    """
+    if preferred.is_file():
+        return preferred
+    other = counterpart(preferred)
+    return other if other is not None and other.is_file() else None
 
 
 def graph_counts(path: Path) -> tuple[int, int]:
