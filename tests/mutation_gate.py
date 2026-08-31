@@ -30,6 +30,13 @@ named set that does not match the modules that failed. The `tests` workflow runs
 the second one on its schedule and on `workflow_dispatch`, in the same job that
 runs the fast mode on a pull request.
 
+Every conclusion here rests on the suite reading this tree, and it is asserted
+rather than assumed. The suite runs in `tests/`, so a relative `PYTHONPATH=src`
+resolves to `tests/src` in the child, which does not exist, and the child imports
+whatever `knowledgestore` is installed instead - after which no mutation of this
+tree is visible to any run. A run therefore starts by asking a child where it
+imports the package from, and refuses if the answer is not this tree's `src/`.
+
 A run that is killed can leave a mutation applied, because SIGKILL cannot be
 handled: `apply` therefore records the original bytes in
 `tests/.mutation-gate-recovery` before touching a file, and the next run restores
@@ -102,7 +109,15 @@ class Mutation:
     find: str
     replace: str
     escaped_as: str
-    observers: tuple[str, ...]
+    # Defaulted, not required, though every shipped entry must name observers and
+    # `check_mapping` refuses one that does not. A required argument turns an entry
+    # written against the older five-field form - which is what every branch opened
+    # before this change still carries - into a TypeError at import, which takes
+    # five unrelated test modules down with it and says nothing about the cause.
+    # Defaulted, the same entry imports and fails one named check that says which
+    # entry is unmapped and which command fills it in. The refusal is the same
+    # strictness, delivered where it can be acted on.
+    observers: tuple[str, ...] = ()
 
 
 # Ordered by the escape they represent rather than by module, because the
@@ -131,6 +146,7 @@ MUTATIONS = (
         "archive could not be read by any of them and no call site said why. The "
         "replacement is the code that was there, so this is the shipped defect rather "
         "than an invented one",
+        ("test_config_and_io",),
     ),
     Mutation(
         "stale counterpart no longer named",
@@ -2184,6 +2200,22 @@ MUTATIONS = (
         "real observers behind it, while every affected entry still looked plausible",
         ("test_mutation_gate_mapping", "test_mutation_gate_recovery"),
     ),
+    Mutation(
+        "the tree the child reads goes unchecked",
+        "tests/mutation_gate.py",
+        "    if check_import" + "_path():",
+        "    if False:",
+        "#269: the suite runs in `tests/`, so a relative `PYTHONPATH=src` resolves to "
+        "`tests/src` in the child and it imports whatever copy is installed instead - after "
+        "which no mutation of this tree is visible to any run. Both symptoms point away "
+        "from the cause: the gate blames tests that pass when run directly, and "
+        "`--derive-mapping` reports entries as observed by nothing. The heuristic watching "
+        "for the second one does not fire on the case that happens, because an entry "
+        "targeting a file outside the installed package is still seen - one run derived 7 "
+        "observed and 72 unobserved, printed no warning, and cost half an hour of deriving "
+        "an artefact that had to be thrown away",
+        ("test_mutation_gate_recovery", "test_mutation_gate_refusals"),
+    ),
 )
 
 
@@ -2359,9 +2391,72 @@ def _run(names: tuple[str, ...] | None) -> SuiteRun:
     return SuiteRun(bool(parsed["passed"]), tuple(parsed["modules"]))
 
 
-def run_suite() -> bool:
-    """True when the whole suite passes."""
-    return _run(None).passed
+# Asked of a child spawned where the suite is spawned, because the question is
+# about that child and not about this process: the gate is started from the
+# repository root and its children run in `tests/`, so a relative path on
+# PYTHONPATH means two different things in the two places.
+IMPORT_PROBE = "import knowledgestore, sys; sys.stdout.write(knowledgestore.__file__ or '')"
+
+
+def check_import_path(run=subprocess.run) -> int:
+    """Refuse a run whose suite subprocess reads a different tree. Non-zero to stop.
+
+    The precondition every conclusion here rests on, asserted rather than
+    inferred from its symptoms. With the child importing an installed copy,
+    nothing this gate does to the tree is visible to any run it starts: every
+    entry survives, or `--derive-mapping` reports every one as observed by
+    nothing, and both readings are about a library nobody is changing (#269).
+
+    Watching for the symptom was tried and is not enough. The warning for "every
+    entry unobserved" does not fire on the case that happens, because an entry
+    targeting a file outside the installed package - `tests/`, `docs/` - is still
+    seen: one run derived 7 entries observed and 72 observed by nothing, printed
+    no warning, and produced a mapping that looked like a mapping.
+
+    `-B` rather than the variable `_run` sets, for two reasons: the child's
+    environment has to arrive exactly as an operator left it, since that is the
+    thing being measured, and a probe that wrote a `.pyc` of an unmutated module
+    would leave one for a mutated run to read back (#228).
+    """
+    completed = run(
+        [sys.executable, "-B", "-c", IMPORT_PROBE],
+        cwd=ROOT / "tests",
+        capture_output=True,
+        text=True,
+    )
+    printed = (completed.stdout or "").strip()
+    expected = SRC.resolve()
+    if printed and Path(printed).resolve().parent == expected:
+        return 0
+    if printed:
+        where = f"from {Path(printed).resolve()}"
+    else:
+        said = (completed.stderr or "").strip().splitlines()
+        where = "from nowhere - it imported no such package at all: " + (
+            said[-1] if said else f"it printed nothing and exited {completed.returncode}"
+        )
+    print(
+        f"A test process started in {ROOT / 'tests'}, which is where this gate runs the "
+        f"suite, imports knowledgestore {where} rather than from {expected}. Every "
+        "mutation of this tree would be invisible to it, so nothing could be concluded "
+        "about any of them - a surviving entry would mean the suite never saw the file "
+        f"change. Give the child an absolute path (PYTHONPATH={ROOT / 'src'}), or install "
+        f"this tree in place with `pip install -e .` from {ROOT}: a relative "
+        f"`PYTHONPATH=src` resolves to {ROOT / 'tests' / 'src'} in that child and finds "
+        "nothing.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def run_suite() -> SuiteRun:
+    """What a whole-suite run of the tree as it stands reported.
+
+    The run rather than a verdict, because the refusal that reads it names the
+    modules that failed: a red suite the reader cannot see from where they are
+    standing is the case that costs, and the names are already in hand.
+    """
+    return _run(None)
 
 
 def run_modules(modules: Sequence[str]) -> bool:
@@ -2656,10 +2751,27 @@ def main(argv: list[str] | None = None) -> int:
     if recover():
         return 1
 
-    if not run_suite():
+    # Before the pre-check below, so that refusal is unreachable for this cause.
+    # A child reading an installed release of a branch that adds functions fails
+    # the suite, and the message would then send the reader to tests that pass
+    # when run directly - correct about the suite, wrong about the suspect.
+    if check_import_path():
+        return 1
+
+    baseline = run_suite()
+    if not baseline.passed:
+        # Named, because the reader is not always looking at the failure: a guard
+        # over the table below fails this run while every test in the module they
+        # are editing passes, and an anonymous refusal sends them there.
+        blamed = (
+            f"these failed: {', '.join(baseline.modules)}"
+            if baseline.modules
+            else "the run named no failing module, so it did not fail inside a test - run "
+            "the suite directly and read what it printed"
+        )
         print(
             "The suite is already failing, so nothing can be concluded about any "
-            "mutation. Fix that first.",
+            f"mutation. Fix that first - {blamed}.",
             file=sys.stderr,
         )
         return 1
