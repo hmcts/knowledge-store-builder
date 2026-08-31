@@ -268,7 +268,16 @@ class BuildPageSmokeTest(SettingsIsolated):
         import json as _json
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # Resolved, because `configure(root=...)` resolves what it is given:
+            # an unresolved override under a symlinked temporary directory is then
+            # not relative to `ROOT`, and `status.EMBEDDED_LAYERS` refuses it.
+            root = Path(tmp).resolve()
+            # The root first, then the individual overrides. Overriding only the
+            # inputs left `ROOT` - and so `EXPLORER_INPUTS_PATH` - pointing at the
+            # working directory, and `main()` wrote its build manifest into the
+            # checkout on every run. Invisible because a store's `graphify-out/` is
+            # gitignored here for an unrelated reason.
+            config.configure(root=root)
             config.configure(GRAPH_PATH=root / "graph.json")
             config.configure(LABELS_PATH=root / "labels.json")
             config.configure(INTENT_INDEX_PATH=root / "missing-intent.json.gz")

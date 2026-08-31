@@ -12,6 +12,7 @@ repository outside the estate: drawn honestly from what was indexed, and false.
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -50,6 +51,9 @@ class ScopeStatementTest(SettingsIsolated):
     def test_the_statement_reaches_the_written_manifest(self):
         """Behaviour covered above is worth nothing if the section is not
         actually emitted - the gap that shipped an unwired check twice."""
+        # A root of its own: without one this wrote the manifest into the
+        # checkout, where `knowledge/` is gitignored and hid it.
+        config.configure(root=self.enterContext(tempfile.TemporaryDirectory()))
         config.configure(GITHUB_ORG="some-org")
         ctx.build_manifest([])
         written = config.MANIFEST_PATH.read_text(encoding="utf-8")
