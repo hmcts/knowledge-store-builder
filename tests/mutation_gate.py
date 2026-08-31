@@ -135,6 +135,19 @@ MUTATIONS = (
         ("test_config_and_io", "test_read_path_policy"),
     ),
     Mutation(
+        "graph loader stops reading the archive",
+        "io.py",
+        '    """\n    return _read_json_file(path)\n',
+        '    """\n    return json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707)\n',
+        "the same defect one function along, and it shipped because the first fix "
+        "looked complete: the dispatch went into `read_json` while `load_graph` read "
+        "the same artefact for the explorer, deep dives, topic briefs, community "
+        "summaries and `status --verify-graph`, so a store holding only its committed "
+        "archive could not be read by any of them and no call site said why. The "
+        "replacement is the code that was there, so this is the shipped defect rather "
+        "than an invented one",
+    ),
+    Mutation(
         "stale counterpart no longer named",
         "record_clustering.py",
         "        disagreement = counterpart_disagreement(config.GRAPH_PATH, (communities, clustered))",
@@ -212,9 +225,9 @@ MUTATIONS = (
     Mutation(
         "the write guard applied to the reads",
         "io.py",
-        '    if not path.exists():\n        return default\n    if path.suffix == ".gz":',
+        "    if not path.exists():\n        return default\n    return _read_json_file(path)",
         "    checked_write_target(path)\n    if not path.exists():\n"
-        '        return default\n    if path.suffix == ".gz":',
+        "        return default\n    return _read_json_file(path)",
         "the one-line answer to the same rule's second report - S8707 on read_json, "
         "code-scanning alert 53 - which this library rejects: the guard is in the "
         "module already, so calling it on a read is one line, and it then refuses "
