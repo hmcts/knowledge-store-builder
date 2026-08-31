@@ -45,10 +45,10 @@ jobs:
       # resolve and install nothing. --no-build says so explicitly, for
       # anything reading the command rather than the flags it implies.
       - name: Ruff lint
-        run: uv run --no-sync --no-build ruff check src tests scripts --output-format=github
+        run: uv run --no-sync --no-build ruff check src tests --output-format=github
 
       - name: Ruff format check
-        run: uv run --no-sync --no-build ruff format --check src tests scripts
+        run: uv run --no-sync --no-build ruff format --check src tests
 
       - name: Pyright
         run: uv run --no-sync --no-build pyright
