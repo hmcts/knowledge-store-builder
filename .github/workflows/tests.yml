@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The mapping check below runs only on these two, never on a pull request: it
+  # applies every entry against the whole suite, which is the cost the mapping
+  # exists to avoid paying per run.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -70,8 +76,33 @@ jobs:
       # breaking the product on purpose and requiring the suite to notice. Every
       # mutation in it is a defect that was actually written, reviewed and caught
       # late - one of them shipped in a release.
+      #
+      # Each entry names the test modules that observe it and only those are run,
+      # which took this step from about 26 minutes to 81 seconds measured locally
+      # over 183 entries. That makes each entry's mapping load-bearing and
+      # invisible from a passing run: a wrong name prints `caught` either way,
+      # once because the mutation was seen and once because a module that cannot
+      # see it failed for its own reasons. Do not add an entry without running
+      # `--derive-mapping` for it.
+      #
+      # `--verify-mapping` is the check for that. It applies every entry against
+      # the whole suite and refuses a set that disagrees with what actually
+      # failed, in both directions. Too slow for a pull request, so it runs on the
+      # schedule and on `workflow_dispatch` instead - in this job rather than a
+      # workflow of its own, so there is one environment to keep correct rather
+      # than two that can drift.
+      #
+      # Two steps with conditions rather than one step branching in shell:
+      # interpolating an expression into a `run:` block is the script-injection
+      # shape the analysers read, and it is worth not writing even where the
+      # value is an enum the runner controls.
       - name: Mutation gate
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: python3 tests/mutation_gate.py
+
+      - name: Mutation gate, verifying every entry's observers against the whole suite
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python3 tests/mutation_gate.py --verify-mapping
 
       # One script, run here and by contributors, so the pinned versions and the
       # checked paths cannot differ between the two.
@@ -94,3 +125,32 @@ jobs:
       # this catches that, and it caught it three times.
       - name: Answer gate mutations
         run: node tests/explorer/answer-regression-mutations.mjs
+
+      # Last, so it judges everything above it. `git add -A` is banned in this
+      # repository because the working tree collects generated output, another
+      # session's edits and scratch at once - and that rule had no gate, so
+      # nothing could notice a test writing into the checkout instead of a
+      # temporary directory. The step does not stop anyone typing `git add -A`;
+      # it removes the population of stray files that makes it dangerous.
+      #
+      # What it cannot see is a stray write to an already-ignored path, and both
+      # of the two this repository had were exactly that: found by enumerating
+      # the tree with `git status --ignored` while adding this step, hidden by a
+      # gitignore entry that exists for an unrelated reason. This check would
+      # have stayed green over either, which is why they were fixed at the test
+      # instead of being written down here as expected output.
+      #
+      # It also makes the mutation gate's restore structural. That gate edits a
+      # real source file and puts it back, and until now the only evidence the
+      # restore was byte-exact was a hand-run `shasum` either side.
+      #
+      # Two commands, because they answer different questions - a tracked file
+      # modified, and a file created - and the second is the strict one: it sees
+      # both. `git diff --exit-code` runs first because it prints the change,
+      # which a porcelain listing never does, so a failure says what moved.
+      # Joined with `&&` so the step cannot pass on one while the other failed.
+      - name: The suite left the checkout as it found it
+        run: |
+          git diff --exit-code \
+            && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
+            || { git status --porcelain=v1 --untracked-files=all; exit 1; }

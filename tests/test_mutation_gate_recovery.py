@@ -47,10 +47,16 @@ TESTS = Path(__file__).resolve().parent
 ORIGINAL = b"# harness target\r\nVALUE = 'ORIGINAL'\n# caf\xc3\xa9\n"
 MUTATED = ORIGINAL.replace(b"ORIGINAL", b"MUTATED")
 
-# Drives the real gate over a purpose-built source directory. Only `run_suite` is
-# replaced - the process boundary the gate's own docstring calls out - and it
-# records what the tree looked like at each call, which is the only way to see
-# whether a mutation was applied when the suite ran.
+# Drives the real gate over a purpose-built source directory. Only the calls that
+# start a child are replaced - the process boundary the gate's own docstring calls
+# out - and the two runners record what the tree looked like at each call, which is
+# the only way to see whether a mutation was applied when the suite ran. Both
+# runners, because the gate runs the whole suite once for the pre-check and the
+# entry's own modules after that: leaving `run_modules` real would run this
+# repository's suite from inside a test in it. `check_import_path` is the third
+# such call and returns 0 here, because it asks a child where it imports
+# knowledgestore from and answers about this repository, while the source
+# directory below is a temporary one holding a single file.
 HARNESS = """
 import json
 import sys
@@ -65,13 +71,23 @@ import mutation_gate as gate
 gate.SRC = Path(settings["source"])
 gate.RECOVERY_PATH = Path(settings["sidecar"])
 gate.MUTATIONS = (
-    gate.Mutation("harness", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"),
+    # The observer names a module of this repository because `check_mapping` reads
+    # the real tests directory, and nothing runs it: `run_modules` below is what
+    # the gate calls instead.
+    gate.Mutation(
+        "harness",
+        "target.py",
+        "ORIGINAL",
+        "MUTATED",
+        "a purpose-built target",
+        ("test_mutation_gate_recovery",),
+    ),
 )
 
 calls = []
 
 
-def run_suite():
+def observe():
     calls.append(None)
     Path(settings["observations"], f"{len(calls)}.json").write_text(
         json.dumps(
@@ -82,15 +98,26 @@ def run_suite():
         ),
         encoding="utf-8",
     )
-    if len(calls) == 1:
-        return settings["suite_passes"]
+
+
+def run_suite():
+    observe()
+    # A SuiteRun rather than a bool: the refusal that reads it names the modules
+    # that failed, so a red pre-check has to carry one.
+    return gate.SuiteRun(settings["suite_passes"], () if settings["suite_passes"] else ("harness",))
+
+
+def run_modules(*_):
+    observe()
     if settings["hang"]:
         Path(settings["ready"]).write_text("mutated", encoding="utf-8")
         time.sleep(120)
     return False
 
 
+gate.check_import_path = lambda: 0
 gate.run_suite = run_suite
+gate.run_modules = run_modules
 raise SystemExit(gate.main([]))
 """
 
@@ -350,7 +377,12 @@ class MutationGateRecoveryTest(unittest.TestCase):
         target = root / "source" / "target.py"
         target.write_bytes(ORIGINAL + b"VALUE = 'ORIGINAL'\n")
         ambiguous = gate.Mutation(
-            "twice over", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+            "twice over",
+            "target.py",
+            "ORIGINAL",
+            "MUTATED",
+            "a purpose-built target",
+            ("test_mutation_gate_recovery",),
         )
 
         with self.assertRaises(SystemExit) as raised:
@@ -367,7 +399,12 @@ class MutationGateRecoveryTest(unittest.TestCase):
         root = self._workspace()
         self._point_gate_at(root)
         unique = gate.Mutation(
-            "once only", "target.py", "ORIGINAL", "MUTATED", "a purpose-built target"
+            "once only",
+            "target.py",
+            "ORIGINAL",
+            "MUTATED",
+            "a purpose-built target",
+            ("test_mutation_gate_recovery",),
         )
 
         original = gate.apply(unique)

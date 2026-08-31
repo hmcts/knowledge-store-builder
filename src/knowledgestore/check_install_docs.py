@@ -41,6 +41,14 @@ opened the requirements input.
 Every `name==version` requirement is compared, rather than a named package, so a
 store pinning more than one thing is covered without this knowing what it pins.
 
+**Neither half claims anything about a set it found empty.** A comparison that read
+no pin at all is refused rather than reported, because a fully resolved store and a
+parse that has stopped matching produce the same empty result and the same
+sentence - and the second is the realistic one: a pin moved behind a `-r` include,
+an input renamed, a spelling this module does not read. The documented-command half
+cannot refuse - a store need not document installing from its lock - so it names
+how many commands it read instead of asserting that all of them pass.
+
 Run: knowledgestore check-install-docs
 """
 
@@ -166,8 +174,16 @@ def shell_commands(text: str, is_markdown: bool) -> list[tuple[int, str]]:
     return commands
 
 
-def offending_commands(root: Path, lock_name: str) -> list[tuple[str, int, str]]:
-    """Documented commands installing from the lock without naming an index."""
+def lock_installs(root: Path, lock_name: str) -> list[tuple[str, int, str]]:
+    """Every documented command that installs from the lock, offending or not.
+
+    Separate from `offending_commands` so the passing message can say how many
+    commands it read. "Every documented install from it passes the flag" over an
+    empty list is an affirmative claim about nothing, and the ways this list
+    empties are all invisible from the message: a documentation suffix absent from
+    `DOC_SUFFIXES`, a `SKIP_DIRS` entry that grew to cover where the docs live, the
+    lock renamed, or a spelling of the requirement flag `target` does not match.
+    """
     target = re.compile(rf"-r\s+\S*{re.escape(lock_name)}\b")
     found: list[tuple[str, int, str]] = []
     for path in sorted(root.rglob("*")):
@@ -179,17 +195,80 @@ def offending_commands(root: Path, lock_name: str) -> list[tuple[str, int, str]]
         if lock_name not in text:
             continue
         for number, command in shell_commands(text, path.suffix == ".md"):
-            if target.search(command) and INDEX_FLAG not in command:
+            if target.search(command):
                 found.append((str(path.relative_to(root)), number, command.strip()))
     return found
 
 
+def offending_commands(installs: list[tuple[str, int, str]]) -> list[tuple[str, int, str]]:
+    """Of the documented installs from the lock, those that name no index."""
+    return [entry for entry in installs if INDEX_FLAG not in entry[2]]
+
+
+def _installs_line(lock_name: str, installs: int) -> str:
+    """What the documented-command half can honestly claim about what it read."""
+    if not installs:
+        return (
+            f"{lock_name} names no index, and no documented command installs from it -"
+            f"\nnothing to check. This half read 0 such commands, so it says nothing about"
+            f"\nwhether an install from {lock_name} would work as documented."
+        )
+    return (
+        f"{lock_name} names no index; all {installs} documented install(s) "
+        f"from it pass {INDEX_FLAG}"
+    )
+
+
+def _nothing_to_compare(requirements: Path, lock: Path) -> str:
+    """Why an empty comparison is refused rather than reported as a clean one."""
+    if requirements.is_file():
+        cause = f"{requirements.name} states 0 `==` pins"
+        remedy = (
+            f"Either the pin is not in {requirements.name} - a `-r` include is not followed, and"
+            f"\nonly `name[extras]==version` is read - or it is spelled in a way this check does"
+            f"\nnot match, in which case the parse is the defect and not the store. The"
+            f"\ndocumented store layout keeps the exact `==` pin in {requirements.name}."
+        )
+    else:
+        cause = f"there is no {requirements.name} beside it to compare against"
+        remedy = (
+            f"Commit the input {lock.name} was compiled from as {requirements.name}, or delete"
+            f"\n{lock.name}: a lock is documented as the resolution of an input, and a store"
+            f"\nthat installs the library directly keeps neither file."
+        )
+    return (
+        f"{lock.name} was compared against nothing: {cause}.\n\n"
+        f"An empty comparison and a clean one reach this line by the same path, so a pass"
+        f"\nhere would be a true sentence about nothing and nothing downstream could tell"
+        f"\nthe two apart. {lock.name} may well resolve everything it names; this half"
+        f"\ncannot say so.\n\n{remedy}"
+    )
+
+
 def _report_unresolved(requirements: Path, lock: Path) -> int:
-    """Print any pin the lock does not deliver. Returns the exit code for that half."""
+    """Print any pin the lock does not deliver. Returns the exit code for that half.
+
+    An empty result has two causes this cannot distinguish - every pin resolved, or
+    no pin ever parsed - so nothing is claimed until at least one pin has been read.
+
+    There is deliberately no setting that turns the refusal back into a pass. The
+    routes to an empty parse are a pin moved behind a `-r` include, a spelling this
+    module stops matching, and an input renamed; all three look identical from here,
+    none of them is something a store would think to declare in advance, and a
+    switch that silences the refusal silences those too. A store that means to pin
+    nothing exactly has an explicit route already: the documented layout keeps the
+    `==` pin, and a store with no pin to state has no lock to commit either, which
+    `main` passes over without reading this half at all.
+    """
+    pinned = pinned_versions(requirements)
+    if not pinned:
+        print(_nothing_to_compare(requirements, lock), file=sys.stderr)
+        return 1
     unresolved = unresolved_pins(requirements, lock)
     if not unresolved:
-        pinned = len(pinned_versions(requirements))
-        print(f"{lock.name} resolves every one of the {pinned} pin(s) {requirements.name} states")
+        print(
+            f"{lock.name} resolves every one of the {len(pinned)} pin(s) {requirements.name} states"
+        )
         return 0
     print(
         f"{lock.name} does not deliver what {requirements.name} pins, and the lock is what"
@@ -221,9 +300,10 @@ def main() -> int:
         print(f"{lock.name} names its index - no documented command needs {INDEX_FLAG}")
         return resolution
 
-    offenders = offending_commands(config.ROOT, lock.name)
+    installs = lock_installs(config.ROOT, lock.name)
+    offenders = offending_commands(installs)
     if not offenders:
-        print(f"{lock.name} names no index; every documented install from it passes {INDEX_FLAG}")
+        print(_installs_line(lock.name, len(installs)))
         return resolution
 
     print(
