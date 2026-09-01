@@ -760,8 +760,14 @@ class ConfigureReachesEveryOutputTest(SettingsIsolated):
         original = config.ROOT
         self.addCleanup(config.configure, original)
         with tempfile.TemporaryDirectory() as tmp:
-            config.configure(root=tmp)
+            # Resolve before configuring, and compare against the same value.
+            # Handing `configure` an unresolved path and asserting against a
+            # resolved one makes this test depend on `configure` resolving - which
+            # is invisible on Linux and, on macOS, quietly turns it into an
+            # observer of a behaviour it is not about. `configure`'s resolve has
+            # its own test in test_harness_root_spelling.
             resolved = str(Path(tmp).resolve())
+            config.configure(root=resolved)
             stale = [name for name in rooted if not str(getattr(config, name)).startswith(resolved)]
             self.assertEqual(
                 stale,

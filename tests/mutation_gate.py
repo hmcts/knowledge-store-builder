@@ -3482,16 +3482,15 @@ MUTATIONS = (
         '        module["ROOT"] = Path(root).expanduser()',
         "every ROOT-relative path is re-derived from ROOT, so an unresolved ROOT lets one "
         "directory have two spellings - a path written under the caller's spelling and the "
-        "same path read back through config compare unequal. It cost four hours across two "
-        "sessions as a phantom platform divergence: a mutation looked caught by ten tests "
-        "on macOS and seven on Linux, main went red on a table that was wrong, and the "
-        "three extra failures were the /var -> /private/var symlink, not the behaviour",
+        "same path read back through config compare unequal. Twice red on this. First as a "
+        "phantom platform divergence in the file-list entry; then this entry, added to "
+        "prevent that, went red the same way - five observers derived on macOS against one "
+        "on Linux. Four tests about *repointing* handed configure an unresolved root and "
+        "asserted against a resolved one, which on macOS made them accidental observers of "
+        "a resolve they are not about. They now resolve once and compare against that, so "
+        "the only observer is the test that builds its own symlink and holds everywhere",
         (
-            "test_config_and_io.ConfigTest.test_configure_root_repoints_every_derived_path",
-            "test_content_set.ConfigureReachesEveryOutputTest.test_every_root_relative_path_constant_is_repointed_by_configure",
             "test_harness_root_spelling.ConfiguredRootHasOneSpelling.test_configure_resolves_a_root_reached_through_a_symlink",
-            "test_repo_list_and_sync.CliTest.test_root_option_repoints_every_derived_path",
-            "test_store_paths.StorePathsTest.test_the_root_is_read_at_call_time_not_import_time",
         ),
     ),
     Mutation(

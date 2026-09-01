@@ -127,8 +127,15 @@ class StorePathsTest(SettingsIsolated):
         rather than assumed.
         """
         with tempfile.TemporaryDirectory() as other:
-            config.configure(root=other)
+            # Resolve before configuring, and compare against the same value.
+            # Handing `configure` an unresolved path and asserting against a
+            # resolved one makes this test depend on `configure` resolving - which
+            # is invisible on Linux and, on macOS, quietly turns it into an
+            # observer of a behaviour it is not about. `configure`'s resolve has
+            # its own test in test_harness_root_spelling.
+            root = Path(other).resolve()
+            config.configure(root=str(root))
             self.assertEqual(
                 store_paths.absolute("repositories/x/main.tf"),
-                str(Path(other).resolve() / "repositories/x/main.tf"),
+                str(root / "repositories/x/main.tf"),
             )
