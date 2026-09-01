@@ -774,6 +774,21 @@ def main() -> int:
     refusal = size_refusal(breakdown, config.EXPLORER_MAX_BYTES)
     if refusal:
         print(refusal, end="", file=sys.stderr)
+        # Recorded, not only printed. A refusal is the run an operator most needs a
+        # number from, and stderr is the one place it does not survive: the next
+        # build compares against the record, and a refused build that wrote nothing
+        # to it reads as a build that never happened rather than one that stopped.
+        # `page_bytes` is what the page WOULD have been - it is the quantity the
+        # limit is about - and `refused_over_bytes` carries the limit beside it so
+        # the pair says why, not just how big. The block breakdown goes in whole so
+        # the operator can act on the same numbers the message ranked.
+        telemetry.record(
+            {
+                **{f"explorer.bytes_{name}": size for name, size in breakdown.items()},
+                "explorer.page_bytes": sum(breakdown.values()),
+                "explorer.refused_over_bytes": config.EXPLORER_MAX_BYTES,
+            }
+        )
         return 1
     warning = size_warning(breakdown, config.EXPLORER_WARN_BYTES)
     if warning:

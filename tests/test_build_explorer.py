@@ -1031,6 +1031,42 @@ class PageByteAttributionTest(SettingsIsolated):
         largest = re.findall(r"([a-z_]+) ([\d,]+) bytes", stderr.split("Largest blocks:")[1])
         self.assertEqual([name for name, _ in largest], ["summaries", "topics", "app_js"])
 
+    def test_a_refused_build_records_why_it_stopped(self):
+        """Catches a refusal that only prints. `status` and the next build read the
+        telemetry record, not stderr, so a refused run that recorded nothing is
+        indistinguishable there from a run that never happened - and the operator
+        is left with a failure whose size and cause survive only in a scrollback.
+
+        The recorded `page_bytes` is what the page would have been, because that is
+        the quantity the limit is about, and `refused_over_bytes` carries the limit
+        beside it so the pair says why rather than only how big.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_MAX_BYTES=100_000)
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(explorer.main(), 1)
+            recorded = store_io.read_json(config.TELEMETRY_PATH, default={}).get("measurements", {})
+
+        self.assertIn("explorer.page_bytes", recorded, "a refusal recorded no size")
+        self.assertEqual(
+            recorded.get("explorer.refused_over_bytes"),
+            100_000,
+            "the record does not say which limit the page was over",
+        )
+        self.assertGreater(
+            recorded["explorer.page_bytes"],
+            recorded["explorer.refused_over_bytes"],
+            "the recorded size does not explain the refusal",
+        )
+        self.assertTrue(
+            any(k.startswith("explorer.bytes_") for k in recorded),
+            "the record carries no block breakdown to act on",
+        )
+
     def test_a_refused_build_leaves_the_page_the_store_already_had(self):
         """Breaks if the refusal comes after the write - or after a write that has
         already replaced the previous page. A stage that fails having swapped a
