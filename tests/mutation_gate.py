@@ -2346,6 +2346,23 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the oversized page refused in the message and written anyway",
+        "build_explorer.py",
+        '                "explorer.refused_over_bytes": config.EXPLORER_MAX_BYTES,\n            }\n        )\n        return 1',
+        '                "explorer.refused_over_bytes": config.EXPLORER_MAX_BYTES,\n            }\n        )',
+        "#245's last part, and the shape the stage shipped in: the size was printed, the "
+        "page was written, and the stage exited 0. A message an exit code contradicts is "
+        "read as advice - the build was committed and the store met the real refusal at "
+        "`git push`, which names neither the stage nor the layer that grew. The mutation "
+        "leaves the text intact and removes only the refusal, because the text was never "
+        "the missing half",
+        (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
+            "test_build_explorer.PageByteAttributionTest.test_a_refused_build_leaves_the_page_the_store_already_had",
+            "test_build_explorer.PageByteAttributionTest.test_the_hard_limit_comes_from_the_environment",
+        ),
+    ),
+    Mutation(
         "the breakdown computed and never printed",
         "build_explorer.py",
         '    print(breakdown_report(breakdown, size_bytes, config.EXPLORER_PATH), end="")',
