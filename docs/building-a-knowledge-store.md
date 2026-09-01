@@ -670,9 +670,9 @@ because anything inferred instead — a pinned extra, a lock file, an installed
 version — can disagree with what actually ran.
 
 **Re-clustering is the cost centre.** Adding repositories moves community ids
-and strands committed summaries, which must then be remapped by membership
-overlap (carry a summary only where the new cluster holds a convincing
-majority — 60% works — and drop it otherwise rather than misattach prose).
+and strands committed summaries, which must then be remapped: `remap` carries a
+summary only onto a community holding exactly the node set it was written about,
+and withdraws the rest for revision rather than misattach prose.
 
 **That bar measures recall, and a precision floor now measures fit.** It asks how much of the *old* cluster
 landed together, and nothing about how much of the *new* cluster those members
@@ -691,9 +691,14 @@ already described 80% or more of their cluster and re-authoring costs real
 money; the run prints the whole distribution so an operator can tighten it
 against their own numbers rather than a guess.
 
-**The damage scales with what you add, not with the act of re-clustering:**
+**The damage scales with what you add, not with the act of re-clustering.** The
+retention figures below were measured under the older *overlap* criterion, which
+carried a summary whenever the new cluster held 60% of the old one's members.
+They are kept because the *ratios between them* are the finding, and they are not
+the retention to expect from a current build — the criterion is now set equality,
+which withdraws far more and did so on the rebuild that motivated the change:
 
-| Change | Summary retention |
+| Change | Summary retention (overlap criterion) |
 |---|---|
 | +70 repositories | 54% |
 | +6 repositories | 93% |

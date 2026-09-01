@@ -85,6 +85,31 @@ class RemapTest(SettingsIsolated):
         """n summaries, so the plausibility guard does not fire in other tests."""
         return {str(i): f"{prefix} summary {i}" for i in range(1000, 1000 + n)}
 
+    def read_withdrawn(self):
+        return json.loads(config.SUMMARIES_WITHDRAWN_PATH.read_text(encoding="utf-8"))
+
+    def read_report(self):
+        return json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))
+
+    def write_swallowed(self):
+        """An old cluster of five absorbed whole into a new one of twenty.
+
+        Recall 1.00 — every old member is still together — and precision 0.25,
+        which clears the shipped precision floor. The one shape the old criterion
+        could not see.
+        """
+        old = {"7": [f"n{i}" for i in range(5)]}
+        new = {"42": [f"n{i}" for i in range(5)] + [f"u{i}" for i in range(15)]}
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"7": "the five-node cluster"} | self.many(30))
+
+    def write_identical(self):
+        """An old cluster carried onto a new id with its membership unchanged."""
+        self.write_snapshot({"7": ["a", "b", "c"]} | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph({"42": ["a", "b", "c"]} | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"7": "the same three nodes"} | self.many(30))
+
     # --- snapshot ------------------------------------------------------------
 
     def test_snapshot_records_community_membership_from_the_graph(self):
@@ -104,7 +129,122 @@ class RemapTest(SettingsIsolated):
         self.assertEqual(summaries.snapshot(), 1)
         self.assertFalse(config.SUMMARIES_SNAPSHOT_PATH.exists())
 
-    # --- the overlap bar -----------------------------------------------------
+    # --- the carry criterion -------------------------------------------------
+
+    def test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose(self):
+        """#296. Recall alone cannot see this: a new community that absorbs an
+        old one whole scores 1.00 however much unrelated material it also holds,
+        so prose written about a small coherent community was silently
+        re-attached to a large incoherent one — and every summary still had a
+        community and every community still had prose, so the store looked
+        healthy."""
+        self.write_swallowed()
+        self.assertEqual(summaries.remap(), 0)
+        result = self.read_summaries()
+        self.assertNotIn(
+            "42", result, "recall is 1.00 here, so only set equality can withhold the prose"
+        )
+        self.assertNotIn("7", result)
+
+    def test_an_identical_member_set_still_carries(self):
+        """The sensitivity half, and the one that matters: a criterion that
+        refuses everything passes the test above."""
+        self.write_identical()
+        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(self.read_summaries().get("42"), "the same three nodes")
+
+    def test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped(self):
+        """Withdrawing is only legible if the writing survives it, so the prose
+        lands in a file shaped like the one it left and can be revised and
+        merged back."""
+        self.write_swallowed()
+        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(self.read_withdrawn().get("7"), "the five-node cluster")
+        displaced = self.read_report()["displaced"]["7"]
+        self.assertEqual(displaced["reason"], "not-identical")
+        self.assertEqual(displaced["best_target"], "42", "the near miss is the backfill's target")
+        self.assertEqual(displaced["share"], 1.0, "recall stays perfect - which is the whole bug")
+
+    def test_a_carried_summary_is_not_also_withdrawn(self):
+        self.write_identical()
+        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(self.read_withdrawn(), {}, "nothing was withheld, so nothing is withdrawn")
+        self.assertIs(self.read_report()["carried"]["42"]["exact"], True)
+
+    def test_carried_and_withdrawn_reconcile_against_the_summaries_read(self):
+        """Every summary is carried or withdrawn, never neither: a criterion
+        this strict is only trustworthy if nothing falls out of the count."""
+        old = {"1": ["a", "b"], "2": ["c", "d"], "3": ["gone1"]}
+        new = {"10": ["a", "b"], "11": ["c", "d", "e", "f"]}
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"1": "one", "2": "two", "3": "three"} | self.many(30))
+        self.assertEqual(summaries.remap(), 0)
+        carried = self.read_report()["carried"]
+        withdrawn = self.read_withdrawn()
+        self.assertEqual(sorted(withdrawn, key=summaries._by_id), ["2", "3"])
+        self.assertEqual(len(carried) + len(withdrawn), 33, "33 summaries went in")
+        self.assertEqual(len(withdrawn), len(self.read_report()["displaced"]))
+
+    def test_the_withdrawal_count_is_reported_beside_the_retention_figure(self):
+        """The retention figure reads as reassurance, and on a real rebuild it
+        was the opposite. It now carries its own contradiction."""
+        old = {"1": ["a", "b"], "2": ["c", "d"], "3": ["gone1"]}
+        new = {"10": ["a", "b"], "11": ["c", "d", "e", "f"]}
+        self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
+        self.write_summaries({"1": "one", "2": "two", "3": "three"} | self.many(30))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            summaries.remap()
+        printed = buffer.getvalue()
+        self.assertIn("31 of 33", printed)
+        self.assertIn("withdrew 2", printed, "the retention figure alone reads as reassurance")
+        self.assertIn("1 not identical", printed)
+        self.assertIn("1 whose members are gone", printed)
+
+    def test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file(self):
+        """A withdrawn file left behind by the previous remap reads as this
+        run's finding — the stale-artefact shape, on an artefact that names
+        prose somebody is meant to go and re-author."""
+        config.SUMMARIES_WITHDRAWN_PATH.write_text(
+            json.dumps({"99": "withdrawn by an earlier remap"}), encoding="utf-8"
+        )
+        self.write_identical()
+        self.assertEqual(summaries.remap(), 0)
+        self.assertNotIn("99", self.read_withdrawn())
+
+    # --- the tolerance, kept but no longer the default -----------------------
+
+    def test_the_overlap_criterion_carries_the_swallowing_case_when_asked_for(self):
+        """The previous behaviour, reachable and now an explicit choice."""
+        self.write_swallowed()
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
+        self.assertEqual(self.read_summaries().get("42"), "the five-node cluster")
+
+    def test_prose_carried_below_set_equality_is_marked_in_the_report(self):
+        """Suggestion 2 of #296: a tolerance is only defensible if a downstream
+        check can tell which summaries it stretched to place."""
+        self.write_swallowed()
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
+        self.assertIs(self.read_report()["carried"]["42"]["exact"], False)
+
+    def test_prose_carried_onto_its_own_set_is_marked_exact_under_the_tolerance(self):
+        """Without this the mark could be a constant `false` and say nothing."""
+        self.write_identical()
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
+        self.assertIs(self.read_report()["carried"]["42"]["exact"], True)
+
+    def test_the_count_carried_below_equality_is_reported(self):
+        """The mark is machine-readable; the count is what an operator sees
+        without opening the report."""
+        self.write_swallowed()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            summaries.remap(carry="overlap")
+        self.assertIn("1 of 31", buffer.getvalue())
+
+    # --- the overlap bar, under --carry overlap ------------------------------
 
     def test_summary_is_carried_when_the_dominant_cluster_holds_enough_members(self):
         old = {"7": [f"n{i}" for i in range(10)]}
@@ -113,7 +253,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "the seven-of-ten cluster"} | self.many(30))
-        self.assertEqual(summaries.remap(bar=0.6), 0)
+        self.assertEqual(summaries.remap(bar=0.6, carry="overlap"), 0)
         result = self.read_summaries()
         self.assertEqual(result.get("42"), "the seven-of-ten cluster")
         self.assertNotIn("7", result)
@@ -132,7 +272,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"154": "describes 37 members"} | self.many(30))
-        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
         self.assertNotIn(
             "9",
             self.read_summaries(),
@@ -146,7 +286,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "the seven-of-ten cluster"} | self.many(30))
-        self.assertEqual(summaries.remap(bar=0.8), 0)
+        self.assertEqual(summaries.remap(bar=0.8, carry="overlap"), 0)
         self.assertNotIn("42", self.read_summaries())
 
     def test_a_split_cluster_with_no_majority_is_dropped_not_guessed(self):
@@ -160,7 +300,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "no majority anywhere"} | self.many(30))
-        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
         result = self.read_summaries()
         for cid in ("50", "51", "52"):
             self.assertNotIn(cid, result)
@@ -175,7 +315,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"1": "from one", "2": "from two"} | self.many(30))
-        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
         result = self.read_summaries()
         self.assertEqual(result.get("99"), "from one", "lowest old id wins, deterministically")
 
@@ -190,7 +330,7 @@ class RemapTest(SettingsIsolated):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"1": "from one", "2": "from two"} | self.many(30))
-        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
         self.assertEqual(
             self.read_summaries().get("99"),
             "from two",
@@ -218,11 +358,11 @@ class RemapTest(SettingsIsolated):
         self.write_summaries(
             {"1": "one", "2": "two", "3": "three", "4": "four", "5": "five"} | self.many(30)
         )
-        self.assertEqual(summaries.remap(), 0)
+        self.assertEqual(summaries.remap(carry="overlap"), 0)
         report = json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
             report["carried"]["77"],
-            {"from": "1", "share": 1.0, "precision": 1.0},
+            {"from": "1", "share": 1.0, "precision": 1.0, "exact": True},
             "the carried record now says how much of its new cluster the prose describes",
         )
         self.assertEqual(report["carried"]["88"]["from"], "3")
@@ -347,8 +487,24 @@ class RemapCliTest(RemapTest):
         self.write_snapshot(old | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_graph(new | {str(i): [f"x{i}"] for i in range(1000, 1030)})
         self.write_summaries({"7": "seven of ten"} | self.many(30))
-        self.assertEqual(summaries.main(["remap", "--bar", "0.8"]), 0)
+        self.assertEqual(summaries.main(["remap", "--carry", "overlap", "--bar", "0.8"]), 0)
         self.assertNotIn("42", self.read_summaries(), "--bar 0.8 must reject 0.7 overlap")
+
+    def test_the_carry_criterion_is_settable_from_the_command_line(self):
+        """The tolerance is only an opt-in if the flag reaches `remap`."""
+        self.write_swallowed()
+        self.assertEqual(summaries.main(["remap", "--carry", "overlap"]), 0)
+        self.assertEqual(
+            self.read_summaries().get("42"),
+            "the five-node cluster",
+            "--carry overlap must reach the stage; the default withholds this",
+        )
+
+    def test_an_unknown_carry_criterion_is_rejected_rather_than_ignored(self):
+        """argparse exits 2 on an unknown choice. A silently ignored value would
+        run the default while the operator believed they had changed it."""
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            summaries.main(["remap", "--carry", "jaccard"])
 
     def test_an_unknown_sub_command_fails_rather_than_silently_doing_nothing(self):
         self.assertEqual(summaries.main(["remapp"]), 1)
@@ -426,25 +582,31 @@ class RemapRefusalTest(unittest.TestCase):
 
 
 class ClaimTargetsTest(unittest.TestCase):
-    """Pass 1: each summary's best new cluster, and the three ways one is lost."""
+    """Pass 1 under `--carry overlap`: the best new cluster, and the ways one is lost.
+
+    The tolerance rather than the shipped criterion, deliberately: `bar` and
+    `precision` only decide anything under `overlap`, and the default is held by
+    the tests that drive `remap()` itself and by `ExactClaimTargetsTest` below.
+    """
 
     def _claim(self, summaries_in, old_members, new_community, bar=0.6, precision=0.0):
-        """Returns (claims, displaced, below_bar, members_gone, below_precision)."""
-        return summaries._claim_targets(summaries_in, old_members, new_community, bar, precision)
+        """Returns (claims, displaced)."""
+        return summaries._claim_targets(
+            summaries_in, old_members, new_community, bar, precision, "overlap"
+        )
 
     def test_a_dominant_target_is_claimed_with_its_share(self):
-        claims, displaced, below, gone, _ = self._claim(
+        claims, displaced = self._claim(
             {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9", "c": "8"}
         )
-        self.assertEqual(claims, {"1": ("9", 2 / 3, 1.0)})
-        self.assertEqual((displaced, below, gone), ({}, [], []))
+        self.assertEqual(claims, {"1": ("9", 2 / 3, 1.0, False)})
+        self.assertEqual(displaced, {})
 
     def test_a_share_below_the_bar_is_displaced_with_the_target_it_missed(self):
-        claims, displaced, below, gone, _ = self._claim(
+        claims, displaced = self._claim(
             {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "8", "c": "7"}
         )
         self.assertEqual(claims, {})
-        self.assertEqual(below, ["1"])
         self.assertEqual(displaced["1"]["reason"], "below-bar")
         self.assertEqual(
             displaced["1"]["best_target"],
@@ -453,16 +615,14 @@ class ClaimTargetsTest(unittest.TestCase):
         )
 
     def test_a_summary_with_no_snapshot_entry_is_members_gone(self):
-        _, displaced, _, gone, _ = self._claim({"1": "prose"}, {}, {"a": "9"})
-        self.assertEqual(gone, ["1"])
+        _, displaced = self._claim({"1": "prose"}, {}, {"a": "9"})
         self.assertEqual(displaced["1"]["reason"], "members-gone")
         self.assertIsNone(displaced["1"]["best_target"])
 
     def test_members_that_no_longer_carry_a_community_are_members_gone(self):
         """A distinct branch from an absent snapshot entry: the members are
         known, but none of them landed anywhere in the new graph."""
-        _, displaced, _, gone, _ = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
-        self.assertEqual(gone, ["1"])
+        _, displaced = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
         self.assertEqual(displaced["1"]["reason"], "members-gone")
 
     def test_the_share_is_measured_against_the_old_cluster_only(self):
@@ -472,7 +632,7 @@ class ClaimTargetsTest(unittest.TestCase):
         here, one member of a cluster of ten. Pinning it so a fix has to change
         the test deliberately rather than by accident.
         """
-        claims, _, _, _, _ = self._claim(
+        claims, _ = self._claim(
             {"1": "prose"},
             {"1": ["a"]},
             {"a": "9", **{f"other{i}": "9" for i in range(9)}},
@@ -495,11 +655,8 @@ class ClaimTargetsTest(unittest.TestCase):
             **{f"m{i}": "9" for i in range(37)},
             **{f"other{i}": "9" for i in range(421)},
         }
-        claims, displaced, _, _, below_precision = self._claim(
-            {"154": "prose"}, old, new, bar=0.6, precision=0.2
-        )
+        claims, displaced = self._claim({"154": "prose"}, old, new, bar=0.6, precision=0.2)
         self.assertEqual(claims, {})
-        self.assertEqual(below_precision, ["154"])
         self.assertEqual(displaced["154"]["reason"], "below-precision")
         self.assertAlmostEqual(displaced["154"]["precision"], 0.081, places=3)
         self.assertEqual(
@@ -515,7 +672,7 @@ class ClaimTargetsTest(unittest.TestCase):
             **{f"m{i}": "9" for i in range(37)},
             **{f"other{i}": "9" for i in range(421)},
         }
-        claims, _, _, _, _ = self._claim({"154": "prose"}, old, new, bar=0.6, precision=0.0)
+        claims, _ = self._claim({"154": "prose"}, old, new, bar=0.6, precision=0.0)
         self.assertIn("154", claims)
 
     def test_prose_describing_most_of_its_cluster_survives_the_floor(self):
@@ -524,19 +681,78 @@ class ClaimTargetsTest(unittest.TestCase):
         costs real money, so judgement calls are carried rather than dropped."""
         old = {"1": ["a", "b", "c"]}
         new = {"a": "9", "b": "9", "c": "9", "d": "9"}
-        claims, _, _, _, below_precision = self._claim(
-            {"1": "prose"}, old, new, bar=0.6, precision=0.2
-        )
+        claims, displaced = self._claim({"1": "prose"}, old, new, bar=0.6, precision=0.2)
         self.assertIn("1", claims)
-        self.assertEqual(below_precision, [])
+        self.assertEqual(displaced, {})
 
     def test_ordering_is_deterministic_for_a_stable_tiebreak(self):
-        claims, _, _, _, _ = self._claim(
+        claims, _ = self._claim(
             {"10": "a", "9": "b", "2": "c"},
             {"10": ["x"], "9": ["y"], "2": ["z"]},
             {"x": "1", "y": "2", "z": "3"},
         )
         self.assertEqual(list(claims), ["2", "9", "10"])
+
+
+class ExactClaimTargetsTest(unittest.TestCase):
+    """Pass 1 under the shipped criterion: a claim about a set, tested as one."""
+
+    def _claim(self, summaries_in, old_members, new_community, bar=0.6, precision=0.2):
+        """Returns (claims, displaced). The bar and floor are passed deliberately:
+        neither may decide anything under `exact`."""
+        return summaries._claim_targets(
+            summaries_in, old_members, new_community, bar, precision, "exact"
+        )
+
+    def test_a_community_holding_the_same_set_is_claimed_and_marked_identical(self):
+        claims, displaced = self._claim(
+            {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9", "c": "9"}
+        )
+        self.assertEqual(claims, {"1": ("9", 1.0, 1.0, True)})
+        self.assertEqual(displaced, {})
+
+    def test_a_community_holding_the_old_set_and_one_more_node_is_withdrawn(self):
+        """One node is enough. A community that gained a node is a different set,
+        therefore a different claim, therefore not the thing the prose describes -
+        and a tolerance only moves the question of how much it may absorb
+        somewhere the reader cannot see it."""
+        claims, displaced = self._claim(
+            {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9", "c": "9", "d": "9"}
+        )
+        self.assertEqual(claims, {})
+        self.assertEqual(displaced["1"]["reason"], "not-identical")
+        self.assertEqual(displaced["1"]["share"], 1.0, "recall cannot see this")
+        self.assertEqual(displaced["1"]["precision"], 0.75, "and a 0.2 floor does not either")
+
+    def test_a_member_that_left_the_graph_is_named_as_a_changed_set_not_a_near_miss(self):
+        """The survivors are all together, so an overlap criterion reads this as
+        a good carry at 0.67. The set the prose described no longer exists."""
+        claims, displaced = self._claim(
+            {"1": "prose"}, {"1": ["a", "b", "c"]}, {"a": "9", "b": "9"}
+        )
+        self.assertEqual(claims, {})
+        self.assertEqual(displaced["1"]["reason"], "not-identical")
+
+    def test_repeated_node_ids_do_not_read_as_an_identical_set(self):
+        """Set equality, not recall 1.0 and precision 1.0.
+
+        A merged graph can repeat a node id, so the snapshot's member list can
+        too - and here both ratios reach 1.0 over a community holding a node the
+        prose never described. The ratios are a neighbour of the quantity being
+        claimed, and this is the case that tells them apart.
+        """
+        claims, displaced = self._claim({"1": "prose"}, {"1": ["a", "a"]}, {"a": "9", "b": "9"})
+        self.assertEqual(claims, {}, "recall 1.0 and precision 1.0, and the sets still differ")
+        self.assertEqual(displaced["1"]["reason"], "not-identical")
+
+    def test_members_gone_is_still_reported_as_its_own_cause(self):
+        _, displaced = self._claim({"1": "prose"}, {"1": ["a", "b"]}, {"z": "9"})
+        self.assertEqual(displaced["1"]["reason"], "members-gone")
+
+    def test_the_recall_bar_cannot_withhold_an_identical_set(self):
+        """`exact` is the criterion, not an extra one stacked on the tolerance."""
+        claims, _ = self._claim({"1": "prose"}, {"1": ["a"]}, {"a": "9"}, bar=1.0, precision=1.0)
+        self.assertIn("1", claims)
 
 
 class PrecisionDistributionTest(unittest.TestCase):

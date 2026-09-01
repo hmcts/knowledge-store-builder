@@ -859,7 +859,7 @@ path is the failure mode to check for.
 knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
 knowledgestore summaries snapshot   # BEFORE re-clustering
 # ... add repositories, merge, re-cluster ...
-knowledgestore summaries remap      # AFTER: carries summaries onto the new ids
+knowledgestore summaries remap      # AFTER: re-keys prose whose community is unchanged
 knowledgestore summaries snapshot   # re-key the baseline to the new clustering
 ```
 
@@ -879,23 +879,33 @@ and the response is to fix the graph or re-take the snapshot — never to re-aut
 prose. An id-space mismatch (`<repo>::<id>` on one side, bare ids on the other) is
 reported as a note for the same reason.
 
-**The bar measures recall, not fit**: it asks how much of the old cluster
-landed together, never how much of the new cluster those members make up. A
-summary can clear it and still describe a corner of where it lands. Retention
-is a coverage number, not a correctness one — carried prose is owed a re-read,
-and `verify` can split its flag rate by carried-versus-authored.
+**A summary is a claim about a specific set of nodes.** `remap` carries one
+only onto a community holding exactly that set: a community that gained a node
+is a different set, so the prose is a claim about something the graph no longer
+contains. Everything else is **withdrawn**, not dropped — the prose goes to
+`knowledge/summaries/communities-withdrawn.json`, in the same shape as
+`communities.json`, so it can be revised and merged back.
 
-`remap` carries a summary only where the new cluster holding most of its old
-members holds at least 60% of them (`--bar` to change), drops it otherwise
-rather than risk prose on the wrong cluster, and prints retention so the cost of
-the re-cluster is a measured number. It refuses to run on a wrong snapshot (no
-shared node ids) or an implausibly small summary set (`--floor`), because both
-failures silently produce an empty file over a good one.
+**Expect retention to be low, and read the withdrawal count beside it.** The
+figure `remap` prints used to be much higher and largely false: the old
+criterion measured recall only, so a new community that swallowed an old one
+whole scored 1.00 however much unrelated material came with it, and the prose
+was re-attached to something it did not describe. Nothing in the output told the
+two apart — every summary had a community and every community had prose. A low
+honest retention is the intended outcome, not a regression.
 
-Whatever `remap` drops is then a backfill — but not from scratch. `remap`
+`--carry overlap` restores the old tolerance (`--bar` recall, `--precision`
+fit). Use it only with a reason, and read what it marks: anything it carries
+that is not the set the prose was written about is `"exact": false` in the remap
+report. `remap` also refuses to run on a wrong snapshot (no shared node ids) or
+an implausibly small summary set (`--floor`), because both failures silently
+produce an empty file over a good one.
+
+Whatever `remap` withdraws is then a backfill — but not from scratch. `remap`
 writes `knowledge/summaries/remap-report.json`: every displaced summary with
-its prose, the reason (`below-bar`, `collision`, `members-gone`) and its best
-new target. When a backfilled cluster's id appears as a `best_target` there,
+its prose, the reason (`not-identical`, `collision`, `members-gone`, and under
+`--carry overlap` also `below-bar` and `below-precision`) and its best new
+target. When a backfilled cluster's id appears as a `best_target` there,
 give the author the displaced paragraph alongside the new digest with the
 instruction: **revise to match this digest exactly; drop anything it no longer
 shows**. Revised prose gets no trust discount — it goes through `merge` and
@@ -907,7 +917,7 @@ why the spool feeds revision and never direct reinstatement.
 `verify` uses the report's carried map to print grounding split by provenance
 (carried vs authored). Read the two numbers together: retention improving
 while carried grounding degrades means the remap is preserving coverage at
-the cost of truth, and the bar or the prose needs attention.
+the cost of truth, and the criterion or the prose needs attention.
 
 Snapshot immediately **before each** re-cluster, not once per session. A
 snapshot of a clustering the summaries are no longer keyed to is not refused; it

@@ -151,6 +151,12 @@ SUMMARIES_SNAPSHOT_PATH = ROOT / "knowledge" / "summaries" / "membership-snapsho
 # What the last remap carried and what it displaced, with the displaced prose
 # itself - the backfill's raw material for revise-rather-than-rewrite.
 REMAP_REPORT_PATH = ROOT / "knowledge" / "summaries" / "remap-report.json"
+# Prose the last remap would not re-key, in the same shape as `communities.json`
+# so it can be read, revised and merged straight back. The remap report holds the
+# same prose with its reason and its near-miss target; this file is the half a
+# backfill consumes, and it is rewritten on every remap so it never describes an
+# earlier run (#296).
+SUMMARIES_WITHDRAWN_PATH = ROOT / "knowledge" / "summaries" / "communities-withdrawn.json"
 SYNONYMS_PATH = ROOT / "knowledge" / "semantic" / "token-neighbours.json.gz"
 # The content set: which corpus files the pipeline decided were content, as a
 # path list a search can consume directly, plus the measurement that says why
@@ -534,6 +540,7 @@ def _recompute_paths() -> None:
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SUMMARIES_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-snapshot.json.gz",
         REMAP_REPORT_PATH=root / "knowledge" / "summaries" / "remap-report.json",
+        SUMMARIES_WITHDRAWN_PATH=root / "knowledge" / "summaries" / "communities-withdrawn.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",
         CONTENT_FILES_PATH=root / "knowledge" / "corpus" / "content-files.txt",
         CONTENT_SET_PATH=root / "knowledge" / "corpus" / "content-set.json",
