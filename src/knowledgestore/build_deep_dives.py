@@ -209,7 +209,7 @@ def extract(repo: str) -> int:
         )
         return 1
     labels = io.read_json_dict(config.LABELS_PATH)
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     intent = io.read_gzip_json_dict(config.INTENT_INDEX_PATH)
     descriptions = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
     files = intent.get(repo, {})

@@ -68,7 +68,7 @@ def run_git(arguments: list[str]) -> str:
 
 
 def layer_coverage() -> dict:
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     digests = io.read_json(config.SUMMARIES_INPUT_PATH, default=[])
     briefs = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
     try:

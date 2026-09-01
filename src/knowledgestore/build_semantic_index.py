@@ -58,8 +58,7 @@ def collect_vocabulary() -> list[str]:
     texts = [n.get("label") or "" for n in graph["nodes"]]
     if config.LABELS_PATH.exists():
         texts += list(json.loads(config.LABELS_PATH.read_text(encoding="utf-8")).values())
-    if config.SUMMARIES_PATH.exists():
-        texts += list(json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8")).values())
+    texts += list(io.read_summaries(config.SUMMARIES_PATH).values())
 
     # Document frequency, not raw occurrences: each token counts once per text,
     # so a word repeated inside a single label cannot qualify on its own. The

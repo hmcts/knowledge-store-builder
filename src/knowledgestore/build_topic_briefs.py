@@ -170,7 +170,7 @@ def topic_dossier(topic: Topic, graph: dict, summaries: dict, descriptions: dict
 def extract() -> int:
     topics = read_topics(config.TOPICS_CONFIG_PATH)
     graph = io.load_graph(config.GRAPH_PATH)
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     descriptions = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
 
     dossiers = [topic_dossier(t, graph, summaries, descriptions) for t in topics]

@@ -763,7 +763,11 @@ knowledgestore summaries extract    # -> knowledge/summaries/communities-input.j
 ```
 
 Each digest carries an id, label, size, repositories, top nodes with source
-files, business features and tickets. Then:
+files, business features, tickets, and a `coverage` block saying how much of
+each capped field it is showing (`shown`, `unshown`, `total`). A digest showing
+12 of 340 top nodes is a sample; one showing 12 of 12 is the whole evidence
+base, and `summaries verify` treats a term missing from the second as a finding
+and a term missing from the first as informational. Then:
 
 1. **Chunk the work.** Sort digests by size (largest first) and split into
    batches of about 50. Prioritise clusters that involve newly added
@@ -790,6 +794,12 @@ files, business features and tickets. Then:
    what it rejected. It is the guardrail — read its output, and **reconcile the
    count it merged against the count the agents wrote**. "N merged" alone does
    not tell you N was everything; the difference is where the defects hide.
+
+   The write is gated on the prose: when nothing an agent wrote changed a
+   summary, `merge` says the file **was not rewritten** and leaves it alone.
+   That is the expected output of a re-run, not a failure — coverage counts move
+   on every re-extraction, and rewriting the whole artefact for them would make
+   every refresh's diff unreadable.
 
 Rules to give each subagent, verbatim in spirit:
 
