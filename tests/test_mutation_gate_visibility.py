@@ -255,6 +255,50 @@ class MutationGateVisibilityTest(unittest.TestCase):
         self.assertIn(str(root / "source" / "target.py"), error, "the refusal names no path")
         self.assertIn(str(os.getpid()), error, "the refusal names no process to signal")
         self.assertIn("kill -TERM", error, "the refusal does not say how to stop the run safely")
+        self.assertIn(
+            "-d cwd",
+            error,
+            "the refusal forbids a `pgrep` without saying how to find the checkout instead",
+        )
+
+    def test_the_live_remedy_says_how_to_find_which_checkout_a_run_holds(self):
+        """Catches the remedy keeping the prohibition and losing the alternative.
+
+        A gate's own arguments are `tests/mutation_gate.py --verify-mapping`: the
+        checkout it holds is its working directory and appears nowhere in them. So
+        every way of asking `ps` about the script name answers a different question -
+        a pattern naming the checkout matches nothing however many gates run, and one
+        naming the script matches every clone on the machine. Both have happened here
+        within a day, in opposite directions, and each cost a run: one killed a
+        sibling worktree's, one nearly published five fabricated findings from two
+        gates mutating one tree.
+
+        Telling the reader not to `pgrep` leaves them without the thing they wanted,
+        which is which checkout this process is holding. This pins that the remedy
+        carries the way to get it, not just the way not to.
+        """
+        root = self._tree()
+        (root / "sidecar").write_bytes(
+            _record(
+                "target.py",
+                ORIGINAL,
+                root=str(gate.ROOT),
+                pid=os.getpid(),
+                host=socket.gethostname(),
+                started=gate.run_ps(os.getpid()),
+            )
+        )
+
+        code, _, error = self._status()
+
+        self.assertEqual(code, 1)
+        self.assertIn("lsof", error, "the remedy names no way to read a process's directory")
+        self.assertIn("-d cwd", error, "the remedy reads something other than the directory")
+        self.assertIn(
+            "pgrep -f mutation_gate.py",
+            error,
+            "the remedy enumerates gates by a pattern that does not find them",
+        )
 
     def test_the_query_tells_an_abandoned_record_from_a_live_run(self):
         """Catches the distinction collapsing. Both readings are expensive and they

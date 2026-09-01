@@ -3581,7 +3581,10 @@ def _remedy(record: Record, state: str) -> str:
             f"A run is live: pid {record.pid} in {record.root}. Wait for it, or stop it "
             f"with `kill -TERM {record.pid}`, which restores the file on the way out. Not "
             "`kill -9`, which cannot be handled and leaves the mutation applied, and not a "
-            "`pgrep` on this script's name, which matches every checkout on this machine."
+            "`pgrep` on this script's name, which matches every checkout on this machine. "
+            "To find which checkout any gate holds, read each one's working directory "
+            "rather than its arguments: `for p in $(pgrep -f mutation_gate.py); do lsof "
+            "-a -p $p -d cwd -Fn | grep '^n'; done`."
         )
     if state == ABANDONED:
         return (
