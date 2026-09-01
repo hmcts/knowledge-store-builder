@@ -4,11 +4,15 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The mapping check below runs only on these two, never on a pull request: it
-  # applies every entry against the whole suite, which is the cost the mapping
-  # exists to avoid paying per run.
+  # The `mapping` job below never runs on a pull request: it applies every entry
+  # against the whole suite, which is the cost the mapping exists to avoid paying
+  # per run. It runs nightly, on a merge that lands the known way an observer set
+  # goes stale, and on demand - and `mapping-decision` decides which of those
+  # actually needs the four legs. Weekly was the previous setting and too coarse:
+  # by the time a disagreement surfaced, the change that caused it was a week of
+  # commits back and nobody could say which one it was (#285).
   schedule:
-    - cron: "17 3 * * 1"
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -38,8 +42,13 @@ jobs:
       # paths-ignore only for changes that carry no Python, so nothing loses
       # coverage.
 
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
       - name: Install the package
-        run: pip install -e .
+        run: pip install -e . # NOSONAR
 
       # The default install declares no runtime dependencies, and this run proves
       # it: every test that needs an optional extra skips rather than fails, so a
@@ -87,22 +96,17 @@ jobs:
       #
       # `--verify-mapping` is the check for that. It applies every entry against
       # the whole suite and refuses a set that disagrees with what actually
-      # failed, in both directions. Too slow for a pull request, so it runs on the
-      # schedule and on `workflow_dispatch` instead - in this job rather than a
-      # workflow of its own, so there is one environment to keep correct rather
-      # than two that can drift.
+      # failed, in both directions. That costs what this gate cost before the
+      # mapping existed - 1683 seconds measured here - so it runs on the schedule
+      # and on `workflow_dispatch`, in the `mapping` job below, over four runners
+      # at a time (#285).
       #
-      # Two steps with conditions rather than one step branching in shell:
-      # interpolating an expression into a `run:` block is the script-injection
-      # shape the analysers read, and it is worth not writing even where the
-      # value is an enum the runner controls.
+      # A condition rather than a shell branch: interpolating an expression into
+      # a `run:` block is the script-injection shape the analysers read, and it
+      # is worth not writing even where the value is an enum the runner controls.
       - name: Mutation gate
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: python3 tests/mutation_gate.py
-
-      - name: Mutation gate, verifying every entry's observers against the whole suite
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: python3 tests/mutation_gate.py --verify-mapping
 
       # One script, run here and by contributors, so the pinned versions and the
       # checked paths cannot differ between the two.
@@ -154,3 +158,170 @@ jobs:
           git diff --exit-code \
             && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
             || { git status --porcelain=v1 --untracked-files=all; exit 1; }
+
+  # The same mapping check, in slices, because it applies every entry against the
+  # whole suite: 1683 seconds in one job, and long enough that nobody dispatches
+  # it on demand - which is exactly when a mapping claim most needs checking,
+  # after a change that moved tests (#285).
+  #
+  # It shards cleanly because every entry runs the same thing, so entries are
+  # interchangeable units of work with no ordering and no cross-entry state. One
+  # runner per shard, so there is no shared filesystem and therefore no shared
+  # subject: the gate mutates a real file in the tree, and two workers doing that
+  # in one checkout corrupt each other's. That is also why the fast mode above is
+  # not parallelised - half its 90 seconds is process-and-import floor, and its
+  # entries are concentrated on a few modules.
+  #
+  # The steps up to the extras are the `tests` job's, step for step, and
+  # `test_mutation_gate_shards` fails if they stop being: one runner per shard
+  # costs a second job, and this is what keeps it from also costing a second
+  # environment. A prefix rather than a hand-picked subset, because a prefix is
+  # something a check can compare.
+  # Whether the four legs below are worth running, and why. Its own job rather
+  # than a step of theirs, because four legs would each decide separately and
+  # could each decide differently, and because a matrix cannot be conditional on
+  # something computed inside itself.
+  #
+  # The reasoning is `tests/mapping_trigger.py` and not this file: a decision
+  # written in shell here is a decision nothing can test, and this one is
+  # asymmetric in a way that hides its own failure - a skip that should have run
+  # reports as a pass. Every uncertainty in it runs the check, and the verdict and
+  # its reason reach the step summary every time, including when it skips.
+  mapping-decision:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # It reads this workflow's own previous runs to find the commit the last
+      # real verification ran against. Without it `gh api` fails, which is a
+      # case that runs the check rather than skipping it.
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison reaches back to the last verified commit, which is
+          # older than any default depth on a nightly.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Through the environment rather than interpolated into the script, which
+      # is the script-injection shape the analysers read. `github.event.before`
+      # is the only one of these Actions does not export by itself.
+      - name: Decide whether the mapping check needs to run
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSHED_FROM: ${{ github.event.before }}
+        run: python3 tests/mapping_trigger.py
+
+  mapping:
+    needs: mapping-decision
+    if: needs.mapping-decision.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      # Every leg runs, so two disagreeing entries in different shards are two
+      # findings rather than one and a cancellation.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from tags at install
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
+      - name: Install the package
+        run: pip install -e . # NOSONAR
+
+      - name: Unit tests, default install
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Install the optional extras
+        run: |
+          pip install --only-binary :all: 'PyYAML==6.0.3'
+          # graphify too, and not only for the deployments stage. Without it 20
+          # tests skip silently - every check that reads graphify's own dispatch
+          # table or its ignore helpers - so "with extras" was green over a fifth
+          # of its own suite never running. Found by the mutation gate below,
+          # which reported a symlink-exclusion mutation as surviving in CI while
+          # the same mutation was caught locally.
+          pip install --only-binary :all: 'graphifyy==0.9.45'
+
+      # The divisor is the number of legs rather than a literal four, so adding
+      # or removing one cannot leave a quarter of the table unchecked with every
+      # leg green. The gate reconciles the slices against the table before it
+      # applies anything, and refuses a set that is not a partition of it - but
+      # it can only reconcile the slices of the count it is given, so nothing in
+      # it could notice a matrix that ran three of four.
+      #
+      # Through the environment rather than interpolated into the script: that is
+      # the script-injection shape the analysers read, and it is what makes the
+      # verdict below runnable outside Actions.
+      - name: Mutation gate, verifying this shard's entries against the whole suite
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python3 tests/mutation_gate.py --verify-mapping --shard "$SHARD/$SHARDS"
+
+  # One verdict over the legs. GitHub reports each of them as its own check, so a
+  # reader gets four results and no answer, and a required context cannot be a
+  # matrix leg.
+  #
+  # `always()` because a job that `needs` a failed one is skipped, and a skipped
+  # check is not a failed one - a required context reads it as satisfied. Without
+  # it this job would report nothing in exactly the case it exists for. The event
+  # condition is repeated because `always()` would otherwise run it on a pull
+  # request, where `mapping` was skipped and its result is neither pass nor fail.
+  mapping-summary:
+    needs: [mapping-decision, mapping]
+    if: >-
+      always() && (github.event_name == 'push' || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      # Two inputs, because a skipped `mapping` means two different things and
+      # only one of them is a pass. Skipped because the decision said so is a
+      # verdict; skipped for any other reason - the decision failed, or said run
+      # and the legs never started - is the wiring failing silently, which is the
+      # shape this whole policy invites.
+      - name: Every shard's entries agree with what the suite observed
+        env:
+          DECISION: ${{ needs.mapping-decision.outputs.run }}
+          RESULT: ${{ needs.mapping.result }}
+        run: |
+          if [ "$DECISION" = true ] && [ "$RESULT" = success ]; then
+            echo "Every shard's entries agree with what the suite observed."
+            exit 0
+          fi
+          if [ "$DECISION" = false ] && [ "$RESULT" = skipped ]; then
+            echo "The mapping check did not need to run. Nothing landed that could"
+            echo "move an observer set - the decision job's summary says what it"
+            echo "compared against and what it found."
+            exit 0
+          fi
+          echo "The sharded mapping check did not pass: the decision was"
+          echo "'$DECISION' and the shards reported '$RESULT'."
+          echo "Each shard verifies its own slice of the table against a whole-suite"
+          echo "run per entry, so the entries in a leg that did not pass are entries"
+          echo "whose observers nothing has checked. A decision of 'true' with no"
+          echo "result at all is the legs never having started, which verifies nothing."
+          exit 1
