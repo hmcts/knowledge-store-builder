@@ -105,9 +105,12 @@ class _StoreCase:
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
-        config.configure(root=str(self.root))
+        config.configure(root=self._tmp.name)
+        # `config.ROOT`, not `Path(self._tmp.name)`: see the note in
+        # settings_isolation. These tests compare stage output against paths
+        # built from `self.root`, so the two must be spelled the same way.
+        self.root = config.ROOT
         (self.root / "graphify-out").mkdir(parents=True, exist_ok=True)
 
     def _repo_file(self, repo: str, name: str) -> Path:
