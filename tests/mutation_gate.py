@@ -1708,6 +1708,37 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an extras-bearing pin silently stops being compared",
+        "check_install_docs.py",
+        "(?:\\[[^\\]]*\\])?",
+        "",
+        "found by review: with the extras group deleted, `alpha[deploy]==1.2.3` matches "
+        "nothing and the pin is not compared at all - and the test asserted an empty "
+        "result, which is equally what agreement produces. An emptiness assertion "
+        "cannot tell `compared and agreed` from `never parsed`, which is the shape this "
+        "whole check exists to refuse one level out",
+        (
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_extras_and_markers_do_not_read_as_a_disagreement",
+        ),
+    ),
+    Mutation(
+        "the stage's single exit stops carrying the resolution result",
+        "check_install_docs.py",
+        "    return resolution",
+        "    return 0",
+        "found by review: there were two `return resolution` sites, so either could be "
+        "severed alone, and every stage test reached only the first because all of them "
+        "use a lock naming its index. The uncovered branch was the no-index one, which "
+        "is the shape the older half of this check was written for. Folded to one site: "
+        "the only place it can be carried, and the only place it can be broken",
+        (
+            "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+            "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
+            "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
+            "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
+        ),
+    ),
+    Mutation(
         "a pin the lock does not deliver is reported as resolved",
         "check_install_docs.py",
         "        if locked.get(name) != version",
@@ -1719,9 +1750,11 @@ MUTATIONS = (
         "having opened that input for correctness",
         (
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+            "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_extras_and_markers_do_not_read_as_a_disagreement",
         ),
     ),
     Mutation(
@@ -1737,6 +1770,7 @@ MUTATIONS = (
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
+            "test_check_install_docs.TheLockMustResolveThePinTest.test_extras_and_markers_do_not_read_as_a_disagreement",
         ),
     ),
     Mutation(
@@ -1748,6 +1782,7 @@ MUTATIONS = (
         "look: the text scrolls past in a green run and nothing chains on it",
         (
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
+            "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
             "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
             "test_check_install_docs.NothingToCompareTest.test_an_input_whose_pins_all_resolve_still_passes_and_still_says_so",
@@ -3834,7 +3869,10 @@ def _remedy(record: Record, state: str) -> str:
             f"A run is live: pid {record.pid} in {record.root}. Wait for it, or stop it "
             f"with `kill -TERM {record.pid}`, which restores the file on the way out. Not "
             "`kill -9`, which cannot be handled and leaves the mutation applied, and not a "
-            "`pgrep` on this script's name, which matches every checkout on this machine."
+            "`pgrep` on this script's name, which matches every checkout on this machine. "
+            "To find which checkout any gate holds, read each one's working directory "
+            "rather than its arguments: `for p in $(pgrep -f mutation_gate.py); do lsof "
+            "-a -p $p -d cwd -Fn | grep '^n'; done`."
         )
     if state == ABANDONED:
         return (
