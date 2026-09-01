@@ -929,6 +929,15 @@ why the spool feeds revision and never direct reinstatement.
 while carried grounding degrades means the remap is preserving coverage at
 the cost of truth, and the criterion or the prose needs attention.
 
+It withholds that line, and says why on stderr, when the report was not written
+for the clustering being verified — the report records which one it describes.
+Community ids are small integers and are reused across re-clusters, so a report
+left behind by a previous rebuild still resolves against the current summaries
+and its split would read as ordinary while describing other data. Re-run
+`summaries remap` to rewrite the report for this clustering; a store that remaps
+through its own script must write the report too, or the split is not available
+to it.
+
 Snapshot immediately **before each** re-cluster, not once per session. A
 snapshot of a clustering the summaries are no longer keyed to is not refused; it
 just retains less, and says nothing about why.
