@@ -170,13 +170,29 @@ def declares_an_index(lock: Path) -> bool:
 
 
 def index_url(requirements: Path) -> str | None:
-    """The index a store's requirements input names, for the fix message."""
+    """The index a store's requirements input names, for the fix message.
+
+    `--extra-index-url` wins where an input names both, and the preference is
+    load-bearing rather than tidy. A store publishing to a private feed alongside
+    PyPI writes both lines, PyPI first. The package the failing command cannot
+    find is on the private feed - PyPI is already the default and suggesting it
+    is advice that changes nothing. Accepting either directive here without
+    ranking them made the hint name PyPI, which is a worse message than the one
+    this function replaced.
+    """
     if not requirements.is_file():
         return None
-    for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
-        found = index_directive(line)
-        if found:
-            return found[1]
+    found = [
+        directive
+        for directive in map(
+            index_directive, requirements.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+        if directive and directive[1]
+    ]
+    for flag in reversed(INDEX_FLAGS):
+        for directive in found:
+            if directive[0] == flag:
+                return directive[1]
     return None
 
 
