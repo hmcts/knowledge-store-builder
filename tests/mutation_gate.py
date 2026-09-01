@@ -816,6 +816,24 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an identifier inside a phrase label is unreachable again",
+        "build_community_summaries.py",
+        r'_PHRASE_SEPARATORS = re.compile(r"[^A-Za-z0-9/@.\-_:]+")',
+        r'_PHRASE_SEPARATORS = re.compile(r"[/@.\-_:]+")',
+        "#303, and the replacement is the class that shipped, so this is the defect "
+        "rather than an invented one: semantic and document nodes are labelled with a "
+        "phrase, and with no whitespace in the class the identifier in the middle of "
+        "one arrived welded to the prose either side of it. `--estate` then reported "
+        "it absent from the graph while it sat in the citing community's own node, on "
+        "the one class of finding the report tells an operator to act on",
+        (
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_a_constant_inside_a_phrase_is_offered_whole_and_in_parts",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_an_identifier_between_words_of_a_phrase_is_a_segment",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_brackets_and_quotes_separate_as_whitespace_does",
+        ),
+    ),
+    Mutation(
         "the stem basis option stops affecting ids",
         "merge_chunks.py",
         "    stem = spec_stem(basis, keep_extension=keep_extension)",
@@ -2320,6 +2338,7 @@ MUTATIONS = (
         "wrong measurement this pipeline has shipped, correct code answering a "
         "neighbouring question",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_every_reported_block_is_the_size_of_that_block_in_the_page",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2334,6 +2353,7 @@ MUTATIONS = (
         "counting each block once is short by the title on every build - and it still "
         "adds up, because the residual line absorbs exactly what was missed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
         ),
@@ -2375,6 +2395,7 @@ MUTATIONS = (
         "the store that reported this was already past GitHub's own warning with the "
         "page committed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_warning_and_under_the_limit_still_only_warns",
             "test_build_explorer.PageByteAttributionTest.test_the_threshold_comes_from_the_environment",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_arrives_before_the_page_is_written",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2394,6 +2415,7 @@ MUTATIONS = (
         (
             "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_a_refused_build_leaves_the_page_the_store_already_had",
+            "test_build_explorer.PageByteAttributionTest.test_a_refused_build_records_why_it_stopped",
             "test_build_explorer.PageByteAttributionTest.test_the_hard_limit_comes_from_the_environment",
         ),
     ),
@@ -2764,6 +2786,7 @@ MUTATIONS = (
         "query that always reports clean is a hook that reads as protection and is none",
         (
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_a_record_the_query_cannot_read_is_refused_rather_than_ignored",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_live_remedy_says_how_to_find_which_checkout_a_run_holds",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_pre_commit_hook_runs_the_query_and_refuses_a_live_mutation",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_carries_the_pid_for_a_caller_that_wants_to_signal_it",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_refuses_while_a_mutation_is_applied_and_names_the_path",
@@ -2885,6 +2908,8 @@ MUTATIONS = (
         "package, which is a worse version of the same defect",
         (
             "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_keeps_the_environment_it_inherits",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
         ),
     ),
     Mutation(
@@ -3257,6 +3282,102 @@ MUTATIONS = (
         (
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
+        ),
+    ),
+    Mutation(
+        "the coverage block stops describing the sample it records",
+        "build_community_summaries.py",
+        '        "business_features": features[:TOP_FEATURES],',
+        '        "business_features": features[: TOP_FEATURES - 1],',
+        "#299: a digest caps three fields and the coverage block says how much of each "
+        "one it is showing, which is only worth recording if the two cannot drift. The "
+        "counts are computed from the caps and cross-checked against the fields, so a cap "
+        "lowered in one place and not the other stops the write. Take the check away and "
+        "the block keeps claiming five where four are shown - a number that reads as "
+        "measured, is written into a committed artefact, and is what the verifier "
+        "subtracts from",
+        (
+            "test_summaries_coverage.DigestCoverageTest.test_a_capped_field_records_the_total_behind_the_cap",
+            "test_summaries_coverage.DigestCoverageTest.test_every_capped_field_is_covered",
+            "test_summaries_coverage.DigestCoverageTest.test_the_block_reconciles_on_a_truncated_community",
+            "test_summaries_coverage.DigestCoverageTest.test_the_shown_count_is_checked_against_what_the_digest_holds",
+            "test_summaries_coverage.MergedArtefactTest.test_a_coverage_block_that_does_not_add_up_stops_the_write",
+            "test_summaries_coverage.MergedArtefactTest.test_a_summary_with_no_digest_gets_no_invented_coverage",
+            "test_summaries_coverage.MergedArtefactTest.test_the_artefact_carries_a_coverage_block_per_community",
+            "test_summaries_coverage.MergedArtefactTest.test_the_metadata_block_keys_are_written_in_a_fixed_order",
+            "test_summaries_coverage.WriteGateTest.test_a_new_community_rewrites_the_file",
+            "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
+            "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
+            "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+        ),
+    ),
+    Mutation(
+        "the merged summaries write is no longer gated on content",
+        "build_community_summaries.py",
+        '    unchanged = recorded == metadata["content_digest"]',
+        "    unchanged = False",
+        "#299: coverage counts move whenever the graph is re-extracted, so recording them "
+        "in the committed artefact without this gate rewrites every summary on every "
+        "refresh - permanently, in every consuming store's diff, for a change no reader "
+        "can act on. Ungated it always writes, which is exactly what a run looks like "
+        "when it is working",
+        (
+            "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
+        ),
+    ),
+    Mutation(
+        "the merged summaries write never happens",
+        "build_community_summaries.py",
+        '    unchanged = recorded == metadata["content_digest"]',
+        "    unchanged = True",
+        "#299: the other direction of the same gate, and the reason one test could not "
+        "stand for it. A gate that decides never to write passes the check that a "
+        "count-only refresh leaves the file alone - the artefact is untouched, the run "
+        "prints its usual counts, and authored prose simply never reaches disk",
+        (
+            "test_summaries_coverage.MergedArtefactTest.test_a_summary_with_no_digest_gets_no_invented_coverage",
+            "test_summaries_coverage.MergedArtefactTest.test_the_artefact_carries_a_coverage_block_per_community",
+            "test_summaries_coverage.MergedArtefactTest.test_the_metadata_block_keys_are_written_in_a_fixed_order",
+            "test_summaries_coverage.WriteGateTest.test_a_new_community_rewrites_the_file",
+            "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
+            "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
+            "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+            "test_ticket_titles_and_summaries.SummariesMergeTest.test_valid_summary_merges",
+        ),
+    ),
+    Mutation(
+        "every unsampled term downgraded to informational",
+        "build_community_summaries.py",
+        "    return [field for field in COVERAGE_FIELDS if _unshown(coverage.get(field)) > 0]",
+        "    return list(COVERAGE_FIELDS)",
+        "#299: the coverage block lets `summaries verify` separate a term the digest never "
+        "showed from one the community does not hold. Read as though every field were "
+        "truncated, every finding becomes informational and `--strict` stops failing on "
+        "anything - and the coverage tests all still pass, because the blocks are correct "
+        "and only the conclusion drawn from them is gone",
+        (
+            "test_summaries_coverage.VerifyReadsCoverageTest.test_a_term_absent_from_a_digest_that_withheld_nothing_still_fails",
+            "test_summaries_coverage.VerifyReadsCoverageTest.test_the_report_reconciles_the_two_classes_against_the_total",
+        ),
+    ),
+    Mutation(
+        "the summaries metadata block read as a community",
+        "io.py",
+        "    return {key: value for key, value in document.items() if key != SUMMARIES_METADATA_KEY}",
+        "    return dict(document)",
+        "#299: the merged artefact gained one reserved key, and six stages iterate that "
+        "file. Unstripped, the block becomes a community: prose in the explorer page, "
+        "tokens in the semantic vocabulary, one more in the count `status` prints, and a "
+        "displaced entry in a remap report. Each of those is ordinary-looking output, "
+        "which is why the strip lives in one reader rather than in six",
+        (
+            "test_summaries_coverage.MetadataIsNotACommunityTest.test_status_does_not_count_it_as_a_summary",
+            "test_summaries_coverage.MetadataIsNotACommunityTest.test_the_shared_reader_returns_the_prose_alone",
+            "test_summaries_coverage.MetadataIsNotACommunityTest.test_verify_does_not_read_it_as_prose",
+            "test_summaries_coverage.WriteGateTest.test_a_new_community_rewrites_the_file",
+            "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
+            "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
+            "test_ticket_titles_and_summaries.SummariesMergeTest.test_unknown_id_and_bad_length_are_rejected",
         ),
     ),
     Mutation(

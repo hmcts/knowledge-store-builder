@@ -215,6 +215,31 @@ both count as grounded, while a longer or different name still differs. English
 compound adjectives ("police-to-courtroom") are excluded from identifier
 detection, because flagging them trains readers to ignore the report.
 
+**What the digest sampled, so absence can mean something.** A digest caps its
+top nodes, business features and tickets, and each one records a `coverage`
+block — `shown`, `unshown` and `total` per capped field, reconciled wherever it
+is written. That turns an inference into a subtraction, and the run labels every
+finding with which of three things it is:
+
+```
+[not in digest, nothing withheld] community <id> cites: <term>
+[not in digest, top_nodes 12 of 340 sampled] community <id> cites: <term>
+[not in digest] community <id> cites: <term>
+```
+
+The first is a real finding: the digest showed every node, feature and ticket
+the community holds, so the community does not hold that term. The second proves
+nothing either way, and `--strict` no longer fails on it. The third is a digest
+that recorded no coverage — every store built before the block existed — and it
+keeps its previous meaning and still fails, because *unknown* must not read as
+*excused*. Re-run `summaries extract` to record it. The three counts and their
+arithmetic are printed, because a split that does not add up is worse than none.
+
+The merged artefact carries the same coverage per community under a reserved
+`_metadata` key, so a reader can see the evidence base a claim was written from
+without re-extracting. Writes to it are gated on a hash of the prose alone: a
+refresh that moved only a count leaves the file untouched and says so.
+
 **`--estate` and name segments.** The estate pass reports `[not in graph]`, which
 is deliberately narrower than "not in the estate": the graph is narrower than the
 corpus. A cited term is corroborated by a whole identifier **or by one of its name
@@ -222,6 +247,16 @@ segments** — `NgRx` against `@ngrx/store`, a class against a Java package that
 contains it, a resource against a Terraform module address. A whole-label match
 alone could never match a scoped package name, and scoped names are the norm in
 JS/TS, so that check fired on an entire ecosystem's naming convention.
+
+A label is cut twice, because two kinds of string arrive as labels. AST nodes
+carry a bare name; semantic and document nodes carry a phrase — a widget word,
+the field it is bound to and the wording a user reads, in one string. The phrase
+is split into words first and each word is then segmented as a name, so an
+identifier in the middle of a descriptive label is reachable rather than welded to
+the prose either side of it. Case transitions are deliberately **not** split on:
+offering `delivery` out of `deliveryWindow` would corroborate a term against any
+label that merely mentions the other half of it, which is the substring match
+segments exist instead of.
 
 Segment matching loosens a check whose job is not lying, so it trades false
 positives for false **negatives**, which fail in the reassuring direction. Two

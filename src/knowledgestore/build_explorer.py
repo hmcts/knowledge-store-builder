@@ -698,11 +698,7 @@ def main() -> int:
 
     graph, labels, intent, titles = load_inputs()
     entries, edges = build_index(graph, labels, intent)
-    summaries = (
-        json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
-        if config.SUMMARIES_PATH.exists()
-        else {}
-    )
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     synonyms = (
         json.load(gzip.open(config.SYNONYMS_PATH, "rt", encoding="utf-8"))
         if config.SYNONYMS_PATH.exists()

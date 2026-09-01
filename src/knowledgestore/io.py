@@ -129,6 +129,31 @@ def read_json_dict(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+# The one reserved top-level key in the merged summaries artefact. Everything
+# else in that file is `<community id>: prose`; this key holds the content digest
+# the write is gated on and the per-community coverage block. Community ids are
+# the string forms of integers, so a leading underscore cannot collide with one.
+SUMMARIES_METADATA_KEY = "_metadata"
+
+
+def summaries_body(document: dict) -> dict:
+    """A merged summaries document with its metadata block removed."""
+    return {key: value for key, value in document.items() if key != SUMMARIES_METADATA_KEY}
+
+
+def read_summaries(path: Path) -> dict:
+    """The prose in a merged summaries artefact, without its metadata block.
+
+    Every stage that embeds, counts, re-keys or verifies summaries wants the
+    prose alone. A stage reading the raw document instead treats the metadata
+    block as a community: it reaches the explorer page, the semantic index's
+    vocabulary, the count `status` prints and a remap's displaced prose, and each
+    of those looks like ordinary output. One reader, so there is one copy of that
+    knowledge rather than six chances to forget it.
+    """
+    return summaries_body(read_json_dict(path))
+
+
 def write_json(path: Path, data, indent: int | None = None) -> None:
     checked_write_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)

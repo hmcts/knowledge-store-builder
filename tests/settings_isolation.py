@@ -17,8 +17,12 @@ and most of the classes here do exactly that.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import pathlib
 import sys
+import tempfile
 import unittest
 
 # Prefer the working tree over any installed copy of the library. `python -m
@@ -51,3 +55,41 @@ class SettingsIsolated(unittest.TestCase):
                 setattr(config, name, value)
             for name in set(_settings()) - set(saved):
                 delattr(config, name)
+
+
+class EstateGraphIsolated(SettingsIsolated):
+    """A temporary store holding one graph, for tests about matching estate names.
+
+    Two modules needed byte-identical scaffolding - a temp root, a configured
+    `config.ROOT`, a one-node-per-label graph, and `absent_from_estate` with its
+    stderr swallowed. Shared here rather than copied, because a copy drifts: the
+    point of both modules is what the matcher does with a label, and a difference
+    in how the graph was written would be indistinguishable from a difference in
+    the matcher.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name)
+        (self.root / "graphify-out").mkdir(parents=True)
+        self._old_root = config.ROOT
+        config.configure(root=str(self.root))
+
+    def tearDown(self):
+        config.configure(root=str(self._old_root))
+        self._tmp.cleanup()
+        super().tearDown()
+
+    def write_graph(self, labels):
+        config.GRAPH_PATH.write_text(
+            json.dumps({"nodes": [{"id": f"n{i}", "label": v} for i, v in enumerate(labels)]}),
+            encoding="utf-8",
+        )
+
+    def _absent(self, unsupported):
+        from knowledgestore import build_community_summaries as summaries
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            return summaries.absent_from_estate(unsupported)
