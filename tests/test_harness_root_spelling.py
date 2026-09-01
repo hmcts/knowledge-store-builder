@@ -76,10 +76,11 @@ class ConfiguredRootHasOneSpelling(unittest.TestCase):
         # Defined here rather than at module scope: a TestCase subclass at
         # module scope is collected by `unittest discover` and run as a test.
         class _Harness(settings_isolation.EstateGraphIsolated):
-            """The shared harness, driven for real as the subject under test."""
+            """The shared harness, driven for real as the subject under test.
 
-            def runTest(self):  # pragma: no cover - only setUp is wanted
-                raise AssertionError("instantiated only to exercise setUp")
+            No `runTest`: since 3.11 a TestCase instantiates without one, and a
+            stub here reads to a linter as an unused non-test method.
+            """
 
         try:
             harness = _Harness()
