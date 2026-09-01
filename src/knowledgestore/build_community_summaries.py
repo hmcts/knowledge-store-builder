@@ -18,9 +18,12 @@ Claude Code (maintainers have a licence; consumers never need one):
   3. knowledgestore summaries snapshot
        Records community membership before a re-cluster moves the ids.
 
-  4. knowledgestore summaries remap [--bar 0.6] [--floor 10] [--coverage 0.5]
-       After re-clustering, carries summaries onto the new ids by membership
-       overlap and reports retention. Refuses on an unclustered graph.
+  4. knowledgestore summaries remap [--carry exact] [--floor 10] [--coverage 0.5]
+       After re-clustering, carries a summary onto the new id of the community
+       holding exactly the node set it was written about, and withdraws the rest
+       to knowledge/summaries/communities-withdrawn.json. Reports retention and
+       the withdrawal count together. Refuses on an unclustered graph.
+       `--carry overlap [--bar 0.6] [--precision 0.2]` is the older tolerance.
 
   4a. knowledgestore summaries adrift [--bar 0.6] [--precision 0.2] [--coverage 0.5]
        Whether the snapshot still describes the graph: which committed summaries
@@ -267,18 +270,22 @@ def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
 # grounds rather than restating them, so the two cannot drift into two different
 # policies. Keep this register complete - `tests/test_read_path_policy.py` fails
 # when a module suppresses the rule without appearing here.
-#   S8707 policy site: build_community_summaries.py - merge, where the grounds are
+#   S8707 policy site: build_community_summaries.py - _take_batches, where the grounds are
 #   S8707 policy site: extract_ast.py - read_file_list, citing merge
 #   S8707 policy site: chunk_status.py - log_tokens, citing merge
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
 #   S8707 policy site: build_content_set.py - a write, validated the same way
-def merge(paths: list[str]) -> int:
-    digests = json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
-    known_ids = {str(d["id"]) for d in digests}
-    coverage = {str(d["id"]): d["coverage"] for d in digests if isinstance(d.get("coverage"), dict)}
-    document = io.read_json_dict(config.SUMMARIES_PATH)
-    merged: dict[str, str] = io.summaries_body(document)
+def _take_batches(
+    paths: list[str], known_ids: set[str], merged: dict[str, str]
+) -> tuple[int, list[str]]:
+    """Read each batch into `merged`, returning what was taken and what was refused.
+
+    Lifted out of `merge` so that function stays readable as the four steps it is -
+    read, merge, gate the write, report. The refusals are collected rather than
+    raised because a batch of many summaries should not be lost to one bad entry,
+    and the caller prints every one.
+    """
     added, rejected = 0, []
     for path in paths:
         # Sonar S8707, and the grounds the register above points at: reading a
@@ -298,6 +305,16 @@ def merge(paths: list[str]) -> int:
             else:
                 merged[str(community_id)] = summary
                 added += 1
+    return added, rejected
+
+
+def merge(paths: list[str]) -> int:
+    digests = json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
+    known_ids = {str(d["id"]) for d in digests}
+    coverage = {str(d["id"]): d["coverage"] for d in digests if isinstance(d.get("coverage"), dict)}
+    document = io.read_json_dict(config.SUMMARIES_PATH)
+    merged: dict[str, str] = io.summaries_body(document)
+    added, rejected = _take_batches(paths, known_ids, merged)
 
     body = dict(sorted(merged.items(), key=lambda kv: int(kv[0])))
     metadata = _merged_metadata(body, coverage)
@@ -333,10 +350,36 @@ def merge(paths: list[str]) -> int:
     return 1 if rejected else 0
 
 
-# The share of an old cluster's members that must land in one new cluster before
-# its summary is carried across. Below this the summary is dropped: prose on the
-# wrong cluster reads as authoritative and is worse than no prose. 0.6 has been
-# used across several estate refreshes and behaved sensibly.
+# How `remap` decides a summary may be re-keyed.
+#
+# `exact` carries a summary only onto a community whose member set is identical
+# to the one it was written about. A summary is a specific claim about a specific
+# set of nodes, so a community that gained a node is a different set and
+# therefore a different claim.
+#
+# `overlap` is the previous criterion - the recall bar below, then the precision
+# floor - kept because a tolerance is a judgement an estate is entitled to make,
+# and defaulted off because it was making that judgement silently. Recall alone
+# cannot see a new community that swallows an old one whole: every old member is
+# still together, so the share is 1.00 however much unrelated material came with
+# it, and the prose is re-attached to something it does not describe. Reported on
+# a real rebuild as the large majority of everything carried. The shape is what
+# makes it dangerous rather than the size - every summary still has a community
+# and every community still has prose, so the store looks healthy and the
+# retention figure reads as reassurance (#296).
+#
+# Anything `overlap` carries that is not the set the prose was written about is
+# marked `"exact": false` in the remap report, so a downstream check can find it.
+CARRY_EXACT = "exact"
+CARRY_OVERLAP = "overlap"
+CARRY_CRITERIA = (CARRY_EXACT, CARRY_OVERLAP)
+DEFAULT_CARRY = CARRY_EXACT
+
+# Under `--carry overlap` only: the share of an old cluster's members that must
+# land in one new cluster before its summary is carried across. Below this the
+# summary is withdrawn: prose on the wrong cluster reads as authoritative and is
+# worse than no prose. 0.6 has been used across several estate refreshes and
+# behaved sensibly. It is not the shipped criterion - see `DEFAULT_CARRY` for why.
 DEFAULT_BAR = 0.6
 # Refuse to remap when fewer summaries than this are loaded. A mis-specified path
 # reads as "almost nothing to do" rather than failing, and the run then writes an
@@ -353,9 +396,10 @@ DEFAULT_FLOOR = 10
 # those few surviving communities still share node ids with the snapshot.
 DEFAULT_COVERAGE = 0.5
 
-# How much of the NEW cluster a carried summary must describe. The carry bar
-# above measures recall - how much of the old cluster stayed together - and says
-# nothing about how much of what a reader now sees the prose covers. Measured on
+# Under `--carry overlap` only: how much of the NEW cluster a carried summary
+# must describe. The carry bar above measures recall - how much of the old
+# cluster stayed together - and says nothing about how much of what a reader now
+# sees the prose covers. Measured on
 # a real refresh: of 5,405 carried summaries, one describes a cluster that grew
 # from 37 members to 458 with every old member retained. Recall 1.00, clearing a
 # 60% bar comfortably; precision 0.08. Not stale and not unsupported -
@@ -478,13 +522,19 @@ def membership_drift(
     stale graph shares every node id with that same stale file - consistent and
     wrong is the one case that guard is blind to.
 
-    **Measured the way `remap` compares, deliberately.** For each summary, the
-    share of its snapshot members the graph still files under that same community
-    id - `remap`'s recall - and the share of the community those members now make
-    up - `remap`'s precision. Not strict set equality: a guard stricter than the
-    tool it guards sends people re-authoring prose `remap` would have carried
-    unchanged. Both, because recall alone was measured on a real refresh to carry
-    prose describing a corner of something much larger.
+    **Graded, where `remap`'s carry is binary.** For each summary, the share of
+    its snapshot members the graph still files under that same community id -
+    recall - and the share of the community those members now make up -
+    precision. Both, because recall alone was measured on a real refresh to
+    report prose describing a corner of something much larger as sound.
+
+    These bars were once `remap`'s own, and are no longer: since #296 `remap`
+    carries only onto an identical member set. So anything this reports as
+    narrowed or adrift will certainly be withdrawn, and some of what it passes
+    will be too - it answers "does the committed prose still describe the graph,
+    and how badly not", which is a question with degrees, whereas "may this prose
+    be re-keyed" is not. Reading a clean run here as a prediction of retention is
+    the one mistake to avoid; `remap` reports that number itself.
 
     Ids are compared exactly, which is also what `remap` does - `_claim_targets`
     looks each snapshot member up in a dict keyed by raw `node["id"]`. Stripping a
@@ -883,35 +933,35 @@ def _claim_targets(
     old_members: dict,
     new_community: dict,
     bar: float,
-    precision: float = 0.0,
-) -> tuple[dict, dict, list, list, list]:
-    """Each summary's best new cluster, and what fell out on the way.
+    precision: float,
+    carry: str,
+) -> tuple[dict, dict]:
+    """Each summary's best new cluster, and what was withdrawn on the way.
 
-    Returns the surviving claims plus the ways a summary is lost: its members
-    gone from the graph entirely, its best overlap short of `bar` (recall), or
-    the target cluster so much larger that the prose describes a corner of it
-    (`precision`). Sorted for a deterministic tiebreak.
+    Returns the surviving claims - target, recall, precision and whether the
+    target holds exactly the set the prose was written about - alongside every
+    summary that was not claimed, keyed by its old id and carrying its reason,
+    its near-miss target and the prose itself. The two partition `summaries`, so
+    a caller can reconcile what it carried against what it read.
+
+    Under `CARRY_EXACT` the only claim is set equality. Under `CARRY_OVERLAP` a
+    summary is withdrawn when its best overlap falls short of `bar` (recall) or
+    the target cluster is so much larger that the prose describes a corner of it
+    (`precision`). Either way its members can have gone from the graph entirely.
+
+    Sorted for a deterministic tiebreak.
     """
-    sizes = Counter(new_community.values())
-    claims: dict[str, tuple[str, float, float]] = {}
+    members_of: dict[str, set[str]] = defaultdict(set)
+    for node, community in new_community.items():
+        members_of[community].add(node)
+    claims: dict[str, tuple[str, float, float, bool]] = {}
     displaced: dict[str, dict] = {}
-    below_bar: list[str] = []
-    members_gone: list[str] = []
-    below_precision: list[str] = []
     for old_id in sorted(summaries, key=lambda k: (len(k), k)):
-        members = old_members.get(str(old_id))
-        if not members:
-            members_gone.append(old_id)
-            displaced[old_id] = {
-                "reason": "members-gone",
-                "best_target": None,
-                "share": None,
-                "prose": summaries[old_id],
-            }
-            continue
+        # An absent snapshot entry and an entry whose members have all left the
+        # graph are the same finding: nothing to place the prose against.
+        members = old_members.get(str(old_id), [])
         landed = Counter(new_community[m] for m in members if m in new_community)
         if not landed:
-            members_gone.append(old_id)
             displaced[old_id] = {
                 "reason": "members-gone",
                 "best_target": None,
@@ -921,8 +971,23 @@ def _claim_targets(
             continue
         target, count = landed.most_common(1)[0]
         share_of_old = count / len(members)
-        if share_of_old < bar:
-            below_bar.append(old_id)
+        share_of_new = count / len(members_of[target])
+        # Set equality, not recall 1.0 and precision 1.0. A merged graph can
+        # repeat a node id, so the snapshot's member list can too - and then both
+        # ratios reach 1.0 over a target holding a member the prose never
+        # described. The ratios are a neighbour of the quantity being claimed.
+        identical = set(members) == members_of[target]
+        if carry == CARRY_EXACT:
+            if not identical:
+                displaced[old_id] = {
+                    "reason": "not-identical",
+                    "best_target": target,
+                    "share": round(share_of_old, 3),
+                    "precision": round(share_of_new, 3),
+                    "prose": summaries[old_id],
+                }
+                continue
+        elif share_of_old < bar:
             displaced[old_id] = {
                 "reason": "below-bar",
                 "best_target": target,
@@ -930,9 +995,7 @@ def _claim_targets(
                 "prose": summaries[old_id],
             }
             continue
-        share_of_new = count / sizes[target] if sizes[target] else 0.0
-        if share_of_new < precision:
-            below_precision.append(old_id)
+        elif share_of_new < precision:
             displaced[old_id] = {
                 "reason": "below-precision",
                 "best_target": target,
@@ -941,8 +1004,8 @@ def _claim_targets(
                 "prose": summaries[old_id],
             }
             continue
-        claims[old_id] = (target, share_of_old, share_of_new)
-    return claims, displaced, below_bar, members_gone, below_precision
+        claims[old_id] = (target, share_of_old, share_of_new, identical)
+    return claims, displaced
 
 
 def _report_precision(carried: dict) -> None:
@@ -997,12 +1060,17 @@ def remap(
     floor: int = DEFAULT_FLOOR,
     coverage: float = DEFAULT_COVERAGE,
     precision: float = DEFAULT_PRECISION,
+    carry: str = DEFAULT_CARRY,
 ) -> int:
     """Carry committed summaries onto new community ids after a re-cluster.
 
     For each summary, find the new cluster holding the largest share of its old
-    members and carry it there when that share meets `bar`. Drop it otherwise,
-    and report retention so the cost of the re-cluster is a measured number.
+    members and carry it there when that cluster holds exactly the set the prose
+    was written about. Withdraw it otherwise, to a file beside the summaries so
+    the writing survives, and report the withdrawal count beside retention so the
+    cost of the re-cluster is a measured number in both directions.
+
+    `carry=CARRY_OVERLAP` restores the previous tolerance - see `DEFAULT_CARRY`.
     """
     if not config.SUMMARIES_SNAPSHOT_PATH.exists():
         print(
@@ -1024,9 +1092,7 @@ def remap(
         print(refusal, file=sys.stderr)
         return 1
 
-    claims, displaced, below_bar, members_gone, below_precision = _claim_targets(
-        summaries, old_members, new_community, bar, precision
-    )
+    claims, displaced = _claim_targets(summaries, old_members, new_community, bar, precision, carry)
 
     # Pass 2: a contested new cluster keeps the summary whose old cluster
     # contributed the largest share of itself - it describes more of the merged
@@ -1046,23 +1112,25 @@ def remap(
     # measurement is what makes this greedy loop correct, not an assumption that
     # optimal matching is too complex - do not "upgrade" it without repeating
     # the measurement and finding a different answer.
-    by_target: dict[str, list[tuple[str, float, float]]] = {}
-    for old_id, (target, share_of_old, share_of_new) in claims.items():
-        by_target.setdefault(target, []).append((old_id, share_of_old, share_of_new))
+    by_target: dict[str, list[tuple[str, float, float, bool]]] = {}
+    for old_id, (target, share_of_old, share_of_new, identical) in claims.items():
+        by_target.setdefault(target, []).append((old_id, share_of_old, share_of_new, identical))
     remapped: dict[str, str] = {}
     carried: dict[str, dict] = {}
-    collisions: list[str] = []
     for target, claimants in by_target.items():
         claimants.sort(key=lambda c: (-c[1], (len(c[0]), c[0])))
-        winner, winner_share, winner_precision = claimants[0]
+        winner, winner_share, winner_precision, winner_identical = claimants[0]
         remapped[target] = summaries[winner]
         carried[target] = {
             "from": winner,
             "share": round(winner_share, 3),
             "precision": round(winner_precision, 3),
+            # The mark #296 asks for: under a tolerance this says which carried
+            # prose describes a set the graph no longer holds, so a downstream
+            # check can find it without recomputing the overlap.
+            "exact": winner_identical,
         }
-        for loser, loser_share, _ in claimants[1:]:
-            collisions.append(loser)
+        for loser, loser_share, _, _ in claimants[1:]:
             displaced[loser] = {
                 "reason": "collision",
                 "best_target": target,
@@ -1074,15 +1142,42 @@ def remap(
         json.dumps(dict(sorted(remapped.items(), key=lambda kv: int(kv[0]))), indent=1),
         encoding="utf-8",
     )
+    # Withdrawn rather than dropped: the prose is a written artefact, so it goes
+    # to a file shaped like the one it left and can be revised and merged back.
+    # Rewritten on every run, including when it is empty - a file left behind by
+    # an earlier remap reads as this run's finding, over prose somebody is meant
+    # to go and re-author.
+    withdrawn = {old_id: entry["prose"] for old_id, entry in displaced.items()}
+    io.write_json(
+        config.SUMMARIES_WITHDRAWN_PATH,
+        dict(sorted(withdrawn.items(), key=lambda kv: int(kv[0]))),
+        indent=1,
+    )
+
     total = len(summaries)
     share = (100 * len(remapped) // total) if total else 0
-    print(f"Retained {len(remapped)} of {total} summaries ({share}%) -> {config.SUMMARIES_PATH}")
+    # The withdrawal count sits on the retention line deliberately. Retention
+    # read as reassurance while being the opposite, so the figure now carries
+    # its own contradiction rather than leaving it a line further down (#296).
     print(
-        f"Dropped: {len(below_bar)} below {int(bar * 100)}% overlap, "
-        f"{len(members_gone)} whose members are gone, "
-        f"{len(collisions)} merged-cluster collisions, "
-        f"{len(below_precision)} describing under {int(precision * 100)}% of their new cluster"
+        f"Retained {len(remapped)} of {total} summaries ({share}%), "
+        f"withdrew {len(displaced)} -> {config.SUMMARIES_PATH}"
     )
+    reasons = Counter(entry["reason"] for entry in displaced.values())
+    print(
+        f"Withdrawn: {reasons['not-identical']} not identical to their new community, "
+        f"{reasons['below-bar']} below {int(bar * 100)}% overlap, "
+        f"{reasons['members-gone']} whose members are gone, "
+        f"{reasons['collision']} merged-cluster collisions, "
+        f"{reasons['below-precision']} describing under {int(precision * 100)}% of their cluster"
+    )
+    inexact = sum(1 for entry in carried.values() if not entry["exact"])
+    if inexact:
+        print(
+            f"Carried below set equality: {inexact} of {len(carried)} carried summaries "
+            "describe a community whose membership has changed since they were written, "
+            f'marked "exact": false in {config.REMAP_REPORT_PATH}'
+        )
     _report_precision(carried)
     # The report is the spool: displaced prose is raw material for the
     # backfill (revise against the new digest, never trust unverified), and
@@ -1101,6 +1196,7 @@ def remap(
         f"Remap report: {len(carried)} carried, {len(displaced)} displaced "
         f"(prose kept for revision) -> {config.REMAP_REPORT_PATH}"
     )
+    print(f"Withdrawn prose -> {config.SUMMARIES_WITHDRAWN_PATH}")
     return 0
 
 
@@ -1947,12 +2043,21 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
         parser.add_argument("--coverage", type=float, default=DEFAULT_COVERAGE)
         parser.add_argument("--precision", type=float, default=DEFAULT_PRECISION)
+        parser.add_argument(
+            "--carry",
+            choices=CARRY_CRITERIA,
+            default=DEFAULT_CARRY,
+            help="exact: carry only onto a community holding the same node set. "
+            "overlap: carry on --bar recall and --precision, marking anything "
+            'carried below equality as "exact": false',
+        )
         options = parser.parse_args(arguments[1:])
         return remap(
             bar=options.bar,
             floor=options.floor,
             coverage=options.coverage,
             precision=options.precision,
+            carry=options.carry,
         )
     print(__doc__)
     return 1

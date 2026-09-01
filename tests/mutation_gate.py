@@ -2320,6 +2320,7 @@ MUTATIONS = (
         "wrong measurement this pipeline has shipped, correct code answering a "
         "neighbouring question",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_every_reported_block_is_the_size_of_that_block_in_the_page",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2334,6 +2335,7 @@ MUTATIONS = (
         "counting each block once is short by the title on every build - and it still "
         "adds up, because the residual line absorbs exactly what was missed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
         ),
@@ -2375,6 +2377,7 @@ MUTATIONS = (
         "the store that reported this was already past GitHub's own warning with the "
         "page committed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_warning_and_under_the_limit_still_only_warns",
             "test_build_explorer.PageByteAttributionTest.test_the_threshold_comes_from_the_environment",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_arrives_before_the_page_is_written",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2394,6 +2397,7 @@ MUTATIONS = (
         (
             "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_a_refused_build_leaves_the_page_the_store_already_had",
+            "test_build_explorer.PageByteAttributionTest.test_a_refused_build_records_why_it_stopped",
             "test_build_explorer.PageByteAttributionTest.test_the_hard_limit_comes_from_the_environment",
         ),
     ),
@@ -2764,6 +2768,7 @@ MUTATIONS = (
         "query that always reports clean is a hook that reads as protection and is none",
         (
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_a_record_the_query_cannot_read_is_refused_rather_than_ignored",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_live_remedy_says_how_to_find_which_checkout_a_run_holds",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_pre_commit_hook_runs_the_query_and_refuses_a_live_mutation",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_carries_the_pid_for_a_caller_that_wants_to_signal_it",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_refuses_while_a_mutation_is_applied_and_names_the_path",
@@ -2885,6 +2890,8 @@ MUTATIONS = (
         "package, which is a worse version of the same defect",
         (
             "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_keeps_the_environment_it_inherits",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
         ),
     ),
     Mutation(
@@ -3353,6 +3360,76 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_ticket_titles_and_summaries.SummariesMergeTest.test_unknown_id_and_bad_length_are_rejected",
+        ),
+    ),
+    Mutation(
+        "a swallowing community reads as the same set",
+        "build_community_summaries.py",
+        "        identical = set(members) == members_of[target]",
+        "        identical = True",
+        "#296, the state that shipped, arrived as a recall-only carry: a new community "
+        "that swallowed an old one whole scored 1.00 however much unrelated material came "
+        "with it, so prose about a small coherent community was re-attached to a large "
+        "incoherent one. Reported on a real rebuild as the large majority of everything "
+        "carried. It is the shape rather than the size that hid it - every summary still "
+        "had a community and every community still had prose, so the store looked healthy "
+        "and the retention figure read as reassurance while being the opposite",
+        (
+            "test_summaries_remap.ClaimTargetsTest.test_a_dominant_target_is_claimed_with_its_share",
+            "test_summaries_remap.ExactClaimTargetsTest.test_a_community_holding_the_old_set_and_one_more_node_is_withdrawn",
+            "test_summaries_remap.ExactClaimTargetsTest.test_a_member_that_left_the_graph_is_named_as_a_changed_set_not_a_near_miss",
+            "test_summaries_remap.ExactClaimTargetsTest.test_repeated_node_ids_do_not_read_as_an_identical_set",
+            "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_prose_carried_below_set_equality_is_marked_in_the_report",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapCliTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+            "test_summaries_remap.RemapTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_prose_carried_below_set_equality_is_marked_in_the_report",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+        ),
+    ),
+    Mutation(
+        "the carry criterion defaults back to a tolerance",
+        "build_community_summaries.py",
+        "DEFAULT_CARRY = CARRY_EXACT",
+        "DEFAULT_CARRY = CARRY_OVERLAP",
+        "the shipped-default class again: the tolerance is still reachable and still "
+        "tested, so every assertion about it passes with the default pointing at it. What "
+        "ships is the criterion nobody passes an argument for",
+        (
+            "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapCliTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+            "test_summaries_remap.RemapTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+        ),
+    ),
+    Mutation(
+        "withdrawn prose no longer written beside the summaries",
+        "build_community_summaries.py",
+        "    io.write_json(\n        config.SUMMARIES_WITHDRAWN_PATH,\n"
+        "        dict(sorted(withdrawn.items(), key=lambda kv: int(kv[0]))),\n"
+        "        indent=1,\n    )",
+        "    pass",
+        "#296: set equality withdraws far more prose than the tolerance it replaced, so the "
+        "change is only defensible while the writing survives it. Unwritten, every count "
+        "still reconciles and the run still reports what it withdrew - the artefact naming "
+        "the paragraphs somebody is meant to revise is the only thing missing",
+        (
+            "test_summaries_remap.RemapCliTest.test_a_carried_summary_is_not_also_withdrawn",
+            "test_summaries_remap.RemapCliTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_a_carried_summary_is_not_also_withdrawn",
+            "test_summaries_remap.RemapTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
         ),
     ),
 )

@@ -213,7 +213,7 @@ class MergeFixture(SettingsIsolated):
         nodes, degree = _oversized_community() if truncated else _small_community()
         return summaries.community_digest(cid, nodes, {}, {}, degree)
 
-    def document(self) -> dict:
+    def _document(self) -> dict:
         return json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
 
 
@@ -223,7 +223,7 @@ class MergedArtefactTest(MergeFixture):
     def test_the_artefact_carries_a_coverage_block_per_community(self):
         self.write_digests([self.digest(1)])
         self.run_merge(self.batch({"1": self.PROSE}))
-        coverage = self.document()[io.SUMMARIES_METADATA_KEY]["coverage"]
+        coverage = self._document()[io.SUMMARIES_METADATA_KEY]["coverage"]
         self.assertEqual(list(coverage), ["1"])
         _reconciles(self, coverage["1"])
         self.assertEqual(coverage["1"]["top_nodes"]["total"], LABELLED_NODES)
@@ -234,8 +234,10 @@ class MergedArtefactTest(MergeFixture):
         broken = self.digest(1)
         broken["coverage"]["top_nodes"]["unshown"] += 1
         self.write_digests([broken])
+        prose = self.batch({"1": self.PROSE})
+
         with self.assertRaises(ValueError):
-            self.run_merge(self.batch({"1": self.PROSE}))
+            self.run_merge(prose)
         self.assertFalse(config.SUMMARIES_PATH.exists(), "nothing may be written")
 
     def test_a_summary_with_no_digest_gets_no_invented_coverage(self):
@@ -247,9 +249,9 @@ class MergedArtefactTest(MergeFixture):
             encoding="utf-8",
         )
         self.run_merge(self.batch({"1": self.PROSE}))
-        coverage = self.document()[io.SUMMARIES_METADATA_KEY]["coverage"]
+        coverage = self._document()[io.SUMMARIES_METADATA_KEY]["coverage"]
         self.assertEqual(list(coverage), ["1"])
-        self.assertIn("7", self.document(), "the prose itself is still retained")
+        self.assertIn("7", self._document(), "the prose itself is still retained")
 
     def test_the_metadata_block_keys_are_written_in_a_fixed_order(self):
         # two runs must be byte-identical, so nothing here may depend on the order
@@ -310,7 +312,7 @@ class WriteGateTest(MergeFixture):
         self.run_merge(self.batch({"1": self.OTHER_PROSE}, name="second.json"))
 
         self.assertTrue(self.rewritten(), "the prose changed, so the file must be written")
-        self.assertEqual(self.document()["1"], self.OTHER_PROSE)
+        self.assertEqual(self._document()["1"], self.OTHER_PROSE)
 
     def test_a_new_community_rewrites_the_file(self):
         self.write_digests([self.digest(1), self.digest(2)])
@@ -320,12 +322,12 @@ class WriteGateTest(MergeFixture):
         self.run_merge(self.batch({"2": self.PROSE}, name="second.json"))
 
         self.assertTrue(self.rewritten())
-        self.assertEqual(sorted(k for k in self.document() if not k.startswith("_")), ["1", "2"])
+        self.assertEqual(sorted(k for k in self._document() if not k.startswith("_")), ["1", "2"])
 
     def test_the_recorded_digest_covers_the_prose_and_not_the_metadata(self):
         self.write_digests([self.digest(1)])
         self.run_merge(self.batch({"1": self.PROSE}))
-        recorded = self.document()[io.SUMMARIES_METADATA_KEY]["content_digest"]
+        recorded = self._document()[io.SUMMARIES_METADATA_KEY]["content_digest"]
         self.assertEqual(recorded, summaries.content_digest({"1": self.PROSE}))
         self.assertNotEqual(recorded, summaries.content_digest({"1": self.OTHER_PROSE}))
 
