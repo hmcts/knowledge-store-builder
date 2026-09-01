@@ -799,6 +799,8 @@ MUTATIONS = (
         "under eight scoped package names across 228 labels - a check that fires on "
         "an entire ecosystem's naming convention gets switched off",
         (
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent",
             "test_estate_segment_match.AbsentFromEstateTest.test_a_scoped_package_no_longer_reads_as_absent",
         ),
     ),
@@ -811,6 +813,7 @@ MUTATIONS = (
         "a two-character segment would corroborate a two-character claim - the "
         "false-negative direction, which fails reassuringly",
         (
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_the_ecosystem_cases_the_rule_was_built_for_are_unchanged",
             "test_estate_segment_match.AbsentFromEstateTest.test_a_short_term_is_not_matched_against_a_segment",
             "test_estate_segment_match.NameSegmentTest.test_segments_below_the_floor_are_not_offered",
         ),
@@ -1943,6 +1946,11 @@ MUTATIONS = (
         "Retargeted when #179 replaced the comprehension with an explicit loop - "
         "the gate refused to run rather than quietly stop testing this",
         (
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_truncated_name_is_still_reported_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_word_out_of_a_camel_case_name_is_still_reported_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_invented_term_is_still_reported_absent",
             "test_estate_segment_match.AbsentFromEstateTest.test_a_genuinely_absent_term_is_still_reported",
             "test_estate_segment_match.AbsentFromEstateTest.test_a_scoped_package_no_longer_reads_as_absent",
             "test_estate_segment_match.AbsentFromEstateTest.test_a_short_term_is_not_matched_against_a_segment",
@@ -2819,9 +2827,6 @@ MUTATIONS = (
         "while reintroducing the second exclusion model the stage exists to remove",
         (
             "test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",
-            "test_extract_ast.ExtractAstTest.test_kinds_the_parser_cannot_read_are_not_handed_to_it",
-            "test_extract_ast.ExtractAstTest.test_one_repository_failing_does_not_lose_the_others",
-            "test_extract_ast.ExtractAstTest.test_the_content_set_is_consumed_rather_than_re_derived",
             "test_extract_ast.ExtractAstTest.test_the_pipelines_own_output_is_refused",
             "test_extract_ast.MovementTest.test_gone_and_new_are_reported_as_different_things",
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
@@ -3468,6 +3473,40 @@ MUTATIONS = (
             "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_ids_reused_by_the_new_clustering_are_not_read_as_a_match",
             "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_the_withheld_split_says_why_on_stderr",
             "test_summaries_provenance_freshness.ProvenanceFreshnessWithoutARecordTest.test_a_report_older_than_the_digests_does_not_produce_a_split",
+        ),
+    ),
+    Mutation(
+        "a configured root keeps the spelling it was given",
+        "config.py",
+        '        module["ROOT"] = Path(root).expanduser().resolve()',
+        '        module["ROOT"] = Path(root).expanduser()',
+        "every ROOT-relative path is re-derived from ROOT, so an unresolved ROOT lets one "
+        "directory have two spellings - a path written under the caller's spelling and the "
+        "same path read back through config compare unequal. It cost four hours across two "
+        "sessions as a phantom platform divergence: a mutation looked caught by ten tests "
+        "on macOS and seven on Linux, main went red on a table that was wrong, and the "
+        "three extra failures were the /var -> /private/var symlink, not the behaviour",
+        (
+            "test_config_and_io.ConfigTest.test_configure_root_repoints_every_derived_path",
+            "test_content_set.ConfigureReachesEveryOutputTest.test_every_root_relative_path_constant_is_repointed_by_configure",
+            "test_harness_root_spelling.ConfiguredRootHasOneSpelling.test_configure_resolves_a_root_reached_through_a_symlink",
+            "test_repo_list_and_sync.CliTest.test_root_option_repoints_every_derived_path",
+            "test_store_paths.StorePathsTest.test_the_root_is_read_at_call_time_not_import_time",
+        ),
+    ),
+    Mutation(
+        "the shared harness keeps its own spelling of the root",
+        "tests/settings_isolation.py",
+        "        self.root = config.ROOT",
+        "        self.root = pathlib.Path(self._tmp.name)",
+        "the other half of the entry above, and the half that actually bit. A harness "
+        "holding the unresolved temp path compares its own paths against stage output "
+        "spelled the resolved way. On Linux the two are one string and nothing happens, so "
+        "the whole suite stays green while a maintainer's machine disagrees with CI - the "
+        "failure mode is a disagreeing suite rather than a red one, which is worse because "
+        "the artefact it corrupts is the observer table this gate ships",
+        (
+            "test_harness_root_spelling.ConfiguredRootHasOneSpelling.test_the_shared_harness_keeps_the_spelling_config_uses",
         ),
     ),
 )

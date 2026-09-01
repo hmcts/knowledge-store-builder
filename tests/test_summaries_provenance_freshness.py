@@ -147,7 +147,9 @@ class ProvenanceFreshnessTest(SettingsIsolated):
         carried = set(json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))["carried"])
         self.recluster()
         current = set(json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8")))
-        self.assertTrue(carried <= current, "the fixture must reuse every id, or it proves nothing")
+        self.assertLessEqual(
+            carried, current, "the fixture must reuse every id, or it proves nothing"
+        )
         out, _ = self.run_stage(summaries.verify)
         self.assertNotIn(SPLIT, out)
 

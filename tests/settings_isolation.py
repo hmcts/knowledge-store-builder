@@ -71,10 +71,18 @@ class EstateGraphIsolated(SettingsIsolated):
     def setUp(self):
         super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = pathlib.Path(self._tmp.name)
-        (self.root / "graphify-out").mkdir(parents=True)
         self._old_root = config.ROOT
-        config.configure(root=str(self.root))
+        config.configure(root=self._tmp.name)
+        # Take the root back *from* config rather than from `tempfile`.
+        # `configure` resolves what it is given, and on macOS the temp directory
+        # is reached through the /var -> /private/var symlink, so the two
+        # spellings of the same directory are unequal strings. A harness holding
+        # the unresolved spelling compares its own paths against stage output
+        # spelled the other way and fails for a reason that cannot occur on
+        # Linux. Deriving it here makes the divergence impossible rather than
+        # something each module has to remember to undo.
+        self.root = config.ROOT
+        (self.root / "graphify-out").mkdir(parents=True)
 
     def tearDown(self):
         config.configure(root=str(self._old_root))
