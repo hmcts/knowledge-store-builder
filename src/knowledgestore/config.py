@@ -370,6 +370,14 @@ E2E_REPOS = _env_set("KSB_E2E_REPOS", set())
 # under GitHub's own warning: the point is room to decide, not a second copy of
 # the same alarm. Raise it where a store has settled that its page is this large.
 EXPLORER_WARN_BYTES = _env_int("KSB_EXPLORER_WARN_BYTES", 40 * 1_048_576)
+# The page size the explorer stage refuses to write at all. GitHub blocks a push
+# carrying a file above 100 MB, so a page over that is not a large artefact but an
+# unshippable one - and the failure arrives at `git push`, a commit after the stage
+# that produced it and naming neither the stage nor the layer that grew. Refused
+# before the write rather than after: a page already in the working tree is one the
+# ordinary workflow commits beside the layers it was built from. Raise it where a
+# store ships its page somewhere GitHub's ceiling does not apply.
+EXPLORER_MAX_BYTES = _env_int("KSB_EXPLORER_MAX_BYTES", 100 * 1_048_576)
 
 # --- deployment evidence (the `deployments` stage) ------------------------
 # Off until an estate names the repository that holds its deployment config,

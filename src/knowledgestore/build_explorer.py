@@ -571,6 +571,17 @@ def breakdown_report(breakdown: Mapping[str, int], size_bytes: int, path: Path) 
     return "\n".join(lines) + "\n"
 
 
+def largest_blocks(breakdown: Mapping[str, int]) -> str:
+    """The biggest blocks named with their bytes, for a line about the page's size.
+
+    One expression, read by both the warning and the refusal. A second expression for
+    the same quantity is how two messages describing one page start disagreeing, and
+    they are read side by side: a store meets the warning on one build and the
+    refusal on the next.
+    """
+    return ", ".join(f"{name} {size:,} bytes" for name, size in ranked(breakdown)[:WARN_TOP_BLOCKS])
+
+
 def size_warning(breakdown: Mapping[str, int], threshold: int) -> str:
     """What to say before writing a page this large, or "" below the threshold.
 
@@ -587,9 +598,7 @@ def size_warning(breakdown: Mapping[str, int], threshold: int) -> str:
     total = sum(breakdown.values())
     if total <= threshold:
         return ""
-    largest = ", ".join(
-        f"{name} {size:,} bytes" for name, size in ranked(breakdown)[:WARN_TOP_BLOCKS]
-    )
+    largest = largest_blocks(breakdown)
     return (
         f"WARNING: the explorer page will be {total / 1_048_576:.1f} MB ({total:,} bytes), "
         f"over the {threshold:,}-byte KSB_EXPLORER_WARN_BYTES threshold. GitHub warns above "
@@ -603,6 +612,49 @@ def size_warning(breakdown: Mapping[str, int], threshold: int) -> str:
         "description reaches `ticketinfo`. The prose blocks have no such setting: "
         "`summaries`, `topics` and `dives` are committed layers, so carrying less of them "
         "in the page means holding less of them in the store.\n"
+    )
+
+
+def size_refusal(breakdown: Mapping[str, int], limit: int) -> str:
+    """Why this page must not be written at all, or "" at or below the limit.
+
+    GitHub blocks a push carrying a file above 100 MB and the page is committed, so a
+    page over that ceiling is not a large artefact but an unshippable one. Warning and
+    writing it anyway - which is what this stage did - leaves the store to discover it
+    at `git push`, a commit after the run that caused it, with a message naming neither
+    the stage, the page's layers, nor anything to change.
+
+    Refused *before* the write rather than failing after it. A page in the working tree
+    is one the ordinary workflow commits beside the layers it was built from, `status`
+    reads it as the current page, and truncating a pushable page to write an unpushable
+    one leaves the next run a worse tree than this one found. Refusing first leaves the
+    store exactly where it was, which is a state it can still ship from.
+
+    Measured from the attribution rather than from the file, because the point is that
+    there is no file yet; `reconcile_breakdown` is what checks the two agree, on the
+    builds that get that far.
+
+    Names the largest blocks for the same reason the warning does - a store told only
+    that its page is too large has the problem it had before - and names the setting,
+    because a store not pushing this page to GitHub must be able to say so.
+    """
+    total = sum(breakdown.values())
+    if total <= limit:
+        return ""
+    return (
+        f"Refusing to write the explorer page: it would be {total / 1_048_576:.1f} MB "
+        f"({total:,} bytes), over the {limit:,}-byte KSB_EXPLORER_MAX_BYTES limit. GitHub "
+        "refuses a push carrying a file above 100 MB and this page is committed, so writing "
+        "it would hand the store an artefact it cannot ship and a rejection at `git push` "
+        "naming none of this. Nothing was written: the page the store already holds, if "
+        "any, is untouched.\n"
+        f"Largest blocks: {largest_blocks(breakdown)}.\n"
+        "Carry less in the page, or raise KSB_EXPLORER_MAX_BYTES where the page is not "
+        "pushed to GitHub. Two settings bound part of it - KSB_MIN_ENTRY_DEGREE gates which "
+        "code entries reach `data` and `edges`, and KSB_TICKET_DETAIL_CHARS caps how much of "
+        "each tracker description reaches `ticketinfo`. The prose blocks have no such "
+        "setting: `summaries`, `topics` and `dives` are committed layers, so carrying less "
+        "of them in the page means holding less of them in the store.\n"
     )
 
 
@@ -716,6 +768,28 @@ def main() -> int:
         "__APP_JS__": app_js,
     }
     breakdown = page_breakdown(TEMPLATE, blocks)
+    # Before the warning as well as before the write: a page over the hard limit is
+    # over the warning threshold too, and two messages about one page invite reading
+    # the softer one. The refusal supersedes it.
+    refusal = size_refusal(breakdown, config.EXPLORER_MAX_BYTES)
+    if refusal:
+        print(refusal, end="", file=sys.stderr)
+        # Recorded, not only printed. A refusal is the run an operator most needs a
+        # number from, and stderr is the one place it does not survive: the next
+        # build compares against the record, and a refused build that wrote nothing
+        # to it reads as a build that never happened rather than one that stopped.
+        # `page_bytes` is what the page WOULD have been - it is the quantity the
+        # limit is about - and `refused_over_bytes` carries the limit beside it so
+        # the pair says why, not just how big. The block breakdown goes in whole so
+        # the operator can act on the same numbers the message ranked.
+        telemetry.record(
+            {
+                **{f"explorer.bytes_{name}": size for name, size in breakdown.items()},
+                "explorer.page_bytes": sum(breakdown.values()),
+                "explorer.refused_over_bytes": config.EXPLORER_MAX_BYTES,
+            }
+        )
+        return 1
     warning = size_warning(breakdown, config.EXPLORER_WARN_BYTES)
     if warning:
         print(warning, end="", file=sys.stderr)

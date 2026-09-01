@@ -1002,6 +1002,151 @@ class PageByteAttributionTest(SettingsIsolated):
         finally:
             importlib.reload(config)
 
+    def test_a_page_over_the_hard_limit_is_refused_instead_of_written(self):
+        """Breaks if the stage warns about a page above GitHub's ceiling and writes it
+        anyway, which is what it did: the file reached the working tree, was committed
+        beside the layers it was built from, and the store found out when `git push`
+        was rejected - a commit later, and with a message naming neither the stage nor
+        the layer that grew. The limit is lowered here rather than the fixture grown to
+        100 MB; the code path is the shipped one either way, and the size the refusal
+        quotes is checked against the file the same build produces once the limit
+        allows it, so it is the page's own size rather than a neighbouring number.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_MAX_BYTES=100_000)
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                self.assertEqual(explorer.main(), 1)
+            written = config.EXPLORER_PATH.exists()
+            config.configure(EXPLORER_MAX_BYTES=100 * 1_048_576)
+            self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+
+        stderr = err.getvalue()
+        self.assertFalse(written)
+        self.assertIn("Refusing to write the explorer page", stderr)
+        self.assertIn(f"{size:,} bytes", stderr)
+        self.assertIn("100,000", stderr)
+        largest = re.findall(r"([a-z_]+) ([\d,]+) bytes", stderr.split("Largest blocks:")[1])
+        self.assertEqual([name for name, _ in largest], ["summaries", "topics", "app_js"])
+
+    def test_a_refused_build_records_why_it_stopped(self):
+        """Catches a refusal that only prints. `status` and the next build read the
+        telemetry record, not stderr, so a refused run that recorded nothing is
+        indistinguishable there from a run that never happened - and the operator
+        is left with a failure whose size and cause survive only in a scrollback.
+
+        The recorded `page_bytes` is what the page would have been, because that is
+        the quantity the limit is about, and `refused_over_bytes` carries the limit
+        beside it so the pair says why rather than only how big.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_MAX_BYTES=100_000)
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(explorer.main(), 1)
+            recorded = store_io.read_json(config.TELEMETRY_PATH, default={}).get("measurements", {})
+
+        self.assertIn("explorer.page_bytes", recorded, "a refusal recorded no size")
+        self.assertEqual(
+            recorded.get("explorer.refused_over_bytes"),
+            100_000,
+            "the record does not say which limit the page was over",
+        )
+        self.assertGreater(
+            recorded["explorer.page_bytes"],
+            recorded["explorer.refused_over_bytes"],
+            "the recorded size does not explain the refusal",
+        )
+        self.assertTrue(
+            any(k.startswith("explorer.bytes_") for k in recorded),
+            "the record carries no block breakdown to act on",
+        )
+
+    def test_a_refused_build_leaves_the_page_the_store_already_had(self):
+        """Breaks if the refusal comes after the write - or after a write that has
+        already replaced the previous page. A stage that fails having swapped a
+        pushable artefact for an unpushable one leaves the tree worse than it found
+        it, and the next run, `status` and the commit all inherit that.
+
+        The digest record goes with it: `status` compares the inputs named there
+        against the layers on disk, so writing it for a page that was never built
+        would report the page as current against inputs it never came from.
+        """
+        kept = "<html>the page this store can still push</html>"
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.EXPLORER_PATH.parent.mkdir(parents=True, exist_ok=True)
+            config.EXPLORER_PATH.write_text(kept, encoding="utf-8")
+            config.configure(EXPLORER_MAX_BYTES=100_000)
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(explorer.main(), 1)
+            after = config.EXPLORER_PATH.read_text(encoding="utf-8")
+            recorded_inputs = config.EXPLORER_INPUTS_PATH.exists()
+
+        self.assertEqual(after, kept)
+        self.assertFalse(recorded_inputs)
+
+    def test_a_page_under_the_hard_limit_is_written_and_the_stage_succeeds(self):
+        """The sensitivity control, and the one that matters: a refusal that fired on
+        every page would satisfy the two tests above and destroy the stage for every
+        store. The shipped limit is left at its default here, and this fixture's page
+        is around a megabyte against a hundred of them - asserted, not assumed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            _, stderr = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+            page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+
+        self.assertLess(size, config.EXPLORER_MAX_BYTES)
+        self.assertNotIn("Refusing", stderr)
+        self.assertIn("</html>", page)
+
+    def test_a_page_over_the_warning_and_under_the_limit_still_only_warns(self):
+        """The other half of the sensitivity control. Breaks if the refusal takes the
+        warning's threshold, which would turn every store already living above the
+        warning into a failing build overnight. The two thresholds are set apart here
+        and the page is asserted to fall between them, so the band is real.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp))
+            config.configure(EXPLORER_WARN_BYTES=100_000, EXPLORER_MAX_BYTES=100 * 1_048_576)
+            _, stderr = self._build()
+            size = config.EXPLORER_PATH.stat().st_size
+
+        self.assertGreater(size, 100_000)
+        self.assertLess(size, 100 * 1_048_576)
+        self.assertIn("WARNING", stderr)
+        self.assertNotIn("Refusing", stderr)
+
+    def test_the_hard_limit_comes_from_the_environment(self):
+        """Breaks if the limit is written at the call site, so a store whose page is
+        not pushed to GitHub could not raise it and would have no way past a refusal.
+        The default is checked too, and it is the number the refusal exists for:
+        GitHub's 100 MB file ceiling, not a threshold this library chose.
+        """
+        self.assertEqual(config.EXPLORER_MAX_BYTES, 100 * 1_048_576)
+        with mock.patch.dict(os.environ, {"KSB_EXPLORER_MAX_BYTES": "100000"}):
+            importlib.reload(config)
+        try:
+            self.assertEqual(config.EXPLORER_MAX_BYTES, 100_000)
+            with tempfile.TemporaryDirectory() as tmp:
+                self._store(Path(tmp))
+                err = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                    self.assertEqual(explorer.main(), 1)
+            self.assertIn("Refusing", err.getvalue())
+        finally:
+            importlib.reload(config)
+
     def test_telemetry_records_the_breakdown_beside_the_page_size(self):
         """Breaks if the breakdown is printed and not recorded, so no later build can
         say which block grew - which is the whole reason a number is recorded here.
