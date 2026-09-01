@@ -120,18 +120,34 @@ class PhraseLabelEstateTest(SettingsIsolated):
         with contextlib.redirect_stderr(err):
             return summaries.absent_from_estate(unsupported)
 
+    def assert_estate(self, labels, cited, *, absent, by_segment, why=""):
+        """Build a graph of `labels`, cite `cited`, and assert both outcomes.
+
+        One helper rather than the same four lines in each test: the tests below
+        differ only in what they hand the estate and what they expect back, and
+        the reason each exists lives in its docstring rather than in repeated
+        setup. Both numbers are asserted every time — a term reported present
+        while the by-segment counter stays at zero would mean the match came
+        from somewhere this module is not describing.
+        """
+        self.write_graph(labels)
+        found, matched = self._absent([("1", set(cited))])
+        self.assertEqual(found, absent, why or "the absences are not the ones expected")
+        self.assertEqual(matched, by_segment, "the by-segment count does not match the verdict")
+
     def test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent(self):
         """Breaks if the reported false positive returns.
 
         The end of the reported path: a term in the citing community's own node,
         reported as something the store cannot speak about.
         """
-        self.write_graph([PHRASE_LABEL])
-
-        absent, by_segment = self._absent([("1", {"deliveryWindow"})])
-
-        self.assertEqual(absent, {}, "the estate holds this identifier inside a label")
-        self.assertEqual(by_segment, 1, "matched by a segment, so the trade stays counted")
+        self.assert_estate(
+            [PHRASE_LABEL],
+            {"deliveryWindow"},
+            absent={},
+            by_segment=1,
+            why="the estate holds this identifier inside a label",
+        )
 
     def test_a_truncated_name_is_still_reported_absent(self):
         """Breaks if the widening becomes a substring match.
@@ -141,12 +157,9 @@ class PhraseLabelEstateTest(SettingsIsolated):
         `deliveryWin` sits inside `deliveryWindow`, so a substring rule silences
         the only finding worth having.
         """
-        self.write_graph([PHRASE_LABEL])
-
-        absent, by_segment = self._absent([("1", {"deliveryWin"})])
-
-        self.assertEqual(absent, {"1": {"deliveryWin"}})
-        self.assertEqual(by_segment, 0)
+        self.assert_estate(
+            [PHRASE_LABEL], {"deliveryWin"}, absent={"1": {"deliveryWin"}}, by_segment=0
+        )
 
     def test_a_word_out_of_a_camel_case_name_is_still_reported_absent(self):
         """Breaks if the widening runs past segments into the words inside them.
@@ -156,12 +169,7 @@ class PhraseLabelEstateTest(SettingsIsolated):
         loose reports almost nothing — worse than the false positives it removed,
         because the report would still look like a check.
         """
-        self.write_graph([PHRASE_LABEL])
-
-        absent, by_segment = self._absent([("1", {"Window"})])
-
-        self.assertEqual(absent, {"1": {"Window"}})
-        self.assertEqual(by_segment, 0)
+        self.assert_estate([PHRASE_LABEL], {"Window"}, absent={"1": {"Window"}}, by_segment=0)
 
     def test_an_invented_term_is_still_reported_absent(self):
         """Breaks if the looser match silences the finding entirely.
@@ -170,12 +178,12 @@ class PhraseLabelEstateTest(SettingsIsolated):
         offers a great many segments, and a name it does not hold must still be
         reported against all of them.
         """
-        self.write_graph([PHRASE_LABEL, "Button orderTracker ('Track your order')"])
-
-        absent, by_segment = self._absent([("1", {"parcelDepot"})])
-
-        self.assertEqual(absent, {"1": {"parcelDepot"}})
-        self.assertEqual(by_segment, 0)
+        self.assert_estate(
+            [PHRASE_LABEL, "Button orderTracker ('Track your order')"],
+            {"parcelDepot"},
+            absent={"1": {"parcelDepot"}},
+            by_segment=0,
+        )
 
     def test_a_phrase_between_name_separators_still_corroborates(self):
         """Breaks if the wider split replaces the narrower one instead of adding.
@@ -184,12 +192,7 @@ class PhraseLabelEstateTest(SettingsIsolated):
         is grounded. Splitting the phrase into its words and nothing else takes
         that away — a fix for false absences that quietly creates new ones.
         """
-        self.write_graph(["Feature: My Widget"])
-
-        absent, by_segment = self._absent([("1", {"MyWidget"})])
-
-        self.assertEqual(absent, {})
-        self.assertEqual(by_segment, 1)
+        self.assert_estate(["Feature: My Widget"], {"MyWidget"}, absent={}, by_segment=1)
 
 
 if __name__ == "__main__":
