@@ -3150,6 +3150,76 @@ MUTATIONS = (
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
         ),
     ),
+    Mutation(
+        "a swallowing community reads as the same set",
+        "build_community_summaries.py",
+        "        identical = set(members) == members_of[target]",
+        "        identical = True",
+        "#296, the state that shipped, arrived as a recall-only carry: a new community "
+        "that swallowed an old one whole scored 1.00 however much unrelated material came "
+        "with it, so prose about a small coherent community was re-attached to a large "
+        "incoherent one. Reported on a real rebuild as the large majority of everything "
+        "carried. It is the shape rather than the size that hid it - every summary still "
+        "had a community and every community still had prose, so the store looked healthy "
+        "and the retention figure read as reassurance while being the opposite",
+        (
+            "test_summaries_remap.ClaimTargetsTest.test_a_dominant_target_is_claimed_with_its_share",
+            "test_summaries_remap.ExactClaimTargetsTest.test_a_community_holding_the_old_set_and_one_more_node_is_withdrawn",
+            "test_summaries_remap.ExactClaimTargetsTest.test_a_member_that_left_the_graph_is_named_as_a_changed_set_not_a_near_miss",
+            "test_summaries_remap.ExactClaimTargetsTest.test_repeated_node_ids_do_not_read_as_an_identical_set",
+            "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_prose_carried_below_set_equality_is_marked_in_the_report",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapCliTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+            "test_summaries_remap.RemapTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_prose_carried_below_set_equality_is_marked_in_the_report",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+        ),
+    ),
+    Mutation(
+        "the carry criterion defaults back to a tolerance",
+        "build_community_summaries.py",
+        "DEFAULT_CARRY = CARRY_EXACT",
+        "DEFAULT_CARRY = CARRY_OVERLAP",
+        "the shipped-default class again: the tolerance is still reachable and still "
+        "tested, so every assertion about it passes with the default pointing at it. What "
+        "ships is the criterion nobody passes an argument for",
+        (
+            "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapCliTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+            "test_summaries_remap.RemapTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_the_withdrawal_count_is_reported_beside_the_retention_figure",
+        ),
+    ),
+    Mutation(
+        "withdrawn prose no longer written beside the summaries",
+        "build_community_summaries.py",
+        "    io.write_json(\n        config.SUMMARIES_WITHDRAWN_PATH,\n"
+        "        dict(sorted(withdrawn.items(), key=lambda kv: int(kv[0]))),\n"
+        "        indent=1,\n    )",
+        "    pass",
+        "#296: set equality withdraws far more prose than the tolerance it replaced, so the "
+        "change is only defensible while the writing survives it. Unwritten, every count "
+        "still reconciles and the run still reports what it withdrew - the artefact naming "
+        "the paragraphs somebody is meant to revise is the only thing missing",
+        (
+            "test_summaries_remap.RemapCliTest.test_a_carried_summary_is_not_also_withdrawn",
+            "test_summaries_remap.RemapCliTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
+            "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap.RemapTest.test_a_carried_summary_is_not_also_withdrawn",
+            "test_summaries_remap.RemapTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
+            "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
+            "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+        ),
+    ),
 )
 
 

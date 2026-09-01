@@ -96,7 +96,7 @@ Then reconcile the number of per-repository graphs against
 repositories still exits zero.
 
 After clustering, record which partitioner produced the new IDs, then carry
-summaries onto them by membership overlap:
+summaries onto the communities that still hold the same node sets:
 
 ```bash
 knowledgestore record-clustering
@@ -110,7 +110,11 @@ summaries now sit on. Without it the committed snapshot describes the graph the
 store no longer has, and the next refresh remaps from a baseline that is
 consistently wrong — the one state `remap`'s own guards cannot see.
 
-Read the retention reported by `remap` — and before you attribute a low figure to
+Read the retention reported by `remap`, and the withdrawal count beside it.
+Expect retention to be low: a summary is carried only onto a community holding
+exactly the node set it describes, so any community that gained or lost a node
+has its prose withdrawn to `knowledge/summaries/communities-withdrawn.json` for
+revision rather than re-keyed. Before you attribute a low figure to
 the corpus, read what `status` says about the partitioner. A refresh run where
 `graspologic` is installed or absent differently from the build that produced the
 committed communities re-keys all of them, and the retention loss then has nothing
@@ -402,7 +406,7 @@ by membership, which is what lets authored per-cluster prose survive.
 `previous_node_community` is `{node_id: community_id}`, and
 `knowledge/summaries/membership-snapshot.json.gz` already holds it the other way
 round — invert it. Without this, clustering from scratch renames most
-communities, and every summary keyed to a renamed ID is dropped by `remap` for
+communities, and every summary keyed to a renamed ID is withdrawn by `remap` for
 no reason connected to the change you made.
 
 Do not pass `force=True` to work around the guard unless you can account for the
@@ -505,7 +509,7 @@ Two failures, both reported by store operators:
 
 | Symptom | Action |
 |---|---|
-| `summaries remap` would discard most prose | Stop. Verify clustering coverage before remapping; a clustering command can report success without saving its result. |
+| `summaries remap` withdrew most of the prose | Usually correct. A summary is carried only onto a community holding exactly the node set it was written about, so any community that gained or lost a node has its prose withdrawn for revision. Check the clustering first — a clustering command can report success without saving its result, and coverage below the `--coverage` floor is refused rather than reported — then treat the withdrawn file as a backfill queue. |
 | `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
 | `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |

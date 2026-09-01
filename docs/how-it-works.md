@@ -204,11 +204,12 @@ that in both directions
 - **`merge` validates shape**: unknown community ids are rejected, as is any
   summary outside 60–700 characters.
 - **`remap` protects continuity** with three refusals: it carries a summary
-  only where the new cluster holds at least 60% of the old one's members
-  (`--bar`); it refuses to run at all on an implausibly small summary set
-  (`--floor`, default 10) or when fewer than half the graph's nodes carry a
-  community (`--coverage`) — both of which would silently write a bad file
-  over a good one.
+  only onto a community holding exactly the node set it was written about, and
+  withdraws the rest to `communities-withdrawn.json` (`--carry overlap` restores
+  the older 60%-of-the-old-members tolerance, `--bar`); it refuses to run at all
+  on an implausibly small summary set (`--floor`, default 10) or when fewer than
+  half the graph's nodes carry a community (`--coverage`) — both of which would
+  silently write a bad file over a good one.
 - **`verify` checks grounding, not shape**: identifiers cited in each
   summary's prose are normalised (case and punctuation stripped), expanded
   with spelling variants (`.java` suffixes, dotted-name parts, `Test`
