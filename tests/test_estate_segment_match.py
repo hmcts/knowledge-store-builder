@@ -18,19 +18,14 @@ would not have travelled; a number printed wherever the check runs does.
 
 from __future__ import annotations
 
-import contextlib
-import io as io_module
-import json
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from settings_isolation import SettingsIsolated  # noqa: E402
+from settings_isolation import EstateGraphIsolated  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
-from knowledgestore import config  # noqa: E402
 
 
 class NameSegmentTest(unittest.TestCase):
@@ -62,31 +57,7 @@ class NameSegmentTest(unittest.TestCase):
         self.assertNotIn("uk", summaries.name_segments("uk.gov.example"))
 
 
-class AbsentFromEstateTest(SettingsIsolated):
-    def setUp(self):
-        super().setUp()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        (self.root / "graphify-out").mkdir(parents=True)
-        self._old_root = config.ROOT
-        config.configure(root=str(self.root))
-
-    def tearDown(self):
-        config.configure(root=str(self._old_root))
-        self._tmp.cleanup()
-        super().tearDown()
-
-    def write_graph(self, labels):
-        config.GRAPH_PATH.write_text(
-            json.dumps({"nodes": [{"id": f"n{i}", "label": v} for i, v in enumerate(labels)]}),
-            encoding="utf-8",
-        )
-
-    def _absent(self, unsupported):
-        err = io_module.StringIO()
-        with contextlib.redirect_stderr(err):
-            return summaries.absent_from_estate(unsupported)
-
+class AbsentFromEstateTest(EstateGraphIsolated):
     def test_a_scoped_package_no_longer_reads_as_absent(self):
         """Breaks if the reported false positive returns.
 
