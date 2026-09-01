@@ -56,6 +56,26 @@ class InstallDocsGateTest(SettingsIsolated):
             self.store(tmp, LOCK_WITH_INDEX_WRONG_VERSION, {})
             self.assertEqual(gate.main(), 1)
 
+    def test_the_no_index_branch_still_carries_the_resolution(self):
+        """The stage branch no other test reaches.
+
+        Every other stage test uses a lock that names its index, so they all exit
+        through the branch above this one. This is the shape a store takes when the
+        lock carries no index and the documented commands pass the flag themselves -
+        and a disagreement has to survive that path too. Found by review: there were
+        two `return resolution` sites and the tests reached one.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                "thing==2.0 \\\n    --hash=sha256:abc\n",
+                {
+                    "README.md": "Rebuild:\n\n```bash\npip install "
+                    f"--extra-index-url {FEED} -r requirements.lock\n```\n"
+                },
+            )
+            self.assertEqual(gate.main(), 1)
+
     def test_agreeing_files_leave_the_stage_passing(self):
         """The control. A stage that failed on an agreeing pair would be switched
         off, and its mutation result would prove nothing."""
@@ -199,10 +219,17 @@ class TheLockMustResolveThePinTest(unittest.TestCase):
         would report every extras-bearing pin as unresolved and the check would be
         abandoned as noise.
         """
+        # Asserted against a DISAGREEING lock, and on the reported mismatch rather
+        # than on an empty list. `[]` is what "compared and agreed" and "never parsed
+        # at all" both produce: delete the extras group from the pattern and an
+        # extras-bearing pin silently stops being compared, which an emptiness
+        # assertion cannot tell from agreement. Requiring the version to be reported
+        # makes it survive the parse first.
         req, lock = self._files(
-            "alpha[deploy,semantic]==1.2.3 ; python_version < '3.14'\n", "alpha==1.2.3 \\\n"
+            "alpha[deploy,semantic]==1.2.3 ; python_version < '3.14'\n",
+            "alpha==9.9.9 \\\n    --hash=sha256:aa\n",
         )
-        self.assertEqual(gate.unresolved_pins(req, lock), [])
+        self.assertEqual(gate.unresolved_pins(req, lock), [("alpha", "1.2.3", "9.9.9")])
 
     def test_names_are_compared_by_pep_503_normalisation(self) -> None:
         """A lock writes the normalised name, an input often writes the human one.
@@ -224,8 +251,26 @@ class TheLockMustResolveThePinTest(unittest.TestCase):
 
     def test_a_commented_pin_is_not_read(self) -> None:
         """A store records superseded pins as comments; reading them would report a
-        disagreement with a line that is deliberately inert."""
-        req, lock = self._files("# alpha==9.9.9\nalpha==1.2.3\n", "alpha==1.2.3 \\\n")
+        disagreement with a line that is deliberately inert.
+
+        **This assertion documents the property; it does not gate it.** Review found
+        it could not fail, and it still cannot: the behaviour is guaranteed twice over
+        by construction. `_PINNED` opens with `^`, and both call sites use `re.match`,
+        which anchors at position 0 regardless - so no single edit to either makes a
+        commented line parse. Relaxing one of them to make this test meaningful would
+        trade real defence for the appearance of coverage, which is the wrong way
+        round; a redundantly guarded property is a good thing to have and a bad thing
+        to count. It carries no mutation entry for the same reason.
+
+        Two things were still worth changing. A `split("#", 1)[0]` strip stood in front
+        of the anchoring and was provably inert - `^` blocks a leading `#`, and the
+        version class already excludes `#`, so a trailing comment never reached the
+        version either - and it read as the mechanism while doing nothing. And the
+        commented pin now comes last: with it first, a parser that did read comments
+        had its value overwritten by the live pin on the next line, so this could not
+        catch even a doubly-broken parse. Ordered this way it would.
+        """
+        req, lock = self._files("alpha==1.2.3\n# alpha==9.9.9\n", "alpha==1.2.3 \\\n")
         self.assertEqual(gate.unresolved_pins(req, lock), [])
 
     def test_every_pin_is_checked_rather_than_one_named_package(self) -> None:

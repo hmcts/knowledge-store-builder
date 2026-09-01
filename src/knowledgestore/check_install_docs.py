@@ -79,12 +79,22 @@ def _normalise(name: str) -> str:
 
 
 def pinned_versions(requirements: Path) -> dict[str, str]:
-    """Normalised name -> version, for every `==` requirement the input states."""
+    """Normalised name -> version, for every `==` requirement the input states.
+
+    A comment is skipped by the pattern being anchored, not by stripping `#` from
+    the line first. That strip used to be here and was provably inert: `match`
+    anchors at the start, so a leading `#` cannot begin a name whatever precedes
+    the comparison, and the version class already excludes `#`, so a trailing
+    comment on a live pin never reached the version either. Removing it leaves one
+    mechanism holding the behaviour instead of two, one of which was doing nothing
+    - and the test named for commented pins could not fail while the inert strip
+    stood in front of the real guard.
+    """
     found: dict[str, str] = {}
     if not requirements.is_file():
         return found
     for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = _PINNED.match(line.split("#", 1)[0].strip())
+        match = _PINNED.match(line.strip())
         if match:
             found[_normalise(match.group("name"))] = match.group("version")
     return found
@@ -296,30 +306,34 @@ def main() -> int:
     # first would hide the second from whoever fixes the first.
     resolution = _report_unresolved(config.REQUIREMENTS_PATH, lock)
 
+    # One exit for the resolution result rather than one per passing branch. With a
+    # `return resolution` in each, either could be severed on its own - and every
+    # stage test reached only the first, because all of them use a lock that names
+    # its index. The uncovered branch was the one a store takes when the lock carries
+    # no index, which is the shape the older half of this check was written for.
+    # Structure rather than coverage: one site to carry it, one site to break.
     if declares_an_index(lock):
         print(f"{lock.name} names its index - no documented command needs {INDEX_FLAG}")
-        return resolution
-
-    installs = lock_installs(config.ROOT, lock.name)
-    offenders = offending_commands(installs)
-    if not offenders:
+    else:
+        installs = lock_installs(config.ROOT, lock.name)
+        offenders = offending_commands(installs)
+        if offenders:
+            print(
+                f"{lock.name} names no index, so these documented commands fail as written:\n",
+                file=sys.stderr,
+            )
+            for path, number, command in offenders:
+                print(f"  {path}:{number}\n    {command}", file=sys.stderr)
+            url = index_url(config.REQUIREMENTS_PATH)
+            hint = f"{INDEX_FLAG} {url}" if url else f"{INDEX_FLAG} <your index>"
+            print(
+                f"\nAdd {hint} to each, or recompile the lock with"
+                f"\n--emit-index-url --emit-build-options so it carries the index itself.",
+                file=sys.stderr,
+            )
+            return 1
         print(_installs_line(lock.name, len(installs)))
-        return resolution
-
-    print(
-        f"{lock.name} names no index, so these documented commands fail as written:\n",
-        file=sys.stderr,
-    )
-    for path, number, command in offenders:
-        print(f"  {path}:{number}\n    {command}", file=sys.stderr)
-    url = index_url(config.REQUIREMENTS_PATH)
-    hint = f"{INDEX_FLAG} {url}" if url else f"{INDEX_FLAG} <your index>"
-    print(
-        f"\nAdd {hint} to each, or recompile the lock with"
-        f"\n--emit-index-url --emit-build-options so it carries the index itself.",
-        file=sys.stderr,
-    )
-    return 1
+    return resolution
 
 
 if __name__ == "__main__":
