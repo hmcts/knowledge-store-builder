@@ -585,8 +585,15 @@ class CliTest(SettingsIsolated):
         original = config.ROOT
         self.addCleanup(config.configure, original)
         with tempfile.TemporaryDirectory() as tmp:
-            cli.main(["--root", tmp])
-            self.assertEqual(config.GRAPH_PATH.parent.parent, Path(tmp).resolve())
+            # Resolve before configuring, and compare against the same value.
+            # Handing `configure` an unresolved path and asserting against a
+            # resolved one makes this test depend on `configure` resolving - which
+            # is invisible on Linux and, on macOS, quietly turns it into an
+            # observer of a behaviour it is not about. `configure`'s resolve has
+            # its own test in test_harness_root_spelling.
+            root = Path(tmp).resolve()
+            cli.main(["--root", str(root)])
+            self.assertEqual(config.GRAPH_PATH.parent.parent, root)
 
 
 class SemanticVocabularyTest(SettingsIsolated):

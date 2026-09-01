@@ -60,11 +60,16 @@ class ConfigTest(SettingsIsolated):
         original = config.ROOT
         self.addCleanup(config.configure, original)
         with tempfile.TemporaryDirectory() as tmp:
-            config.configure(root=tmp)
+            # Resolve before configuring, and compare against the same value.
+            # Handing `configure` an unresolved path and asserting against a
+            # resolved one makes this test depend on `configure` resolving - which
+            # is invisible on Linux and, on macOS, quietly turns it into an
+            # observer of a behaviour it is not about. `configure`'s resolve has
+            # its own test in test_harness_root_spelling.
+            root = Path(tmp).resolve()
+            config.configure(root=str(root))
             for name in ROOTED:
-                self.assertTrue(
-                    str(getattr(config, name)).startswith(str(Path(tmp).resolve())), name
-                )
+                self.assertTrue(str(getattr(config, name)).startswith(str(root)), name)
 
     def test_configure_overrides_a_single_setting(self):
         original = config.GITHUB_ORG
