@@ -3329,6 +3329,26 @@ MUTATIONS = (
             "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
         ),
     ),
+    Mutation(
+        "the provenance split is printed without checking the report describes these summaries",
+        "build_community_summaries.py",
+        "    withheld = _stale_provenance(report, digests)",
+        '    withheld = ""',
+        "#305, the state that shipped: `verify` read `remap-report.json` with no freshness "
+        "check at all, so a report a previous rebuild had left behind relabelled every current "
+        "summary carried or authored. Community ids are small integers and are reused across "
+        "re-clusters, so every id in the old report still resolved against the current "
+        "summaries - no error, no empty group, just a different partition reported to two "
+        "significant figures, with the two groups summing to a population the store did not "
+        "hold. Reported from a real store, and the line's own docstring says retention must "
+        "never be read without it",
+        (
+            "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_a_report_from_a_previous_clustering_does_not_produce_a_split",
+            "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_ids_reused_by_the_new_clustering_are_not_read_as_a_match",
+            "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_the_withheld_split_says_why_on_stderr",
+            "test_summaries_provenance_freshness.ProvenanceFreshnessWithoutARecordTest.test_a_report_older_than_the_digests_does_not_produce_a_split",
+        ),
+    ),
 )
 
 

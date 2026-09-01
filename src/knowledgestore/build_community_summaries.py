@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import re
 import sys
@@ -1054,6 +1055,11 @@ def remap(
     io.write_json(
         config.REMAP_REPORT_PATH,
         {
+            # Which clustering these ids belong to. Without it the carried map is
+            # a set of small integers that resolves against any partition, so
+            # `verify` cannot tell a split of these summaries from a split of
+            # somebody else's (#305).
+            "clustering": _clustering_of_nodes(nodes),
             "carried": dict(sorted(carried.items(), key=lambda kv: int(kv[0]))),
             "displaced": dict(sorted(displaced.items(), key=lambda kv: int(kv[0]))),
         },
@@ -1391,15 +1397,141 @@ def _ungrounded(text: str, digest: dict) -> set[str]:
     }
 
 
-def _report_provenance_split(checked: list[str], unsupported: list[tuple[str, set[str]]]) -> None:
+def _clustering_fingerprint(sizes: dict[str, int]) -> str:
+    """An identity for one clustering: its significant communities and their sizes.
+
+    What `remap` records in its report and what `verify` recomputes, so the two
+    can be compared. Timestamps cannot answer "was this report written for this
+    partition" - see `io.layer_digests` for the same argument about pages and the
+    layers they embed - and the answer matters here because every id in a report
+    written for a previous partition still resolves against the current
+    summaries.
+
+    Sorted before hashing: a fingerprint that depended on dict order would differ
+    between two runs over the same graph, and a freshness check that reports stale
+    at random is worse than none.
+    """
+    payload = ";".join(f"{cid}:{sizes[cid]}" for cid in sorted(sizes))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _clustering_of_nodes(nodes: list[dict]) -> str:
+    """The fingerprint of the clustering a graph holds, counted as `extract` counts it.
+
+    Mirrors `extract`'s bucketing on purpose - the same default for a node
+    carrying no community, the same significance threshold - because the two
+    values are compared: this is recorded in the remap report and `verify`
+    recomputes it from the digests `extract` wrote. The mirror is checked rather
+    than asserted; `tests/test_summaries_provenance_freshness.py` runs both
+    stages over one graph.
+
+    "" when nothing clears the threshold, which reads through as "no identity
+    recorded" rather than as the identity of an empty clustering.
+    """
+    sizes = Counter(str(node.get("community", -1)) for node in nodes)
+    significant = {cid: n for cid, n in sizes.items() if n >= config.MIN_COMMUNITY_SIZE}
+    return _clustering_fingerprint(significant) if significant else ""
+
+
+def _clustering_of_digests(digests: dict[str, dict]) -> str:
+    """The same fingerprint, from the digests `verify` has already loaded.
+
+    Free, and that is why the check is affordable in `verify`: `extract` writes
+    each community's size into its digest, so nothing has to read the graph to
+    answer whether the clustering has moved.
+
+    "" when any digest carries no size. A digest file this library did not write
+    cannot be compared, and a fingerprint over the ones that do carry a size
+    would answer a different question - it would report every hand-made fixture
+    as a different clustering.
+    """
+    sizes: dict[str, int] = {}
+    for community, digest in digests.items():
+        size = digest.get("size")
+        if not isinstance(size, int):
+            return ""
+        sizes[community] = size
+    return _clustering_fingerprint(sizes) if sizes else ""
+
+
+def _mtime(path: Path) -> float:
+    """A file's modification time, or 0.0 when it cannot be read - which reads
+    through as "older than anything", so an unreadable report is treated as one
+    that cannot be shown to be current."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _stale_provenance(report: dict, digests: dict[str, dict]) -> str:
+    """Why the carried-versus-authored split must not be printed, or "" when it may.
+
+    Two checks, because a report written before this one was recorded still has
+    to be judged:
+
+    - the recorded clustering against the current one, which is the real answer:
+      a re-cluster moves community sizes, so a report written for a previous
+      partition fingerprints differently whatever the filesystem says;
+    - failing that, the report's age against the digests'. `extract` rewrites the
+      digests for a new partition, so a report older than them may describe a
+      previous one. A proxy, and it fails towards withholding the number: it
+      fires on a re-extract that changed nothing, and it misses a checkout that
+      rewrote both timestamps.
+    """
+    recorded = report.get("clustering")
+    current = _clustering_of_digests(digests)
+    if isinstance(recorded, str) and recorded and current:
+        if recorded == current:
+            return ""
+        return (
+            "  grounding by provenance: not reported. "
+            f"{config.REMAP_REPORT_PATH.name} was written for clustering {recorded} and these "
+            f"digests are {current}, so its carried and authored groups are a different "
+            "partition of this estate. Community ids are small integers and are reused across "
+            "re-clusters, so its ids still resolve against these summaries and the split would "
+            "have read as ordinary. Re-run `summaries remap` to rewrite the report for this "
+            "clustering."
+        )
+    if _mtime(config.REMAP_REPORT_PATH) >= _mtime(config.SUMMARIES_INPUT_PATH):
+        return ""
+    return (
+        "  grounding by provenance: not reported. "
+        f"{config.REMAP_REPORT_PATH.name} records no clustering and is older than "
+        f"{config.SUMMARIES_INPUT_PATH.name}, so it may have been written for a previous "
+        "partition - and one would still resolve, because community ids are reused across "
+        "re-clusters. Re-run `summaries remap` to rewrite the report for this clustering."
+    )
+
+
+def _report_provenance_split(
+    checked: list[str], unsupported: list[tuple[str, set[str]]], digests: dict[str, dict]
+) -> None:
     """Grounding flag rate split carried-versus-authored, when a remap report exists.
 
     Remap preserves coverage while degrading grounding (measured: 9% flagged
     for prose authored on its own digest, 37% for prose carried across a
     re-cluster), so retention must never be read without this line beside it.
+
+    Which is why the split is withheld rather than qualified when the report
+    describes another clustering. A line that load-bearing gets read, and a
+    reader invited to conclude that carried prose grounds better than authored
+    prose has no way to see that the two groups are not the groups being
+    described: nothing fails and nothing comes back empty on a stale report,
+    because community ids are small integers and get reused, so every id in a
+    report written for a previous partition still resolves against the current
+    summaries. The reason goes to stderr in the line's place, so a withheld
+    number is visible rather than silently absent.
     """
-    carried_ids = set(io.read_json_dict(config.REMAP_REPORT_PATH).get("carried", {}))
+    report = io.read_json_dict(config.REMAP_REPORT_PATH)
+    carried_ids = set(report.get("carried", {}))
     if not carried_ids:
+        return
+    # `withheld` rather than `stale`: the guard of that name in `adrift` is a
+    # mutation-gate site, and an entry's `find` must match one line of the file.
+    withheld = _stale_provenance(report, digests)
+    if withheld:
+        print(withheld, file=sys.stderr)
         return
     flagged = {cid for cid, _ in unsupported}
 
@@ -1759,7 +1891,7 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
             "whole identifier (scoped packages, Java packages, module addresses)"
         )
     _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent, classified)
-    _report_provenance_split(checked, unsupported)
+    _report_provenance_split(checked, unsupported, digests)
     # Under --estate, fail on what is genuinely unbacked rather than on what a
     # 12-node sample failed to mention. Without it, the old behaviour stands so
     # an existing CI invocation does not silently change meaning.
