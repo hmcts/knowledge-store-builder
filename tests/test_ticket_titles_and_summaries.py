@@ -11,6 +11,7 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
+from knowledgestore import io as store_io  # noqa: E402
 from knowledgestore import import_ticket_titles as titles  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
 
@@ -109,7 +110,9 @@ class SummariesMergeTest(SettingsIsolated):
             batch = Path(tmp) / "gen.json"
             batch.write_text(json.dumps({"999": "x" * 100, "3": "too short"}), encoding="utf-8")
             code = summaries.merge([str(batch)])
-            merged = json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
+            # the prose alone: the artefact also carries a metadata block, which is
+            # written whether or not any summary was accepted
+            merged = store_io.read_summaries(config.SUMMARIES_PATH)
         self.assertEqual(code, 1)
         self.assertEqual(merged, {})
 

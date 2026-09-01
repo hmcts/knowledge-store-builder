@@ -8,7 +8,9 @@ Claude Code (maintainers have a licence; consumers never need one):
   1. knowledgestore summaries extract
        -> knowledge/summaries/communities-input.json
        One digest per significant community (label, size, repositories,
-       top nodes, business features, Jira tickets) - the raw material.
+       top nodes, business features, Jira tickets) - the raw material -
+       and a `coverage` block saying how much of each capped field it
+       shows, so the author knows when they are reading a sample.
 
   2. In Claude Code: generate 2-4 sentence business summaries for each
      digest, as JSON files of {"<community id>": "<summary>", ...}.
@@ -30,7 +32,10 @@ Claude Code (maintainers have a licence; consumers never need one):
 
   5. knowledgestore summaries merge <file.json ...>
        -> knowledge/summaries/communities.json  (committed)
-       Validates ids and length bounds, merges over any existing file.
+       Validates ids and length bounds, merges over any existing file,
+       and carries each community's coverage into a reserved `_metadata`
+       key beside a digest of the prose. The write is gated on that
+       digest: a run that changed no prose rewrites nothing.
 
 The explorer embeds the merged summaries; Ask answers then include
 pre-written prose selected deterministically - no query-time AI.
@@ -40,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import re
 import sys
@@ -61,6 +67,11 @@ TOP_TICKETS = 8
 MIN_SUMMARY_LEN = 60
 MAX_SUMMARY_LEN = 700
 
+# The capped fields, in the order a coverage block records them. Listed rather
+# than derived from a digest's keys: these blocks are committed bytes, so their
+# order must not depend on how a dict happened to be built.
+COVERAGE_FIELDS = ("top_nodes", "business_features", "tickets")
+
 
 def _derived_label(nodes: list[dict], repos: Counter) -> str:
     """Name a community from evidence already in its digest.
@@ -81,12 +92,72 @@ def _derived_label(nodes: list[dict], repos: Counter) -> str:
     return top or repo
 
 
+def validate_coverage(community: object, coverage: dict) -> None:
+    """Refuse a coverage block that does not reconcile.
+
+    `shown + unshown == total`, per field, wherever a block is written. A block
+    that does not add up is worse than no block at all: it reads as precision, and
+    the whole point of recording it is that `summaries verify` and a human reader
+    subtract from it. Raises rather than warns, because the artefact is committed
+    and a warning on a build log is not a gate.
+    """
+    for field in COVERAGE_FIELDS:
+        entry = coverage.get(field)
+        if not isinstance(entry, dict):
+            raise ValueError(f"community {community}: coverage records no {field}")
+        shown, unshown, total = entry.get("shown"), entry.get("unshown"), entry.get("total")
+        if not (isinstance(shown, int) and isinstance(unshown, int) and isinstance(total, int)):
+            raise ValueError(f"community {community}: coverage for {field} is not counted: {entry}")
+        if shown < 0 or unshown < 0 or shown + unshown != total:
+            raise ValueError(
+                f"community {community}: coverage for {field} does not reconcile - "
+                f"{shown} shown + {unshown} unshown is not {total} total"
+            )
+
+
+def checked_coverage(digest: dict, pools: dict[str, tuple[int, int]]) -> dict:
+    """One digest's coverage block, cross-checked against the fields it describes.
+
+    `pools` gives each field `(how many the cap lets through, how many exist)`.
+    The first is computed from the cap rather than measured off the emitted list
+    on purpose: a count copied from the list it describes can never disagree with
+    it, so it would record a cap change instead of catching one. Lower a cap in
+    the digest and leave this alone and the two disagree here, at the point of
+    writing, rather than in a store's committed prose.
+    """
+    block: dict[str, dict[str, int]] = {}
+    for field in COVERAGE_FIELDS:
+        shown, total = pools[field]
+        held = len(digest[field])
+        if held != shown:
+            raise ValueError(
+                f"coverage for {field} claims {shown} shown, the digest holds {held} - "
+                "the cap and the block that describes it have gone out of step"
+            )
+        block[field] = {"shown": shown, "unshown": total - shown, "total": total}
+    validate_coverage(digest.get("id"), block)
+    return block
+
+
 def community_digest(
     community: int, nodes: list[dict], labels: dict, intent: dict, degree: dict
 ) -> dict:
-    """The raw material one community summary is written from."""
+    """The raw material one community summary is written from.
+
+    Three fields are capped, and `coverage` records what each cap left out. An
+    author reading `12 of 340` writes differently from one reading `12 of 12`,
+    and `summaries verify` can then tell a term the digest never showed from one
+    the community does not contain - which the totals being computed and
+    discarded made indistinguishable.
+    """
     nodes.sort(key=lambda n: -degree[n["id"]])
     repos = Counter(n.get("repo", "") for n in nodes)
+    # label-less structural nodes (Java package hierarchy) are skipped, so the
+    # sample is drawn from twice the cap and then capped. `window` is what that
+    # sample may draw on; `labelled` is what the community holds altogether,
+    # which is the total the coverage block reports.
+    labelled = [n for n in nodes if n.get("label")]
+    window = [n for n in nodes[: TOP_NODES * 2] if n.get("label")]
     features = [n["label"] for n in nodes if kinds.is_kind(n, kinds.FEATURE)]
     tickets: Counter = Counter()
     for n in nodes[:30]:
@@ -94,22 +165,30 @@ def community_digest(
         entry = intent.get(n.get("repo", ""), {}).get(n.get("source_file") or "")
         if entry:
             tickets.update(dict(list(entry["tickets"].items())[:3]))
-    return {
+    digest = {
         "id": community,
         "label": (
             labels.get(str(community)) or _derived_label(nodes, repos) or f"Community {community}"
         ),
         "size": len(nodes),
         "repositories": [r for r, _ in repos.most_common(4) if r],
-        "top_nodes": [
-            # label-less structural nodes (Java package hierarchy) are skipped
-            f"{n['label']} ({n.get('source_file') or '?'})"
-            for n in nodes[: TOP_NODES * 2]
-            if n.get("label")
-        ][:TOP_NODES],
+        "top_nodes": [f"{n['label']} ({n.get('source_file') or '?'})" for n in window][:TOP_NODES],
         "business_features": features[:TOP_FEATURES],
         "tickets": [t for t, _ in tickets.most_common(TOP_TICKETS)],
     }
+    # `tickets` counts what the digest's own scan found across the 30
+    # highest-degree nodes, which is the pool the sample was taken from rather
+    # than every ticket the community touches. Said here because a total that
+    # means something narrower than it reads is how a coverage block misleads.
+    digest["coverage"] = checked_coverage(
+        digest,
+        {
+            "top_nodes": (min(TOP_NODES, len(window)), len(labelled)),
+            "business_features": (min(TOP_FEATURES, len(features)), len(features)),
+            "tickets": (min(TOP_TICKETS, len(tickets)), len(tickets)),
+        },
+    )
+    return digest
 
 
 def extract() -> int:
@@ -154,6 +233,36 @@ def extract() -> int:
     return 0
 
 
+def content_digest(body: dict[str, str]) -> str:
+    """A hash of the merged artefact's semantic body - the prose, and nothing else.
+
+    The metadata block is excluded deliberately. Coverage counts move whenever the
+    graph is re-extracted, so hashing them would make every refresh rewrite every
+    summary in every consuming store's diff for reasons no reader can act on.
+    Keys are sorted, so the hash describes the content rather than the order it
+    happened to be built in.
+    """
+    canonical = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
+    """The reserved block: the digest the write is gated on, and the evidence base.
+
+    Every key is placed explicitly - here, in `COVERAGE_FIELDS` and by sorting the
+    community ids - because two runs on the same inputs must be byte-identical and
+    dict order is not a contract worth resting that on.
+
+    Coverage is carried only for a community that has a digest. Prose retained for
+    a cluster that has fallen below the significance threshold has none, and
+    inventing an empty block for it would say the digest showed everything.
+    """
+    covered = {cid: coverage[cid] for cid in sorted(body, key=lambda k: int(k)) if cid in coverage}
+    for cid, block in covered.items():
+        validate_coverage(cid, block)
+    return {"content_digest": content_digest(body), "coverage": covered}
+
+
 # The S8707 register. Sonar reports `pythonsecurity:S8707` wherever a path built
 # from CLI arguments reaches the filesystem, and this library answers it in two
 # ways: a write is validated by `io.checked_write_target`, and a read is
@@ -161,21 +270,22 @@ def extract() -> int:
 # grounds rather than restating them, so the two cannot drift into two different
 # policies. Keep this register complete - `tests/test_read_path_policy.py` fails
 # when a module suppresses the rule without appearing here.
-#   S8707 policy site: build_community_summaries.py - merge, where the grounds are
+#   S8707 policy site: build_community_summaries.py - _take_batches, where the grounds are
 #   S8707 policy site: extract_ast.py - read_file_list, citing merge
 #   S8707 policy site: chunk_status.py - log_tokens, citing merge
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
 #   S8707 policy site: build_content_set.py - a write, validated the same way
-def merge(paths: list[str]) -> int:
-    known_ids = {
-        str(d["id"]) for d in json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
-    }
-    merged: dict[str, str] = (
-        json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
-        if config.SUMMARIES_PATH.exists()
-        else {}
-    )
+def _take_batches(
+    paths: list[str], known_ids: set[str], merged: dict[str, str]
+) -> tuple[int, list[str]]:
+    """Read each batch into `merged`, returning what was taken and what was refused.
+
+    Lifted out of `merge` so that function stays readable as the four steps it is -
+    read, merge, gate the write, report. The refusals are collected rather than
+    raised because a batch of many summaries should not be lost to one bad entry,
+    and the caller prints every one.
+    """
     added, rejected = 0, []
     for path in paths:
         # Sonar S8707, and the grounds the register above points at: reading a
@@ -195,16 +305,39 @@ def merge(paths: list[str]) -> int:
             else:
                 merged[str(community_id)] = summary
                 added += 1
+    return added, rejected
 
-    config.SUMMARIES_PATH.write_text(
-        json.dumps(
-            dict(sorted(merged.items(), key=lambda kv: int(kv[0]))), indent=1, ensure_ascii=False
-        ),
-        encoding="utf-8",
-    )
+
+def merge(paths: list[str]) -> int:
+    digests = json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
+    known_ids = {str(d["id"]) for d in digests}
+    coverage = {str(d["id"]): d["coverage"] for d in digests if isinstance(d.get("coverage"), dict)}
+    document = io.read_json_dict(config.SUMMARIES_PATH)
+    merged: dict[str, str] = io.summaries_body(document)
+    added, rejected = _take_batches(paths, known_ids, merged)
+
+    body = dict(sorted(merged.items(), key=lambda kv: int(kv[0])))
+    metadata = _merged_metadata(body, coverage)
+    recorded = (document.get(io.SUMMARIES_METADATA_KEY) or {}).get("content_digest")
+    # Gated on the prose alone. Coverage counts move on every re-extraction, so
+    # without this a refresh that changed not one word would still rewrite every
+    # summary - the diff a consuming store reviews would be noise forever, which
+    # is a worse outcome than not recording coverage at all.
+    unchanged = recorded == metadata["content_digest"]
+    if not unchanged:
+        config.SUMMARIES_PATH.write_text(
+            json.dumps({**body, io.SUMMARIES_METADATA_KEY: metadata}, indent=1, ensure_ascii=False),
+            encoding="utf-8",
+        )
     for r in rejected:
         print(f"rejected - {r}")
-    print(f"{added} summaries merged ({len(merged)} total) -> {config.SUMMARIES_PATH}")
+    if unchanged:
+        print(
+            f"{added} summaries merged ({len(merged)} total); the prose is unchanged, so "
+            f"{config.SUMMARIES_PATH} was not rewritten"
+        )
+    else:
+        print(f"{added} summaries merged ({len(merged)} total) -> {config.SUMMARIES_PATH}")
     missing = len(known_ids - set(merged))
     if missing:
         print(f"{missing} significant communities still lack a summary")
@@ -634,7 +767,7 @@ def adrift(
     wherever the two committed artefacts have had an opportunity to go out of
     step.
     """
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     if not summaries:
         print(
             f"No summaries at {config.SUMMARIES_PATH}, so there was nothing to check. "
@@ -948,7 +1081,7 @@ def remap(
         return 1
     with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
         old_members: dict[str, list[str]] = json.load(handle)
-    summaries = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.read_summaries(config.SUMMARIES_PATH)
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
     new_community = {
@@ -1305,10 +1438,45 @@ def _report_absent_terms(
         print(f"  [not in graph, in history] community {cid} cites: {', '.join(sorted(terms))}")
 
 
+def _report_evidence_split(
+    unsupported: list[tuple[str, set[str]]], evidence: dict[str, str | None]
+) -> tuple[int, int]:
+    """The flagged total split by how much of its evidence each digest showed.
+
+    This is the subtraction the coverage block exists for. A term missing from a
+    digest that withheld nothing is missing from the community; one missing from a
+    digest that showed twelve of three hundred says nothing either way. Splitting
+    them is what lets an operator act on the first without reading the second.
+
+    Returns `(sampled, unrecorded)` so the caller can decide whether the older
+    paragraph about unsampled content still applies. The arithmetic is printed
+    because a split that does not add up is how a count stops being a finding.
+    """
+    complete = [cid for cid, _ in unsupported if evidence.get(cid) == ""]
+    sampled = [cid for cid, _ in unsupported if evidence.get(cid)]
+    unrecorded = [cid for cid, _ in unsupported if evidence.get(cid) is None]
+    print(
+        f"  Of those, {len(complete)} of them cite a digest that withheld nothing, so the "
+        "community holds no such node, feature or ticket and that is a finding to act on; "
+        f"{len(sampled)} cite one that did not show everything, which proves nothing either "
+        f"way; {len(unrecorded)} cite one that recorded no coverage, so nothing can say which "
+        "of the two it is - re-run `summaries extract` to record it."
+    )
+    # "the split reconciles" rather than "reconciled", which the estate pass's own
+    # arithmetic line already owns: two different reconciliations sharing a word is
+    # how a check asserting one of them starts passing on the other.
+    print(
+        f"    the split reconciles: {len(complete)} + {len(sampled)} + {len(unrecorded)} = "
+        f"{len(unsupported)} flagged."
+    )
+    return len(sampled), len(unrecorded)
+
+
 def _report_verify_totals(
     unsupported: list[tuple[str, set[str]]],
     speculative: list[tuple[str, list[str]]],
     orphaned: list[str],
+    evidence: dict[str, str | None],
     absent: dict[str, set[str]] | None,
     classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None = None,
 ) -> None:
@@ -1321,12 +1489,14 @@ def _report_verify_totals(
         f"{len(orphaned)} without a digest."
     )
     _report_dashed_rule({term for _, terms in unsupported for term in terms})
+    unexplained = sum(_report_evidence_split(unsupported, evidence)) if unsupported else 0
     if absent is None:
-        print(
-            "  A term absent from a 12-node digest is usually real content the digest did "
-            "not sample - on one estate 98% of them existed in the corpus. Run with "
-            "--estate to check the graph instead, which is the truthfulness gate."
-        )
+        if unexplained:
+            print(
+                "  A term absent from a 12-node digest is usually real content the digest did "
+                "not sample - on one estate 98% of them existed in the corpus. Run with "
+                "--estate to check the graph instead, which is the truthfulness gate."
+            )
         return
     total_absent = sum(len(terms) for terms in absent.values())
     if total_absent:
@@ -1347,11 +1517,11 @@ def _report_verify_totals(
 
 
 def _report_verify(
-    checked: int,
-    total: int,
+    counts: tuple[int, int],
     unsupported: list[tuple[str, set[str]]],
     speculative: list[tuple[str, list[str]]],
     orphaned: list[str],
+    evidence: dict[str, str | None],
     absent: dict[str, set[str]] | None = None,
     classified: tuple[dict[str, set[str]], dict[str, set[str]]] | None = None,
 ) -> None:
@@ -1367,10 +1537,23 @@ def _report_verify(
     catching the 2% that are real. So the digest finding is now named for what it
     measures, and `absent` - populated only by the estate-wide pass - carries the
     finding that actually means a summary cites something that does not exist.
+
+    `evidence` carries what each flagged digest recorded about its own sampling,
+    which turns that inference into a subtraction: absence from a digest that
+    withheld nothing is absence from the community, and the label says so rather
+    than leaving every finding to be discounted at the same rate.
     """
+    checked, total = counts
     print(f"Verified {checked} of {total} summaries against their digests.")
     for cid, extra in unsupported:
-        print(f"  [not in digest] community {cid} cites: {', '.join(sorted(extra))}")
+        cited = ", ".join(sorted(extra))
+        sampled = evidence.get(cid)
+        if sampled is None:
+            print(f"  [not in digest] community {cid} cites: {cited}")
+        elif sampled:
+            print(f"  [not in digest, {sampled} sampled] community {cid} cites: {cited}")
+        else:
+            print(f"  [not in digest, nothing withheld] community {cid} cites: {cited}")
     for cid, hedges in speculative:
         words = sorted({hedge.lower() for hedge in hedges})
         print(f"  [speculation] community {cid}: {', '.join(words)}")
@@ -1378,7 +1561,46 @@ def _report_verify(
         print(f"  [no digest] community {cid} has prose but no evidence to check it against")
     if absent:
         _report_absent_terms(absent, classified)
-    _report_verify_totals(unsupported, speculative, orphaned, absent, classified)
+    _report_verify_totals(unsupported, speculative, orphaned, evidence, absent, classified)
+
+
+def _unshown(entry: object) -> int:
+    """How many a coverage field held back, or 0 when it does not say."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("unshown"), int):
+        return 0
+    return entry["unshown"]
+
+
+def truncated_fields(digest: dict) -> list[str] | None:
+    """Which of the digest's capped fields held something back.
+
+    `[]` and `None` are deliberately different answers, and confusing them is the
+    one way this whole change makes things worse. `[]` is a measured "the digest
+    showed everything there was", which is what lets a term absent from it be
+    called a finding. `None` is "nothing recorded what was sampled" - every store
+    built before the coverage block, and any hand-edited digest - and it must
+    never read as an excuse, or the check goes green on those stores without
+    having examined anything.
+    """
+    coverage = digest.get("coverage")
+    if not isinstance(coverage, dict):
+        return None
+    return [field for field in COVERAGE_FIELDS if _unshown(coverage.get(field)) > 0]
+
+
+def evidence_base(digest: dict) -> str | None:
+    """What the digest sampled, as a phrase; `""` when it withheld nothing.
+
+    `None` when the digest records no coverage - see `truncated_fields` for why
+    that is not the same answer as `""`.
+    """
+    fields = truncated_fields(digest)
+    if fields is None:
+        return None
+    coverage = digest.get("coverage") or {}
+    return ", ".join(
+        f"{field} {coverage[field]['shown']} of {coverage[field]['total']}" for field in fields
+    )
 
 
 def _ungrounded(text: str, digest: dict) -> set[str]:
@@ -1422,19 +1644,24 @@ def _report_provenance_split(checked: list[str], unsupported: list[tuple[str, se
 def _verify_exit(
     strict: bool,
     estate: bool,
-    unsupported: list,
+    digest_findings: list,
     orphaned: list,
     absent: dict | None,
 ) -> int:
     """Whether to fail, and on which finding.
 
     Under `--estate`, fail on what is genuinely unbacked rather than on what a
-    12-node sample failed to mention. Without it the previous behaviour stands,
-    so an existing CI invocation does not silently change meaning.
+    12-node sample failed to mention.
+
+    Without it, `digest_findings` is the flagged set minus what the coverage block
+    explains: a term the digest never showed no longer fails a run, and one absent
+    from a digest that withheld nothing still does. A digest recording no coverage
+    keeps its previous meaning and stays blocking, so an existing CI invocation
+    against an existing store does not silently turn green.
     """
     if not strict:
         return 0
-    blocking = (absent or orphaned) if estate else (unsupported or orphaned)
+    blocking = (absent or orphaned) if estate else (digest_findings or orphaned)
     return 1 if blocking else 0
 
 
@@ -1721,10 +1948,17 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
     history datasets but not held by the graph, which is a remap question, or
     absent from both, which is the only class that can contain invention. The two
     counts sum to the flagged total in the output.
+
+    The digest check is also split, by what each digest recorded about its own
+    sampling. A term absent from a digest that withheld nothing is absent from the
+    community, and `--strict` fails on it; one absent from a digest that showed a
+    fraction of its nodes proves nothing and no longer fails a run; one whose
+    digest recorded no coverage keeps the previous meaning and still fails,
+    because unknown must not read as excused.
     """
     loaded = io.read_json(config.SUMMARIES_INPUT_PATH, default=[]) or []
     digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
-    prose = io.read_json_dict(config.SUMMARIES_PATH)
+    prose = io.read_summaries(config.SUMMARIES_PATH)
     if not digests or not prose:
         print(
             f"Nothing to verify: {len(digests)} digests in {config.SUMMARIES_INPUT_PATH}, "
@@ -1758,12 +1992,22 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
             f"  {matched_by_segment} cited terms matched a name segment rather than a "
             "whole identifier (scoped packages, Java packages, module addresses)"
         )
-    _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent, classified)
+    # What each flagged digest recorded about its own sampling. A term the digest
+    # never showed is excused; one absent from a digest that withheld nothing is a
+    # finding; one whose digest recorded nothing is neither, and stays blocking
+    # because unknown must not read as excused.
+    evidence = {cid: evidence_base(digests[cid]) for cid, _ in unsupported}
+    excused = {cid for cid, _ in unsupported if evidence[cid]}
+    conclusive = [(cid, terms) for cid, terms in unsupported if cid not in excused]
+    _report_verify(
+        (len(checked), len(prose)), unsupported, speculative, orphaned, evidence, absent, classified
+    )
     _report_provenance_split(checked, unsupported)
     # Under --estate, fail on what is genuinely unbacked rather than on what a
-    # 12-node sample failed to mention. Without it, the old behaviour stands so
-    # an existing CI invocation does not silently change meaning.
-    return _verify_exit(strict, estate, unsupported, orphaned, absent)
+    # 12-node sample failed to mention. Without it, the old behaviour stands -
+    # sharpened by the coverage block - so an existing CI invocation does not
+    # silently change meaning.
+    return _verify_exit(strict, estate, conclusive, orphaned, absent)
 
 
 def main(argv: list[str] | None = None) -> int:
