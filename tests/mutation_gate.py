@@ -2320,6 +2320,7 @@ MUTATIONS = (
         "wrong measurement this pipeline has shipped, correct code answering a "
         "neighbouring question",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_every_reported_block_is_the_size_of_that_block_in_the_page",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2334,6 +2335,7 @@ MUTATIONS = (
         "counting each block once is short by the title on every build - and it still "
         "adds up, because the residual line absorbs exactly what was missed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_the_breakdown_reconciles_with_the_page_on_disk",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
         ),
@@ -2375,6 +2377,7 @@ MUTATIONS = (
         "the store that reported this was already past GitHub's own warning with the "
         "page committed",
         (
+            "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_warning_and_under_the_limit_still_only_warns",
             "test_build_explorer.PageByteAttributionTest.test_the_threshold_comes_from_the_environment",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_arrives_before_the_page_is_written",
             "test_build_explorer.PageByteAttributionTest.test_the_warning_names_the_largest_blocks_above_the_threshold",
@@ -2394,6 +2397,7 @@ MUTATIONS = (
         (
             "test_build_explorer.PageByteAttributionTest.test_a_page_over_the_hard_limit_is_refused_instead_of_written",
             "test_build_explorer.PageByteAttributionTest.test_a_refused_build_leaves_the_page_the_store_already_had",
+            "test_build_explorer.PageByteAttributionTest.test_a_refused_build_records_why_it_stopped",
             "test_build_explorer.PageByteAttributionTest.test_the_hard_limit_comes_from_the_environment",
         ),
     ),
@@ -2764,6 +2768,7 @@ MUTATIONS = (
         "query that always reports clean is a hook that reads as protection and is none",
         (
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_a_record_the_query_cannot_read_is_refused_rather_than_ignored",
+            "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_live_remedy_says_how_to_find_which_checkout_a_run_holds",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_pre_commit_hook_runs_the_query_and_refuses_a_live_mutation",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_carries_the_pid_for_a_caller_that_wants_to_signal_it",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_query_refuses_while_a_mutation_is_applied_and_names_the_path",
@@ -2885,6 +2890,8 @@ MUTATIONS = (
         "package, which is a worse version of the same defect",
         (
             "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_keeps_the_environment_it_inherits",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
+            "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
         ),
     ),
     Mutation(
