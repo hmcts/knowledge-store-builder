@@ -816,6 +816,24 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an identifier inside a phrase label is unreachable again",
+        "build_community_summaries.py",
+        r'_PHRASE_SEPARATORS = re.compile(r"[^A-Za-z0-9/@.\-_:]+")',
+        r'_PHRASE_SEPARATORS = re.compile(r"[/@.\-_:]+")',
+        "#303, and the replacement is the class that shipped, so this is the defect "
+        "rather than an invented one: semantic and document nodes are labelled with a "
+        "phrase, and with no whitespace in the class the identifier in the middle of "
+        "one arrived welded to the prose either side of it. `--estate` then reported "
+        "it absent from the graph while it sat in the citing community's own node, on "
+        "the one class of finding the report tells an operator to act on",
+        (
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_a_constant_inside_a_phrase_is_offered_whole_and_in_parts",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_an_identifier_between_words_of_a_phrase_is_a_segment",
+            "test_estate_phrase_label_segments.PhraseLabelSegmentTest.test_brackets_and_quotes_separate_as_whitespace_does",
+        ),
+    ),
+    Mutation(
         "the stem basis option stops affecting ids",
         "merge_chunks.py",
         "    stem = spec_stem(basis, keep_extension=keep_extension)",
