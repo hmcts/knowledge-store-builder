@@ -223,6 +223,16 @@ contains it, a resource against a Terraform module address. A whole-label match
 alone could never match a scoped package name, and scoped names are the norm in
 JS/TS, so that check fired on an entire ecosystem's naming convention.
 
+A label is cut twice, because two kinds of string arrive as labels. AST nodes
+carry a bare name; semantic and document nodes carry a phrase — a widget word,
+the field it is bound to and the wording a user reads, in one string. The phrase
+is split into words first and each word is then segmented as a name, so an
+identifier in the middle of a descriptive label is reachable rather than welded to
+the prose either side of it. Case transitions are deliberately **not** split on:
+offering `delivery` out of `deliveryWindow` would corroborate a term against any
+label that merely mentions the other half of it, which is the substring match
+segments exist instead of.
+
 Segment matching loosens a check whose job is not lying, so it trades false
 positives for false **negatives**, which fail in the reassuring direction. Two
 things keep that visible. Segments shorter than three characters are not matched,

@@ -1450,6 +1450,20 @@ MIN_SEGMENT_MATCH = 3
 # addresses (`module.name`) and hyphenated repository names.
 _SEGMENT_SEPARATORS = re.compile(r"[/@.\-_:]+")
 
+# What separates one name from the next *inside a descriptive label*. Semantic and
+# document nodes are labelled with a phrase rather than a bare name - a widget
+# word, the field it is bound to and the wording a user reads, in one string - and
+# an identifier in the middle of one is unreachable while the prose either side of
+# it stays attached.
+#
+# Defined as the complement of the characters a name is spelled with, rather than
+# as a list of the punctuation seen so far. The two characters the report named
+# were a space and an `=`, but the same label wrapped its user-facing wording in a
+# parenthesis and two apostrophes, and the next label will use something else; a
+# complement needs no further amendment, and it says what it means - a name is
+# letters, digits and the separators above, so everything else is prose.
+_PHRASE_SEPARATORS = re.compile(r"[^A-Za-z0-9/@.\-_:]+")
+
 
 def estate_vocabulary() -> tuple[set[str], set[str]]:
     """Every identifier the graph holds, normalised - the estate's own vocabulary.
@@ -1518,12 +1532,36 @@ def name_segments(identifier: str) -> set[str]:
     other ecosystems this will arrive from next - a Java package and a Terraform
     module address are the same shape - without a second special case.
 
+    A phrase label is a sequence of names with prose between them, so it is cut
+    twice: into words on the phrase separators, and then each word into segments
+    on the name separators. `Radio someField=A_CONSTANT ('some wording')` offers
+    `someField` and `A_CONSTANT` as well as `CONSTANT`, where before it offered
+    only the two fragments the name separators happened to fall on. That is the
+    whole of #303: the identifier was in the citing community's own node and the
+    report said the store could not speak about it.
+
+    Both cuts, not the finer one alone. The segments of the *whole* label are kept
+    as well, so `Feature: My Widget` still offers ` My Widget` for prose citing
+    `MyWidget`. A fix for false absences must not create new ones by narrowing
+    somewhere else.
+
+    And it stops at the phrase. Case transitions are deliberately not split on:
+    offering `delivery` and `Window` out of `deliveryWindow` would corroborate a
+    term against any label that merely mentions the other half of it, which is the
+    substring match this rule exists instead of.
+
     This deliberately loosens a check whose job is not lying, so it trades false
     positives for false negatives, which fail in the reassuring direction.
     `MIN_SEGMENT_MATCH` and the count reported by `absent_from_estate` are what
     keep that trade visible rather than assumed.
     """
-    parts = {part for part in _SEGMENT_SEPARATORS.split(identifier) if part}
+    # `part != identifier` so a bare name is not offered as its own segment: a
+    # whole identifier is already matched as one, and adding it here would credit
+    # the segment counter for matches the strict rule was making anyway.
+    words = {part for part in _PHRASE_SEPARATORS.split(identifier) if part and part != identifier}
+    parts = words | {
+        part for value in (identifier, *words) for part in _SEGMENT_SEPARATORS.split(value) if part
+    }
     return {part for part in parts if len(part) >= MIN_SEGMENT_MATCH}
 
 
@@ -1756,7 +1794,8 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
     if estate and matched_by_segment:
         print(
             f"  {matched_by_segment} cited terms matched a name segment rather than a "
-            "whole identifier (scoped packages, Java packages, module addresses)"
+            "whole identifier (scoped packages, Java packages, module addresses, "
+            "identifiers inside a descriptive label)"
         )
     _report_verify(len(checked), len(prose), unsupported, speculative, orphaned, absent, classified)
     _report_provenance_split(checked, unsupported)
