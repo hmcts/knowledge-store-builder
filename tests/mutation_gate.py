@@ -3327,6 +3327,7 @@ MUTATIONS = (
         "can act on. Ungated it always writes, which is exactly what a run looks like "
         "when it is working",
         (
+            "test_prose_integrity.SummariesDriftTest.test_a_second_run_after_that_writes_nothing",
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_remap.RemapWriteGateTest.test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded",
             "test_summaries_remap.RemapWriteGateTest.test_a_second_remap_of_the_same_clustering_writes_nothing",
