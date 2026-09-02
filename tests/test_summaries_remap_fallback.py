@@ -130,7 +130,7 @@ class FileClaimsTest(unittest.TestCase):
             {"7": [("repo-a", "src/A.java")]},
             {"42": [("new", "repo-a", "src/A.java")]},
         )
-        self.assertEqual(claims["7"][3], False, "the node set is gone, so nothing is identical")
+        self.assertIs(claims["7"][3], False, "the node set is gone, so nothing is identical")
         self.assertTrue(outcomes["7"]["files_exact"], "the file verdict is reported on its own key")
 
     def test_a_verdict_the_node_route_reached_is_not_reopened(self):
@@ -571,7 +571,7 @@ class RemapFallbackTest(SettingsIsolated):
             },
         )
         self.assertEqual(report["carried"]["43"]["route"], "node-ids")
-        self.assertEqual(report["carried"]["43"]["exact"], True)
+        self.assertIs(report["carried"]["43"]["exact"], True)
         self.assertEqual(
             report["fallback"],
             {"available": True, "considered": 1, "outcomes": {"carried": 1}},
@@ -596,7 +596,7 @@ class RemapFallbackTest(SettingsIsolated):
         withdrawn = json.loads(config.SUMMARIES_WITHDRAWN_PATH.read_text(encoding="utf-8"))
         self.assertEqual(withdrawn["7"], "the semantic community")
         fallback = self.report()["fallback"]
-        self.assertEqual(fallback["available"], False)
+        self.assertIs(fallback["available"], False)
         self.assertEqual(fallback["considered"], 1)
         self.assertEqual(fallback["outcomes"], {})
         self.assertIn("no file snapshot", fallback["reason"])
@@ -615,7 +615,7 @@ class RemapFallbackTest(SettingsIsolated):
         _, stderr = self.remap()
         self.assertNotIn("42", json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8")))
         fallback = self.report()["fallback"]
-        self.assertEqual(fallback["available"], False)
+        self.assertIs(fallback["available"], False)
         self.assertIn("different membership snapshot", fallback["reason"])
         self.assertIn("different membership snapshot", stderr)
 

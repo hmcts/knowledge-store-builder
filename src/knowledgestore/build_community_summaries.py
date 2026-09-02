@@ -1309,89 +1309,126 @@ def _file_claims(
         if not keys:
             # The dangerous case, refused explicitly. An empty old key set
             # intersects an empty community key set perfectly, so every measure
-            # below would read 1.0 over no evidence whatsoever - and a wholly
+            # would read 1.0 over no evidence whatsoever - and a wholly
             # structural community has exactly that key set.
             outcomes[old_id] = {"outcome": "no-file-key", "files": 0}
             continue
-        landed: Counter = Counter()  # files of this community present in each target
-        attributable: Counter = Counter()  # nodes of each target that come from those files
-        for key in keys:
-            for community, count in by_file.get(key, {}).items():
-                landed[community] += 1
-                attributable[community] += count
-        if not landed:
+        measured = _file_measure(
+            keys, len(old_members.get(str(old_id), [])), by_file, files_of, sizes
+        )
+        if measured is None:
             outcomes[old_id] = {"outcome": "no-file-match", "files": len(keys)}
             continue
-        # Explicitly ordered, not `most_common`, which breaks ties on insertion
-        # order - and insertion order here follows a set iteration, which hash
-        # randomisation moves between processes.
-        target = min(landed, key=lambda name: (-landed[name], _by_id(name)))
-        matched = landed[target]
-        share_of_old = matched / len(keys)
-        # Precision in NODES on both sides, never in files: see `FALLBACK_ROUTE`
-        # reason 4. Two terms, and the smaller of them is the figure, so the
-        # floor is never looser than either.
-        #
-        # - `attributed` is the share of the target's nodes that come from the
-        #   old community's files. It sees a target that absorbed material from
-        #   elsewhere - the prose describes a corner of a merged cluster.
-        # - `bound` is the old community's node count over the target's. It sees
-        #   the case the first term cannot: the same files holding an order of
-        #   magnitude more nodes after a rebuild that added a layer over them,
-        #   where every node is attributable and the prose still describes a
-        #   fraction of what a reader now sees. It is an upper bound rather than
-        #   a measurement - the prose described `old_size` nodes, so at most
-        #   that many of the target's nodes can be things it described - and
-        #   rejecting on an upper bound can only ever under-reject.
-        #
-        # `bound` is also the closest available analogue of the node route's own
-        # precision, and it reproduces the recorded escape: 37 old members in a
-        # cluster of 458 scores 0.081 here exactly as it does there.
-        old_size = len(old_members.get(str(old_id), []))
-        target_size = sizes[target]
-        attributed = attributable[target] / target_size if target_size else 0.0
-        bound = old_size / target_size if target_size else 0.0
-        share_of_new = min(attributed, bound)
-        entry = {
-            "outcome": "carried",
-            "files": len(keys),
-            "matched_files": matched,
-            "best_target": target,
-            "share": round(share_of_old, 3),
-            "precision": round(share_of_new, 3),
-            # The three counts the precision figure is a ratio of, so a reader
-            # of the report can re-derive it instead of believing it. It is a
-            # min of two ratios, which is exactly the kind of number that gets
-            # quoted as though it were one.
-            "nodes": old_size,
-            "target_nodes": target_size,
-            "attributed_nodes": attributable[target],
-            "files_exact": keys == files_of.get(target, set()),
-        }
-        if carry == CARRY_EXACT and not entry["files_exact"]:
-            outcomes[old_id] = {**entry, "outcome": "not-identical"}
-            continue
-        if carry != CARRY_EXACT and share_of_old < bar:
-            outcomes[old_id] = {**entry, "outcome": "below-bar"}
-            continue
-        # Applied under both criteria, where the node route applies it under
-        # `overlap` only. Under `exact` the node route's guarantee is node-set
-        # equality, and file-set equality is not that: the same files can hold
-        # ten times the nodes after a rebuild that added a layer. The precision
-        # floor is what stands in for the guarantee that does not transfer.
-        if share_of_new < precision:
-            outcomes[old_id] = {**entry, "outcome": "below-precision"}
-            continue
-        outcomes[old_id] = entry
-        # `identical` is False for every fallback carry, whatever the file sets
-        # say. That flag is #296's marker for "the target holds exactly the set
-        # the prose was written about", and by construction it does not here -
-        # the members are gone. Recording a file-set match as set equality would
-        # hand a downstream check a clean bill for the least exact carry the
-        # stage makes; the file-set verdict is reported as `files_exact`
-        # instead.
-        claims[old_id] = (target, share_of_old, share_of_new, False)
+        entry, share_of_old, share_of_new = measured
+        outcome = _fallback_verdict(entry, share_of_old, share_of_new, bar, precision, carry)
+        outcomes[old_id] = entry if outcome == "carried" else {**entry, "outcome": outcome}
+        if outcome == "carried":
+            # `identical` is False for every fallback carry, whatever the file
+            # sets say. That flag is #296's marker for "the target holds exactly
+            # the set the prose was written about", and by construction it does
+            # not here - the members are gone. Recording a file-set match as set
+            # equality would hand a downstream check a clean bill for the least
+            # exact carry the stage makes; the file-set verdict is reported as
+            # `files_exact` instead.
+            claims[old_id] = (str(entry["best_target"]), share_of_old, share_of_new, False)
     return claims, {old_id: outcomes[old_id] for old_id in sorted(outcomes, key=_by_id)}
+
+
+def _landed_order(item: tuple[str, int]) -> tuple[int, tuple[int, str]]:
+    """Most files landed first, lowest community id to break a tie.
+
+    A named function rather than a lambda over the loop's own `landed` counter:
+    the tie has to break the same way on every run, and `Counter.most_common`
+    breaks it on insertion order - which here follows a set iteration, so hash
+    randomisation would move the chosen target between processes.
+    """
+    name, count = item
+    return -count, _by_id(name)
+
+
+def _file_measure(
+    keys: set,
+    old_size: int,
+    by_file: dict[tuple[str, str], Counter],
+    files_of: dict[str, set],
+    sizes: Counter,
+) -> tuple[dict, float, float] | None:
+    """What the file key says about one community, before any criterion is applied.
+
+    Returns the report entry alongside the two unrounded shares - the entry
+    rounds them for reading, and a criterion must be applied to the full value
+    or a share of 0.5995 clears a 0.6 bar - or None when none of the files is in
+    the new graph at all.
+    """
+    landed: Counter = Counter()  # files of this community present in each target
+    attributable: Counter = Counter()  # nodes of each target that come from those files
+    for key in keys:
+        for community, count in by_file.get(key, {}).items():
+            landed[community] += 1
+            attributable[community] += count
+    if not landed:
+        return None
+    target = min(landed.items(), key=_landed_order)[0]
+    matched = landed[target]
+    share_of_old = matched / len(keys)
+    # Precision in NODES on both sides, never in files: see `FALLBACK_ROUTE`
+    # reason 4. Two terms, and the smaller of them is the figure, so the
+    # floor is never looser than either.
+    #
+    # - `attributed` is the share of the target's nodes that come from the
+    #   old community's files. It sees a target that absorbed material from
+    #   elsewhere - the prose describes a corner of a merged cluster.
+    # - `bound` is the old community's node count over the target's. It sees
+    #   the case the first term cannot: the same files holding an order of
+    #   magnitude more nodes after a rebuild that added a layer over them,
+    #   where every node is attributable and the prose still describes a
+    #   fraction of what a reader now sees. It is an upper bound rather than
+    #   a measurement - the prose described `old_size` nodes, so at most
+    #   that many of the target's nodes can be things it described - and
+    #   rejecting on an upper bound can only ever under-reject.
+    #
+    # `bound` is also the closest available analogue of the node route's own
+    # precision, and it reproduces the recorded escape: 37 old members in a
+    # cluster of 458 scores 0.081 here exactly as it does there.
+    target_size = sizes[target]
+    attributed = attributable[target] / target_size if target_size else 0.0
+    bound = old_size / target_size if target_size else 0.0
+    share_of_new = min(attributed, bound)
+    entry = {
+        "outcome": "carried",
+        "files": len(keys),
+        "matched_files": matched,
+        "best_target": target,
+        "share": round(share_of_old, 3),
+        "precision": round(share_of_new, 3),
+        # The three counts the precision figure is a ratio of, so a reader of
+        # the report can re-derive it instead of believing it. It is a min of
+        # two ratios, which is exactly the kind of number that gets quoted as
+        # though it were one.
+        "nodes": old_size,
+        "target_nodes": target_size,
+        "attributed_nodes": attributable[target],
+        "files_exact": keys == files_of.get(target, set()),
+    }
+    return entry, share_of_old, share_of_new
+
+
+def _fallback_verdict(
+    entry: dict, share_of_old: float, share_of_new: float, bar: float, precision: float, carry: str
+) -> str:
+    """Which criterion a file-keyed match clears, or the name of the one it fails."""
+    if carry == CARRY_EXACT and not entry["files_exact"]:
+        return "not-identical"
+    if carry != CARRY_EXACT and share_of_old < bar:
+        return "below-bar"
+    # The precision floor is applied under both criteria, where the node route
+    # applies it under `overlap` only. Under `exact` the node route's guarantee
+    # is node-set equality, and file-set equality is not that: the same files can
+    # hold ten times the nodes after a rebuild that added a layer over them. The
+    # floor is what stands in for the guarantee that does not transfer.
+    if share_of_new < precision:
+        return "below-precision"
+    return "carried"
 
 
 def _report_fallback(
@@ -1490,98 +1527,50 @@ def _report_precision(carried: dict) -> None:
     print(f"Carried prose describes its new cluster: {', '.join(counts)}")
 
 
-def remap(
-    bar: float = DEFAULT_BAR,
-    floor: int = DEFAULT_FLOOR,
-    coverage: float = DEFAULT_COVERAGE,
-    precision: float = DEFAULT_PRECISION,
-    carry: str = DEFAULT_CARRY,
-) -> int:
-    """Carry committed summaries onto new community ids after a re-cluster.
-
-    For each summary, find the new cluster holding the largest share of its old
-    members and carry it there when that cluster holds exactly the set the prose
-    was written about. Withdraw it otherwise, to a file beside the summaries so
-    the writing survives, and report the withdrawal count beside retention so the
-    cost of the re-cluster is a measured number in both directions.
-
-    The write is gated on a digest of the prose, the way `merge`'s is: a remap
-    that carries every summary onto the id it already holds rewrites nothing.
-
-    A second, narrower route runs after the first: for the summaries the node-id
-    route lost because their members are gone from the graph entirely, a key of
-    `(repository, source_file)` gets one attempt at them. Only there, and it
-    never re-decides anything the node ids decided - see `FALLBACK_ROUTE` for
-    why the file key is a fallback rather than the key, and how it keeps the
-    precision floor honest while measuring recall in files.
-
-    `carry=CARRY_OVERLAP` restores the previous tolerance - see `DEFAULT_CARRY`.
-    """
-    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
-        print(
-            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}. Run `summaries snapshot` "
-            "before re-clustering.",
-            file=sys.stderr,
-        )
-        return 1
-    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
-        old_members: dict[str, list[str]] = json.load(handle)
-    # The whole document, not just the prose: the write below is gated on the
-    # digest the metadata block records, exactly as `merge`'s is.
-    document = io.read_json_dict(config.SUMMARIES_PATH)
-    summaries = io.summaries_body(document)
-    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
-    print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
-    new_community = {
-        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
-    }
-    refusal = _remap_refusal(summaries, nodes, new_community, old_members, floor, coverage)
-    if refusal:
-        print(refusal, file=sys.stderr)
-        return 1
-
-    claims, displaced = _claim_targets(summaries, old_members, new_community, bar, precision, carry)
-    routes = dict.fromkeys(claims, NODE_ROUTE)
-
-    # The fallback, over what the node-id route lost outright. Sequenced here
-    # rather than inside `_claim_targets` so the shape of the code says the
-    # shape of the rule: the primary route runs to completion and reaches its
-    # verdicts, and this reads those verdicts and reopens exactly one of them.
-    sizes = Counter(new_community.values())
-    # Counted before the fallback runs, because it is the fallback's denominator
-    # and the fallback removes its successes from `displaced`. Taken from the
-    # verdicts rather than recomputed, so "considered" is the set the route
-    # actually looked at.
-    considered = sum(1 for entry in displaced.values() if entry["reason"] == "members-gone")
-    old_files, fallback_note = _read_file_snapshot(old_members)
-    file_claims: dict[str, tuple[str, float, float, bool]] = {}
-    fallback_outcomes: dict[str, dict] = {}
+def _fallback_claims(
+    displaced: dict[str, dict],
+    old_members: dict,
+    nodes: list,
+    sizes: Counter,
+    bar: float,
+    precision: float,
+    carry: str,
+) -> tuple[dict[str, tuple[str, float, float, bool]], dict[str, dict], str]:
+    """The fallback route's claims and outcomes, or nothing and the reason it did not run."""
+    old_files, note = _read_file_snapshot(old_members)
     # Not run at all rather than run over an empty old side. Running it would
     # report every candidate as `no-file-key` - "this community keys on no
     # file" - when the truth is that no community keys on anything because the
     # snapshot could not be read. A wrong reason is worse than no reason: it
     # names something to go and look at that is not what happened.
-    if not fallback_note:
-        file_claims, fallback_outcomes = _file_claims(
-            displaced,
-            old_members,
-            old_files,
-            *_file_index(nodes),
-            sizes,
-            bar,
-            precision,
-            carry,
-        )
-    for old_id, claim in file_claims.items():
-        claims[old_id] = claim
-        routes[old_id] = FALLBACK_ROUTE
-        # Removed from `displaced` only once it is genuinely claimed. A fallback
-        # that ran and refused must leave the node route's verdict standing,
-        # prose and reason intact, or the withdrawn file loses the paragraph
-        # somebody is meant to go and re-author.
-        del displaced[old_id]
+    if note:
+        return {}, {}, note
+    claims, outcomes = _file_claims(
+        displaced,
+        old_members,
+        old_files,
+        *_file_index(nodes),
+        sizes,
+        bar,
+        precision,
+        carry,
+    )
+    return claims, outcomes, note
 
-    # Pass 2: a contested new cluster keeps the summary whose old cluster
+
+def _resolve_targets(
+    summaries: dict,
+    claims: dict[str, tuple[str, float, float, bool]],
+    routes: dict[str, str],
+    displaced: dict[str, dict],
+    fallback_outcomes: dict[str, dict],
+) -> tuple[dict[str, str], dict[str, dict]]:
+    """Pass 2: one summary per new cluster, and the carried record for each.
+
+    Mutates `displaced` with the losers and `fallback_outcomes` with the ones it
+    took back, so the two tallies never disagree about the same summary.
+    """
+    # A contested new cluster keeps the summary whose old cluster
     # contributed the largest share of itself - it describes more of the merged
     # result than a summary that barely arrived. Lowest old id only breaks
     # ties, deterministically. (Winner-by-lowest-id regardless of fit was the
@@ -1660,6 +1649,86 @@ def remap(
                 # counts disagree about the same summary, and the tally is what
                 # the false-carry measurement will be drawn from.
                 fallback_outcomes[loser]["outcome"] = "collision"
+
+    return remapped, carried
+
+
+def remap(
+    bar: float = DEFAULT_BAR,
+    floor: int = DEFAULT_FLOOR,
+    coverage: float = DEFAULT_COVERAGE,
+    precision: float = DEFAULT_PRECISION,
+    carry: str = DEFAULT_CARRY,
+) -> int:
+    """Carry committed summaries onto new community ids after a re-cluster.
+
+    For each summary, find the new cluster holding the largest share of its old
+    members and carry it there when that cluster holds exactly the set the prose
+    was written about. Withdraw it otherwise, to a file beside the summaries so
+    the writing survives, and report the withdrawal count beside retention so the
+    cost of the re-cluster is a measured number in both directions.
+
+    The write is gated on a digest of the prose, the way `merge`'s is: a remap
+    that carries every summary onto the id it already holds rewrites nothing.
+
+    A second, narrower route runs after the first: for the summaries the node-id
+    route lost because their members are gone from the graph entirely, a key of
+    `(repository, source_file)` gets one attempt at them. Only there, and it
+    never re-decides anything the node ids decided - see `FALLBACK_ROUTE` for
+    why the file key is a fallback rather than the key, and how it keeps the
+    precision floor honest while measuring recall in files.
+
+    `carry=CARRY_OVERLAP` restores the previous tolerance - see `DEFAULT_CARRY`.
+    """
+    if not config.SUMMARIES_SNAPSHOT_PATH.exists():
+        print(
+            f"No membership snapshot at {config.SUMMARIES_SNAPSHOT_PATH}. Run `summaries snapshot` "
+            "before re-clustering.",
+            file=sys.stderr,
+        )
+        return 1
+    with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
+        old_members: dict[str, list[str]] = json.load(handle)
+    # The whole document, not just the prose: the write below is gated on the
+    # digest the metadata block records, exactly as `merge`'s is.
+    document = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.summaries_body(document)
+    nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
+    print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
+    new_community = {
+        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
+    }
+    refusal = _remap_refusal(summaries, nodes, new_community, old_members, floor, coverage)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+
+    claims, displaced = _claim_targets(summaries, old_members, new_community, bar, precision, carry)
+    routes = dict.fromkeys(claims, NODE_ROUTE)
+
+    # The fallback, over what the node-id route lost outright. Sequenced here
+    # rather than inside `_claim_targets` so the shape of the code says the
+    # shape of the rule: the primary route runs to completion and reaches its
+    # verdicts, and this reads those verdicts and reopens exactly one of them.
+    sizes = Counter(new_community.values())
+    # Counted before the fallback runs, because it is the fallback's denominator
+    # and the fallback removes its successes from `displaced`. Taken from the
+    # verdicts rather than recomputed, so "considered" is the set the route
+    # actually looked at.
+    considered = sum(1 for entry in displaced.values() if entry["reason"] == "members-gone")
+    file_claims, fallback_outcomes, fallback_note = _fallback_claims(
+        displaced, old_members, nodes, sizes, bar, precision, carry
+    )
+    for old_id, claim in file_claims.items():
+        claims[old_id] = claim
+        routes[old_id] = FALLBACK_ROUTE
+        # Removed from `displaced` only once it is genuinely claimed. A fallback
+        # that ran and refused must leave the node route's verdict standing,
+        # prose and reason intact, or the withdrawn file loses the paragraph
+        # somebody is meant to go and re-author.
+        del displaced[old_id]
+
+    remapped, carried = _resolve_targets(summaries, claims, routes, displaced, fallback_outcomes)
 
     body = dict(sorted(remapped.items(), key=lambda kv: int(kv[0])))
     # Through the shared writer, which is gated on the prose (#299, #313). An
