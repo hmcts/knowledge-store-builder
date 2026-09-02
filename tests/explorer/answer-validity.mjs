@@ -46,14 +46,37 @@ try {
 }
 
 let failures = 0;
-/** @param {string} name @param {boolean} condition @param {string} detail */
-function assert(name, condition, detail = '') {
-  if (condition) {
+
+/** @param {string} text */
+const indented = (text) => text.split('\n').map((line) => `      ${line}`).join('\n');
+
+/** Record one assertion by comparing what happened against what should have.
+ *
+ * Deliberately not a name and a verdict. A pre-computed boolean and a separately
+ * written detail string are two expressions that can disagree, so a failure can
+ * print evidence about a different check than the one that failed - and this
+ * repository's own history is of correct code answering a neighbouring question.
+ * Comparing the two values makes the complaint the difference itself, and it puts
+ * every expected value in the test as a hand-written literal, which is where the
+ * house rules want them.
+ *
+ * @param {string} name the break this catches, in the words a reader needs
+ * @param {unknown} observed what the product did
+ * @param {unknown} expected what it should have done, derived by hand
+ * @param {string} context further output worth reading when this fails
+ */
+function equal(name, observed, expected, context = '') {
+  const got = JSON.stringify(observed);
+  const want = JSON.stringify(expected);
+  if (got === want) {
     console.log(`ok    ${name}`);
-  } else {
-    failures++;
-    console.error(`FAIL  ${name}${detail ? ` - ${detail}` : ''}`);
+    return;
   }
+  failures++;
+  console.error(`FAIL  ${name}`);
+  console.error(`      expected ${want}`);
+  console.error(`      observed ${got}`);
+  if (context) console.error(indented(context));
 }
 
 /** Drive the real runner over an inline question set.
@@ -72,6 +95,12 @@ const forQuestion = (results, question) => {
   return found;
 };
 
+/** Key-sorted rows, so a comparison is about the values and not the order two
+ * tables happen to list their keys in.
+ * @param {Record<string, string>} table
+ */
+const asRows = (table) => Object.keys(table).sort().map((key) => [key, table[key]]);
+
 // ---------------------------------------------------------------------------
 // Catches: the void rule removed or inverted. A question declared for the topics
 // layer, answered only out of the data block, would be counted as a pass - and
@@ -84,21 +113,18 @@ const setA = report(`${wrongLayer} | brief, graph\n${control} | brief\n`);
 const voidedA = forQuestion(setA.results, wrongLayer);
 const controlA = forQuestion(setA.results, control);
 
-assert('a question satisfied by a layer it was not written for is voided',
-  voidedA.pass === true && voidedA.voided === true,
-  JSON.stringify({ pass: voidedA.pass, voided: voidedA.voided, modes: voidedA.modes }));
-assert('the void names the block that did not answer',
-  voidedA.carriers.join() === 'data' && voidedA.missingBlocks.join() === 'topics',
-  JSON.stringify({ carriers: voidedA.carriers, missing: voidedA.missingBlocks }));
-assert('a voided question is excluded from both halves of the pass rate',
-  setA.validity.rate.total === 2
-  && setA.validity.rate.counted === 1
-  && setA.validity.rate.passed === 1
-  && setA.validity.rate.voided === 1,
-  JSON.stringify(setA.validity.rate));
-assert('the voided question is reported by name, not just counted',
-  setA.validity.voided.length === 1 && setA.validity.voided[0].question === wrongLayer,
-  JSON.stringify(setA.validity.voided.map((v) => v.question)));
+equal('a question satisfied by a layer it was not written for is voided',
+  { modes: voidedA.modes, pass: voidedA.pass, voided: voidedA.voided },
+  { modes: ['graph'], pass: true, voided: true });
+equal('the void names the block that did not answer',
+  { carriers: voidedA.carriers, missing: voidedA.missingBlocks },
+  { carriers: ['data'], missing: ['topics'] });
+equal('a voided question is excluded from both halves of the pass rate',
+  setA.validity.rate,
+  { passed: 1, counted: 1, voided: 1, total: 2, percent: 100 });
+equal('the voided question is reported by name, not just counted',
+  setA.validity.voided.map((v) => v.question),
+  [wrongLayer]);
 
 // ---------------------------------------------------------------------------
 // The over-correction guard. Catches: "void the wrong ones" broadened into "void
@@ -108,12 +134,12 @@ assert('the voided question is reported by name, not just counted',
 // unaccepted modes would void it, the rate would collapse, and the output would
 // be indistinguishable from the gate working.
 // ---------------------------------------------------------------------------
-assert('a question satisfied by its intended layer is not voided',
-  controlA.pass === true && controlA.voided === false,
-  JSON.stringify({ modes: controlA.modes, voided: controlA.voided }));
-assert('extra modes beyond the declaration do not void the question',
-  controlA.modes.length > 1 && controlA.carriers.join() === 'topics',
-  JSON.stringify({ modes: controlA.modes, carriers: controlA.carriers }));
+equal('a question satisfied by its intended layer is not voided',
+  { pass: controlA.pass, voided: controlA.voided },
+  { pass: true, voided: false });
+equal('extra modes beyond the declaration do not void the question',
+  { modes: controlA.modes, carriers: controlA.carriers },
+  { modes: ['brief', 'tickets', 'graph'], carriers: ['topics'] });
 
 // ---------------------------------------------------------------------------
 // Catches: counting modes where the verdict must count blocks. `tickets` and
@@ -125,11 +151,9 @@ assert('extra modes beyond the declaration do not void the question',
 const twoModesOneBlock = 'what changed in DEMO-1?';
 const setB = report(`${twoModesOneBlock} | ticket, tickets\n`);
 const sameBlock = forQuestion(setB.results, twoModesOneBlock);
-assert('two modes reading the same block are one declared layer, not two',
-  sameBlock.pass === true
-  && sameBlock.voided === false
-  && sameBlock.declaredBlocks.join() === 'tickets',
-  JSON.stringify({ declared: sameBlock.declaredBlocks, voided: sameBlock.voided }));
+equal('two modes reading the same block are one declared layer, not two',
+  { declaredBlocks: sameBlock.declaredBlocks, pass: sameBlock.pass, voided: sameBlock.voided },
+  { declaredBlocks: ['tickets'], pass: true, voided: false });
 
 // ---------------------------------------------------------------------------
 // Catches: a failing question being voided. The void must not become a way for a
@@ -139,12 +163,13 @@ assert('two modes reading the same block are one declared layer, not two',
 const missed = 'what does demo-core do?';
 const setC = report(`${missed} | brief, tickets\n`);
 const failed = forQuestion(setC.results, missed);
-assert('a failing question is not voided out of the rate',
-  failed.pass === false
-  && failed.voided === false
-  && setC.validity.rate.counted === 1
-  && setC.validity.rate.passed === 0,
-  JSON.stringify({ pass: failed.pass, voided: failed.voided, rate: setC.validity.rate }));
+equal('a failing question is not voided out of the rate',
+  { pass: failed.pass, voided: failed.voided, rate: setC.validity.rate },
+  {
+    pass: false,
+    voided: false,
+    rate: { passed: 0, counted: 1, voided: 0, total: 1, percent: 0 },
+  });
 
 // ---------------------------------------------------------------------------
 // Catches: the block distribution dropped, or counting declarations instead of
@@ -154,19 +179,25 @@ assert('a failing question is not voided out of the rate',
 // ---------------------------------------------------------------------------
 const setD = report(`which repositories implement PaymentService? | graph\n${control} | brief\n`);
 const observedD = Object.fromEntries(setD.validity.blocks.map((b) => [b.block, b.observed]));
-assert('the distribution counts the block that carried each valid question',
-  observedD.topics === 1 && observedD.data === 1,
-  JSON.stringify(observedD));
-assert('the report names every block no question observes',
-  setD.validity.unobserved.map((b) => b.block).join() === 'dives,tickets,abstention',
-  JSON.stringify(setD.validity.unobserved.map((b) => b.block)));
-assert('an unobserved block names the artefact nothing read',
-  setD.validity.unobserved.every((b) => b.source.length > 0)
-  && setD.validity.unobserved.some((b) => b.source.includes('docs/deep-dives')),
-  JSON.stringify(setD.validity.unobserved.map((b) => b.source)));
-assert('an unobserved block nothing declares is distinguished from one that failed',
-  setD.validity.unobserved.every((b) => b.declared === 0),
-  JSON.stringify(setD.validity.unobserved.map((b) => [b.block, b.declared])));
+equal('the distribution counts the block that carried each valid question',
+  observedD,
+  { topics: 1, dives: 0, tickets: 0, data: 1, abstention: 0 });
+equal('the report names every block no question observes',
+  setD.validity.unobserved.map((b) => b.block),
+  ['dives', 'tickets', 'abstention']);
+// The sources are pinned here as well as in the MODE_SOURCE pin below, and they
+// are not the same assertion: this one catches the block report attaching the
+// wrong block's artefact, which the mode table cannot see.
+equal('an unobserved block names the artefact nothing read',
+  setD.validity.unobserved.map((b) => b.source),
+  [
+    'dives block (docs/deep-dives -> dives.json)',
+    'tickets block (knowledge/intent)',
+    'no block answered, which is the engine abstaining',
+  ]);
+equal('an unobserved block nothing declares is distinguished from one that failed',
+  setD.validity.unobserved.map((b) => [b.block, b.declared]),
+  [['dives', 0], ['tickets', 0], ['abstention', 0]]);
 
 // ---------------------------------------------------------------------------
 // The sharpest one. Catches: crediting a voided question's carrier to the block,
@@ -178,17 +209,15 @@ assert('an unobserved block nothing declares is distinguished from one that fail
 // ---------------------------------------------------------------------------
 const setE = report(`${control} | brief, graph\nhow is the postcode brief written? | brief, graph\n`);
 const observedE = Object.fromEntries(setE.validity.blocks.map((b) => [b.block, b.observed]));
-assert('the per-mode floor can read healthy while the block has no observer',
-  setE.byMode.brief.declared === 2 && setE.byMode.brief.passed === 2 && observedE.topics === 0,
-  JSON.stringify({ brief: setE.byMode.brief, topics: observedE.topics }));
-assert('a block whose only questions were voided is reported as declared but unobserved',
-  setE.validity.unobserved.some((b) => b.block === 'topics' && b.declared === 2),
-  JSON.stringify(setE.validity.unobserved.map((b) => [b.block, b.declared])));
-assert('a set of voided questions has an empty pass rate rather than a full one',
-  setE.validity.rate.counted === 0
-  && setE.validity.rate.voided === 2
-  && setE.validity.rate.percent === 0,
-  JSON.stringify(setE.validity.rate));
+equal('the per-mode floor can read healthy while the block has no observer',
+  { brief: setE.byMode.brief, topics: observedE.topics },
+  { brief: { declared: 2, passed: 2 }, topics: 0 });
+equal('a block whose only questions were voided is reported as declared but unobserved',
+  setE.validity.unobserved.map((b) => [b.block, b.declared]),
+  [['topics', 2], ['dives', 0], ['tickets', 0], ['data', 2], ['abstention', 0]]);
+equal('a set of voided questions has an empty pass rate rather than a full one',
+  setE.validity.rate,
+  { passed: 0, counted: 0, voided: 2, total: 2, percent: 0 });
 
 // ---------------------------------------------------------------------------
 // Catches: a mode added to MODES without a block. It would map to `undefined`,
@@ -199,8 +228,7 @@ assert('a set of voided questions has an empty pass rate rather than a full one'
 const unmapped = MODES.filter(
   (m) => probeVerdict({ accept: [m], modes: [m], pass: true }).declaredBlocks.length !== 1,
 );
-assert('every declarable mode maps to exactly one block', unmapped.length === 0,
-  `unmapped: ${unmapped.join(', ')}`);
+equal('every declarable mode maps to exactly one block', unmapped, []);
 
 // ---------------------------------------------------------------------------
 // These strings reach the reader: every finding prints `read from: <source>`, so
@@ -218,14 +246,8 @@ const EXPECTED_MODE_SOURCE = {
   ticket: 'tickets block (knowledge/intent), by ticket id',
   abstain: 'no block answered, which is the engine abstaining',
 };
-const sourceDrift = MODES
-  .filter((m) => MODE_SOURCE[m] !== EXPECTED_MODE_SOURCE[m])
-  .map((m) => `${m}: ${JSON.stringify(MODE_SOURCE[m])}`);
-assert('every mode names the artefact it reads, in the words the reader sees',
-  sourceDrift.length === 0
-  && Object.keys(MODE_SOURCE).length === MODES.length,
-  sourceDrift.length ? `drifted - ${sourceDrift.join('; ')}`
-    : `MODE_SOURCE has ${Object.keys(MODE_SOURCE).length} keys for ${MODES.length} modes`);
+equal('every mode names the artefact it reads, in the words the reader sees',
+  asRows(MODE_SOURCE), asRows(EXPECTED_MODE_SOURCE));
 
 // ---------------------------------------------------------------------------
 // Catches: the two tables drifting apart. `MODE_SOURCE` is derived from
@@ -235,57 +257,61 @@ assert('every mode names the artefact it reads, in the words the reader sees',
 // name different artefacts for the same block. The literal pin above cannot see
 // that: it agrees with a hand-written copy of the right string. This is the
 // invariant that change claimed, so it is checked rather than asserted in prose.
+//
+// It carries a second break: a mode declared in MODES with no MODE_SOURCE entry
+// reads as the string "undefined", matches no block source, and is named here.
 // ---------------------------------------------------------------------------
 const blockSources = Object.values(BLOCK_SOURCE);
 const underived = MODES.filter((m) => !blockSources.some(
-  (source) => MODE_SOURCE[m] === source || MODE_SOURCE[m].startsWith(`${source},`),
+  (source) => String(MODE_SOURCE[m]) === source
+    || String(MODE_SOURCE[m]).startsWith(`${source},`),
 ));
-assert('every mode source is a block source, or one with a suffix',
-  underived.length === 0,
-  underived.map((m) => `${m}: ${JSON.stringify(MODE_SOURCE[m])}`).join('; '));
+equal('every mode source is a block source, or one with a suffix', underived, []);
 
 // ---------------------------------------------------------------------------
 // The design constraint, asserted end to end. Catches: the void wired to the exit
 // code. Report-only is deliberate - a store going red on its own question file
 // rather than on its data is the "always red so nobody reads it" failure the mode
-// design was chosen to avoid - so a run whose every question is voided must still
-// exit 0, and must say so in the output a person reads.
+// design was chosen to avoid - so a run whose question is voided must still exit
+// 0, and must say so in the output a person reads.
 // ---------------------------------------------------------------------------
 const work = mkdtempSync(join(tmpdir(), 'ksb-answer-validity-'));
 const questionFile = join(work, 'questions.txt');
 writeFileSync(questionFile, `${wrongLayer} | brief, graph\n${control} | brief\n`);
 const cli = spawnSync(process.execPath, [runner, '--page', page, '--questions', questionFile],
   { encoding: 'utf-8' });
-const output = (cli.stdout || '') + (cli.stderr || '');
+const stdout = cli.stdout || '';
+const output = stdout + (cli.stderr || '');
 
-assert('a voided question does not fail the run', cli.status === 0, output);
-assert('the human output marks the voided question', /^void {2}/m.test(cli.stdout || ''),
-  cli.stdout || '');
-assert('the rate line says how many were voided',
-  (cli.stdout || '').includes('1 of 1 questions answered as declared, 1 of 2 voided'),
-  cli.stdout || '');
-assert('the human output reports the block distribution',
-  (cli.stdout || '').includes('blocks observed by a valid question:'),
-  cli.stdout || '');
+equal('a voided question does not fail the run', cli.status, 0, output);
+equal('the human output marks the voided question',
+  /^void {2}/m.test(stdout), true, stdout);
+equal('the rate line says how many were voided',
+  stdout.includes('1 of 1 questions answered as declared, 1 of 2 voided'), true, stdout);
+equal('the human output reports the block distribution',
+  stdout.includes('blocks observed by a valid question:'), true, stdout);
 
 const asJson = spawnSync(
   process.execPath, [runner, '--page', page, '--questions', questionFile, '--json'],
   { encoding: 'utf-8' },
 );
+const jsonOut = asJson.stdout || '';
 let parsed;
 try {
-  // The JSON is the first value printed, before the human report.
-  parsed = JSON.parse((asJson.stdout || '').slice(0, (asJson.stdout || '').indexOf('\n}\n') + 3));
+  // The JSON is the first value printed, before the human report, and it is
+  // pretty-printed - so the top-level close is the first `}` at column zero.
+  parsed = JSON.parse(jsonOut.slice(0, jsonOut.indexOf('\n}\n') + 3));
 } catch (e) {
   parsed = null;
   console.error(`      could not parse --json output: ${e instanceof Error ? e.message : e}`);
 }
-assert('the JSON output carries the validity region for consumers',
-  Boolean(parsed?.validity?.rate)
-  && parsed.validity.rate.voided === 1
-  && parsed.validity.voided[0].question === wrongLayer
-  && Array.isArray(parsed.validity.blocks),
-  JSON.stringify(parsed?.validity?.rate));
+equal('the JSON output carries the validity region for consumers',
+  {
+    voided: parsed?.validity?.rate?.voided,
+    firstVoided: parsed?.validity?.voided?.[0]?.question,
+    blocksIsArray: Array.isArray(parsed?.validity?.blocks),
+  },
+  { voided: 1, firstVoided: wrongLayer, blocksIsArray: true });
 
 // ---------------------------------------------------------------------------
 // The file's own discriminating power, in the same run. A rule that voids nothing
@@ -304,5 +330,6 @@ if (voidedA.voided === controlA.voided) {
   console.log('ok    the void verdict discriminates: one voided, one not, same run');
 }
 
-console.log(`\n${failures ? `${failures} failure(s)` : 'the question-set validity gate holds'}`);
+const summary = failures ? `${failures} failure(s)` : 'the question-set validity gate holds';
+console.log(`\n${summary}`);
 process.exit(failures ? 1 : 0);
