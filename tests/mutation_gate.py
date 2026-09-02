@@ -1753,6 +1753,10 @@ MUTATIONS = (
         "is the shape the older half of this check was written for. Folded to one site: "
         "the only place it can be carried, and the only place it can be broken",
         (
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -1770,6 +1774,7 @@ MUTATIONS = (
         "store's requirements input did not name - and three checks passed, none of them "
         "having opened that input for correctness",
         (
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
@@ -1788,6 +1793,7 @@ MUTATIONS = (
         "fix; folding the two together sends an operator to recompile a lock that is "
         "missing the entry rather than holding a stale one",
         (
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
@@ -1802,6 +1808,12 @@ MUTATIONS = (
         "a check that prints a disagreement and exits 0 is worse than one that does not "
         "look: the text scrolls past in a green run and nothing chains on it",
         (
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -1822,6 +1834,11 @@ MUTATIONS = (
         "this library has shipped before in a repository-list reader that was green "
         "because every fixture used bare names",
         (
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
+            "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
             "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
         ),

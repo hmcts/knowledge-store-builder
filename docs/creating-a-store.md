@@ -12,6 +12,7 @@ adds evidence-grounded prose where deterministic extraction is not enough.
 | Build a store for the first time | [Install the prerequisites](#install-the-prerequisites), then [Create and define the store](#create-and-define-the-store) |
 | Bring an existing store up to date | [Refreshing a knowledge store](refreshing-a-store.md) |
 | Change the library release used by a store | [Update the library version](refreshing-a-store.md#update-the-library-version) |
+| Keep a lock that is written by hand rather than compiled | [A lock you maintain by hand](refreshing-a-store.md#a-lock-you-maintain-by-hand) |
 | Change pipeline settings or BDD support | [Configuring a knowledge store](configuring-a-store.md) |
 | Ask questions of a store someone else maintains | [Asking questions of a knowledge store](asking-questions.md) |
 
