@@ -243,6 +243,21 @@ connections) and test files — sources matching `.spec.`, `__tests__` or
 `/test/` — are excluded, except in repositories the estate declares as
 end-to-end suites, where the tests *are* the business documentation.
 
+**The entry index is dictionary-encoded, column by column.** Most of its bytes
+are repeats of strings already in it — a repository name, a source path, a
+community label — so each column's values are replaced by indices into a
+per-column table, and the page application restores every row before anything
+reads one. Which columns are encoded is decided at build time from that page's
+own data, by one inequality: the bytes a column costs, less the table and the
+indices that would replace it, has to come out positive against
+frequency-ordered indices. There is no list of column names, because the largest
+column of one estate's page need not exist on another's. A column whose values
+are no longer than their indices loses however often it repeats — a single-digit
+number in every row is the extreme case — so the build prints the verdict and the
+counts behind it for every column, and a store can read which of its own columns
+paid. Nothing is compressed: the browser parses less JSON rather than gaining a
+step before parsing it, and the page stays one file that opens from disk.
+
 **What the commits said is a retrieval surface, indexed per ticket.** The page
 searches all three evidence fields the ticket artefact carries — the curated
 description, the commit subjects as written, and the body prose — because a body

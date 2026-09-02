@@ -5,6 +5,8 @@
  * Inlined into graphify-out/explorer.html by scripts/build_explorer.py.
  * The page embeds JSON blocks this script reads at startup:
  *   #data      - Entry[] (see typedef below), sorted by degree descending
+ *   #dicts     - per-column dictionary tables for #data, where the build found
+ *                interning that column cheaper than repeating its values
  *   #edges     - flat [source, target, source, target, ...] index pairs
  *   #titles    - Jira titles (offline CSV import), #tickets - commit-mined detail
  *   #summaries - community summaries, #synonyms - semantic token neighbours
@@ -51,8 +53,18 @@ const SYN = JSON.parse(getEl('synonyms').textContent || '{}');
 /** Per-ticket detail mined from commit messages.
  * @type {Record<string, TicketInfo>} */
 const TICKET_INFO = JSON.parse(getEl('tickets').textContent || '{}');
+/** Per-column dictionary tables for #data, keyed by the row's column index.
+ *
+ * The build interns a column only where the table plus the indices cost fewer
+ * bytes than the values they replace, decided per column from that page's own
+ * data - so which columns appear here is a property of the estate rather than a
+ * list anyone maintains, and it can differ between two pages built by the same
+ * library. A page built before interning carries no block at all, `{}` is what
+ * an absent block parses to, and `decodeRows` is then the identity.
+ * @type {Record<string, (string|number)[]>} */
+const DICTS = JSON.parse(getEl('dicts').textContent || '{}');
 /** @type {Entry[]} */
-const DATA = JSON.parse(getEl('data').textContent || '[]');
+const DATA = decodeRows(JSON.parse(getEl('data').textContent || '[]'), DICTS);
 /** @type {number[]} */
 const EDGE_FLAT = JSON.parse(getEl('edges').textContent || '[]');
 const N = DATA.length;
@@ -106,6 +118,40 @@ const STOP = new Set(
    + ' what when where which who whose why will with would you your'
    + ' exist exists existed thing things way ways going want wants').split(' ')
 );
+
+/** Interned columns of #data restored to the values they stood for.
+ *
+ * A row is positional and is read by index in fifty places below, so decoding
+ * restores it exactly - same length, same order, same types - and nothing
+ * downstream can tell an interned page from a plain one. The interning is a
+ * wire format for the file, not a shape the engine knows about.
+ *
+ * In place, not into new rows: on the largest pages these rows are the biggest
+ * object in the browser, and rebuilding them would hold both copies at once for
+ * no benefit, since the originals are unreachable the moment this returns.
+ *
+ * An index outside its table cannot ship - the build decodes its own block and
+ * refuses to write a page that does not come back unchanged - so there is no
+ * guard for one here, and a page that lied about its tables would rather show
+ * `undefined` than silently drop a column.
+ *
+ * @param {any[][]} rows
+ * @param {Record<string, (string|number)[]>} dicts
+ * @returns {Entry[]}
+ */
+function decodeRows(rows, dicts) {
+  const columns = Object.keys(dicts);
+  for (const row of rows) {
+    for (const key of columns) {
+      const table = dicts[key];
+      const cell = row[Number(key)];
+      row[Number(key)] = Array.isArray(cell)
+        ? cell.map((index) => table[index])
+        : table[Number(cell)];
+    }
+  }
+  return /** @type {Entry[]} */ (rows);
+}
 
 /** @param {string} id @returns {HTMLElement} */
 function getEl(id) {
@@ -1352,6 +1398,9 @@ run();
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
   matchTopic, matchDive, runAsk, runSearch, q, out, meta,
   ticketEvidence, unevidencedTerms, extraSubjects,
+  // The data block's decoder, so its behaviour can be asserted directly rather
+  // than only through whether the page happens to answer a question.
+  decodeRows,
   // The two structures `vTicket` draws its evidence from. Exposed so a harness
   // can ask whether a ticket id has any record here, rather than concluding it
   // from the id appearing in the question - which is true of any string.
