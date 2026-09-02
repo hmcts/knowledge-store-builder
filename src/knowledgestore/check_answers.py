@@ -38,6 +38,18 @@ Modes are answer *shapes*, not text - a harness pinning prose is red after every
 refresh that legitimately reworded something, and one that is always red is one
 nobody reads. Several modes separated by commas means any of them is acceptable.
 
+**The question set's own validity is reported, and deliberately not gated**
+(#311). Because a question passes on any accepted mode, one declaring two blocks
+passes while either of them is dead: `brief, graph` answers on `graph` with the
+topics block blanked out, so it is not evidence about the topics layer. The run
+marks such a question `void`, leaves it out of the pass rate, and prints which
+blocks the set genuinely observes - a block with no observer is something the
+per-mode floors cannot report, because they are keyed on the modes questions
+declare. None of it changes the exit code: a store red on its own question file
+rather than on its data is the failure the mode design exists to avoid, and the
+counts are there so that decision can be taken on real numbers rather than a
+guess. `--json` carries the whole report, including its `validity` region.
+
 Requires Node (the same requirement the explorer tests already carry).
 
 Run: knowledgestore check-answers [--candidate PATH] [--questions PATH]

@@ -1187,7 +1187,16 @@ failure was 0 of 70,655 joined with the build green and both layers present.
 
 Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
 `10 of 10` cannot both be reported, but a total alone hides a dead layer behind a
-healthy one. See `docs/building-a-knowledge-store.md` §9.
+healthy one.
+
+Read the `blocks observed` line too, and any question marked `void`. A question
+passes on any mode it declares, so `brief, graph` passes on `graph` with the
+topics block blanked out - it is not evidence about the topics layer, and the run
+keeps it out of the pass rate rather than counting it as coverage. `brief 2/2`
+alongside `topics 0` means two questions declared that layer, both passed, and
+neither would have noticed it gone. Neither a void nor an unobserved block
+changes the exit code: both are findings about the question file, so fix the file
+rather than hunting the store. See `docs/building-a-knowledge-store.md` §9.
 
 ## Finishing a refresh
 
