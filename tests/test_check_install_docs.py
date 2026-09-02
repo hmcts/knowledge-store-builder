@@ -525,5 +525,190 @@ class NothingToCompareTest(SettingsIsolated):
         self.assertIn("all 1 documented install(s) from it pass", shown)
 
 
+class AHandAuthoredLockDeclaresItselfTest(SettingsIsolated):
+    """The third state a lock may be in, and the remedy #277's refusal left out.
+
+    The break these catch, as a set: the refusal above offers two ways out - commit
+    the input, or delete the lock - and a lock written by hand can take neither.
+    There is no input to commit, and a store reported a lock carrying commentary a
+    recompile destroys with a determinism test asserting it names the library, so
+    deleting it was not available either. A store in that position had no green path
+    at all, which is the shape of a check people learn to skip - worse than the
+    vacuous pass the refusal replaced.
+
+    The danger in fixing it is the opposite error, so these tests are written in
+    pairs: every one that shows the marker working has a partner showing it has not
+    become "any lock is fine". The marker must buy exactly one thing, for exactly
+    the lock that declares it.
+
+    Each drives `main()`. The composed message and the exit code are what an
+    operator meets, and the message is half of what is being fixed.
+    """
+
+    # Commentary first, so the cited line number is 2 rather than 1 and a reader
+    # cannot mistake a hard-coded 1, or a 0-based enumerate, for a correct citation.
+    # The commentary is also the reporting store's actual reason for the lock: notes
+    # that a recompile would destroy.
+    AUTHORED = (
+        "# Maintained by hand. A recompile drops the notes below with no way back.\n"
+        f"{gate.AUTHORED_MARKER}\n"
+        f"--extra-index-url {FEED}\n"
+        "--only-binary :all:\n"
+        "\n"
+        "thing==1.0 \\\n"
+        "    --hash=sha256:abc\n"
+    )
+    # The same lock with the declaration removed, and nothing else changed. Every
+    # over-correction test uses this, so a difference in outcome can only be the
+    # marker.
+    UNDECLARED = AUTHORED.replace(f"{gate.AUTHORED_MARKER}\n", "")
+    # A lock that documents the convention rather than invoking it, which is what a
+    # commentary-carrying lock plausibly grows. It must not declare itself.
+    QUOTED = AUTHORED.replace(
+        f"{gate.AUTHORED_MARKER}\n", f"# add `{gate.AUTHORED_MARKER}` to skip the comparison\n"
+    )
+    PINNED = f"--extra-index-url {FEED}\n--only-binary :all:\nthing==2.0\n"
+
+    def root(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name)
+
+    def drive(
+        self, lock: str, requirements: str | None = None, readme: str | None = None
+    ) -> tuple[int, str]:
+        """Build a store, run the stage, return its exit code and everything shown.
+
+        `requirements` defaults to absent, because that is the reported state: a
+        lock with no input beside it.
+        """
+        root = self.root()
+        (root / "requirements.lock").write_text(lock, encoding="utf-8")
+        if requirements is not None:
+            (root / "requirements.txt").write_text(requirements, encoding="utf-8")
+        if readme is not None:
+            (root / "README.md").write_text(readme, encoding="utf-8")
+        config.configure(root=str(root))
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gate.main()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_a_declared_lock_with_no_input_beside_it_passes(self):
+        """#312 itself: the store that reported this has no green path without it.
+
+        The lock names its index, so the documented-command half has nothing to say
+        and the exit code can only have come from the comparison half.
+        """
+        code, shown = self.drive(self.AUTHORED)
+        self.assertEqual(code, 0, shown)
+        self.assertNotIn("was compared against nothing", shown)
+
+    def test_an_undeclared_lock_with_no_input_is_still_refused(self):
+        """The over-correction guard, and the one that matters most.
+
+        Fixing #312 by treating an absent input as agreement would pass the test
+        above and reopen #277 for every store: an input renamed, or a pin moved
+        behind a `-r` include, look exactly like this from here. Authorship is
+        declared, never inferred from an absence.
+        """
+        code, shown = self.drive(self.UNDECLARED)
+        self.assertEqual(code, 1)
+        self.assertIn("no requirements.txt", shown)
+
+    def test_the_skip_says_it_compared_nothing_rather_than_passing_quietly(self):
+        """A silent skip is the vacuous pass again, one indirection along.
+
+        If the marker only changed the exit code, a green run would read as a
+        comparison that passed - and no reader or chained command could tell a
+        skipped half from a clean one, which is the exact defect #277 closed. The
+        wording is pinned because the wording is the fix.
+        """
+        code, shown = self.drive(self.AUTHORED)
+        self.assertEqual(code, 0, shown)
+        self.assertIn("SKIPPED, not passed", shown)
+        self.assertIn("compared 0 pins", shown)
+        self.assertIn(f"hand-authored at line 2: `{gate.AUTHORED_MARKER}`", shown)
+        self.assertNotIn("resolves every one of the", shown)
+
+    def test_a_declared_lock_is_still_compared_when_the_input_states_a_pin(self):
+        """The marker must not be a blanket off-switch for the comparison.
+
+        Skipping unconditionally on the marker would let a store mark its way out of
+        a live disagreement - a lock installing one version while the committed input
+        claims another, which is the harm this half exists for and does not depend on
+        how the lock was written. So the marker is consulted only after the
+        comparison has come back empty. Here it does not: the input pins thing==2.0
+        and the lock resolves 1.0.
+        """
+        code, shown = self.drive(self.AUTHORED, requirements=self.PINNED)
+        self.assertEqual(code, 1)
+        self.assertIn("thing: pinned 2.0, lock has 1.0", shown)
+        self.assertNotIn("SKIPPED", shown)
+
+    def test_the_documented_command_half_still_runs_behind_the_marker(self):
+        """Only one of the two invariants is skipped.
+
+        A marker that suppressed the whole stage would pass every test above while
+        letting a store document `pip install -r requirements.lock` against a lock
+        naming no index - the original defect this module was written for. This lock
+        declares itself hand-authored AND names no index, and the README gives the
+        command that cannot work.
+        """
+        code, shown = self.drive(
+            f"{gate.AUTHORED_MARKER}\nthing==1.0 \\\n    --hash=sha256:abc\n",
+            readme="Rebuild:\n\n```bash\npip install -r requirements.lock\n```\n",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("fail as written", shown)
+        # Both halves reported: the skip is a skip, not a stage that stopped.
+        self.assertIn("SKIPPED, not passed", shown)
+
+    def test_a_lock_that_only_quotes_the_marker_does_not_declare_it(self):
+        """Matched as a whole line, so prose about the convention is not the
+        convention.
+
+        A substring match would let any lock declare itself by explaining the
+        marker, and a lock carrying commentary - the only kind that needs the marker
+        - is exactly the lock whose commentary would come to mention it. The
+        declaration has to be a line the store wrote on purpose.
+        """
+        code, shown = self.drive(self.QUOTED)
+        self.assertEqual(code, 1)
+        self.assertIn("was compared against nothing", shown)
+
+    def test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered(self):
+        """The usability half of #312, and the reason it was a defect rather than a
+        gap.
+
+        A store meeting this refusal was shown two remedies it could not take and
+        never told the third existed, so the visible options were to invent a
+        synthetic input or to skip the check. Whoever hits the refusal has to be able
+        to reach the marker from the message alone - the message is the only
+        documentation a CI log carries.
+        """
+        code, shown = self.drive(self.UNDECLARED)
+        self.assertEqual(code, 1)
+        self.assertIn(gate.AUTHORED_MARKER, shown)
+        self.assertIn("not compiled from anything", shown)
+
+    def test_the_declaration_does_not_disturb_what_pip_reads_from_the_lock(self):
+        """The syntax constraint, asserted rather than argued.
+
+        The marker is a `#` comment so no resolver can read it as a requirement or
+        an option. If it ever became a syntax the lock parsers here have an opinion
+        about, the lock would gain a phantom package or lose its index - so the same
+        lock is read with and without the line and both must be identical.
+        """
+        root = self.root()
+        declared, plain = root / "declared.lock", root / "plain.lock"
+        declared.write_text(self.AUTHORED, encoding="utf-8")
+        plain.write_text(self.UNDECLARED, encoding="utf-8")
+        self.assertEqual(gate.locked_versions(declared), {"thing": "1.0"})
+        self.assertEqual(gate.locked_versions(declared), gate.locked_versions(plain))
+        self.assertTrue(gate.declares_an_index(declared))
+        self.assertIsNone(gate.declares_itself_authored(plain))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -429,7 +429,9 @@ in a store that follows the reference layout. Keep the exact `==` pin, so that
 rebuilding the store resolves the same versions it was built with —
 `check-install-docs` refuses rather than passing when the input states no `==`
 pin, because a lock compared against nothing reports the same clean result as a
-lock that resolves everything.
+lock that resolves everything. A store whose lock is not compiled from an input
+at all declares that instead — see
+[A lock you maintain by hand](#a-lock-you-maintain-by-hand).
 
 ```text
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
@@ -470,6 +472,46 @@ The library and plugin update separately: this changes the pinned library
 release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer
 skills.
+
+### A lock you maintain by hand
+
+Not every lock is compiled. If yours is written by hand, say so in the lock
+itself:
+
+```text
+# knowledgestore: hand-authored lock
+```
+
+`check-install-docs` then skips comparing the lock against a requirements input,
+and reports on every run that it did:
+
+```text
+requirements.lock declares itself hand-authored at line 3: `# knowledgestore: hand-authored lock`.
+The pin comparison was SKIPPED, not passed - it compared 0 pins.
+```
+
+**Without the line, a lock with no `requirements.txt` beside it fails the check.**
+That is deliberate: an absent input is refused rather than read as agreement,
+because an input renamed out from under the check and a store that resolves
+everything look identical from there. The line is how a store states which of the
+two it is, rather than leaving the check to guess.
+
+Add it only when the lock genuinely is not compiled from anything — it carries
+notes a recompile would destroy, or it pins a combination `uv pip compile` cannot
+resolve. Adding it to a compiled lock hides a renamed input.
+
+Two things the line does not switch off:
+
+- **The documented-command half.** Unchanged: while the lock names no index, every
+  documented command that installs from it still has to pass one.
+- **The comparison, whenever there is something to compare.** A declared lock
+  beside an input that does state a `==` pin is compared like any other, so the
+  line cannot hide a lock that installs a different version from the one the store
+  commits.
+
+A recompile removes the line, because `uv pip compile` keeps no comment it did not
+write. That is the intended behaviour: the skip stops, the check starts refusing
+again, and the cause is one deleted line in the lock's diff.
 
 ### Deciding whether a local check can go
 
