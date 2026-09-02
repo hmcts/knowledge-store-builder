@@ -254,6 +254,112 @@ class CostModelTest(unittest.TestCase):
         )
 
 
+# Values that stress `json_text`: the `</` sequence the block escapes on its way
+# into the page, characters whose UTF-8 length is not their character length, and
+# the quotes, backslash and newline that JSON escapes. Every other fixture in
+# this module is plain ASCII, where all three of those distinctions vanish.
+AWKWARD_VALUES = (
+    "</script><b>x</b>",
+    "cost per case in £",
+    "Cymraeg — llawn",
+    'he said "yes"',
+    "back\\slash",
+    "line\nbreak",
+    "</",
+    "\U0001f600 emoji",
+)
+
+
+class AwkwardValueTest(unittest.TestCase):
+    """The costing against values whose bytes are not their characters."""
+
+    def rows(self) -> list[list]:
+        return [
+            [
+                f"Label{index}",
+                AWKWARD_VALUES[index % len(AWKWARD_VALUES)],
+                f"src/f{index % 4}.ts",
+                AWKWARD_VALUES[(index + 1) % len(AWKWARD_VALUES)],
+                "code",
+                index,
+                [AWKWARD_VALUES[index % 3]],
+                [f"T-{index % 3}"],
+                index % 4,
+                "",
+            ]
+            for index in range(40)
+        ]
+
+    def blocks(self, rows: list) -> tuple[tuple, str, str, str]:
+        """`(plan, the plain block, the encoded block, the tables block)`.
+
+        Serialised through `json_text`, which is the expression `main` uses to
+        write every block. Not a copy of it: a second spelling of the
+        serialisation here would let the test agree with itself while the page
+        was written some other way, which is the whole failure this class
+        exists to catch.
+        """
+        plan, tables = explorer.interning_plan(rows)
+        encoded = explorer.encode_rows(rows, tables)
+        return (
+            plan,
+            explorer.json_text(rows),
+            explorer.json_text(encoded),
+            explorer.json_text(tables),
+        )
+
+    def test_the_costing_is_exact_for_values_whose_bytes_exceed_their_length(self):
+        """Breaks if `json_text` stops escaping `</`, or counts characters.
+
+        Both are one-character edits with no visible symptom on ASCII data, and
+        both make the model disagree with the page by a byte per occurrence -
+        in the direction that overstates the saving. A pound sign costs two
+        bytes and one character; `</` costs three on the page and two in
+        `json.dumps`.
+        """
+        rows = self.rows()
+        plan, plain, encoded, tables = self.blocks(rows)
+        interned = [item for item in plan if item.interned]
+
+        self.assertTrue(interned, "nothing was interned, so this asserts nothing")
+        self.assertEqual(sum(item.table_bytes for item in interned), len(tables.encode("utf-8")))
+        self.assertEqual(
+            sum(item.field_bytes - item.reference_bytes for item in interned),
+            len(plain.encode("utf-8")) - len(encoded.encode("utf-8")),
+        )
+        self.assertEqual(
+            sum(item.saving for item in interned),
+            len(plain.encode("utf-8")) - len(encoded.encode("utf-8")) - len(tables.encode("utf-8")),
+        )
+
+    def test_no_value_can_close_the_script_tag_it_is_embedded_in(self):
+        """Breaks if a table value reaches the page with a literal `</` in it.
+
+        The tables are a new block carrying estate strings, so they need the
+        same escape the data block has always had. A value holding `</script>`
+        would otherwise end the tag early and the page would render the rest of
+        its own index as markup.
+        """
+        _, _, encoded, tables = self.blocks(self.rows())
+
+        self.assertNotIn("</", tables)
+        self.assertNotIn("</", encoded)
+        self.assertIn("<\\/script", tables)  # the payload is there, escaped
+
+    def test_the_encoding_round_trips_awkward_values_unchanged(self):
+        """Breaks if a value is altered by being interned.
+
+        Escaping is a property of the serialisation, not of the value, so what
+        the reader gets back has to be the string the graph carried - byte for
+        byte, including the newline and the astral-plane character.
+        """
+        rows = self.rows()
+        _, tables = explorer.interning_plan(rows)
+        encoded = explorer.encode_rows(rows, tables)
+
+        self.assertEqual(explorer.decode_rows(encoded, tables), rows)
+
+
 class IndexAssignmentTest(unittest.TestCase):
     """Frequency ordering, and the determinism of the table it produces."""
 

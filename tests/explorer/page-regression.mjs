@@ -440,7 +440,11 @@ try {
   const legacyApp = join(legacyDir, 'app.js');
   copyFileSync(APP_PATH, legacyApp);
   const built = readFileSync(pagePath, 'utf-8');
-  const plain = JSON.stringify(api.DATA).replace(/<\//g, '<\\/');
+  // `replaceAll` with a plain string, and `String.raw` for the replacement: a
+  // global regex and a backslash-escaped literal are the same two bytes and
+  // both draw a Sonar smell that the JavaScript analyser will not let a
+  // NOSONAR silence.
+  const plain = JSON.stringify(api.DATA).replaceAll('</', String.raw`<\/`);
   const legacyHtml = built
     .replace(/<script id="dicts" type="application\/json">[^]*?<\/script>\n/, '')
     .replace(
