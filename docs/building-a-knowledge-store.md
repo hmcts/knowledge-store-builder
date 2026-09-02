@@ -679,8 +679,10 @@ landed together, and nothing about how much of the *new* cluster those members
 constitute. A summary can therefore clear the bar and still describe a small
 corner of the cluster it lands on — most of that cluster being newly arrived
 members the prose has never seen. Retention is a coverage number, not a
-correctness one: treat carried prose as owed a re-read, and split `verify`'s
-flag rate by carried-versus-authored rather than reading the headline.
+correctness one: treat carried prose as owed a re-read, and read `verify`'s flag
+rate split by provenance rather than the headline. That split names three
+states, and only `carried across a move` is prose re-keyed onto a set it was not
+written about.
 
 `remap` now also drops a summary whose target cluster grew so much that the
 prose describes a corner of it (`--precision`, default 20%). Measured on one

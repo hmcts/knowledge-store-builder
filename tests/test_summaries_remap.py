@@ -17,6 +17,7 @@ import contextlib
 import gzip
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
 from knowledgestore import config  # noqa: E402
+from knowledgestore import io as store_io  # noqa: E402
 
 
 def _graph(members: dict[str, list[str]]) -> dict:
@@ -445,7 +447,9 @@ class RemapTest(SettingsIsolated):
         self.write_graph({"1": ["a"]})
         self.write_summaries({"1": "the only one"})
         self.assertEqual(summaries.remap(floor=1), 0)
-        self.assertEqual(self.read_summaries(), {"1": "the only one"})
+        # The prose alone: the write also carries the reserved metadata block the
+        # skip in `RemapWriteGateTest` is gated on (#313).
+        self.assertEqual(store_io.read_summaries(config.SUMMARIES_PATH), {"1": "the only one"})
 
     # --- reporting -----------------------------------------------------------
 
@@ -820,6 +824,223 @@ class PrecisionDistributionTest(unittest.TestCase):
 
     def test_nothing_carried_reports_nothing(self):
         self.assertEqual(self._reported([]), "")
+
+
+class RemapWriteGateTest(SettingsIsolated):
+    """A remap that changed no prose writes nothing, and one that changed prose writes.
+
+    `merge` grew this gate in #299 and `remap` did not, so the two stages
+    disagreed about whether a no-op should touch a committed file (#313). An
+    identity remap - unchanged clustering, every summary carried onto the id it
+    already held, nothing withdrawn - rewrote every line of the artefact, and a
+    whole-file diff that means nothing is what teaches a reviewer to skim the one
+    that means something.
+
+    Deliberately not a subclass of `RemapTest`: inheriting its fixture would
+    inherit its tests too, and every inherited copy becomes another name the
+    mutation table has to carry for the entries this module already observes.
+    """
+
+    # A coverage block, reconciled by hand: shown + unshown == total per field.
+    # It survives an identity remap only because the write is skipped, which is
+    # the point - remap cannot know a carried summary's evidence base.
+    COVERAGE = {
+        "top_nodes": {"shown": 2, "unshown": 3, "total": 5},
+        "business_features": {"shown": 0, "unshown": 0, "total": 0},
+        "tickets": {"shown": 1, "unshown": 0, "total": 1},
+    }
+    # A fixed point in the past, so "was this file rewritten?" is answered by the
+    # filesystem rather than by comparing bytes a rewrite would reproduce.
+    PINNED = 1_000_000_000
+    # The community whose prose is watched across the remap. The rest are filler,
+    # so the plausibility floor does not refuse the run.
+    WATCHED = "7"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        (self.root / "knowledge" / "summaries").mkdir(parents=True)
+        (self.root / "graphify-out").mkdir(parents=True)
+        self._old_root = config.ROOT
+        self.addCleanup(config.configure, root=str(self._old_root))
+        config.configure(root=str(self.root))
+
+    # --- fixture -------------------------------------------------------------
+
+    @classmethod
+    def prose(cls, cid: str, note: str = "") -> str:
+        """Prose long enough to clear `merge`'s length bound, keyed to its id."""
+        return (
+            f"Community {cid} groups the lookup and persistence paths that one "
+            f"invented service reads at build time.{note}"
+        )
+
+    def members(self, watched: str = WATCHED) -> dict[str, list[str]]:
+        """A clustering with more communities than the plausibility floor asks for."""
+        return {watched: ["a", "b", "c"]} | {str(i): [f"x{i}"] for i in range(1000, 1030)}
+
+    def write_graph(self, members: dict[str, list[str]]) -> None:
+        config.GRAPH_PATH.write_text(json.dumps(_graph(members)), encoding="utf-8")
+
+    def identity_store(self, note: str = "") -> dict[str, str]:
+        """Snapshot and graph agreeing exactly, and the prose that belongs to them."""
+        members = self.members()
+        with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "wt", encoding="utf-8") as handle:
+            json.dump(members, handle)
+        self.write_graph(members)
+        return {cid: self.prose(cid, note if cid == self.WATCHED else "") for cid in members}
+
+    def recluster(self) -> None:
+        """The re-cluster: the watched community keeps its nodes under a new id."""
+        self.write_graph(self.members(watched="42"))
+
+    def commit_through_merge(self, prose: dict[str, str]) -> None:
+        """Commit `prose` through the real merge stage.
+
+        The file under test is then the artefact `merge` writes, digest and all,
+        rather than a hand-made stand-in for it - the disagreement pinned here is
+        between two real stages.
+        """
+        digests = [
+            {"id": cid} | ({"coverage": self.COVERAGE} if cid == self.WATCHED else {})
+            for cid in prose
+        ]
+        config.SUMMARIES_INPUT_PATH.write_text(json.dumps(digests), encoding="utf-8")
+        self.assertEqual(self.run_merge(prose, name="first.json")[0], 0)
+
+    def run_remap(self, **kwargs) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = summaries.remap(**kwargs)
+        return code, out.getvalue()
+
+    def run_merge(self, prose: dict[str, str], name: str = "again.json") -> tuple[int, str]:
+        batch = self.root / name
+        batch.write_text(json.dumps(prose), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = summaries.merge([str(batch)])
+        return code, out.getvalue()
+
+    def pin(self) -> None:
+        self.assertTrue(config.SUMMARIES_PATH.is_file(), "nothing was committed to remap")
+        os.utime(config.SUMMARIES_PATH, (self.PINNED, self.PINNED))
+
+    def rewritten(self) -> bool:
+        return int(config.SUMMARIES_PATH.stat().st_mtime) != self.PINNED
+
+    def body(self) -> dict:
+        return store_io.read_summaries(config.SUMMARIES_PATH)
+
+    # --- the gate ------------------------------------------------------------
+
+    def test_an_identity_remap_does_not_rewrite_the_committed_file(self):
+        """The break: a remap that carries every summary onto the id it already
+        holds rewriting the file anyway, so an operator reviewing a re-cluster
+        cannot tell an identity remap from a real one at a glance."""
+        prose = self.identity_store()
+        self.commit_through_merge(prose)
+        before = config.SUMMARIES_PATH.read_bytes()
+        self.pin()
+
+        code, output = self.run_remap()
+
+        self.assertEqual(code, 0)
+        self.assertFalse(self.rewritten(), "no prose moved, so nothing may be written")
+        self.assertEqual(config.SUMMARIES_PATH.read_bytes(), before)
+        self.assertIn("not rewritten", output)
+        # Not a refusal wearing a skip: the same run carried all 31 and withdrew none.
+        self.assertIn(f"Retained {len(prose)} of {len(prose)} summaries (100%), withdrew 0", output)
+
+    def test_the_skipped_write_leaves_the_coverage_merge_recorded(self):
+        """The break: losing the evidence base on a no-op. The metadata block is
+        what a reader subtracts from to see when they are reading a sample, and
+        an identity remap has no grounds to disturb it."""
+        prose = self.identity_store()
+        self.commit_through_merge(prose)
+        self.pin()
+
+        self.assertEqual(self.run_remap()[0], 0)
+
+        document = json.loads(config.SUMMARIES_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            document[store_io.SUMMARIES_METADATA_KEY]["coverage"][self.WATCHED], self.COVERAGE
+        )
+
+    def test_a_remap_that_moves_an_id_still_rewrites_the_file(self):
+        """The over-correction this exists to catch: "skip the rewrite" becoming
+        "never rewrite" looks exactly like success from the test above, and would
+        strand every committed summary on ids the graph no longer uses."""
+        prose = self.identity_store()
+        self.commit_through_merge(prose)
+        self.recluster()
+        self.pin()
+
+        code, output = self.run_remap()
+
+        self.assertEqual(code, 0)
+        self.assertTrue(self.rewritten(), "an id moved, so the file must be written")
+        self.assertEqual(self.body()["42"], prose[self.WATCHED])
+        self.assertNotIn(self.WATCHED, self.body())
+        self.assertNotIn("not rewritten", output)
+
+    def test_a_second_remap_of_the_same_clustering_writes_nothing(self):
+        """The break: remap recording no digest of what it wrote, so its own
+        output is unrecognisable to it and every later run rewrites the file. A
+        store whose file predates the digest normalises it once, not once a run."""
+        prose = self.identity_store()
+        # Two-space indentation and no metadata block: a file no `merge` of this
+        # library wrote, which is the shape the reporting store had.
+        config.SUMMARIES_PATH.write_text(json.dumps(prose, indent=2), encoding="utf-8")
+
+        self.assertEqual(self.run_remap()[0], 0)
+        first = config.SUMMARIES_PATH.read_bytes()
+        self.pin()
+
+        code, output = self.run_remap()
+
+        self.assertEqual(code, 0)
+        self.assertFalse(self.rewritten(), "remap must recognise the file it wrote itself")
+        self.assertEqual(config.SUMMARIES_PATH.read_bytes(), first)
+        self.assertIn("not rewritten", output)
+
+    def test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded(self):
+        """The break: the two stages computing or recording the digest
+        differently, so a merge that adds no prose rewrites the whole file
+        directly after a remap - the churn moved rather than removed."""
+        prose = self.identity_store()
+        config.SUMMARIES_PATH.write_text(json.dumps(prose), encoding="utf-8")
+        config.SUMMARIES_INPUT_PATH.write_text(
+            json.dumps([{"id": cid} for cid in prose]), encoding="utf-8"
+        )
+        self.assertEqual(self.run_remap()[0], 0)
+        after_remap = config.SUMMARIES_PATH.read_bytes()
+        self.pin()
+
+        code, output = self.run_merge(prose)
+
+        self.assertEqual(code, 0, output)
+        self.assertFalse(self.rewritten(), "the prose is the prose already committed")
+        self.assertEqual(config.SUMMARIES_PATH.read_bytes(), after_remap)
+        self.assertIn("not rewritten", output)
+
+    def test_non_ascii_prose_survives_a_remap_as_merge_wrote_it(self):
+        """The second defect underneath #313: `remap` wrote with the default
+        `ensure_ascii` and `merge` with `ensure_ascii=False`, so a remap escaped
+        every non-ASCII character a merge had written literally and the next
+        merge unescaped it again. Alternating the two stages churned the file on
+        its own, over prose neither had changed."""
+        prose = self.identity_store(note=" Uses the naming café — an invented one.")
+        self.commit_through_merge(prose)
+        self.assertIn("café", config.SUMMARIES_PATH.read_text(encoding="utf-8"))
+        self.recluster()
+
+        self.assertEqual(self.run_remap()[0], 0)
+
+        text = config.SUMMARIES_PATH.read_text(encoding="utf-8")
+        self.assertIn("café — an invented one", text, "remap must not escape what merge did not")
+        self.assertNotIn("\\u", text)
 
 
 if __name__ == "__main__":
