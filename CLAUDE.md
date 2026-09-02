@@ -68,6 +68,7 @@ tests/explorer/check-js.sh          # eslint + tsc --checkJs, the versions CI pi
 node tests/explorer/engine-unit.mjs
 python3 tests/explorer/fixture.py
 node tests/explorer/page-regression.mjs
+node tests/explorer/answer-validity.mjs
 ```
 
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked

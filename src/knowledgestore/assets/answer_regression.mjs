@@ -42,6 +42,25 @@
 // estate-shaped threshold: if a mode has questions declared and none of them
 // pass, that is a finding whatever the total says.
 //
+// **The same argument, one level down: a question can be a valid probe or not**
+// (#311). The mode floors stop a dead MODE hiding behind a healthy total. They do
+// not stop a dead LAYER hiding behind a question that another layer happens to
+// answer - because a question may declare several acceptable modes, and passes on
+// any one of them. A question declaring `brief, graph` passes on `graph` alone
+// with the topics block blanked out, and the run reports it as a pass without
+// anything recording that the layer it was written for was never consulted. The
+// sharp case is a question whose terms are all bare label matches: `rankNodes`
+// finds those whatever state the semantic and intent layers are in.
+//
+// So each question also gets a verdict on whether it could have failed for the
+// layer it was written for, and the set gets a report of which blocks it actually
+// observes. **This is reported, not gated**, and that is a decision rather than an
+// omission: a voided question is a finding about the question FILE, and failing
+// the run on it would put a store red on its own probes rather than on its data -
+// the "always red so nobody reads it" failure the mode design was chosen to avoid.
+// The counts are in the human output and the JSON so the gating decision can be
+// taken on real numbers.
+//
 // **Every finding names the artefact it read.** Each of the four misses across
 // both estates that motivated #134 was false testimony rather than silence -
 // something was counted, and the number meant something other than it appeared
@@ -53,14 +72,47 @@ import { loadPage, strip } from './explorer_harness.mjs';
 /** The answer shapes a question may declare. Names are the reader's, not internal. */
 export const MODES = ['brief', 'dive', 'tickets', 'graph', 'ticket', 'abstain'];
 
+/** The embedded blocks a question set can observe, and the artefact behind each.
+ *
+ * Ordered, because the report prints them and two runs on the same inputs must be
+ * byte-identical. `abstention` is not a block on the page: it is what the engine
+ * does when no block answers, and it belongs here because "nothing observes
+ * abstention" is the same finding as "nothing observes the dives block".
+ * @type {Record<string, string>} */
+const BLOCK_SOURCE = {
+  topics: 'topics block (docs/topics -> briefs.json)',
+  dives: 'dives block (docs/deep-dives -> dives.json)',
+  tickets: 'tickets block (knowledge/intent)',
+  data: 'data + edges blocks (graphify-out/graph.json)',
+  abstention: 'no block answered, which is the engine abstaining',
+};
+
+/** Which block each mode's evidence comes from.
+ *
+ * Coarser than the mode, and deliberately: `tickets` and `ticket` are two shapes
+ * of answer read from the same block, so a question declaring both declares one
+ * layer, not two. The validity verdict below counts blocks rather than modes for
+ * exactly that reason.
+ * @type {Record<string, string>} */
+const MODE_BLOCK = {
+  brief: 'topics',
+  dive: 'dives',
+  tickets: 'tickets',
+  graph: 'data',
+  ticket: 'tickets',
+  abstain: 'abstention',
+};
+
 /** Which embedded block each mode is evidence from, for the house rule above.
+ * Derived from `BLOCK_SOURCE` so the two cannot drift apart; `ticket` adds how it
+ * was read, because the id lookup is the assertion that mode exists for.
  * @type {Record<string, string>} */
 const MODE_SOURCE = {
-  brief: 'topics block (docs/topics -> briefs.json)',
-  dive: 'dives block (docs/deep-dives -> dives.json)',
-  tickets: 'tickets block (knowledge/intent)',
-  graph: 'data + edges blocks (graphify-out/graph.json)',
-  ticket: 'tickets block, by ticket id',
+  brief: BLOCK_SOURCE.topics,
+  dive: BLOCK_SOURCE.dives,
+  tickets: BLOCK_SOURCE.tickets,
+  graph: BLOCK_SOURCE.data,
+  ticket: `${BLOCK_SOURCE.tickets}, by ticket id`,
   abstain: 'no block answered',
 };
 
@@ -207,6 +259,109 @@ export function classify(api, question) {
 /** @param {string[]} observed @param {string[]} accept */
 const met = (observed, accept) => accept.some((m) => observed.includes(m));
 
+/** The blocks these modes read from, deduplicated and in `BLOCK_SOURCE` order.
+ * Sorted by the table rather than by first appearance, because the order a
+ * question happens to list its modes in must not reach the output.
+ * @param {string[]} modes @returns {string[]}
+ */
+const blocksOf = (modes) => Object.keys(BLOCK_SOURCE)
+  .filter((block) => modes.some((m) => MODE_BLOCK[m] === block));
+
+/** Is this question a probe that could have failed for the layer it declares?
+ *
+ * A question passes on ANY accepted mode, so one declaring two blocks passes
+ * while either of them is dead: kill the topics block and `brief, graph` still
+ * answers on `graph`. Such a question observes neither block - it is answerable
+ * another way - and counting it as a pass reports coverage of a layer nothing
+ * checked. So a passing question is VOID when it declares more than one block.
+ *
+ * Two shapes reach that verdict and the reader needs to be told which:
+ *
+ *   - more than one declared block answered, so none of them has to be alive;
+ *   - only one did, so the question was satisfied by a layer it declared but was
+ *     not written for, and the others were never consulted.
+ *
+ * A single-block declaration is never void: exactly one block carries it, and
+ * that block's death fails the question. A failing question is not void either -
+ * it failed, and a failure is not a coverage claim.
+ *
+ * @param {{accept: string[], modes: string[], pass: boolean}} result
+ * @returns {{declaredBlocks: string[], carriers: string[], missingBlocks: string[],
+ *            voided: boolean, voidReason: string}}
+ */
+export function probeVerdict(result) {
+  const declaredBlocks = blocksOf(result.accept);
+  // Only the accepted modes that actually answered: those are what carried the
+  // pass, and killing anything else would leave the question passing.
+  const carriers = result.pass
+    ? blocksOf(result.accept.filter((m) => result.modes.includes(m)))
+    : [];
+  const missingBlocks = declaredBlocks.filter((b) => !carriers.includes(b));
+  const voided = Boolean(result.pass) && declaredBlocks.length > 1;
+  let voidReason = '';
+  if (voided && carriers.length > 1) {
+    voidReason = `${carriers.join(' and ')} each answered a declared mode, `
+      + 'so none of them has to be alive for this to pass';
+  } else if (voided) {
+    voidReason = `only ${carriers.join(' and ')} answered; `
+      + `${missingBlocks.join(', ')} did not, so nothing here observes `
+      + `${missingBlocks.length > 1 ? 'them' : 'it'}`;
+  }
+  return { declaredBlocks, carriers, missingBlocks, voided, voidReason };
+}
+
+/** The question set's own validity: the rate with voids excluded, and which
+ * blocks the set genuinely observes.
+ *
+ * The second half is the repository's rule that a gate must name what it covers,
+ * applied to the question set instead of the code. A block with no observer is
+ * something the mode floors cannot report: `byMode` is keyed on modes questions
+ * DECLARE, so a block nothing declares has no entry to have a floor, and a block
+ * whose only questions were voided has a floor that the void made vacuous.
+ *
+ * @param {any[]} results each carrying the fields `probeVerdict` returns
+ */
+export function assessValidity(results) {
+  const voided = results.filter((r) => r.voided);
+  const counted = results.length - voided.length;
+  const passed = results.filter((r) => r.pass && !r.voided).length;
+  /** @type {Record<string, {observed: number, declared: number}>} */
+  const tally = {};
+  for (const block of Object.keys(BLOCK_SOURCE)) tally[block] = { observed: 0, declared: 0 };
+  for (const r of results) {
+    for (const block of r.declaredBlocks) tally[block].declared++;
+    if (r.voided) continue;
+    for (const block of r.carriers) tally[block].observed++;
+  }
+  const blocks = Object.entries(tally)
+    .map(([block, c]) => ({ block, source: BLOCK_SOURCE[block], ...c }));
+  return {
+    rate: {
+      passed,
+      counted,
+      voided: voided.length,
+      total: results.length,
+      // Named so nobody has to re-derive it from two numbers that mean different
+      // things: this is the rate over probes that could have failed, not over the
+      // question file.
+      percent: counted ? Math.round((passed / counted) * 100) : 0,
+    },
+    voided: voided.map((r) => ({
+      question: r.question,
+      line: r.line,
+      accept: r.accept,
+      modes: r.modes,
+      declaredBlocks: r.declaredBlocks,
+      carriers: r.carriers,
+      missingBlocks: r.missingBlocks,
+      carried: r.carried,
+      voidReason: r.voidReason,
+    })),
+    blocks,
+    unobserved: blocks.filter((b) => b.observed === 0),
+  };
+}
+
 /** Run every question and return a report. Pure enough to test.
  *
  * @param {any} api
@@ -219,7 +374,7 @@ export function run(api, questions, previous = {}) {
     const wanted = met(modes, q.accept);
     const wasAnswered = previous[q.question] && !previous[q.question].includes('abstain');
     const nowAbstains = modes.includes('abstain') && modes.length === 1;
-    return {
+    const answered = {
       ...q,
       modes,
       composed,
@@ -233,6 +388,7 @@ export function run(api, questions, previous = {}) {
       lostAnswer: Boolean(wasAnswered && nowAbstains),
       moved: Boolean(previous[q.question] && !sameSet(previous[q.question], modes)),
     };
+    return { ...answered, ...probeVerdict(answered) };
   });
 
   // The decomposition. By expected mode, because modes are produced by different
@@ -252,7 +408,11 @@ export function run(api, questions, previous = {}) {
     .filter(([, c]) => c.declared > 0 && c.passed === 0)
     .map(([mode, c]) => ({ mode, declared: c.declared }));
 
-  return { results, byMode, floors };
+  // `byMode` above deliberately still counts a voided question's pass. It carries
+  // the exit code through the floors, and the validity gate is report-only by
+  // design (#311) - subtracting voids from it would gate on the question file
+  // through the back door, which is the one thing that decision rules out.
+  return { results, byMode, floors, validity: assessValidity(results) };
 }
 
 /** @param {string[]} a @param {string[]} b */
@@ -363,6 +523,20 @@ function reportOne(r, previous) {
     console.error('      the baseline has this answered; it now abstains');
     return 1;
   }
+  if (r.voided) {
+    // Not a failure, and stdout rather than stderr for that reason: the finding
+    // is about the question file, and the exit code is deliberately not wired to
+    // it (#311). It is reported before `moved` because a question that has moved
+    // between two accepted shapes is exactly the question this voids, and the
+    // reason it can move is the thing worth reading.
+    console.log(`void  ${r.question}  ->  ${r.modes.join(' + ')}`);
+    console.log(`      declared ${r.accept.join(' or ')}: ${r.voidReason}`);
+    console.log('      excluded from the pass rate; it is not evidence about a layer');
+    if (r.carried.length) {
+      console.log(`      the terms that carried it: ${r.carried.join(', ')}`);
+    }
+    return 0;
+  }
   if (r.moved) {
     // A note, not a failure. Movement between two accepted shapes is what a
     // refresh legitimately does; a harness that fails on it gets switched off.
@@ -384,6 +558,27 @@ function reportFloors(floors) {
     console.error('      a pass rate hides this: the other modes carry the total');
   }
   return floors.length;
+}
+
+/** Which blocks this question set actually observes.
+ *
+ * Report-only, and it returns nothing a caller could add to a failure count -
+ * deliberately, so a later change cannot wire it to the exit code by accident.
+ * The floors above cannot report this: `byMode` is keyed on the modes questions
+ * declare, so a block nothing declares has no entry to carry a floor at all.
+ *
+ * @param {ReturnType<typeof assessValidity>} v
+ */
+function reportValidity(v) {
+  const parts = v.blocks.map((b) => `${b.block} ${b.observed}`).join(', ');
+  console.log(`blocks observed by a valid question: ${parts}`);
+  for (const b of v.unobserved) {
+    console.log(`warn  no valid question is carried by ${b.block}, so nothing here observes it`);
+    console.log(`      read from: ${b.source}`);
+    console.log(b.declared
+      ? `      ${b.declared} question(s) declare it, and none carried it as a valid probe`
+      : '      no question declares it, which no per-mode floor can report');
+  }
 }
 
 /** @param {string[]} argv */
@@ -416,21 +611,28 @@ function main(argv) {
   }
 
   const previous = readBaseline(args.baseline);
-  const { results, byMode, floors } = run(api, questions, previous);
+  const { results, byMode, floors, validity } = run(api, questions, previous);
 
   if (args.write) writeBaseline(args.baseline, results);
-  if (args.json) console.log(JSON.stringify({ results, byMode, floors }, null, 2));
+  if (args.json) console.log(JSON.stringify({ results, byMode, floors, validity }, null, 2));
 
   let failures = 0;
   for (const r of results) failures += reportOne(r, previous);
   failures += reportFloors(floors);
 
-  const passed = results.filter((/** @type {any} */ r) => r.pass).length;
   const parts = Object.entries(byMode)
     .map(([m, c]) => `${m} ${c.passed}/${c.declared}`)
     .sort((x, y) => x.localeCompare(y))
     .join(', ');
-  console.log(`\n${passed} of ${results.length} questions answered as declared  (${parts})`);
+  // The denominator is the questions that could have failed for the layer they
+  // declare, not the size of the question file: a voided probe contributes to
+  // neither half of a rate people read as coverage. The clause naming how many
+  // were voided appears only when some were, so a set of single-block questions
+  // reads exactly as it did before this existed.
+  const { passed, counted, voided, total } = validity.rate;
+  const voidedClause = voided ? `, ${voided} of ${total} voided` : '';
+  console.log(`\n${passed} of ${counted} questions answered as declared${voidedClause}  (${parts})`);
+  reportValidity(validity);
   console.log(`page: ${args.page}`);
   return failures ? 1 : 0;
 }
