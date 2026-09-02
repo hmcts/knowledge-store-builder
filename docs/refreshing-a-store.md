@@ -110,6 +110,23 @@ summaries now sit on. Without it the committed snapshot describes the graph the
 store no longer has, and the next refresh remaps from a baseline that is
 consistently wrong — the one state `remap`'s own guards cannot see.
 
+`snapshot` writes two files and both are part of the baseline:
+`membership-snapshot.json.gz` keyed by node id, and `membership-files.json.gz`
+keyed by `(repository, source_file)`. Commit both. `remap` reads the second one
+for the summaries the node ids lose outright — a rebuild that re-runs semantic
+extraction renames essentially every semantic node id, because those ids are
+built from labels an extraction authored, so prose about a community whose corpus
+files never moved is otherwise withdrawn for no reason connected to the change.
+Read the route split on the output:
+
+```
+Carried by route: N on node ids, M on (repository, source_file)
+```
+
+Every fallback carry is marked `"exact": false` in `remap-report.json` and named
+with `"route": "source-files"`, so those paragraphs can be sampled on their own
+and put at the front of the revision queue.
+
 `remap` writes `communities.json` only when the prose in it changes, the same gate
 `merge` uses. A re-cluster that moved no summary therefore leaves the committed file
 byte-identical and says so on the retention line, so a diff on that file always means
@@ -557,6 +574,7 @@ Two failures, both reported by store operators:
 | Symptom | Action |
 |---|---|
 | `summaries remap` withdrew most of the prose | Usually correct. A summary is carried only onto a community holding exactly the node set it was written about, so any community that gained or lost a node has its prose withdrawn for revision. Check the clustering first — a clustering command can report success without saving its result, and coverage below the `--coverage` floor is refused rather than reported — then treat the withdrawn file as a backfill queue. |
+| `remap` reports `"available": false` under `fallback` | The `(repository, source_file)` route did not run, and the block says why: no `membership-files.json.gz` (a snapshot taken before the library wrote one, or a store that commits only the node-id file), or one recorded against a different membership snapshot. It is not a measured zero. Re-run `summaries snapshot` against the graph the summaries were written for, before re-clustering. |
 | `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
 | `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |

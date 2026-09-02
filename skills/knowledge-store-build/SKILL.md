@@ -867,7 +867,7 @@ path is the failure mode to check for.
 
 ```bash
 knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
-knowledgestore summaries snapshot   # BEFORE re-clustering
+knowledgestore summaries snapshot   # BEFORE re-clustering; writes two files, commit both
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: re-keys prose whose community is unchanged
 knowledgestore summaries snapshot   # re-key the baseline to the new clustering
@@ -910,6 +910,46 @@ that is not the set the prose was written about is `"exact": false` in the remap
 report. `remap` also refuses to run on a wrong snapshot (no shared node ids) or
 an implausibly small summary set (`--floor`), because both failures silently
 produce an empty file over a good one.
+
+**Commit both snapshot files.** `summaries snapshot` writes
+`knowledge/summaries/membership-snapshot.json.gz` (node ids) and
+`knowledge/summaries/membership-files.json.gz` (the same communities keyed by
+`(repository, source_file)`). The second one is what the remap's fallback route
+reads, and a store that commits only the first loses that route silently — the
+run says so on stderr, once, in a build log nobody reads twice.
+
+**A rebuild that re-runs semantic extraction has a second route.** Semantic node
+ids are built from labels an extraction authored, so a fresh pass renames
+essentially all of them even where the corpus files are unchanged; the ids that
+survive a rebuild are close to just the deterministic AST population. Prose about
+a renamed community is dropped as `members-gone` with nothing wrong with it. So
+for those summaries — and only those — `remap` tries again on
+`(repository, source_file)`, which is a corpus path and identical whoever
+extracted it. Read the split:
+
+```
+Carried by route: N on node ids, M on (repository, source_file)
+```
+
+The route is named per carry in the remap report, so the fallback-only carries
+can be sampled on their own. Three things to know before trusting them:
+
+- **A fallback carry is never `"exact": true`.** The node set the prose was
+  written about is gone by definition, so every one of them is marked inexact
+  and belongs in the revision queue ahead of a node-id carry.
+- **The route cannot rescue anything the node ids decided.** `not-identical`,
+  `below-bar`, `below-precision` and `collision` were all measured against
+  members the graph still holds. Only `members-gone` means there was nothing to
+  measure.
+- **`"available": false` in the report's `fallback` block is not a zero.** It
+  means the route did not run — no file snapshot, or one recorded against a
+  different membership snapshot — and the reason is in the block. A store
+  reading `0 carried` off that has measured nothing.
+
+Communities that key on no file at all are refused by name (`no-file-key`):
+structural nodes carry no `source_file`, so a package-hierarchy community keys
+on nothing, and an empty key set would otherwise match another empty key set
+perfectly.
 
 Whatever `remap` withdraws is then a backfill — but not from scratch. `remap`
 writes `knowledge/summaries/remap-report.json`: every displaced summary with

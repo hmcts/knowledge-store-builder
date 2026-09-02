@@ -364,8 +364,9 @@ class RemapTest(SettingsIsolated):
         report = json.loads(config.REMAP_REPORT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
             report["carried"]["77"],
-            {"from": "1", "share": 1.0, "precision": 1.0, "exact": True},
-            "the carried record now says how much of its new cluster the prose describes",
+            {"from": "1", "share": 1.0, "precision": 1.0, "exact": True, "route": "node-ids"},
+            "the carried record now says how much of its new cluster the prose describes, "
+            "and which of the two keys carried it",
         )
         self.assertEqual(report["carried"]["88"]["from"], "3")
         displaced = report["displaced"]

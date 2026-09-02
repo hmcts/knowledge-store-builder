@@ -148,6 +148,19 @@ SUMMARIES_PATH = ROOT / "knowledge" / "summaries" / "communities.json"
 # Community membership as it was before a re-cluster, so summaries can be
 # remapped onto the new ids afterwards. Written by `summaries snapshot`.
 SUMMARIES_SNAPSHOT_PATH = ROOT / "knowledge" / "summaries" / "membership-snapshot.json.gz"
+# The same communities keyed by `(repository, source_file)` instead of node id,
+# written beside the membership snapshot by the same `summaries snapshot` run.
+# `remap`'s fallback route needs the OLD side's file sets, and the old node ids
+# cannot supply them: the whole reason the fallback exists is that those ids are
+# absent from the rebuilt graph, so nothing in the new graph can say which files
+# they came from (#302).
+#
+# A second file rather than a second key inside the membership snapshot. That
+# snapshot's value is a list of node ids and an older library reads it as one, so
+# widening it to a dict would leave a pinned release intersecting the strings
+# "nodes" and "files" with the graph's node ids - a clean, silent, total drift.
+# An extra file is ignored by every reader that does not know about it.
+SUMMARIES_FILE_SNAPSHOT_PATH = ROOT / "knowledge" / "summaries" / "membership-files.json.gz"
 # What the last remap carried and what it displaced, with the displaced prose
 # itself - the backfill's raw material for revise-rather-than-rewrite.
 REMAP_REPORT_PATH = ROOT / "knowledge" / "summaries" / "remap-report.json"
@@ -539,6 +552,7 @@ def _recompute_paths() -> None:
         SUMMARIES_INPUT_PATH=root / "knowledge" / "summaries" / "communities-input.json",
         SUMMARIES_PATH=root / "knowledge" / "summaries" / "communities.json",
         SUMMARIES_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-snapshot.json.gz",
+        SUMMARIES_FILE_SNAPSHOT_PATH=root / "knowledge" / "summaries" / "membership-files.json.gz",
         REMAP_REPORT_PATH=root / "knowledge" / "summaries" / "remap-report.json",
         SUMMARIES_WITHDRAWN_PATH=root / "knowledge" / "summaries" / "communities-withdrawn.json",
         SYNONYMS_PATH=root / "knowledge" / "semantic" / "token-neighbours.json.gz",

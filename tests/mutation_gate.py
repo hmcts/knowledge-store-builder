@@ -1905,6 +1905,7 @@ MUTATIONS = (
         (
             "test_summaries_remap.RemapCliTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
             "test_summaries_remap.RemapTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_fallback_refusal_leaves_the_node_routes_verdict_standing",
         ),
     ),
     Mutation(
@@ -3399,6 +3400,7 @@ MUTATIONS = (
             "test_summaries_remap.RemapWriteGateTest.test_an_identity_remap_does_not_rewrite_the_committed_file",
             "test_summaries_remap.RemapWriteGateTest.test_non_ascii_prose_survives_a_remap_as_merge_wrote_it",
             "test_summaries_remap.RemapWriteGateTest.test_the_skipped_write_leaves_the_coverage_merge_recorded",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_renamed_community_is_carried_onto_its_new_id",
             "test_ticket_titles_and_summaries.SummariesMergeTest.test_valid_summary_merges",
         ),
     ),
@@ -3456,6 +3458,11 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_a_report_written_for_this_clustering_still_reports_the_split",
             "test_summaries_provenance_freshness.ProvenanceFreshnessTest.test_the_report_records_the_clustering_it_was_written_for",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_an_identity_remap_reports_nothing_carried_across_a_move",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_each_group_carries_its_own_flag_rate",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_every_checked_summary_lands_in_exactly_one_group",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_prose_re_keyed_onto_a_changed_set_is_reported_as_carried_across_a_move",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_the_remap_marked_exactly_the_two_communities_whose_members_moved",
             "test_summaries_remap.RemapCliTest.test_the_floor_guard_can_be_lowered_for_a_genuinely_small_store",
             "test_summaries_remap.RemapTest.test_the_floor_guard_can_be_lowered_for_a_genuinely_small_store",
             "test_summaries_remap.RemapWriteGateTest.test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded",
@@ -3538,6 +3545,10 @@ MUTATIONS = (
             "test_summaries_remap.RemapTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
             "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
             "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_fallback_refusal_leaves_the_node_routes_verdict_standing",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_store_with_no_file_snapshot_remaps_as_it_did_before",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_fallback_never_takes_a_target_from_the_node_id_route",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_renamed_community_is_carried_onto_its_new_id",
         ),
     ),
     Mutation(
