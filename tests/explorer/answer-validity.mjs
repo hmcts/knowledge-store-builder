@@ -27,7 +27,7 @@ import { spawnSync } from 'node:child_process';
 
 import { loadPage } from '../../src/knowledgestore/assets/explorer_harness.mjs';
 import {
-  MODES, run, parseQuestions, probeVerdict,
+  MODES, MODE_SOURCE, BLOCK_SOURCE, run, parseQuestions, probeVerdict,
 } from '../../src/knowledgestore/assets/answer_regression.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -201,6 +201,48 @@ const unmapped = MODES.filter(
 );
 assert('every declarable mode maps to exactly one block', unmapped.length === 0,
   `unmapped: ${unmapped.join(', ')}`);
+
+// ---------------------------------------------------------------------------
+// These strings reach the reader: every finding prints `read from: <source>`, so
+// each is user-visible output. Nothing pinned them, and one changed under this
+// change - `ticket` gained `(knowledge/intent)` when the two tables were derived
+// from one. Catches: any edit to BLOCK_SOURCE or MODE_SOURCE silently moving what
+// an operator reads. Written out by hand, not composed from BLOCK_SOURCE, because
+// re-evaluating the table under test would pass under any edit to it.
+// ---------------------------------------------------------------------------
+const EXPECTED_MODE_SOURCE = {
+  brief: 'topics block (docs/topics -> briefs.json)',
+  dive: 'dives block (docs/deep-dives -> dives.json)',
+  tickets: 'tickets block (knowledge/intent)',
+  graph: 'data + edges blocks (graphify-out/graph.json)',
+  ticket: 'tickets block (knowledge/intent), by ticket id',
+  abstain: 'no block answered, which is the engine abstaining',
+};
+const sourceDrift = MODES
+  .filter((m) => MODE_SOURCE[m] !== EXPECTED_MODE_SOURCE[m])
+  .map((m) => `${m}: ${JSON.stringify(MODE_SOURCE[m])}`);
+assert('every mode names the artefact it reads, in the words the reader sees',
+  sourceDrift.length === 0
+  && Object.keys(MODE_SOURCE).length === MODES.length,
+  sourceDrift.length ? `drifted - ${sourceDrift.join('; ')}`
+    : `MODE_SOURCE has ${Object.keys(MODE_SOURCE).length} keys for ${MODES.length} modes`);
+
+// ---------------------------------------------------------------------------
+// Catches: the two tables drifting apart. `MODE_SOURCE` is derived from
+// `BLOCK_SOURCE` so a block's artefact is named in one place - but a value
+// hand-written back into `MODE_SOURCE` looks identical until someone edits
+// `BLOCK_SOURCE`, at which point the block report and the per-question report
+// name different artefacts for the same block. The literal pin above cannot see
+// that: it agrees with a hand-written copy of the right string. This is the
+// invariant that change claimed, so it is checked rather than asserted in prose.
+// ---------------------------------------------------------------------------
+const blockSources = Object.values(BLOCK_SOURCE);
+const underived = MODES.filter((m) => !blockSources.some(
+  (source) => MODE_SOURCE[m] === source || MODE_SOURCE[m].startsWith(`${source},`),
+));
+assert('every mode source is a block source, or one with a suffix',
+  underived.length === 0,
+  underived.map((m) => `${m}: ${JSON.stringify(MODE_SOURCE[m])}`).join('; '));
 
 // ---------------------------------------------------------------------------
 // The design constraint, asserted end to end. Catches: the void wired to the exit

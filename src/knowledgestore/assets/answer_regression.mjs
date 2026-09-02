@@ -79,7 +79,7 @@ export const MODES = ['brief', 'dive', 'tickets', 'graph', 'ticket', 'abstain'];
  * does when no block answers, and it belongs here because "nothing observes
  * abstention" is the same finding as "nothing observes the dives block".
  * @type {Record<string, string>} */
-const BLOCK_SOURCE = {
+export const BLOCK_SOURCE = {
   topics: 'topics block (docs/topics -> briefs.json)',
   dives: 'dives block (docs/deep-dives -> dives.json)',
   tickets: 'tickets block (knowledge/intent)',
@@ -104,16 +104,19 @@ const MODE_BLOCK = {
 };
 
 /** Which embedded block each mode is evidence from, for the house rule above.
- * Derived from `BLOCK_SOURCE` so the two cannot drift apart; `ticket` adds how it
- * was read, because the id lookup is the assertion that mode exists for.
+ * Every value is `BLOCK_SOURCE`'s, optionally with a suffix - `ticket` adds how it
+ * was read, because the id lookup is the assertion that mode exists for. That
+ * invariant is what stops the two tables drifting apart, so it is asserted rather
+ * than left as a convention: `answer-validity.mjs` pins both the concrete strings
+ * and the derivation, because these strings reach the reader.
  * @type {Record<string, string>} */
-const MODE_SOURCE = {
+export const MODE_SOURCE = {
   brief: BLOCK_SOURCE.topics,
   dive: BLOCK_SOURCE.dives,
   tickets: BLOCK_SOURCE.tickets,
   graph: BLOCK_SOURCE.data,
   ticket: `${BLOCK_SOURCE.tickets}, by ticket id`,
-  abstain: 'no block answered',
+  abstain: BLOCK_SOURCE.abstention,
 };
 
 const TICKET_ID = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/;
