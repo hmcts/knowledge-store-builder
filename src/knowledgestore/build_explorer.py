@@ -447,8 +447,8 @@ def column_cells(entries: list, column: int) -> tuple[list, bool]:
 
     Flattened for a list-valued column, because interning replaces each element
     of the list rather than the list: costing references per row instead of per
-    value understates them by the mean list length, and the dominant column of
-    the estate this work is for holds several values per row.
+    value understates them by the mean list length, which flatters the saving of
+    exactly the columns holding most of the values.
 
     A column mixing lists and scalars returns no values and therefore declines.
     Rows are built by one comprehension so it cannot happen today, and a column
@@ -525,12 +525,16 @@ def column_interning(entries: list, column: int) -> Interning:
 
     The whole rule: `field_bytes - (table + references) > 0`, against
     frequency-ordered indices. No threshold, no ratio, no filter on the
-    column's type - two rules that read as obvious are both false and both were
-    published and retracted before this landed. A column whose values are all
-    identical is the most repetitive column it is possible to have and still
-    loses when a two-byte value costs more as a five-digit index; a column of
-    13-digit timestamps with a handful of distinct values wins by a wide margin
-    though every value in it is a number.
+    column's type - two rules that read as obvious are both false, and stating
+    either as the mechanism is how both got published in the first place.
+
+    A column holding ONE distinct value across tens of thousands of rows is the
+    most repetitive column it is possible to have, and whether it wins turns
+    entirely on its bytes: a single-digit number loses, because frequency
+    ordering gives it index 0 and a one-byte value cannot beat a one-byte index,
+    so the table is pure cost. The same column holding a long path wins by a
+    wide margin. And a column of 13-digit timestamps with a handful of distinct
+    values wins though every value in it is a number.
     """
     values, _ = column_cells(entries, column)
     table = frequency_table(values)
