@@ -717,10 +717,10 @@ def main() -> int:
     ticket_info = merge_ticket_evidence(mined_tickets, tracker_tickets)
     # Topic briefs (GraphRAG phase 3): pre-written narratives composed at
     # build time from knowledge/topics evidence; served without any LLM.
-    topics = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
+    topics = io.read_prose_layer(config.TOPICS_BRIEFS_PATH)
     # Deep dives (Task 7): pre-written, provenance-stamped dossiers on
     # individual repositories, served without any LLM.
-    divesdata = io.read_json_dict(config.DEEPDIVES_PATH)
+    divesdata = io.read_prose_layer(config.DEEPDIVES_PATH)
 
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.

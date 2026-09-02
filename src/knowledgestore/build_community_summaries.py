@@ -37,7 +37,10 @@ Claude Code (maintainers have a licence; consumers never need one):
        Validates ids and length bounds, merges over any existing file,
        and carries each community's coverage into a reserved `_metadata`
        key beside a digest of the prose. The write is gated on that
-       digest: a run that changed no prose rewrites nothing.
+       digest: a run that changed no prose rewrites nothing. The block
+       also records one digest per summary, and `merge` and `remap` both
+       report - without refusing - any committed summary whose prose no
+       longer matches the one recorded beside it.
 
 The explorer embeds the merged summaries; Ask answers then include
 pre-written prose selected deterministically - no query-time AI.
@@ -262,7 +265,33 @@ def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
     covered = {cid: coverage[cid] for cid in sorted(body, key=lambda k: int(k)) if cid in coverage}
     for cid, block in covered.items():
         validate_coverage(cid, block)
-    return {"content_digest": content_digest(body), "coverage": covered}
+    return {
+        "content_digest": content_digest(body),
+        # Two digests over the same prose, answering two different questions, and
+        # neither is a substitute for the other (#316). `content_digest` covers
+        # `{id: prose}` and gates the write: a remap that re-keys prose must
+        # rewrite the file, so that digest has to move when an id moves. The
+        # per-entry digests exclude the ids for the opposite reason - they are
+        # what a later run compares the committed prose against, and a re-key is
+        # not an edit.
+        io.PROSE_DIGESTS_KEY: io.prose_digests(body.values()),
+        "coverage": covered,
+    }
+
+
+def _recorded_content_digest(document: dict) -> str | None:
+    """The digest the committed file records, or None if it records no prose digests.
+
+    The write gate skips a run whose prose is unchanged, which is what a store
+    upgrading to a version that records something new in the metadata block runs
+    into: the prose is identical, the write is skipped, and the new field arrives
+    only if somebody happens to change a summary. Withholding the recorded digest
+    until the block carries the prose digests makes the first run after the upgrade
+    write once and every run after it skip as before - so the check populates
+    itself rather than waiting for unrelated work.
+    """
+    metadata = document.get(io.SUMMARIES_METADATA_KEY) or {}
+    return metadata.get("content_digest") if metadata.get(io.PROSE_DIGESTS_KEY) else None
 
 
 def _write_merged_summaries(
@@ -284,9 +313,16 @@ def _write_merged_summaries(
     without this a refresh that changed not one word would still rewrite every
     summary - the diff a consuming store reviews would be noise forever, which
     is a worse outcome than not recording coverage at all.
+
+    Also where the committed prose is checked against the digests recorded beside
+    it, before this replaces both (#316). Here rather than in each caller for the
+    same reason the write is: the file this reads is about to be overwritten, so a
+    check anywhere downstream of the write can no longer see what it needs to.
     """
+    for line in io.prose_drift(config.SUMMARIES_PATH, document, io.summaries_body(document)):
+        print(line)
     metadata = _merged_metadata(body, coverage)
-    recorded = (document.get(io.SUMMARIES_METADATA_KEY) or {}).get("content_digest")
+    recorded = _recorded_content_digest(document)
     unchanged = recorded == metadata["content_digest"]
     if not unchanged:
         config.SUMMARIES_PATH.write_text(

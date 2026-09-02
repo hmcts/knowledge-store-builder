@@ -233,6 +233,17 @@ def extract(repo: str) -> int:
 
 
 def merge() -> int:
+    """Validate, render and write the committed deep-dives artefact.
+
+    Reports, before overwriting it, any dossier in the committed file whose prose
+    no longer matches the digest recorded beside it - a dossier edited in
+    `knowledge/deep-dives/dives.json` after the stage wrote it (#316). Editing
+    `docs/deep-dives/<repo>.md` is the authoring route and is not that.
+
+    The exit code is unchanged by the report. It stays the validation verdict -
+    whether every bundle has a dossier that is long enough and stamped with the
+    build it measured.
+    """
     dives_out: dict[str, dict] = {}
     problems: list[str] = []
     bundles = sorted(config.DEEPDIVES_INPUT_DIR.glob("*-input.json"))
@@ -242,6 +253,11 @@ def merge() -> int:
             file=sys.stderr,
         )
         return 1
+    # Read before the write below replaces both the prose and the digests it is
+    # compared against. Below the refusal above, which writes nothing, so there is
+    # nothing for a report to be about.
+    committed = io.read_json_dict(config.DEEPDIVES_PATH)
+    drift = io.prose_drift(config.DEEPDIVES_PATH, committed, io.rendered_prose(committed))
     for bundle_path in bundles:
         bundle = io.read_json_dict(bundle_path)
         repo = str(bundle.get("repo", ""))
@@ -266,7 +282,18 @@ def merge() -> int:
             "source": f"docs/deep-dives/{repo}.md",
             "sha": sha,
         }
-    io.write_json(config.DEEPDIVES_PATH, dict(sorted(dives_out.items())), indent=1)
+    io.write_json(
+        config.DEEPDIVES_PATH,
+        {
+            **dict(sorted(dives_out.items())),
+            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
+                dive["html"] for dive in dives_out.values()
+            ),
+        },
+        indent=1,
+    )
+    for line in drift:
+        print(line)
     for problem in problems:
         print(f"skipped - {problem}")
     print(f"{len(dives_out)} deep dives -> {config.DEEPDIVES_PATH}")

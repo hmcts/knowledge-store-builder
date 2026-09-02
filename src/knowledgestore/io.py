@@ -42,6 +42,8 @@ import gzip
 import hashlib
 import json
 import sys
+from collections import Counter
+from collections.abc import Iterable
 from io import TextIOWrapper
 from pathlib import Path
 
@@ -129,11 +131,23 @@ def read_json_dict(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-# The one reserved top-level key in the merged summaries artefact. Everything
-# else in that file is `<community id>: prose`; this key holds the content digest
-# the write is gated on and the per-community coverage block. Community ids are
-# the string forms of integers, so a leading underscore cannot collide with one.
+# The one reserved top-level key in a committed prose artefact - the merged
+# community summaries, the topic briefs and the deep dives. Everything else in
+# such a file is `<entry id>: <authored content>`; this key holds the digests
+# that say the prose is still what the stage wrote, and, for summaries, the
+# content digest the write is gated on and the per-community coverage block.
+# Community ids are the string forms of integers, so a leading underscore cannot
+# collide with one; a topic slug or repository name called `_metadata` could, and
+# nothing else in either configuration would make sense either.
+#
+# The name keeps `SUMMARIES_` because it is the name three stages, five tests and
+# a mutation-gate entry already refer to. Renaming it would be a change with no
+# behaviour in it.
 SUMMARIES_METADATA_KEY = "_metadata"
+
+# The recorded prose digests inside that block: one per entry, sorted, and
+# deliberately not keyed to the entry id. `prose_digest` says why.
+PROSE_DIGESTS_KEY = "prose_digests"
 
 
 def summaries_body(document: dict) -> dict:
@@ -152,6 +166,122 @@ def read_summaries(path: Path) -> dict:
     knowledge rather than six chances to forget it.
     """
     return summaries_body(read_json_dict(path))
+
+
+def read_prose_layer(path: Path) -> dict:
+    """The entries in a committed prose artefact, without its metadata block.
+
+    `read_summaries`, for the two prose layers that gained a metadata block later
+    (#316): the topic briefs and the deep dives. Its docstring is the whole
+    argument for this one existing - a consumer reading the document raw treats
+    the block as an entry, which is a brief in the explorer's topic list and one
+    more in the coverage count `status` prints, and both look like ordinary
+    output. The two artefacts are shaped `<entry id>: {...}` rather than
+    `<community id>: prose`, so nothing here can assume the value is a string.
+    """
+    return summaries_body(read_json_dict(path))
+
+
+def rendered_prose(document: dict) -> dict[str, str]:
+    """The authored prose in a briefs or dives artefact, one string per entry.
+
+    The rendered `html`, because that is the LLM-authored half. The other fields
+    of an entry - title, keywords, source path, the short sha - are derived from
+    configuration or from provenance on every run, so a stage rewrites them
+    whatever anybody did to the file and a digest over them would report a
+    configuration change as an edit to the prose.
+    """
+    return {
+        key: str(entry.get("html", ""))
+        for key, entry in summaries_body(document).items()
+        if isinstance(entry, dict)
+    }
+
+
+def prose_digest(prose: str) -> str:
+    """A hash of one piece of authored prose, and of nothing else.
+
+    Not of the id it is keyed to, deliberately. Community ids are positional and
+    `summaries remap` re-keys prose onto new ones by design, so a digest over
+    `{id: prose}` differs after every re-clustering - an integrity check resting
+    on one would fire on the operation this library exists to perform, and be
+    switched off within a week. Hashing the prose alone makes a legitimate re-key
+    invisible to the check and an edit to the words visible to it.
+    """
+    return hashlib.sha256(prose.encode("utf-8")).hexdigest()
+
+
+def prose_digests(prose: Iterable[str]) -> list[str]:
+    """What a prose artefact records about itself: one digest per entry, sorted.
+
+    A sorted list rather than a mapping, for the reason in `prose_digest`: the
+    entry ids are not in it at all, so prose carried onto a new id produces the
+    same list. Sorted because two runs on the same inputs must be byte-identical
+    and the order entries happened to be built in is not a contract.
+    """
+    return sorted(prose_digest(text) for text in prose)
+
+
+def prose_metadata(prose: Iterable[str]) -> dict:
+    """The reserved block for a prose artefact that records nothing but digests."""
+    return {PROSE_DIGESTS_KEY: prose_digests(prose)}
+
+
+def prose_drift(path: Path, document: dict, prose: dict[str, str]) -> list[str]:
+    """Report lines for entries carrying prose no digest in the file accounts for.
+
+    `document` is the committed artefact as it stands and `prose` is the prose in
+    that same document - this is a self-consistency check, not a comparison
+    against what the stage is about to write. A hand edit changes the prose and
+    leaves the recorded digests alone, so the two stop agreeing; the stage that
+    wrote them last left them agreeing.
+
+    Reports, and does not refuse: no caller changes its exit code on the strength
+    of this. Whether post-hoc editing of generated prose happens at all is
+    unmeasured (#316), and a stage that refused before anyone knew how common a
+    legitimate hand edit was would be a stage nobody adopted.
+
+    Names the entries rather than announcing that something moved, because "the
+    digest changed" is not something a reader can act on. Matching is by multiset,
+    so two entries holding identical prose need two recorded digests.
+
+    Deletion is not reported. A digest per entry says an entry's prose is not one
+    the stage wrote; it cannot say an entry the stage wrote has gone, because the
+    recorded list is not tied to the ids. Chaining each entry's hash onto the
+    previous one would make a removal break its successor - the idea #316 records
+    and defers, being worth its own change rather than a corner of this one.
+
+    An artefact with no recorded digests reports nothing: it predates this, and
+    calling that tampering would flag every store's first run.
+
+    How long the report persists differs by layer, and neither behaviour is this
+    function's to choose. `topics merge` and `deepdive merge` re-render from the
+    markdown an author writes, so the run that reports an edit also replaces it and
+    the report fires once. `summaries merge` has no such source, and its write gate
+    skips a run whose merged prose matches the digest recorded in the file - so a
+    batch re-supplying the original prose leaves the edit on disk and the report
+    repeats every run until somebody acts on it. For a stage that reports rather
+    than refuses, persisting is the safer of the two: it does not silently revert
+    an edit somebody may have meant, and it does not fall silent either.
+    """
+    recorded = (document.get(SUMMARIES_METADATA_KEY) or {}).get(PROSE_DIGESTS_KEY)
+    if not isinstance(recorded, list) or not recorded:
+        return []
+    outstanding = Counter(str(digest) for digest in recorded)
+    edited = []
+    for entry in sorted(prose):
+        digest = prose_digest(prose[entry])
+        if outstanding[digest]:
+            outstanding[digest] -= 1
+        else:
+            edited.append(entry)
+    if not edited:
+        return []
+    return [
+        f"{len(edited)} of {len(prose)} entries in {path} no longer carry the prose "
+        "recorded there - reported, not refused:",
+        *(f"  {entry}: prose differs from the digest recorded beside it" for entry in edited),
+    ]
 
 
 def write_json(path: Path, data, indent: int | None = None) -> None:
