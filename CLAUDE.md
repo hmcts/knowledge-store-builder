@@ -70,6 +70,24 @@ python3 tests/explorer/fixture.py
 node tests/explorer/page-regression.mjs
 ```
 
+**After merging `main` into a branch, ask what the merge may have staled:**
+
+```bash
+python3 tests/observer_staleness.py --base ORIG_HEAD
+```
+
+A merge is how a correct entry in the mutation table comes to *under-describe*
+what protects it: a test arrives that observes the same defect, the entry does
+not name it, and nothing about the entry changed. Nothing else in the
+pull-request path notices — the fast gate runs only the modules an entry names,
+so an unnamed observer is by construction not run, and `--verify-mapping`, which
+does notice, costs a whole-suite run per entry and runs nightly. This names the
+suspect entries in seconds and prints the `--only` command that settles them.
+
+It reads test ids, so it reports **arrivals only**. A set also goes stale when
+`src/` puts an existing test onto a mutated line with no test touched; the
+nightly run owns that half, and a `CLEAN` here does not claim otherwise.
+
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked
 with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
 the page regression verifies that the tested code is the code that ships.
