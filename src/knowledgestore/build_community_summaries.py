@@ -22,7 +22,9 @@ Claude Code (maintainers have a licence; consumers never need one):
        After re-clustering, carries a summary onto the new id of the community
        holding exactly the node set it was written about, and withdraws the rest
        to knowledge/summaries/communities-withdrawn.json. Reports retention and
-       the withdrawal count together. Refuses on an unclustered graph.
+       the withdrawal count together, and gates the write on the same prose
+       digest `merge` uses, so an identity remap rewrites nothing.
+       Refuses on an unclustered graph.
        `--carry overlap [--bar 0.6] [--precision 0.2]` is the older tolerance.
 
   4a. knowledgestore summaries adrift [--bar 0.6] [--precision 0.2] [--coverage 0.5]
@@ -263,6 +265,37 @@ def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
     return {"content_digest": content_digest(body), "coverage": covered}
 
 
+def _write_merged_summaries(
+    document: dict, body: dict[str, str], coverage: dict[str, dict]
+) -> bool:
+    """Write the merged summaries artefact unless the prose in it is already this.
+
+    The one writer of that file and the one gate on it, because both `merge` and
+    `remap` write it and while each had its own writer they disagreed twice
+    (#313): `remap` rewrote every line of a file whose prose it had not changed,
+    and escaped non-ASCII characters `merge` wrote literally, so alternating the
+    two stages churned a committed artefact on its own. `document` is the file as
+    it stands, which is where the digest to compare against is recorded.
+
+    Returns whether the write was skipped - the only part of this either caller
+    reports, and each reports it in its own words.
+
+    Gated on the prose alone. Coverage counts move on every re-extraction, so
+    without this a refresh that changed not one word would still rewrite every
+    summary - the diff a consuming store reviews would be noise forever, which
+    is a worse outcome than not recording coverage at all.
+    """
+    metadata = _merged_metadata(body, coverage)
+    recorded = (document.get(io.SUMMARIES_METADATA_KEY) or {}).get("content_digest")
+    unchanged = recorded == metadata["content_digest"]
+    if not unchanged:
+        config.SUMMARIES_PATH.write_text(
+            json.dumps({**body, io.SUMMARIES_METADATA_KEY: metadata}, indent=1, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    return unchanged
+
+
 # The S8707 register. Sonar reports `pythonsecurity:S8707` wherever a path built
 # from CLI arguments reaches the filesystem, and this library answers it in two
 # ways: a write is validated by `io.checked_write_target`, and a read is
@@ -317,18 +350,7 @@ def merge(paths: list[str]) -> int:
     added, rejected = _take_batches(paths, known_ids, merged)
 
     body = dict(sorted(merged.items(), key=lambda kv: int(kv[0])))
-    metadata = _merged_metadata(body, coverage)
-    recorded = (document.get(io.SUMMARIES_METADATA_KEY) or {}).get("content_digest")
-    # Gated on the prose alone. Coverage counts move on every re-extraction, so
-    # without this a refresh that changed not one word would still rewrite every
-    # summary - the diff a consuming store reviews would be noise forever, which
-    # is a worse outcome than not recording coverage at all.
-    unchanged = recorded == metadata["content_digest"]
-    if not unchanged:
-        config.SUMMARIES_PATH.write_text(
-            json.dumps({**body, io.SUMMARIES_METADATA_KEY: metadata}, indent=1, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    unchanged = _write_merged_summaries(document, body, coverage)
     for r in rejected:
         print(f"rejected - {r}")
     if unchanged:
@@ -1070,6 +1092,9 @@ def remap(
     the writing survives, and report the withdrawal count beside retention so the
     cost of the re-cluster is a measured number in both directions.
 
+    The write is gated on a digest of the prose, the way `merge`'s is: a remap
+    that carries every summary onto the id it already holds rewrites nothing.
+
     `carry=CARRY_OVERLAP` restores the previous tolerance - see `DEFAULT_CARRY`.
     """
     if not config.SUMMARIES_SNAPSHOT_PATH.exists():
@@ -1081,7 +1106,10 @@ def remap(
         return 1
     with gzip.open(config.SUMMARIES_SNAPSHOT_PATH, "rt", encoding="utf-8") as handle:
         old_members: dict[str, list[str]] = json.load(handle)
-    summaries = io.read_summaries(config.SUMMARIES_PATH)
+    # The whole document, not just the prose: the write below is gated on the
+    # digest the metadata block records, exactly as `merge`'s is.
+    document = io.read_json_dict(config.SUMMARIES_PATH)
+    summaries = io.summaries_body(document)
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
     new_community = {
@@ -1138,10 +1166,21 @@ def remap(
                 "prose": summaries[loser],
             }
 
-    config.SUMMARIES_PATH.write_text(
-        json.dumps(dict(sorted(remapped.items(), key=lambda kv: int(kv[0]))), indent=1),
-        encoding="utf-8",
-    )
+    body = dict(sorted(remapped.items(), key=lambda kv: int(kv[0])))
+    # Through the shared writer, which is gated on the prose (#299, #313). An
+    # identity remap carries every summary onto the id it already holds, so the
+    # document this stage would write is the document already committed;
+    # rewriting it produces a whole-file diff with no semantic change, in an
+    # artefact a human reviews and the only review LLM-authored prose gets.
+    #
+    # No coverage is passed, so none is recorded. A coverage block says how much
+    # of a community the digest its prose was written from showed; after a
+    # re-cluster the carried prose was written from the digest of the community
+    # it left, so re-keying that block onto the new id would state a sampling
+    # figure about a community nobody sampled. `merge` records it again the next
+    # time prose is merged, and nothing is lost that survived before: this write
+    # dropped the metadata block whole.
+    unchanged = _write_merged_summaries(document, body, {})
     # Withdrawn rather than dropped: the prose is a written artefact, so it goes
     # to a file shaped like the one it left and can be revised and merged back.
     # Rewritten on every run, including when it is empty - a file left behind by
@@ -1159,10 +1198,17 @@ def remap(
     # The withdrawal count sits on the retention line deliberately. Retention
     # read as reassurance while being the opposite, so the figure now carries
     # its own contradiction rather than leaving it a line further down (#296).
-    print(
-        f"Retained {len(remapped)} of {total} summaries ({share}%), "
-        f"withdrew {len(displaced)} -> {config.SUMMARIES_PATH}"
-    )
+    if unchanged:
+        print(
+            f"Retained {len(remapped)} of {total} summaries ({share}%), "
+            f"withdrew {len(displaced)}; the prose is unchanged, so "
+            f"{config.SUMMARIES_PATH} was not rewritten"
+        )
+    else:
+        print(
+            f"Retained {len(remapped)} of {total} summaries ({share}%), "
+            f"withdrew {len(displaced)} -> {config.SUMMARIES_PATH}"
+        )
     reasons = Counter(entry["reason"] for entry in displaced.values())
     print(
         f"Withdrawn: {reasons['not-identical']} not identical to their new community, "

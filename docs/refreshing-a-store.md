@@ -110,6 +110,11 @@ summaries now sit on. Without it the committed snapshot describes the graph the
 store no longer has, and the next refresh remaps from a baseline that is
 consistently wrong — the one state `remap`'s own guards cannot see.
 
+`remap` writes `communities.json` only when the prose in it changes, the same gate
+`merge` uses. A re-cluster that moved no summary therefore leaves the committed file
+byte-identical and says so on the retention line, so a diff on that file always means
+prose moved.
+
 Read the retention reported by `remap`, and the withdrawal count beside it.
 Expect retention to be low: a summary is carried only onto a community holding
 exactly the node set it describes, so any community that gained or lost a node
