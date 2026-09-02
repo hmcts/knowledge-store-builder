@@ -1888,6 +1888,7 @@ MUTATIONS = (
         (
             "test_summaries_remap.RemapCliTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
             "test_summaries_remap.RemapTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_fallback_refusal_leaves_the_node_routes_verdict_standing",
         ),
     ),
     Mutation(
@@ -3327,6 +3328,7 @@ MUTATIONS = (
         "can act on. Ungated it always writes, which is exactly what a run looks like "
         "when it is working",
         (
+            "test_prose_integrity.SummariesDriftTest.test_a_second_run_after_that_writes_nothing",
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_remap.RemapWriteGateTest.test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded",
             "test_summaries_remap.RemapWriteGateTest.test_a_second_remap_of_the_same_clustering_writes_nothing",
@@ -3381,6 +3383,7 @@ MUTATIONS = (
             "test_summaries_remap.RemapWriteGateTest.test_an_identity_remap_does_not_rewrite_the_committed_file",
             "test_summaries_remap.RemapWriteGateTest.test_non_ascii_prose_survives_a_remap_as_merge_wrote_it",
             "test_summaries_remap.RemapWriteGateTest.test_the_skipped_write_leaves_the_coverage_merge_recorded",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_renamed_community_is_carried_onto_its_new_id",
             "test_ticket_titles_and_summaries.SummariesMergeTest.test_valid_summary_merges",
         ),
     ),
@@ -3517,6 +3520,10 @@ MUTATIONS = (
             "test_summaries_remap.RemapTest.test_a_run_that_withdraws_nothing_replaces_an_earlier_runs_file",
             "test_summaries_remap.RemapTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
             "test_summaries_remap.RemapTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_fallback_refusal_leaves_the_node_routes_verdict_standing",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_a_store_with_no_file_snapshot_remaps_as_it_did_before",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_fallback_never_takes_a_target_from_the_node_id_route",
+            "test_summaries_remap_fallback.RemapFallbackTest.test_the_renamed_community_is_carried_onto_its_new_id",
         ),
     ),
     Mutation(
