@@ -770,13 +770,14 @@ class PageByteAttributionTest(SettingsIsolated):
     # both ends so telemetry's own indented lines cannot be read as blocks.
     LINE = re.compile(r"^ {2}(?P<name>[a-z_]+) +(?P<bytes>[\d,]+)$")
 
-    # The nine JSON blocks the page delimits itself, as `<script id=...>` to
+    # The JSON blocks the page delimits itself, as `<script id=...>` to
     # breakdown name. Written out rather than derived, so this list disagreeing
     # with the code is a failure rather than an agreement with itself.
     EMBEDDED = (
         ("data", "data"),
         ("edges", "edges"),
         ("titles", "titles"),
+        ("dicts", "dicts"),
         ("summaries", "summaries"),
         ("synonyms", "synonyms"),
         ("tickets", "ticketinfo"),
@@ -864,6 +865,7 @@ class PageByteAttributionTest(SettingsIsolated):
                 "title",
                 "sub",
                 "data",
+                "dicts",
                 "edges",
                 "titles",
                 "summaries",

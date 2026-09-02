@@ -33,6 +33,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
@@ -351,6 +352,335 @@ def kept_edges(kept: list, adjacency: dict, index_of: dict) -> list[int]:
     return edges
 
 
+# --- data-block field interning (#245) ------------------------------------
+# The data block is the largest thing on the page and most of its bytes are
+# repeats of strings already in it, so each column's values are replaced by
+# indices into a per-column table. The saving is exact rather than
+# compressive: nothing is encoded, decoded or base64'd, the page stays one
+# self-contained offline file, and the JSON the browser parses gets smaller
+# rather than gaining a step before parsing.
+#
+# The decision is per column and is computed from THIS page's own data on every
+# build. It is deliberately not a curated list of column names, however well
+# measured: the largest column of one estate's page has no counterpart on
+# another's, so a list measured on one estate leaves the other's bulk untouched
+# while still reporting a healthy saving on the estate it was tuned against.
+
+# The names the report uses for the row's positions. Names only - `interning_plan`
+# iterates the row's own columns and decides each on its bytes, so this list can
+# never decide anything. It exists because "column 6" tells an operator nothing.
+COLUMN_NAMES = (
+    "label",
+    "repo",
+    "source_file",
+    "community_label",
+    "kind",
+    "degree",
+    "connections",
+    "tickets",
+    "community",
+    "deployment",
+)
+
+
+@dataclass(frozen=True)
+class Interning:
+    """One column's costing, and the verdict that follows from it.
+
+    Every field is a byte count of something the page either does or does not
+    write, so the verdict is re-derivable from the record rather than trusted:
+    `saving == field_bytes - table_bytes - reference_bytes` and
+    `interned == saving > 0`, with no threshold and no ratio anywhere in it.
+    """
+
+    column: int
+    name: str
+    occurrences: int
+    distinct: int
+    field_bytes: int
+    table_bytes: int
+    reference_bytes: int
+    table: tuple
+
+    @property
+    def saving(self) -> int:
+        return self.field_bytes - self.table_bytes - self.reference_bytes
+
+    @property
+    def interned(self) -> bool:
+        return self.saving > 0
+
+    @property
+    def informative(self) -> bool:
+        """Does the column carry anything at all? An all-empty column is dead weight.
+
+        Interning one is still a small win - one digit costs less than a pair of
+        quotes - but no encoding of an empty column beats removing it, and the
+        report says so rather than quietly representing nothing efficiently.
+        Dropping a column renumbers every positional read in the page
+        application, so it is a change to the row's shape and not to its
+        encoding.
+        """
+        return any(value != "" and value is not None for value in self.table)
+
+
+def json_text(value: object) -> str:
+    """One value exactly as the data block writes it.
+
+    The same encoder settings as the block itself, because the quantity being
+    costed is bytes on the page and nothing else: `ensure_ascii=False` leaves
+    non-ASCII characters as themselves, so a value's byte count is not its
+    character count, and the `</` escape the block applies inside strings adds a
+    byte the costing would otherwise miss. A `</` cannot straddle two values -
+    a string always closes with a quote first - so per-value text sums to the
+    block's own.
+    """
+    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+
+
+def value_bytes(value: object) -> int:
+    return len(json_text(value).encode("utf-8"))
+
+
+def column_cells(entries: list, column: int) -> tuple[list, bool]:
+    """`(every value the column carries, whether it is list-valued)`.
+
+    Flattened for a list-valued column, because interning replaces each element
+    of the list rather than the list: costing references per row instead of per
+    value understates them by the mean list length, and the dominant column of
+    the estate this work is for holds several values per row.
+
+    A column mixing lists and scalars returns no values and therefore declines.
+    Rows are built by one comprehension so it cannot happen today, and a column
+    that grew a second shape would otherwise be encoded on a guess.
+    """
+    cells = [row[column] for row in entries]
+    lists = sum(1 for cell in cells if isinstance(cell, list))
+    if lists and lists != len(cells):
+        return [], False
+    if lists:
+        return [value for cell in cells for value in cell], True
+    return cells, False
+
+
+def frequency_table(values: list) -> tuple:
+    """The column's distinct values, most frequent first.
+
+    Frequency order is not a heuristic. Reference cost is
+    `sum over values of freq(v) x digits(index(v))`, digit length is
+    non-decreasing in the index, and table bytes are the same whatever the
+    order - so choosing an assignment is choosing a permutation to minimise a
+    sum of products with one sequence fixed, and by the rearrangement
+    inequality the minimum pairs the highest frequencies with the shortest
+    indices. Frequency ordering cannot be beaten, so a column that loses under
+    it cannot be rescued by any other assignment and the verdict is decidable
+    rather than encoder-relative.
+
+    Ties break on the value's own JSON text, ascending. A `Counter` iterates in
+    first-seen order, so two equally frequent values would otherwise take their
+    places from the order the graph happened to list its nodes in, and two
+    builds of one graph would emit different tables. The text rather than the
+    value, because a column may hold numbers and a string, which do not compare.
+    """
+    counts = Counter(json_text(value) for value in values)
+    first_seen = {}
+    for value in values:
+        first_seen.setdefault(json_text(value), value)
+    order = sorted(counts, key=lambda text: (-counts[text], text))
+    return tuple(first_seen[text] for text in order)
+
+
+def table_bytes(column: int, table: tuple) -> int:
+    """What this column's table costs on the page, as the page writes it.
+
+    Everything the table adds: the values, the separators between them, the
+    brackets around them, the object key naming the column and the separator
+    before it. `json.dumps` writes `", "` and `": "` by default, two bytes each
+    and not one, and a costing that assumed one understated every table by its
+    cardinality - which is the direction that predicts wins that are losses.
+    The separator convention is not transferable between encodings and has to be
+    read off the serialisation in front of you: measured against `__DICTS__`,
+    where the sum of these costs is the block's length exactly, and pinned there
+    by a test rather than argued.
+    """
+    values = sum(value_bytes(value) for value in table)
+    separators = 2 * max(len(table) - 1, 0) + 2  # the `", "` pairs, plus the two brackets
+    keying = len(f'"{column}": ') + 2  # the object key with its `": "`, plus the `", "` before it
+    return values + separators + keying
+
+
+def reference_bytes(values: list, table: tuple) -> int:
+    """What the indices replacing the values cost, against frequency ordering.
+
+    Keyed on each value's JSON text rather than on the value, so a column
+    holding both `0` and `"0"` - or `1` and `True`, which are one key in a
+    Python dict - cannot silently share a table entry.
+    """
+    index_of = {json_text(value): index for index, value in enumerate(table)}
+    return sum(len(str(index_of[json_text(value)])) for value in values)
+
+
+def column_interning(entries: list, column: int) -> Interning:
+    """Cost this column both ways and record which is smaller.
+
+    The whole rule: `field_bytes - (table + references) > 0`, against
+    frequency-ordered indices. No threshold, no ratio, no filter on the
+    column's type - two rules that read as obvious are both false and both were
+    published and retracted before this landed. A column whose values are all
+    identical is the most repetitive column it is possible to have and still
+    loses when a two-byte value costs more as a five-digit index; a column of
+    13-digit timestamps with a handful of distinct values wins by a wide margin
+    though every value in it is a number.
+    """
+    values, _ = column_cells(entries, column)
+    table = frequency_table(values)
+    return Interning(
+        column=column,
+        name=COLUMN_NAMES[column],
+        occurrences=len(values),
+        distinct=len(table),
+        field_bytes=sum(value_bytes(value) for value in values),
+        table_bytes=table_bytes(column, table),
+        reference_bytes=reference_bytes(values, table),
+        table=table,
+    )
+
+
+def interning_plan(entries: list) -> tuple[tuple[Interning, ...], dict[str, list]]:
+    """`(the costing for every column, the tables for the columns that won)`.
+
+    Every column of whatever row this page actually built, in column order, so
+    the tables serialise the same way on every build.
+
+    Raises when the row and `COLUMN_NAMES` disagree: a column added to the row
+    without a name would be costed and reported as an integer nobody can act
+    on, and one removed would shift every name onto its neighbour's column -
+    a report that names one column while measuring another.
+    """
+    if not entries:
+        return (), {}
+    width = len(entries[0])
+    if width != len(COLUMN_NAMES):
+        raise ValueError(
+            f"the page row carries {width} columns and COLUMN_NAMES names "
+            f"{len(COLUMN_NAMES)} of them. The interning report names each column it "
+            "costed, so a row and a name list that disagree would report one column "
+            "while measuring another - name the new column in COLUMN_NAMES, or take "
+            "the removed one out of it."
+        )
+    plan = tuple(column_interning(entries, column) for column in range(width))
+    tables = {str(item.column): list(item.table) for item in plan if item.interned}
+    return plan, tables
+
+
+def encode_rows(entries: list, tables: Mapping[str, list]) -> list[list]:
+    """The rows as the page carries them: interned columns replaced by indices.
+
+    New rows rather than rows edited in place. `entries` is read again after
+    this - the recorded join counts its ticket column - and an encoded row would
+    turn that count into a count of something else.
+    """
+    index_of = {
+        int(column): {json_text(value): index for index, value in enumerate(table)}
+        for column, table in tables.items()
+    }
+    rows = []
+    for entry in entries:
+        row = list(entry)
+        for column, indices in index_of.items():
+            cell = row[column]
+            row[column] = (
+                [indices[json_text(value)] for value in cell]
+                if isinstance(cell, list)
+                else indices[json_text(cell)]
+            )
+        rows.append(row)
+    return rows
+
+
+def decode_rows(rows: list, tables: Mapping[str, list]) -> list[list]:
+    """Interned columns restored to the values they stood for.
+
+    The independent half of the encoder's own check, and the Python counterpart
+    of the page application's `decodeRows`. Written from the format rather than
+    from `encode_rows`, because a verifier sharing the encoder's arithmetic
+    would agree with it while both were wrong.
+    """
+    decoded = []
+    for row in rows:
+        restored = list(row)
+        for column, table in tables.items():
+            cell = restored[int(column)]
+            restored[int(column)] = (
+                [table[index] for index in cell] if isinstance(cell, list) else table[cell]
+            )
+        decoded.append(restored)
+    return decoded
+
+
+def verify_round_trip(entries: list, rows: list, tables: Mapping[str, list]) -> None:
+    """Refuse an encoding that does not decode back to the rows it replaced.
+
+    The one check that can tell a right index from a wrong one. Every other gate
+    over this page reads the encoded block, so a table built in the wrong order
+    or an index off by one would be reported consistently by all of them: the
+    page would answer questions, reconcile its bytes and diff clean between
+    builds, while showing one row's repository against another's file.
+
+    Whole rows, and equality rather than a count: the failure this catches
+    substitutes one value for another and leaves every length the same.
+    """
+    decoded = decode_rows(rows, tables)
+    if decoded == entries:
+        return
+    differing = next(
+        (index for index, (before, after) in enumerate(zip(entries, decoded)) if before != after),
+        None,
+    )
+    raise ValueError(
+        "the interned data block does not decode back to the rows it was built from, "
+        f"so the page would show values from the wrong rows. Rows in: {len(entries)}, "
+        f"rows out: {len(decoded)}, first differing row: {differing}. Interned columns: "
+        f"{sorted(int(column) for column in tables)}."
+    )
+
+
+def interning_report(plan: tuple[Interning, ...]) -> str:
+    """The decision per column, as the operator meets it.
+
+    The decision rather than the total. A store told only that its page shrank
+    cannot tell a column that declined because interning would cost bytes from
+    one that was never looked at, and the answer differs per estate - so every
+    column is listed with the counts the verdict was reached on, whichever way
+    it went.
+
+    Percentages are quoted against the block's value bytes, never against the
+    block: brackets, commas and row scaffolding are a floor no encoding touches,
+    and their share differs measurably between estates, so a percentage of the
+    whole block would flatter one store and understate another.
+    """
+    if not plan:
+        return ""
+    lines = ["Data-block interning, decided per column from this page's own data:"]
+    for item in sorted(plan, key=lambda item: (-item.saving, item.column)):
+        verdict = "interned" if item.interned else "declined"
+        effect = "saves" if item.interned else "would cost"
+        note = "" if item.informative else "  (empty in every row - carries no information)"
+        lines.append(
+            f"  {verdict}  {item.name:<16}{item.distinct:>9,} distinct of "
+            f"{item.occurrences:>9,} values  {effect} {abs(item.saving):>12,} bytes{note}"
+        )
+    saved = sum(item.saving for item in plan if item.interned)
+    total = sum(item.field_bytes for item in plan)
+    share = f" ({saved * 100 // total}% of them)" if total else ""
+    lines.append(
+        f"  net {saved:,} bytes off the block's {total:,} value bytes{share}; structural "
+        "bytes (brackets, commas, row scaffolding) are a floor no encoding touches and "
+        "are excluded from both."
+    )
+    return "\n".join(lines) + "\n"
+
+
 TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -465,6 +795,7 @@ this page can't answer, query the knowledge base with an agentic harness (clone 
 and ask your coding agent) or run <code>graphify query</code> from the terminal &mdash; see the
 README.</div>
 <script id="data" type="application/json">__DATA__</script>
+<script id="dicts" type="application/json">__DICTS__</script>
 <script id="edges" type="application/json">__EDGES__</script>
 <script id="titles" type="application/json">__TITLES__</script>
 <script id="summaries" type="application/json">__SUMMARIES__</script>
@@ -745,6 +1076,18 @@ def main() -> int:
     synced = latest_synced(recorded)
     if synced:
         sub += f" &middot; sources synced to {synced}"
+    # The data block's columns, interned where the table plus the indices cost fewer
+    # bytes than the values they replace - decided per column from this page's own
+    # data. The plan is printed whichever way each column went, including on the
+    # refusal path below: a store meeting a size refusal needs to know what the
+    # encoding already took off the block before it decides what to carry less of.
+    plan, tables = interning_plan(entries)
+    rows = encode_rows(entries, tables)
+    # Before the page is assembled, not after. Every other gate over this page reads
+    # the encoded block, so a table in the wrong order would be reported consistently
+    # by all of them; this is the only check that reads both sides.
+    verify_round_trip(entries, rows, tables)
+    print(interning_report(plan), end="")
     # One mapping rather than a chain of `.replace` calls, so each block's bytes can
     # be counted before any of them is substituted. Insertion order is the order the
     # chain used, and the substitution below keeps it: a block whose own text
@@ -752,7 +1095,8 @@ def main() -> int:
     blocks = {
         "__TITLE__": config.EXPLORER_TITLE,
         "__SUB__": sub,
-        "__DATA__": json.dumps(entries, ensure_ascii=False).replace("</", "<\\/"),
+        "__DATA__": json.dumps(rows, ensure_ascii=False).replace("</", "<\\/"),
+        "__DICTS__": json.dumps(tables, ensure_ascii=False).replace("</", "<\\/"),
         "__EDGES__": json.dumps(edges),
         "__TITLES__": json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"),
         "__SUMMARIES__": json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"),

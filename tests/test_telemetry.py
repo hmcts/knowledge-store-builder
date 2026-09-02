@@ -345,13 +345,21 @@ class ExplorerWiringTest(SettingsIsolated):
         the artefact is worse than none. Re-derived here from the built page's
         embedded rows rather than from the code that recorded it.
         """
+        from knowledgestore import build_explorer
+
         with tempfile.TemporaryDirectory() as tmp:
             self._run(Path(tmp), "")
             page = config.EXPLORER_PATH.read_text(encoding="utf-8")
             recorded = telemetry.read()
 
         block = page.split('<script id="data" type="application/json">')[1].split("</script>")[0]
-        rows = json.loads(block)
+        # Decoded first. The page interns a column wherever the table plus the
+        # indices cost fewer bytes than the values (#245), so the embedded rows
+        # are not the rows the stage counted - and the ticket column of an
+        # encoded row is a count of something else. Through the shipped decoder,
+        # because a second one here would be a second chance to be wrong.
+        dicts = page.split('<script id="dicts" type="application/json">')[1].split("</script>")[0]
+        rows = build_explorer.decode_rows(json.loads(block), json.loads(dicts))
         self.assertEqual(recorded["explorer.rows_indexed"], len(rows))
         self.assertEqual(recorded["explorer.rows_with_tickets"], sum(1 for r in rows if r[7]))
 

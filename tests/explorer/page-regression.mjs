@@ -42,6 +42,69 @@ try {
 // `strip` comes from the shared harness, for the same reason as the loader above.
 let failures = 0;
 
+// --- the data block's interning (#245) ------------------------------------
+// The build replaces a column's values with indices into a per-column table
+// wherever that costs fewer bytes than repeating them, and app.js decodes the
+// rows before anything reads one. Rows are positional and read by index in
+// fifty places below, so a decode that restored the wrong value would not fail
+// loudly: it would answer every question in this file about the wrong entry,
+// with the right shape and the right count.
+//
+// Two assertions, and the first is what stops the second being vacuous. A page
+// with no interned column decodes trivially, and the decision is taken from the
+// page's own data - so if the fixture ever stopped being interned, the
+// round-trip below would pass over rows nothing had encoded, and this gate would
+// report green over a decoder it no longer exercised.
+//
+// The expected rows are written out by hand from the fixture's own literals
+// (tests/explorer/fixture.py: GRAPH for the labels, repositories and files,
+// LABELS for the community names, INTENT for the tickets), never read back from
+// the page they are checking. Sorted, because the row ORDER is the degree sort's
+// business and is pinned elsewhere; what this asserts is the content.
+const dicts = JSON.parse(jsonBlocks.dicts || '{}');
+const internedColumns = Object.keys(dicts).map(Number).sort((a, b) => a - b);
+if (internedColumns.length) {
+  console.log(`ok    interning: the page interns column(s) ${internedColumns.join(', ')}`);
+} else {
+  failures++;
+  console.error('FAIL  interning: no column of this page is interned, so the round-trip');
+  console.error('      assertion below would pass over rows nothing encoded');
+}
+
+/** [label, repo, sourceFile, communityLabel, kind, tickets] per indexed entry. */
+const EXPECTED_ROWS = [
+  ['AddressEntryComponent', 'demo-app-b', 'src/address/address-entry.component.ts',
+    'Address handling (app B)', 'code', ''],
+  ['AddressFormComponent', 'demo-app-a', 'src/address/address-form.component.ts',
+    'Address handling (app A)', 'code', ''],
+  ['AddressPipe', 'demo-app-a', 'src/pipes/address.pipe.ts',
+    'Address handling (app A)', 'code', 'DEMO-1'],
+  ['AddressPipe', 'demo-app-b', 'src/pipes/address.pipe.ts',
+    'Address handling (app B)', 'code', ''],
+  ['Card payment succeeds', 'demo-e2e', 'features/payment.feature',
+    'Business Features: Payments', 'scenario', ''],
+  ['CheckoutContainer', 'demo-app-a', 'src/checkout/checkout.container.ts',
+    'Payments', 'code', ''],
+  ['DEMO-1', '', '', 'Business Features: Payments', 'ticket', 'DEMO-1'],
+  ['Pay a fine online', 'demo-e2e', 'features/payment.feature',
+    'Business Features: Payments', 'feature', ''],
+  ['PayContainer', 'demo-app-b', 'src/pay/pay.container.ts', 'Payments', 'code', ''],
+  ['PaymentService', 'demo-core', 'src/payment.service.ts', 'Payments', 'code', 'DEMO-2'],
+  ['pay-service (prd)', 'demo-deploy', 'ansible/group_vars/prd/pay-service_values.yaml.j2',
+    'Payments', 'concept', ''],
+  ['prd', 'demo-deploy', '', 'Payments', 'concept', ''],
+];
+const flatten = (rows) => rows.map((r) => r.join('\u241f')).sort().join('\n');
+const decodedRows = api.DATA.map((e) => [e[0], e[1], e[2], e[3], e[4], e[7].join(',')]);
+if (flatten(decodedRows) === flatten(EXPECTED_ROWS)) {
+  console.log(`ok    interning: all ${api.DATA.length} rows decode to the values they stood for`);
+} else {
+  failures++;
+  console.error('FAIL  interning: the decoded rows are not the rows the build built');
+  console.error(`      decoded:  ${flatten(decodedRows).slice(0, 400)}`);
+  console.error(`      expected: ${flatten(EXPECTED_ROWS).slice(0, 400)}`);
+}
+
 /** @param {string} haystack @param {string[]} wanted @param {string} label */
 const absentFrom = (haystack, wanted, label) =>
   wanted.filter((s) => !haystack.includes(s)).map((s) => `${label} missing: "${s}"`);
