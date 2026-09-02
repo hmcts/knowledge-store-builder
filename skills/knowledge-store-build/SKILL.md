@@ -1178,6 +1178,25 @@ answers everything is failing to say when it has nothing. `ticket` is the
 strongest of them, because it asserts the file-to-ticket join, whose canonical
 failure was 0 of 70,655 joined with the build green and both layers present.
 
+**Commit an answer baseline, and re-write it only after a refresh you have
+reviewed.**
+
+```bash
+knowledgestore check-answers --write-baseline    # then commit knowledge/answers/baseline.json
+```
+
+The `graph` mode passes on a non-empty ranking, so the row a reader wants can
+slide from rank 1 to rank 40 and the mode still passes. The baseline records what
+answered and where it ranked, so the next build can report "this ranks worse than
+last time" - which needs no expected node, and is the only thing that sees the
+gradient between rank 1 and the cliff. With no baseline committed, the run says it
+compared nothing.
+
+A rank finding **does not fail the run** (#310), so a zero exit code means the
+declared modes still hold - not that the answers are as good as they were. Read
+the `rank drift:` line, and re-write the baseline as a reviewed decision rather
+than to clear the report.
+
 Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
 `10 of 10` cannot both be reported, but a total alone hides a dead layer behind a
 healthy one.
