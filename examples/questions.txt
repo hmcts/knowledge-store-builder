@@ -15,7 +15,16 @@
 #   ticket   a ticket id resolved AND reached the graph (asserts the join)
 #   abstain  nothing answered, and that is correct
 #
-# Two notes worth having before you write these.
+# Three notes worth having before you write these.
+#
+# Declaring several modes buys resilience and costs observation. `brief, graph`
+# survives a refresh that moves the answer from a graph traversal to a written
+# brief - and it passes on `graph` with the topics block blanked out, so it is not
+# evidence about either layer. The run marks such a question `void` and keeps it
+# out of the pass rate; it does not fail. Three of the questions below are that
+# shape, so a first run shows you what the report says - and each is paired with
+# a single-mode question, which is what keeps the layer watched. Read the
+# `blocks observed` line to see which layers your own set actually watches.
 #
 # `ticket` is the strongest assertion here: it requires the store to hold that
 # ticket AND for a code or concept node to be reached from it. That conjunction IS
@@ -33,10 +42,14 @@ how are addresses validated and formatted?        | brief, graph
 
 # --- a repository someone always asks about ------------------------------------
 what does the progression service do?             | dive, graph
+what does the notifications service do?           | dive
 
 # --- the graph's own strength: independent implementations ---------------------
 which repositories implement AppState?            | graph
 which services publish hearing results?           | graph, tickets
+
+# --- the commit layer, on words no brief or node carries -----------------------
+what work has touched the payment retry?          | tickets
 
 # --- the join, asserted through a ticket that should reach code ----------------
 what changed under ABC-1234?                      | ticket

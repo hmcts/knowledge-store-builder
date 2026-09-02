@@ -2350,14 +2350,74 @@ def _stale_provenance(report: dict, digests: dict[str, dict]) -> str:
     )
 
 
+# The three states `remap` can leave a carried summary in, in the order the split
+# prints them: the group a reader should slow down for first. Named once because
+# each label appears both in the line and in the note under it, and a label that
+# drifted between the two would describe a group nobody could find.
+_CARRIED_MOVED = "carried across a move"
+_CARRIED_UNCHANGED = "carried unchanged"
+_CARRIED_UNRECORDED = "carried with no record of the move"
+
+
+def _provenance_groups(report: dict, checked: list[str]) -> dict[str, list[str]]:
+    """`checked` split by what the last remap actually did to each summary.
+
+    Three carried states rather than one, because "present in the last remap
+    report" and "written for a different cluster and carried across the move"
+    are different quantities and coincide only when the remap moved something.
+    An identity remap - unchanged clustering, every summary retained - puts every
+    summary in the report, and the split called them all carried: the alarming
+    reading printed for the harmless case, which is how a figure gets discounted
+    and then the alarming one with it (#314).
+
+    `remap` already records the distinction per summary, so this reads it rather
+    than recomputing it: `"exact"` is whether the target holds exactly the set the
+    prose was written about (#296). Membership that did not move means the prose
+    still describes what it was written about, whatever community id it now sits
+    under - a re-keying moves the label, not the nodes the prose cites, and the
+    digest the grounding check reads is the same digest either way.
+
+    A missing `exact` is not a true one. A report written before #296 recorded it
+    carries no such field, and calling those "unchanged" would print the
+    reassuring reading of a measurement nobody took, so they get a state of their
+    own and the line says how to record it.
+    """
+    carried = report.get("carried", {})
+    groups: dict[str, list[str]] = {
+        _CARRIED_MOVED: [],
+        _CARRIED_UNCHANGED: [],
+        _CARRIED_UNRECORDED: [],
+        "authored": [],
+    }
+    for cid in checked:
+        if cid not in carried:
+            groups["authored"].append(cid)
+            continue
+        entry = carried[cid]
+        exact = entry.get("exact") if isinstance(entry, dict) else None
+        if exact is True:
+            groups[_CARRIED_UNCHANGED].append(cid)
+        elif exact is False:
+            groups[_CARRIED_MOVED].append(cid)
+        else:
+            groups[_CARRIED_UNRECORDED].append(cid)
+    return groups
+
+
 def _report_provenance_split(
     checked: list[str], unsupported: list[tuple[str, set[str]]], digests: dict[str, dict]
 ) -> None:
-    """Grounding flag rate split carried-versus-authored, when a remap report exists.
+    """Grounding flag rate split by provenance, when a remap report exists.
 
     Remap preserves coverage while degrading grounding (measured: 9% flagged
     for prose authored on its own digest, 37% for prose carried across a
     re-cluster), so retention must never be read without this line beside it.
+
+    That degradation belongs to prose carried *across a move*, which is why the
+    line names the three states of `_provenance_groups` rather than one carried
+    group: a summary that went through a remap which did not move its community
+    grounds like authored prose, and reporting it beside the 37% figure invites
+    the opposite conclusion (#314).
 
     Which is why the split is withheld rather than qualified when the report
     describes another clustering. A line that load-bearing gets read, and a
@@ -2370,8 +2430,7 @@ def _report_provenance_split(
     number is visible rather than silently absent.
     """
     report = io.read_json_dict(config.REMAP_REPORT_PATH)
-    carried_ids = set(report.get("carried", {}))
-    if not carried_ids:
+    if not report.get("carried", {}):
         return
     # `withheld` rather than `stale`: the guard of that name in `adrift` is a
     # mutation-gate site, and an entry's `find` must match one line of the file.
@@ -2387,14 +2446,28 @@ def _report_provenance_split(
         hit = sum(1 for cid in group if cid in flagged)
         return f"{100 * hit // len(group)}% ({hit} of {len(group)})"
 
-    carried = [cid for cid in checked if cid in carried_ids]
-    authored = [cid for cid in checked if cid not in carried_ids]
+    groups = _provenance_groups(report, checked)
+    # An empty group still prints: "n/a (0 checked)" is what tells a reader the
+    # group is empty rather than unmeasured. The unrecorded one is the exception,
+    # because no report this library writes now can populate it and a permanent
+    # zero on the line would train the eye past the rest of it.
+    parts = [
+        f"{label} {rate(members)}"
+        for label, members in groups.items()
+        if members or label != _CARRIED_UNRECORDED
+    ]
     print(
-        f"  grounding by provenance: carried {rate(carried)}, "
-        f"authored {rate(authored)} - carried prose cites the cluster "
-        "it was written for, so a gap here is expected and is the signal to "
-        "revise rather than trust"
+        f"  grounding by provenance: {', '.join(parts)} - only prose carried "
+        "across a move describes a set it was not written about, so a gap there "
+        "is expected and is the signal to revise rather than trust; prose whose "
+        "community did not move is evidence about this clustering exactly as "
+        "authored prose is"
     )
+    if groups[_CARRIED_UNRECORDED]:
+        print(
+            f"  ({len(groups[_CARRIED_UNRECORDED])} of those carried summaries predate the "
+            "record of whether the remap moved them - re-run `summaries remap` to record it.)"
+        )
 
 
 def _verify_exit(
