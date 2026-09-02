@@ -30,60 +30,20 @@
 
 import { writeFileSync, readFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { loadPage } from '../../src/knowledgestore/assets/explorer_harness.mjs';
 import {
   MARGIN_DROP_POINTS, evidenceKey, rankFindings, run, parseQuestions,
 } from '../../src/knowledgestore/assets/answer_regression.mjs';
+// The page loading, the assertion recorder and the total live in one place, so
+// two explorer harnesses cannot come to disagree about what a failure looks like.
+import {
+  equal, fail, conclude, fixtureApi, root, fixturePagePath as page, runnerPath as runner,
+} from './harness.mjs';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, '..', '..');
-const runner = join(root, 'src', 'knowledgestore', 'assets', 'answer_regression.mjs');
-const fixtureQuestions = join(here, 'fixtures', 'questions.txt');
-const page = process.env.KSB_FIXTURE_PAGE
-  || join(root, '.fixture-store', 'graphify-out', 'explorer.html');
-
-let api;
-try {
-  ({ api } = loadPage(page));
-} catch (e) {
-  console.error(`FAIL  no usable page at ${page}: ${e instanceof Error ? e.message : e}`);
-  console.error('      run: python3 tests/explorer/fixture.py');
-  process.exit(1);
-}
-
-let failures = 0;
-
-/** @param {string} text */
-const indented = (text) => text.split('\n').map((line) => `      ${line}`).join('\n');
-
-/** Record one assertion by comparing what happened against what should have.
- *
- * A value comparison rather than a name and a pre-computed boolean: a verdict and
- * a separately written detail string are two expressions that can disagree, so a
- * failure can print evidence about a different check than the one that failed.
- * Comparing values makes the complaint the difference itself and puts every
- * expected value in the test as a literal.
- *
- * @param {string} name the break this catches, in the words a reader needs
- * @param {unknown} observed @param {unknown} expected @param {string} context
- */
-function equal(name, observed, expected, context = '') {
-  const got = JSON.stringify(observed);
-  const want = JSON.stringify(expected);
-  if (got === want) {
-    console.log(`ok    ${name}`);
-    return;
-  }
-  failures++;
-  console.error(`FAIL  ${name}`);
-  console.error(`      expected ${want}`);
-  console.error(`      observed ${got}`);
-  if (context) console.error(indented(context));
-}
+const fixtureQuestions = join(root, 'tests', 'explorer', 'fixtures', 'questions.txt');
+const api = fixtureApi();
 
 /** Drive the real runner over an inline question set and baseline.
  * @param {string} text @param {Record<string, any>} previousRanking
@@ -380,8 +340,14 @@ function rankingRegion(out) {
   const parsed = JSON.parse(out.slice(0, out.indexOf('\n}\n') + 3));
   return JSON.stringify(parsed.results.map((/** @type {any} */ r) => r.ranking));
 }
+// Two separate subprocesses, named rather than compared inline: the two calls are
+// textually identical, which reads - to a person and to a static analyser alike -
+// as an expression compared with itself. Naming them also puts both regions in
+// the failure output, where a diff is what a reader needs.
+const firstJsonRun = rankingRegion(jsonRun(baseline));
+const secondJsonRun = rankingRegion(jsonRun(baseline));
 equal('two --json runs record the same ranking, byte for byte',
-  rankingRegion(jsonRun(baseline)) === rankingRegion(jsonRun(baseline)), true);
+  secondJsonRun, firstJsonRun);
 
 // ---------------------------------------------------------------------------
 // Catches: a baseline written before this existed reported as a total regression.
@@ -445,17 +411,14 @@ equal('the summary counts the compared population, not the question file',
 // expectation. This says which of the two happened.
 // ---------------------------------------------------------------------------
 if (Boolean(fell.rankDrift.length) === Boolean(held.rankDrift.length)) {
-  failures++;
-  console.error('FAIL  this check can no longer tell a fall from a hold');
-  console.error(`      the fallen row reported ${fell.rankDrift.length} finding(s) and the `
-    + `held one ${held.rankDrift.length}`);
-  console.error(fell.rankDrift.length
-    ? '      everything is being reported, which is not the same as reporting the right things'
-    : '      nothing is being reported, so the comparison is decoration');
+  fail('this check can no longer tell a fall from a hold',
+    `the fallen row reported ${fell.rankDrift.length} finding(s) and the held one `
+      + `${held.rankDrift.length}`,
+    fell.rankDrift.length
+      ? 'everything is being reported, which is not the same as reporting the right things'
+      : 'nothing is being reported, so the comparison is decoration');
 } else {
   console.log('ok    the rank comparison discriminates: one fell, one held, same run');
 }
 
-const summary = failures ? `${failures} failure(s)` : 'the rank baseline holds';
-console.log(`\n${summary}`);
-process.exit(failures ? 1 : 0);
+conclude('the rank baseline holds');
