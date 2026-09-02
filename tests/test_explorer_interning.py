@@ -72,6 +72,14 @@ def sample_rows() -> list[list]:
     community label and kind columns repeat heavily, so they win. A change that
     interned everything, or nothing, fails the assertions below rather than
     passing them quietly.
+
+    **Called per test, never shared between them.** These rows were a class
+    attribute once, and `encode_rows` mutating its argument in place then went
+    undetected: the test that exists to catch it snapshotted rows an
+    alphabetically earlier test had already replaced with indices, so it passed
+    in the suite and failed only when run alone. The mutation was still caught,
+    by a different test - which is worse than not being caught, because the
+    mapping from break to observer was wrong and read as right.
     """
     return [
         [
@@ -318,25 +326,37 @@ class IndexAssignmentTest(unittest.TestCase):
         self.assertEqual(forwards, backwards)
         self.assertEqual(forwards, ("alpha", "beta"))
 
-    def test_a_column_of_mixed_shapes_is_declined_rather_than_guessed_at(self):
-        """Breaks if a column holding both a list and a scalar is encoded anyway.
+    def test_a_column_of_mixed_shapes_is_declined_as_mixed_not_as_empty(self):
+        """Breaks if a mixed column is encoded on a guess, or reported as empty.
 
-        One comprehension builds every row today, so it cannot happen - and a
-        column that grew a second shape would otherwise be interned on a guess
-        about which shape the decoder should expect.
+        One comprehension builds every row today, so a mixed column cannot
+        happen - and one that grew a second shape would otherwise be interned on
+        a guess about which shape the decoder should expect.
+
+        The second half is where the defect was. Nothing is costed, so every
+        byte count is zero and the table is empty - and an empty table read as
+        "holds nothing" made the report tell an operator that this populated
+        column carried no information. Acting on that line deletes a column, and
+        deleting a column renumbers every positional read in `app.js`. So this
+        asserts the verdict is *mixed*, and that the line the operator actually
+        sees neither calls the column empty nor quotes counts that are not the
+        column's.
         """
-        rows = rows_carrying(0, ["a", "b"])
-        rows[0][0] = ["a"]
+        rows = rows_carrying(0, [f"LongLabel{index}" for index in range(4)])
+        rows[0][0] = ["LongLabel0"]
         item = explorer.column_interning(rows, 0)
+        line = explorer.column_line(item)
 
-        self.assertEqual(item.occurrences, 0)
+        self.assertTrue(item.mixed)
         self.assertFalse(item.interned)
+        self.assertFalse(item.uninformative)
+        self.assertIn("rows disagree about this column's shape", line)
+        self.assertNotIn("carries no information", line)
+        self.assertNotIn("distinct of", line)
 
 
 class RoundTripTest(unittest.TestCase):
     """Encoding, and the refusal that stops a wrong one reaching a page."""
-
-    ROWS = sample_rows()
 
     def test_the_encoded_rows_decode_to_the_rows_they_replaced(self):
         """Breaks if a table is built in one order and read in another.
@@ -345,11 +365,12 @@ class RoundTripTest(unittest.TestCase):
         substitutes one row's value for another's and leaves every length,
         every type and every row count exactly as it found them.
         """
-        _, tables = explorer.interning_plan(self.ROWS)
-        encoded = explorer.encode_rows(self.ROWS, tables)
+        rows = sample_rows()
+        _, tables = explorer.interning_plan(rows)
+        encoded = explorer.encode_rows(rows, tables)
 
-        self.assertNotEqual(encoded, self.ROWS)  # something was actually encoded
-        self.assertEqual(explorer.decode_rows(encoded, tables), self.ROWS)
+        self.assertNotEqual(encoded, rows)  # something was actually encoded
+        self.assertEqual(explorer.decode_rows(encoded, tables), rows)
 
     def test_encoding_leaves_the_rows_it_was_given_alone(self):
         """Breaks if the rows are encoded in place.
@@ -359,11 +380,17 @@ class RoundTripTest(unittest.TestCase):
         row would turn a count of rows carrying a ticket into a count of rows
         carrying an index. Both numbers would still look plausible.
         """
-        before = json.dumps(self.ROWS)
-        _, tables = explorer.interning_plan(self.ROWS)
-        explorer.encode_rows(self.ROWS, tables)
+        rows = sample_rows()
+        # The rows have to arrive unencoded for the snapshot below to mean
+        # anything. They did not, once - a shared class attribute let an
+        # alphabetically earlier test encode them in place first, and this test
+        # then compared encoded rows against encoded rows and passed.
+        self.assertIsInstance(rows[0][1], str)
+        before = json.dumps(rows)
+        _, tables = explorer.interning_plan(rows)
+        explorer.encode_rows(rows, tables)
 
-        self.assertEqual(json.dumps(self.ROWS), before)
+        self.assertEqual(json.dumps(rows), before)
 
     def test_an_encoding_that_does_not_round_trip_is_refused(self):
         """Breaks if the build stops verifying its own encoding.
@@ -374,13 +401,14 @@ class RoundTripTest(unittest.TestCase):
         showing one row's repository against another's file. Only reading both
         sides catches it, which is what the build does before it writes.
         """
-        _, tables = explorer.interning_plan(self.ROWS)
-        encoded = explorer.encode_rows(self.ROWS, tables)
+        rows = sample_rows()
+        _, tables = explorer.interning_plan(rows)
+        encoded = explorer.encode_rows(rows, tables)
         column = sorted(tables)[0]
         tables[column][0], tables[column][1] = tables[column][1], tables[column][0]
 
         with self.assertRaises(ValueError) as raised:
-            explorer.verify_round_trip(self.ROWS, encoded, tables)
+            explorer.verify_round_trip(rows, encoded, tables)
 
         self.assertIn("does not decode back", str(raised.exception))
 
@@ -392,7 +420,7 @@ class RoundTripTest(unittest.TestCase):
         the report would then name one column while measuring another - the shape
         of every wrong measurement this pipeline has shipped.
         """
-        widened = [row + ["extra"] for row in self.ROWS]
+        widened = [row + ["extra"] for row in sample_rows()]
 
         with self.assertRaises(ValueError) as raised:
             explorer.interning_plan(widened)
@@ -412,7 +440,7 @@ class InterningReportTest(unittest.TestCase):
         there too: the verdict is re-derivable from them, so a reader can check
         it rather than take it.
         """
-        plan, _ = explorer.interning_plan(RoundTripTest.ROWS)
+        plan, _ = explorer.interning_plan(sample_rows())
         report = explorer.interning_report(plan)
 
         for item in plan:
@@ -432,10 +460,10 @@ class InterningReportTest(unittest.TestCase):
         a change to the row's shape rather than to its encoding - which is
         exactly why the operator has to be told rather than have it done.
         """
-        plan, _ = explorer.interning_plan(RoundTripTest.ROWS)
+        plan, _ = explorer.interning_plan(sample_rows())
         deployment = next(item for item in plan if item.name == "deployment")
 
-        self.assertFalse(deployment.informative)
+        self.assertTrue(deployment.uninformative)
         self.assertIn("carries no information", explorer.interning_report(plan))
 
 
@@ -626,7 +654,7 @@ class ReportedNumbersTest(unittest.TestCase):
         percentage of the whole block would flatter one store and understate
         another for reasons that have nothing to do with the encoding.
         """
-        plan, _ = explorer.interning_plan(RoundTripTest.ROWS)
+        plan, _ = explorer.interning_plan(sample_rows())
         report = explorer.interning_report(plan)
 
         value_bytes = sum(item.field_bytes for item in plan)
@@ -642,7 +670,7 @@ class ReportedNumbersTest(unittest.TestCase):
         for the same quantity, which is how two numbers describing one thing
         start disagreeing.
         """
-        plan, _ = explorer.interning_plan(RoundTripTest.ROWS)
+        plan, _ = explorer.interning_plan(sample_rows())
         report = explorer.interning_report(plan)
 
         saved = sum(item.saving for item in plan if item.interned)

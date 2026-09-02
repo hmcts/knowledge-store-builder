@@ -401,6 +401,11 @@ class Interning:
     table_bytes: int
     reference_bytes: int
     table: tuple
+    # Rows disagreeing about this column's shape - some holding a list, some a
+    # scalar. Nothing was costed, so every byte count above is zero and none of
+    # them describes the column: the report says the shapes disagree instead of
+    # printing counts that are not the column's.
+    mixed: bool
 
     @property
     def saving(self) -> int:
@@ -411,17 +416,26 @@ class Interning:
         return self.saving > 0
 
     @property
-    def informative(self) -> bool:
-        """Does the column carry anything at all? An all-empty column is dead weight.
+    def uninformative(self) -> bool:
+        """Was this column costed, and does it hold nothing at all?
 
-        Interning one is still a small win - one digit costs less than a pair of
-        quotes - but no encoding of an empty column beats removing it, and the
-        report says so rather than quietly representing nothing efficiently.
-        Dropping a column renumbers every positional read in the page
-        application, so it is a change to the row's shape and not to its
-        encoding.
+        An all-empty column is dead weight. Interning one is still a small win -
+        one digit costs less than a pair of quotes - but no encoding of an empty
+        column beats removing it, and the report says so rather than quietly
+        representing nothing efficiently. Dropping a column renumbers every
+        positional read in the page application, so it is a change to the row's
+        shape and not to its encoding.
+
+        Both guards are load-bearing rather than defensive. An empty table means
+        "holds nothing" only for a column that was actually costed: a mixed
+        column and a page with no rows both have an empty table while carrying
+        values or no rows to carry them, and reading emptiness as dead weight
+        told an operator to delete a populated column - which, by the paragraph
+        above, is the most expensive thing this report can be wrong about.
         """
-        return any(value != "" and value is not None for value in self.table)
+        if self.mixed or not self.occurrences:
+            return False
+        return not any(value != "" and value is not None for value in self.table)
 
 
 def json_text(value: object) -> str:
@@ -443,23 +457,29 @@ def value_bytes(value: object) -> int:
 
 
 def column_cells(entries: list, column: int) -> tuple[list, bool]:
-    """`(every value the column carries, whether it is list-valued)`.
+    """`(every value the column carries, whether its rows disagree about shape)`.
 
     Flattened for a list-valued column, because interning replaces each element
     of the list rather than the list: costing references per row instead of per
     value understates them by the mean list length, which flatters the saving of
     exactly the columns holding most of the values.
 
-    A column mixing lists and scalars returns no values and therefore declines.
-    Rows are built by one comprehension so it cannot happen today, and a column
-    that grew a second shape would otherwise be encoded on a guess.
+    A column mixing lists and scalars is reported as mixed and costed as
+    nothing, so it declines. Rows are built by one comprehension so it cannot
+    happen today, and a column that grew a second shape would otherwise be
+    encoded on a guess about which shape the decoder should expect.
+
+    The second element says *mixed*, not *list-valued*. List-valued was the
+    obvious thing to return and no caller ever read it, which left the mixed
+    case indistinguishable from an empty column - and the report then told an
+    operator that a populated column carried no information.
     """
     cells = [row[column] for row in entries]
     lists = sum(1 for cell in cells if isinstance(cell, list))
     if lists and lists != len(cells):
-        return [], False
+        return [], True
     if lists:
-        return [value for cell in cells for value in cell], True
+        return [value for cell in cells for value in cell], False
     return cells, False
 
 
@@ -536,7 +556,7 @@ def column_interning(entries: list, column: int) -> Interning:
     wide margin. And a column of 13-digit timestamps with a handful of distinct
     values wins though every value in it is a number.
     """
-    values, _ = column_cells(entries, column)
+    values, mixed = column_cells(entries, column)
     table = frequency_table(values)
     return Interning(
         column=column,
@@ -547,6 +567,7 @@ def column_interning(entries: list, column: int) -> Interning:
         table_bytes=table_bytes(column, table),
         reference_bytes=reference_bytes(values, table),
         table=table,
+        mixed=mixed,
     )
 
 
@@ -649,6 +670,29 @@ def verify_round_trip(entries: list, rows: list, tables: Mapping[str, list]) -> 
     )
 
 
+def column_line(item: Interning) -> str:
+    """One column's line in the report, saying what was decided and on what.
+
+    A mixed column gets a different line rather than a note on the usual one.
+    Its byte counts are all zero because nothing was costed, so printing
+    "0 distinct of 0 values" beside a column holding real values states a
+    quantity that is not the column's - and an operator reading it as an empty
+    column deletes something populated.
+    """
+    if item.mixed:
+        return (
+            f"  declined  {item.name:<16}rows disagree about this column's shape "
+            "(some hold a list, some a value), so it was not costed"
+        )
+    verdict = "interned" if item.interned else "declined"
+    effect = "saves" if item.interned else "would cost"
+    note = "  (empty in every row - carries no information)" if item.uninformative else ""
+    return (
+        f"  {verdict}  {item.name:<16}{item.distinct:>9,} distinct of "
+        f"{item.occurrences:>9,} values  {effect} {abs(item.saving):>12,} bytes{note}"
+    )
+
+
 def interning_report(plan: tuple[Interning, ...]) -> str:
     """The decision per column, as the operator meets it.
 
@@ -667,13 +711,7 @@ def interning_report(plan: tuple[Interning, ...]) -> str:
         return ""
     lines = ["Data-block interning, decided per column from this page's own data:"]
     for item in sorted(plan, key=lambda item: (-item.saving, item.column)):
-        verdict = "interned" if item.interned else "declined"
-        effect = "saves" if item.interned else "would cost"
-        note = "" if item.informative else "  (empty in every row - carries no information)"
-        lines.append(
-            f"  {verdict}  {item.name:<16}{item.distinct:>9,} distinct of "
-            f"{item.occurrences:>9,} values  {effect} {abs(item.saving):>12,} bytes{note}"
-        )
+        lines.append(column_line(item))
     saved = sum(item.saving for item in plan if item.interned)
     total = sum(item.field_bytes for item in plan)
     share = f" ({saved * 100 // total}% of them)" if total else ""

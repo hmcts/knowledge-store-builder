@@ -11,10 +11,12 @@
 //
 // Run: python3 tests/explorer/fixture.py && node tests/explorer/page-regression.mjs
 
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadPage, strip } from '../../src/knowledgestore/assets/explorer_harness.mjs';
+import { APP_PATH, loadPage, strip } from '../../src/knowledgestore/assets/explorer_harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pagePath = process.env.KSB_FIXTURE_PAGE
@@ -71,39 +73,66 @@ if (internedColumns.length) {
   console.error('      assertion below would pass over rows nothing encoded');
 }
 
-/** [label, repo, sourceFile, communityLabel, kind, tickets] per indexed entry. */
+/** [label, repo, sourceFile, communityLabel, kind, connections, tickets] per entry.
+ *
+ * `connections` is here because it is the only interned LIST column on this
+ * page, and the projection once skipped it: the list decode was then covered
+ * only by a synthetic row in engine-unit, and nothing checked that a list
+ * column of a real page came back as the labels it stood for. `tickets` is a
+ * list column the costing DECLINES, so the pair also pins that a declined
+ * column reaches the reader untouched.
+ *
+ * Hand-derived from the fixture's own literals: GRAPH for the labels,
+ * repositories and files, LABELS for the community names, INTENT for the
+ * tickets, and `links` for the connections - ordered by degree descending then
+ * by node id, which is what `entry_connections` documents.
+ */
 const EXPECTED_ROWS = [
   ['AddressEntryComponent', 'demo-app-b', 'src/address/address-entry.component.ts',
-    'Address handling (app B)', 'code', ''],
+    'Address handling (app B)', 'code', 'AddressPipe', ''],
   ['AddressFormComponent', 'demo-app-a', 'src/address/address-form.component.ts',
-    'Address handling (app A)', 'code', ''],
+    'Address handling (app A)', 'code', 'AddressPipe', ''],
   ['AddressPipe', 'demo-app-a', 'src/pipes/address.pipe.ts',
-    'Address handling (app A)', 'code', 'DEMO-1'],
+    'Address handling (app A)', 'code', 'DEMO-1,AddressFormComponent', 'DEMO-1'],
   ['AddressPipe', 'demo-app-b', 'src/pipes/address.pipe.ts',
-    'Address handling (app B)', 'code', ''],
+    'Address handling (app B)', 'code', 'AddressEntryComponent', ''],
   ['Card payment succeeds', 'demo-e2e', 'features/payment.feature',
-    'Business Features: Payments', 'scenario', ''],
+    'Business Features: Payments', 'scenario', 'Pay a fine online', ''],
   ['CheckoutContainer', 'demo-app-a', 'src/checkout/checkout.container.ts',
-    'Payments', 'code', ''],
-  ['DEMO-1', '', '', 'Business Features: Payments', 'ticket', 'DEMO-1'],
+    'Payments', 'code', 'PaymentService', ''],
+  ['DEMO-1', '', '', 'Business Features: Payments', 'ticket',
+    'Pay a fine online,AddressPipe', 'DEMO-1'],
   ['Pay a fine online', 'demo-e2e', 'features/payment.feature',
-    'Business Features: Payments', 'feature', ''],
-  ['PayContainer', 'demo-app-b', 'src/pay/pay.container.ts', 'Payments', 'code', ''],
-  ['PaymentService', 'demo-core', 'src/payment.service.ts', 'Payments', 'code', 'DEMO-2'],
+    'Business Features: Payments', 'feature',
+    'PaymentService,DEMO-1,Card payment succeeds', ''],
+  ['PayContainer', 'demo-app-b', 'src/pay/pay.container.ts', 'Payments', 'code',
+    'PaymentService', ''],
+  ['PaymentService', 'demo-core', 'src/payment.service.ts', 'Payments', 'code',
+    'Pay a fine online,pay-service (prd),CheckoutContainer,PayContainer', 'DEMO-2'],
   ['pay-service (prd)', 'demo-deploy', 'ansible/group_vars/prd/pay-service_values.yaml.j2',
-    'Payments', 'concept', ''],
-  ['prd', 'demo-deploy', '', 'Payments', 'concept', ''],
+    'Payments', 'concept', 'PaymentService,prd', ''],
+  ['prd', 'demo-deploy', '', 'Payments', 'concept', 'pay-service (prd)', ''],
 ];
 const flatten = (rows) => rows.map((r) => r.join('\u241f')).sort().join('\n');
-const decodedRows = api.DATA.map((e) => [e[0], e[1], e[2], e[3], e[4], e[7].join(',')]);
-if (flatten(decodedRows) === flatten(EXPECTED_ROWS)) {
-  console.log(`ok    interning: all ${api.DATA.length} rows decode to the values they stood for`);
-} else {
+/** @param {any[][]} data */
+const project = (data) => data.map(
+  (e) => [e[0], e[1], e[2], e[3], e[4], e[6].join(','), e[7].join(',')]
+);
+
+/** Assert a page's decoded rows are exactly the rows the build built.
+ * @param {string} label @param {any[][]} data */
+function checkRows(label, data) {
+  if (flatten(project(data)) === flatten(EXPECTED_ROWS)) {
+    console.log(`ok    interning: ${label} (${data.length} rows)`);
+    return;
+  }
   failures++;
-  console.error('FAIL  interning: the decoded rows are not the rows the build built');
-  console.error(`      decoded:  ${flatten(decodedRows).slice(0, 400)}`);
+  console.error(`FAIL  interning: ${label} - not the rows the build built`);
+  console.error(`      decoded:  ${flatten(project(data)).slice(0, 400)}`);
   console.error(`      expected: ${flatten(EXPECTED_ROWS).slice(0, 400)}`);
 }
+
+checkRows('every row decodes to the values it stood for', api.DATA);
 
 /** @param {string} haystack @param {string[]} wanted @param {string} label */
 const absentFrom = (haystack, wanted, label) =>
@@ -387,6 +416,73 @@ for (const hostile of ['<img src=x onerror=alert(1)>', '"><script>alert(1)</scri
   api.runAsk();
   assertInert(`a hostile question: ${hostile}`, api.out.innerHTML);
   assertInert(`the meta line for: ${hostile}`, api.meta.textContent);
+}
+
+// --- a page built before interning still loads and answers (#245) ---------
+// Two lines carry that guarantee - `OPTIONAL_BLOCKS` in the shipped harness and
+// app.js's `|| '{}'` fallback - and neither was observed. Moving `dicts` into
+// REQUIRED_BLOCKS left the Python suite, engine-unit, page-regression and
+// check-js all green while a page built before this format failed to load at
+// all, naming a block its builder never wrote. Every store that has committed a
+// page and not yet rebuilt is in that blast radius, and `check-answers` runs
+// against exactly those pages.
+//
+// So this constructs one: the real fixture page with its rows written out plain
+// and the `#dicts` tag removed entirely. That is byte-for-byte the shape a
+// pre-interning page has, and it must answer with the same rows.
+//
+// app.js is required from a COPY, deliberately. Node caches modules by path, so
+// a second `require` of the shipped path hands back the first page's module
+// without re-running it - the assertion would then re-check the interned page
+// and pass whatever the fallback did.
+const legacyDir = mkdtempSync(join(tmpdir(), 'ksb-preinterning-'));
+try {
+  const legacyApp = join(legacyDir, 'app.js');
+  copyFileSync(APP_PATH, legacyApp);
+  const built = readFileSync(pagePath, 'utf-8');
+  const plain = JSON.stringify(api.DATA).replace(/<\//g, '<\\/');
+  const legacyHtml = built
+    .replace(/<script id="dicts" type="application\/json">[^]*?<\/script>\n/, '')
+    .replace(
+      /(<script id="data" type="application\/json">)[^]*?(<\/script>)/,
+      (_m, open, close) => open + plain + close
+    );
+  // Both substitutions have to have bitten. A regex that matched nothing leaves
+  // the interned page in place, and everything below would then pass while
+  // testing the case it exists to rule out.
+  const problems = [];
+  if (/<script id="dicts"/.test(legacyHtml)) problems.push('the #dicts block was not removed');
+  if (legacyHtml === built) problems.push('the page was not rewritten at all');
+  if (legacyHtml.includes('"demo-core"') === false) problems.push('the plain rows are missing');
+  if (problems.length) {
+    failures++;
+    console.error('FAIL  pre-interning page: the fixture for it was not built');
+    for (const problem of problems) console.error(`      ${problem}`);
+  } else {
+    const legacyPage = join(legacyDir, 'explorer.html');
+    writeFileSync(legacyPage, legacyHtml);
+    // Caught rather than left to propagate. Both ways of breaking this - the
+    // block becoming required, or the fallback going - throw during the load,
+    // and an unhandled stack trace says a page failed somewhere. What a reader
+    // needs is the sentence: a page a store has already committed no longer
+    // opens. So the failure is named, and the run still reaches its summary.
+    try {
+      // requireVerbatim off: this page deliberately does NOT inline app.js
+      // byte-for-byte, which is the whole situation a published page is in.
+      const legacy = loadPage(legacyPage, { appPath: legacyApp, requireVerbatim: false });
+      checkRows('a page carrying no #dicts block loads and holds the same rows', legacy.api.DATA);
+    } catch (e) {
+      failures++;
+      console.error('FAIL  pre-interning page: a page built before interning no longer loads,');
+      console.error('      so every store that has committed one and not yet rebuilt would');
+      console.error('      have `check-answers` fail against its own published page.');
+      console.error(`      ${e.message}`);
+      console.error('      the two lines that carry this: OPTIONAL_BLOCKS in explorer_harness.mjs,');
+      console.error("      and app.js's `|| '{}'` fallback for an absent #dicts block");
+    }
+  }
+} finally {
+  rmSync(legacyDir, { recursive: true, force: true });
 }
 
 if (failures) {
