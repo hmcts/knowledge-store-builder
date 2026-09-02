@@ -924,10 +924,17 @@ pipeline's own calibration, prose carried across clusters unrevised flags at
 roughly four times the rate of prose written against its own digest, which is
 why the spool feeds revision and never direct reinstatement.
 
-`verify` uses the report's carried map to print grounding split by provenance
-(carried vs authored). Read the two numbers together: retention improving
-while carried grounding degrades means the remap is preserving coverage at
-the cost of truth, and the criterion or the prose needs attention.
+`verify` uses the report's carried map to print grounding split by provenance,
+in three states: `carried across a move`, `carried unchanged` and `authored`.
+Only the first is prose re-keyed onto a set it was not written about, and only
+it explains a worse flag rate; the other two are evidence about this clustering
+either way. Under the default `--carry exact` nothing can reach that state, so
+an identity remap reads quiet rather than reporting every summary as carried.
+Read the numbers together: retention improving while grounding for prose carried
+across a move degrades means the remap is preserving coverage at the cost of
+truth, and the criterion or the prose needs attention. A report written before
+`remap` recorded the distinction prints `carried with no record of the move` instead -
+re-run `summaries remap` to record it.
 
 It withholds that line, and says why on stderr, when the report was not written
 for the clustering being verified — the report records which one it describes.
@@ -1178,9 +1185,37 @@ answers everything is failing to say when it has nothing. `ticket` is the
 strongest of them, because it asserts the file-to-ticket join, whose canonical
 failure was 0 of 70,655 joined with the build green and both layers present.
 
+**Commit an answer baseline, and re-write it only after a refresh you have
+reviewed.**
+
+```bash
+knowledgestore check-answers --write-baseline    # then commit knowledge/answers/baseline.json
+```
+
+The `graph` mode passes on a non-empty ranking, so the row a reader wants can
+slide from rank 1 to rank 40 and the mode still passes. The baseline records what
+answered and where it ranked, so the next build can report "this ranks worse than
+last time" - which needs no expected node, and is the only thing that sees the
+gradient between rank 1 and the cliff. With no baseline committed, the run says it
+compared nothing.
+
+A rank finding **does not fail the run** (#310), so a zero exit code means the
+declared modes still hold - not that the answers are as good as they were. Read
+the `rank drift:` line, and re-write the baseline as a reviewed decision rather
+than to clear the report.
+
 Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
 `10 of 10` cannot both be reported, but a total alone hides a dead layer behind a
-healthy one. See `docs/building-a-knowledge-store.md` §9.
+healthy one.
+
+Read the `blocks observed` line too, and any question marked `void`. A question
+passes on any mode it declares, so `brief, graph` passes on `graph` with the
+topics block blanked out - it is not evidence about the topics layer, and the run
+keeps it out of the pass rate rather than counting it as coverage. `brief 2/2`
+alongside `topics 0` means two questions declared that layer, both passed, and
+neither would have noticed it gone. Neither a void nor an unobserved block
+changes the exit code: both are findings about the question file, so fix the file
+rather than hunting the store. See `docs/building-a-knowledge-store.md` §9.
 
 ## Finishing a refresh
 

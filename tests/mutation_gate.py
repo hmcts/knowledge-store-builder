@@ -3463,6 +3463,9 @@ MUTATIONS = (
         "had a community and every community still had prose, so the store looked healthy "
         "and the retention figure read as reassurance while being the opposite",
         (
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_each_group_carries_its_own_flag_rate",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_prose_re_keyed_onto_a_changed_set_is_reported_as_carried_across_a_move",
+            "test_summaries_provenance_states.ProvenanceStatesTest.test_the_remap_marked_exactly_the_two_communities_whose_members_moved",
             "test_summaries_remap.ClaimTargetsTest.test_a_dominant_target_is_claimed_with_its_share",
             "test_summaries_remap.ExactClaimTargetsTest.test_a_community_holding_the_old_set_and_one_more_node_is_withdrawn",
             "test_summaries_remap.ExactClaimTargetsTest.test_a_member_that_left_the_graph_is_named_as_a_changed_set_not_a_near_miss",

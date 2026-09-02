@@ -52,9 +52,14 @@ README). One document each.
 ## Verify — documentation is code
 
 - Run every command in the document, or state in the PR why one was not run.
-- Check every internal anchor and cross-repository link resolves. Inbound
-  deep links from other repositories are load-bearing: renaming a heading
-  breaks them silently.
+- Run `python3 tests/docs_integrity.py`. It resolves every relative link and
+  in-page anchor across `README.md`, `docs/` and `skills/`, and it fails when a
+  heading named in `docs/load-bearing-anchors.txt` is gone. Inbound deep links
+  from other repositories are load-bearing and those repositories cannot be
+  grepped from here, so that file is how they are known: if you renamed a
+  declared heading, restore it or change the consumer and the declared line
+  together — deleting the line is not the fix. Declare a new inbound link there
+  when a consumer adds one.
 - Read the finished page **as the persona**: can they act within a minute?
   Is the first screen worth their next five?
 - Docs that restate a rule from a skill or a master document must name it,

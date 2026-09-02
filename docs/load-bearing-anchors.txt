@@ -1,0 +1,31 @@
+# Headings other repositories deep-link to. Renaming one breaks their README
+# silently, so this file declares them and `tests/test_docs_integrity.py` fails
+# when a declared anchor no longer has a heading behind it.
+#
+# The obligation is inverted on purpose. The repositories that link in here are
+# private and are deliberately not named in this one, so CI cannot grep them.
+# What CI can do is hold this repository to a list it owns: a maintainer no
+# longer has to remember to check an unnamed repository, only to leave a line in
+# this file alone. Renaming a heading then fails the suite, and the fix is to
+# rename the heading back or to update the consumer and this line together.
+#
+# It is weaker than a real cross-repository check, in one direction: a consumer
+# can add a deep link that nobody declares here, and nothing will notice. A
+# consuming store's own maintenance routine is where that is caught - declare
+# the link here when you add it.
+#
+# One entry per line, `path` or `path#anchor`, relative to the repository root.
+# The anchor is the GitHub heading slug, which is what a consumer's URL carries.
+# Blank lines and `#` comments are ignored.
+
+# The install and update sections. These are the incident this file exists for:
+# install detail used to live in the README, a consumer linked to it, and the
+# sections were removed while that link still pointed at them. The detail now
+# lives in the two persona guides, so these are where that link resolves today.
+docs/asking-questions.md
+docs/asking-questions.md#install-the-plugin
+docs/asking-questions.md#update-the-plugin
+docs/creating-a-store.md
+docs/creating-a-store.md#install-the-prerequisites
+docs/creating-a-store.md#install-the-pipeline
+docs/refreshing-a-store.md#update-the-library-version
