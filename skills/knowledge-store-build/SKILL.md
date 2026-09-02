@@ -924,10 +924,17 @@ pipeline's own calibration, prose carried across clusters unrevised flags at
 roughly four times the rate of prose written against its own digest, which is
 why the spool feeds revision and never direct reinstatement.
 
-`verify` uses the report's carried map to print grounding split by provenance
-(carried vs authored). Read the two numbers together: retention improving
-while carried grounding degrades means the remap is preserving coverage at
-the cost of truth, and the criterion or the prose needs attention.
+`verify` uses the report's carried map to print grounding split by provenance,
+in three states: `carried across a move`, `carried unchanged` and `authored`.
+Only the first is prose re-keyed onto a set it was not written about, and only
+it explains a worse flag rate; the other two are evidence about this clustering
+either way. Under the default `--carry exact` nothing can reach that state, so
+an identity remap reads quiet rather than reporting every summary as carried.
+Read the numbers together: retention improving while grounding for prose carried
+across a move degrades means the remap is preserving coverage at the cost of
+truth, and the criterion or the prose needs attention. A report written before
+`remap` recorded the distinction prints `carried with no record of the move` instead -
+re-run `summaries remap` to record it.
 
 It withholds that line, and says why on stderr, when the report was not written
 for the clustering being verified — the report records which one it describes.
