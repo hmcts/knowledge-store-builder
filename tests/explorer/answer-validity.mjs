@@ -97,9 +97,15 @@ const forQuestion = (results, question) => {
 
 /** Key-sorted rows, so a comparison is about the values and not the order two
  * tables happen to list their keys in.
+ *
+ * `localeCompare` rather than a bare `sort()`, which orders by UTF-16 code unit -
+ * the same explicit comparator the runner's own two sorts use, because a
+ * deterministic order is a feature of this codebase rather than a preference.
  * @param {Record<string, string>} table
  */
-const asRows = (table) => Object.keys(table).sort().map((key) => [key, table[key]]);
+const asRows = (table) => Object.keys(table)
+  .sort((x, y) => x.localeCompare(y))
+  .map((key) => [key, table[key]]);
 
 // ---------------------------------------------------------------------------
 // Catches: the void rule removed or inverted. A question declared for the topics
