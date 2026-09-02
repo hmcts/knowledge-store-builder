@@ -71,6 +71,26 @@ The `hmcts-lib` Azure Artifacts feed serves this package anonymously even though
 opening the feed root in a browser prompts for sign-in. Credentials are needed
 to publish packages, not to install them.
 
+Confirm which install you got:
+
+```bash
+knowledgestore --version
+```
+
+That prints the version, the interpreter and the package directory. Read all
+three whenever a run behaves as though it holds a version you did not install,
+and capture all three in any check that asserts what is installed.
+
+**Ask through the console script, never a bare `python3`.** A check reading
+`python3 -c "import knowledgestore; ..."` answers for whichever `python3` sits on
+`PATH`, which need not be the one that runs your pipeline. One store's
+pre-commit hook asserted that the installed library matched its lock, from the
+machine interpreter, while the virtualenv building the store held a different
+version — so it passed on an environment that never builds the store. No check
+can close that gap, because a check is code some interpreter runs and inherits
+whichever one ran it. `knowledgestore` is a console script inside the
+virtualenv, so it can only answer for the environment that owns it.
+
 ### Select the repositories
 
 Create `config/repository-filters.txt`:

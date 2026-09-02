@@ -387,9 +387,21 @@ This library and its consumer stores often share one Python environment.
 Installing a store's pinned release (its `requirements.lock`) silently
 replaces this repo's editable install — after which "local" test runs
 exercise the released wheel, not your working tree: tests for new code
-error while CI passes. Before trusting a local run, confirm
-`python3 -c "import knowledgestore; print(knowledgestore.__file__)"` points
-at `src/` here; `pip install --no-deps -e .` restores it.
+error while CI passes. Before trusting a local run, confirm the answer with
+`knowledgestore --version`, which prints the version, the interpreter and the
+package directory — the `package` line must point at `src/` here, and
+`pip install --no-deps -e .` restores it when it does not.
+
+**Ask through the console script, not a bare `python3`.** This used to say
+`python3 -c "import knowledgestore; print(knowledgestore.__file__)"`, which
+answers for whichever `python3` is on `PATH` and so cannot tell you about the
+environment that runs your pipeline — it is the same trap one directory up. A
+consumer store's pre-commit hook asserted "the installed library matches the
+lock" from the machine `python3` while the virtualenv that builds the store held
+another version, and certified an environment that does not build the store. No
+check can fix that, because a check is code some interpreter runs; the console
+script is the answer because it necessarily runs under the environment that owns
+it, and it now says which one that is.
 
 ## Things that look like bugs but are not
 
