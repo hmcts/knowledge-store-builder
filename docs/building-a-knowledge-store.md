@@ -679,8 +679,10 @@ landed together, and nothing about how much of the *new* cluster those members
 constitute. A summary can therefore clear the bar and still describe a small
 corner of the cluster it lands on — most of that cluster being newly arrived
 members the prose has never seen. Retention is a coverage number, not a
-correctness one: treat carried prose as owed a re-read, and split `verify`'s
-flag rate by carried-versus-authored rather than reading the headline.
+correctness one: treat carried prose as owed a re-read, and read `verify`'s flag
+rate split by provenance rather than the headline. That split names three
+states, and only `carried across a move` is prose re-keyed onto a set it was not
+written about.
 
 `remap` now also drops a summary whose target cluster grew so much that the
 prose describes a corner of it (`--precision`, default 20%). Measured on one
@@ -863,6 +865,37 @@ total says.
 false testimony rather than silence - something was counted, and the number meant
 something other than it appeared to. None of them could have been written down
 naming its source.
+
+### A question that cannot fail for its own layer
+
+A question passes on any mode it declares, so `brief, graph` passes on `graph`
+with the topics block blanked out. The run marks such a question `void`, keeps it
+out of the pass rate, and reports which blocks the set actually observes:
+
+```
+1 of 1 questions answered as declared, 2 of 3 voided  (brief 2/2, graph 3/3)
+blocks observed by a valid question: topics 0, dives 0, tickets 0, data 1, abstention 0
+warn  no valid question is carried by topics, so nothing here observes it
+      read from: topics block (docs/topics -> briefs.json)
+      2 question(s) declare it, and none carried it as a valid probe
+```
+
+`brief 2/2` and `topics 0` in the same report is the finding. Two questions
+declared the topics layer, both passed, and neither would have noticed it gone -
+which is what the per-mode floor above cannot show you, because it is keyed on
+what questions declare rather than on what carried an answer.
+
+Declaring several modes buys resilience and costs observation. Both are true: the
+question survives a refresh that legitimately moves its answer from a graph
+traversal to a written brief, and it stops being evidence about either layer. So
+pair every multi-block question with at least one single-block question for each
+layer you want watched.
+
+**This is reported and not gated.** The exit code is unchanged by a void, because
+a store red on its own question file rather than on its data is the always-red
+failure the mode design exists to avoid. The counts are in the human output and
+under `validity` in `--json`, so gating can be decided on a real refresh's
+numbers instead of a guess (#311).
 
 ### Declare at least one `abstain`
 
