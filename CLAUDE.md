@@ -315,10 +315,21 @@ source. Two hard rules from it:
 
 - **Inbound deep links are load-bearing.** A consuming store repository links
   into this repository's docs, so renaming a heading it targets breaks that
-  consumer's README silently. Grep the consuming repository for the anchor before
-  renaming or removing any heading — that check is what caught the README's
-  install sections being removed while a consumer still pointed at them. (The
-  consumers are not named here: this repository is public and they are not.)
+  consumer's README silently — that is what happened to the README's install
+  sections, removed while a consumer still pointed at them. (The consumers are
+  not named here: this repository is public and they are not, which is also why
+  the check cannot be written the obvious way round. CI has nothing to grep.)
+
+  So the obligation is inverted. `docs/load-bearing-anchors.txt` declares the
+  anchors other repositories link to, and `tests/test_docs_integrity.py` fails
+  when a declared anchor no longer has a heading behind it — renaming one is a
+  failing suite rather than a thing to remember. Two consequences: **do not
+  delete a line from that file to make the gate pass** — restore the heading, or
+  change the consumer and the line together; and when a consumer adds a deep
+  link, declare it there, because nothing here can notice one that is
+  undeclared. The same gate resolves every relative link and in-page anchor
+  across `README.md`, `docs/` and `skills/`. Run it alone with
+  `python3 tests/docs_integrity.py`.
 - **Install detail lives in the guides, not the README.** `docs/asking-questions.md`
   owns the plugin install and `docs/creating-a-store.md` owns the library
   install. The README routes to them and carries no install commands of its own,
