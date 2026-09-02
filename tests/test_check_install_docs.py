@@ -144,6 +144,124 @@ class InstallDocsGateTest(SettingsIsolated):
             )
             self.assertEqual(gate.main(), 0)
 
+    def test_a_lock_naming_its_index_with_the_primary_directive_is_accepted(self):
+        """Break it catches: matching only `--extra-index-url`.
+
+        `--index-url` is pip's primary index directive and a lock carrying it
+        names an index as plainly as one carrying the additional form. Reported
+        from a store whose lock line 28 reads `--index-url https://pypi.org/simple`
+        and which failed this stage permanently as a result - the check could not
+        be satisfied by any correct lock, which is how a check gets skipped.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                LOCK_WITH_INDEX.replace("--extra-index-url", "--index-url"),
+                {"README.md": "```bash\npip install -r requirements.lock\n```\n"},
+            )
+            self.assertEqual(gate.main(), 0)
+
+    def test_the_equals_joined_spelling_of_the_directive_is_read(self):
+        """`--index-url=URL` is the same instruction as `--index-url URL`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.lock").write_text(
+                LOCK_WITH_INDEX.replace(f"--extra-index-url {FEED}", f"--index-url={FEED}"),
+                encoding="utf-8",
+            )
+            self.assertTrue(gate.declares_an_index(root / "requirements.lock"))
+            self.assertEqual(gate.index_url(root / "requirements.lock"), FEED)
+
+    def test_a_lock_naming_both_directives_is_still_accepted(self):
+        """The common real topology, and the regression guard for this fix.
+
+        `uv pip compile --emit-index-url` writes both lines when a store has a
+        primary index plus a private feed. Such a lock passed before this change
+        because it happens to carry the additional form, which is why the bug
+        looked absent on one store and permanent on another: it is conditional on
+        index topology, not on the tool. A later tightening that made the match
+        exclusive would break exactly these stores.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                f"--index-url https://pypi.org/simple\n{LOCK_WITH_INDEX}",
+                {"README.md": "```bash\npip install -r requirements.lock\n```\n"},
+            )
+            self.assertEqual(gate.main(), 0)
+
+    def test_the_hint_names_the_extra_feed_rather_than_the_default_one(self):
+        """Break it catches: reading whichever index directive comes first.
+
+        An input naming PyPI primary and a private feed additionally is the
+        ordinary shape. The package a failing command cannot find is on the
+        private feed - PyPI is already the default, so a hint naming it tells the
+        reader to add something that changes nothing. Accepting either directive
+        without ranking them produced exactly that.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text(
+                f"--index-url https://pypi.org/simple\n--extra-index-url {FEED}\nthing==1.0\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(gate.index_url(root / "requirements.txt"), FEED)
+
+    def test_the_hint_falls_back_to_the_only_directive_present(self):
+        """A store whose private feed IS the primary index still gets a usable hint."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text(
+                f"--index-url {FEED}\nthing==1.0\n", encoding="utf-8"
+            )
+            self.assertEqual(gate.index_url(root / "requirements.txt"), FEED)
+
+    def test_a_lock_naming_no_index_is_still_reported(self):
+        """The over-correction guard, and the reason this pair is not one test.
+
+        Accepting both directives must not become accepting anything. Widening
+        the match until every lock 'names an index' would turn the whole check
+        green and read exactly like the fix working. This is the assertion that
+        separates the two.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                LOCK_WITHOUT_INDEX,
+                {"README.md": "```bash\npip install -r requirements.lock\n```\n"},
+            )
+            self.assertEqual(gate.main(), 1)
+
+    def test_a_comment_mentioning_the_directive_does_not_name_an_index(self):
+        """The case where widening the match looks exactly like the fix working.
+
+        A lock explaining itself - `# see --index-url docs`, or forty lines of
+        commentary recording a version skew - names no index. A substring or
+        prefix match passes it, and the failure is invisible: the stage goes green
+        on a lock that names nothing, which is #277's vacuous pass arriving by a
+        different route. Reported by a store verifying the fix against its own
+        lock, which is the kind of lock that carries commentary.
+        """
+        self.assertIsNone(gate.index_directive("# see --index-url docs"))
+        self.assertIsNone(gate.index_directive("#--index-url https://example.invalid"))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lock = root / "requirements.lock"
+            lock.write_text(
+                f"# this feed used to be {FEED} - see --extra-index-url notes\n"
+                "thing==1.0 \\\n    --hash=sha256:abc\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(gate.declares_an_index(lock))
+
+    def test_a_longer_option_that_merely_starts_the_same_way_is_not_an_index(self):
+        """Whole-token matching: `--index-url-suffix` is not `--index-url`."""
+        self.assertIsNone(gate.index_directive("--index-url-suffix https://example.invalid"))
+        self.assertEqual(
+            gate.index_directive("--index-url https://example.invalid"),
+            ("--index-url", "https://example.invalid"),
+        )
+
     def test_a_store_without_a_lock_is_not_a_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

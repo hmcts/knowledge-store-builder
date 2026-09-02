@@ -60,6 +60,20 @@ from pathlib import Path
 
 from . import config
 
+# Both directives name an index. `--index-url` is pip's primary index and
+# `--extra-index-url` an additional feed, but either one in a lock means the lock
+# carries an index, and either one on a command line supplies it.
+#
+# Matching only the additional form reported a lock whose own line reads
+# `--index-url https://pypi.org/simple` as naming no index. That is a permanent
+# failure on a correctly specified lock, and a check that cannot be satisfied is
+# one people learn to skip - so it cost more than the vacuous pass it replaced.
+# The bug is the usual shape here: the code was correct about
+# `--extra-index-url` and the sentence it was answering was "does this lock name
+# an index".
+INDEX_FLAGS = ("--index-url", "--extra-index-url")
+# The one the fix messages suggest adding to a command, which leaves whatever the
+# environment already treats as primary in place.
 INDEX_FLAG = "--extra-index-url"
 DOC_SUFFIXES = {".md", ".yml", ".yaml", ".sh"}
 SKIP_DIRS = {".git", ".venv", "node_modules", "repositories", "knowledge", "graphify-out"}
@@ -131,23 +145,54 @@ def unresolved_pins(requirements: Path, lock: Path) -> list[tuple[str, str, str 
     ]
 
 
+def index_directive(line: str) -> tuple[str, str | None] | None:
+    """`(flag, url)` when a requirements or lock line names an index, else None.
+
+    Both spellings pip accepts are handled - `--flag URL` and `--flag=URL` - and
+    the flag is matched as a whole token rather than a prefix, so a longer option
+    that merely begins the same way is not mistaken for one.
+    """
+    token, _, rest = line.strip().partition(" ")
+    flag, equals, joined = token.partition("=")
+    if flag not in INDEX_FLAGS:
+        return None
+    return flag, ((joined if equals else rest).strip() or None)
+
+
 def declares_an_index(lock: Path) -> bool:
     """True when the lock names an index, making the flag unnecessary."""
     if not lock.is_file():
         return False
     return any(
-        line.strip().startswith(INDEX_FLAG)
+        index_directive(line)
         for line in lock.read_text(encoding="utf-8", errors="replace").splitlines()
     )
 
 
 def index_url(requirements: Path) -> str | None:
-    """The index a store's requirements input names, for the fix message."""
+    """The index a store's requirements input names, for the fix message.
+
+    `--extra-index-url` wins where an input names both, and the preference is
+    load-bearing rather than tidy. A store publishing to a private feed alongside
+    PyPI writes both lines, PyPI first. The package the failing command cannot
+    find is on the private feed - PyPI is already the default and suggesting it
+    is advice that changes nothing. Accepting either directive here without
+    ranking them made the hint name PyPI, which is a worse message than the one
+    this function replaced.
+    """
     if not requirements.is_file():
         return None
-    for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.strip().startswith(INDEX_FLAG):
-            return line.split(maxsplit=1)[1].strip() if len(line.split()) > 1 else None
+    found = [
+        directive
+        for directive in map(
+            index_directive, requirements.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+        if directive and directive[1]
+    ]
+    for flag in reversed(INDEX_FLAGS):
+        for directive in found:
+            if directive[0] == flag:
+                return directive[1]
     return None
 
 
@@ -212,7 +257,7 @@ def lock_installs(root: Path, lock_name: str) -> list[tuple[str, int, str]]:
 
 def offending_commands(installs: list[tuple[str, int, str]]) -> list[tuple[str, int, str]]:
     """Of the documented installs from the lock, those that name no index."""
-    return [entry for entry in installs if INDEX_FLAG not in entry[2]]
+    return [entry for entry in installs if not any(flag in entry[2] for flag in INDEX_FLAGS)]
 
 
 def _installs_line(lock_name: str, installs: int) -> str:
