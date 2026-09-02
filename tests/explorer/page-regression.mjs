@@ -428,8 +428,11 @@ for (const hostile of ['<img src=x onerror=alert(1)>', '"><script>alert(1)</scri
 // against exactly those pages.
 //
 // So this constructs one: the real fixture page with its rows written out plain
-// and the `#dicts` tag removed entirely. That is byte-for-byte the shape a
-// pre-interning page has, and it must answer with the same rows.
+// and the `#dicts` tag removed entirely. Not byte-for-byte what the old build
+// wrote - `JSON.stringify` is compact where `json.dumps` puts a space after
+// every separator - and that is not the property under test. What both
+// fallbacks key on is the block being ABSENT and the rows being plain values,
+// and that is reproduced exactly.
 //
 // app.js is required from a COPY, deliberately. Node caches modules by path, so
 // a second `require` of the shipped path hands back the first page's module
