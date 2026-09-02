@@ -82,7 +82,12 @@ max-complexity = 15
 pythonpath = ["src"]
 
 [tool.pyright]
-include = ["src"]
+# `src`, plus the docs-integrity gate by name. Not `tests/` wholesale: that
+# would surface errors across every test module at once, which is a repo-wide
+# decision and not one to take alongside a new gate. Named narrowly instead,
+# because a gate CI never type-checks is the shape of problem this one exists
+# to prevent - a check reporting green about a file it never read.
+include = ["src", "tests/docs_integrity.py", "tests/test_docs_integrity.py"]
 # Stage modules read module-level path constants that tests and configure()
 # rebind, so inferred types are deliberately loose in places.
 typeCheckingMode = "basic"
