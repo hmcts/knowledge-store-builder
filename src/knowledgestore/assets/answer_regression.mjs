@@ -61,6 +61,28 @@
 // The counts are in the human output and the JSON so the gating decision can be
 // taken on real numbers.
 //
+// **The graph mode asserted non-emptiness, not relevance** (#310). `if
+// (ranked.length) modes.push('graph')` stays green while the node a reader wants
+// slides from rank 1 to rank 40 or out of the window the renderer shows: it only
+// goes red at the cliff, when the ranking empties. Ranking quality degrades
+// continuously - a vocabulary change, an IDF shift as the corpus grows, a change
+// to label segmentation - and a boolean over a ranked list can see none of it.
+//
+// Declaring an expected NODE per question would measure it, and is the wrong fix
+// here: `questions.txt` declares an expected mode rather than an id precisely
+// because pinning prose or ids makes a harness that is red after every legitimate
+// refresh. So there is no ground truth to measure rank against.
+//
+// The version that needs none: **baseline the rank against the previous build.**
+// Per question this records what answered (`evidence`), how many rows ranked,
+// how many of them the renderer shows, the top two scores and the top result's
+// lead over its runner-up as a ratio. `--baseline` already exists, so the next
+// build can report "this ranks worse than the last one for the same question" -
+// a finding needing no declared answer. **Reported, not gated**, for the same
+// reason the validity verdict is: whether rank movement is stable enough to gate
+// is a measurement on a real refresh, not a guess, and a harness that goes red on
+// ordinary churn is one nobody reads.
+//
 // **Every finding names the artefact it read.** Each of the four misses across
 // both estates that motivated #134 was false testimony rather than silence -
 // something was counted, and the number meant something other than it appeared
@@ -121,6 +143,153 @@ export const MODE_SOURCE = {
 
 const TICKET_ID = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/;
 
+/** How far the top result's lead may narrow before it is reported, in points.
+ *
+ * A starting value, not a calibrated one, and it is deliberately the only number
+ * here that needs calibrating: a rank that fell and a window that shrank are both
+ * directional facts needing no threshold. Ten points is chosen to sit above
+ * rounding rather than on evidence, and this whole report is unwired from the
+ * exit code until one real refresh says what ordinary churn looks like.
+ */
+export const MARGIN_DROP_POINTS = 10;
+
+/** Four decimal places, so a baseline diff is readable and two runs agree.
+ * @param {number} x */
+const round4 = (x) => Math.round(x * 1e4) / 1e4;
+
+/** A ranked row's identity, as far as the page carries one.
+ *
+ * The page holds no node id - `build_index` writes label, repo, source file,
+ * community label, kind, degree, connections, tickets, community, deployment -
+ * so this is the closest thing to one, and it has to distinguish rows that share
+ * a label: `AddressPipe` in two repositories is two rows, and a key on the label
+ * alone would report one of them's rank for the other and under-report a fall.
+ *
+ * A row with neither label nor source file is NOT identifiable: newer graphify
+ * emits structural package-hierarchy nodes with neither, and several of them
+ * would share a key. Returning `''` says "no identity" rather than handing back a
+ * key whose lookup finds the first such row - which is a different quantity from
+ * the rank being claimed. Nothing is compared for such a question, which is the
+ * right answer: a number that means something else is worse than no number.
+ *
+ * A relabel or a file move therefore reads as the row no longer ranking rather
+ * than as a fall, and that is the right report: the label is what the page shows,
+ * so to a reader the old answer has gone. Measured end to end on the fixture -
+ * renaming one row's label left all five questions passing and their modes
+ * unchanged, and this was the only thing that noticed.
+ *
+ * Opaque by design - it is a key and a label for the reader, never parsed back.
+ * @param {any[]} row a DATA row @returns {string}
+ */
+export function evidenceKey(row) {
+  if (!row) return '';
+  const [label, repo, sourceFile, , kind] = row;
+  if (!label && !sourceFile) return '';
+  return `${kind} | ${repo || ''} | ${sourceFile || ''} | ${label || ''}`;
+}
+
+/** What this build's ranking looks like for one question, and where a probe sits.
+ *
+ * Recorded from the ordering the RENDERER receives. `runAsk` applies
+ * `applySummaryBoost` before it routes, so a record taken from `rankNodes` alone
+ * describes an ordering no reader is ever shown - measured on the fixture, the
+ * boost moves a row from rank 4 to rank 3 and cuts the top result's lead from
+ * 79% to 11%. The boost runs on a COPY: the caller's array decides the `graph`
+ * mode, and boosting it in place would change which questions this gate reports
+ * as passing, which is a different change from recording a rank.
+ *
+ * @param {any} api the engine API from explorer_harness
+ * @param {[number, number][]} ranked what `rankNodes` returned, unmutated
+ * @param {string[]} terms
+ * @param {[string, number][]} expansions
+ * @param {string} probe the evidence key the baseline recorded, or '' for none
+ * @returns {{ranking: {evidence: string, ranked: number, shown: number,
+ *            top: number, runnerUp: number, marginPct: number}, probeRank: number}}
+ *          `probeRank` is 1-based, 0 when the probe does not rank at all, and -1
+ *          when there was no probe to look for.
+ */
+export function rankingOf(api, ranked, terms, expansions, probe = '') {
+  /** @type {[number, number][]} */
+  const ordered = ranked.map((r) => [r[0], r[1]]);
+  api.applySummaryBoost?.(ordered, terms, expansions);
+  const rows = /** @type {any[][]} */ (api.DATA || []);
+  const top = ordered[0] ? round4(ordered[0][0]) : 0;
+  const runnerUp = ordered[1] ? round4(ordered[1][0]) : 0;
+  const probeRank = probe
+    ? ordered.findIndex(([, i]) => evidenceKey(rows[i]) === probe) + 1
+    : -1;
+  return {
+    ranking: {
+      evidence: ordered[0] ? evidenceKey(rows[ordered[0][1]]) : '',
+      ranked: ordered.length,
+      // The floor the renderer applies: `pickSeeds` is what `runAsk` hands
+      // `routeQuestion`, so a row past it is ranked and not shown.
+      shown: ordered.length ? api.pickSeeds(ordered, terms).length : 0,
+      top,
+      runnerUp,
+      // A ratio in whole points, not a raw difference. Every score moves
+      // wholesale when the corpus grows and IDF shifts, so a raw margin reports
+      // every question after a refresh that changed nothing about ranking. The
+      // ratio is scale-free. One ranked row has no runner-up, and a lead over
+      // nothing is total - 100, not an error.
+      marginPct: top ? Math.round(((top - runnerUp) / top) * 100) : 0,
+    },
+    probeRank,
+  };
+}
+
+/** Where the row that ranked first last build sits now.
+ * @param {any} previous @param {any} current @param {number} probeRank
+ */
+function fellLines(previous, current, probeRank) {
+  const lines = [probeRank
+    ? `the row that ranked first last build is now rank ${probeRank} of ${current.ranked}`
+    : `the row that ranked first last build does not rank at all, of ${current.ranked} that do`];
+  lines.push(`it is: ${previous.evidence}`);
+  if (probeRank > current.shown) {
+    lines.push(`the renderer shows ${current.shown}, so a reader is not shown it at all`);
+  }
+  // Printed on every fall, because a lead of 0% means the baseline's top row was
+  // TIED and which of the tied rows got recorded is the index tiebreak - so a
+  // fall on such a question is a fact about the tiebreak, not about the ranker.
+  lines.push(`its lead over the runner-up was ${previous.marginPct}%; `
+    + `the row now first leads by ${current.marginPct}%`);
+  return lines;
+}
+
+/** How this build's ranking compares with the baseline's, for one question.
+ *
+ * Directional throughout: a build that ranks the same, or better, produces
+ * nothing. A comparison on inequality would fire on an improvement and read
+ * exactly like the check working.
+ *
+ * An absent or pre-#310 baseline entry produces nothing rather than everything -
+ * a baseline with no `ranking` region must not report every question as
+ * regressed, which would be a harness red on its own upgrade.
+ *
+ * @param {any} previous the baseline's record, or undefined
+ * @param {{ranked: number, shown: number, marginPct: number}} current
+ * @param {number} probeRank from `rankingOf`
+ * @returns {string[]} one line per finding, in the words the reader needs
+ */
+export function rankFindings(previous, current, probeRank) {
+  if (!previous?.evidence) return [];
+  /** @type {string[]} */
+  const lines = [];
+  // The baseline's evidence was rank 1 when it was written, so rank can only
+  // hold or worsen; anything but 1 is a fall.
+  if (probeRank !== 1) lines.push(...fellLines(previous, current, probeRank));
+  if (current.shown < previous.shown) {
+    lines.push(`${current.shown} ranked result(s) reach the reader, was ${previous.shown}`);
+  }
+  const drop = previous.marginPct - current.marginPct;
+  if (drop >= MARGIN_DROP_POINTS) {
+    lines.push(`the top result leads its runner-up by ${current.marginPct}%, `
+      + `was ${previous.marginPct}% - ${drop} points narrower`);
+  }
+  return lines;
+}
+
 /** Parse an estate's question file.
  *
  * `question | mode[, mode...]`, `#` comments, blank lines ignored. Several modes
@@ -168,11 +337,14 @@ export function parseQuestions(text) {
  *
  * @param {any} api the engine API from explorer_harness
  * @param {string} question
+ * @param {string} probe the evidence key the baseline recorded for this question,
+ *        or '' for none - the row whose rank this build reports (#310)
  * @returns {{ modes: string[], composed: boolean, meta: string, chars: number,
- *            carried: string[] }} `carried` names the terms the estate does have
- *            evidence for, which is what makes a failed `abstain` actionable.
+ *            carried: string[], ranking: any, probeRank: number }} `carried` names
+ *            the terms the estate does have evidence for, which is what makes a
+ *            failed `abstain` actionable.
  */
-export function classify(api, question) {
+export function classify(api, question, probe = '') {
   // Reset the rendered surfaces so a previous question cannot be read as this one's.
   api.out.innerHTML = '';
   api.meta.textContent = '';
@@ -182,6 +354,10 @@ export function classify(api, question) {
   const terms = api.queryTerms(question);
   const expansions = api.expandTerms(terms);
   const ranked = api.rankNodes(terms, expansions);
+  // Before anything reduces the ranking to a boolean. `if (ranked.length)` below
+  // is non-emptiness, and the whole gradient between "rank 1" and "one row left"
+  // is invisible to it (#310); this is where the ordering still exists.
+  const { ranking, probeRank } = rankingOf(api, ranked, terms, expansions, probe);
   const topic = api.matchTopic(question.toLowerCase(), expansions);
   const dive = topic ? null : api.matchDive(question.toLowerCase());
   const evidence = api.ticketEvidence(terms);
@@ -256,6 +432,8 @@ export function classify(api, question) {
     meta: String(api.meta.textContent || ''),
     chars: rendered.length,
     carried,
+    ranking,
+    probeRank,
   };
 }
 
@@ -370,10 +548,15 @@ export function assessValidity(results) {
  * @param {any} api
  * @param {{question: string, accept: string[], line: number}[] } questions
  * @param {Record<string, string[]>} previous baseline: question -> modes last seen
+ * @param {Record<string, any>} previousRanking baseline: question -> ranking last
+ *        recorded. Absent for a baseline written before #310, and an absent entry
+ *        must report nothing rather than everything.
  */
-export function run(api, questions, previous = {}) {
+export function run(api, questions, previous = {}, previousRanking = {}) {
   const results = questions.map((q) => {
-    const { modes, composed, meta, chars, carried } = classify(api, q.question);
+    const was = previousRanking[q.question];
+    const { modes, composed, meta, chars, carried, ranking, probeRank } =
+      classify(api, q.question, was?.evidence || '');
     const wanted = met(modes, q.accept);
     const wasAnswered = previous[q.question] && !previous[q.question].includes('abstain');
     const nowAbstains = modes.includes('abstain') && modes.length === 1;
@@ -384,6 +567,10 @@ export function run(api, questions, previous = {}) {
       meta,
       chars,
       carried,
+      ranking,
+      // Report-only. Held as lines rather than a count so nothing here can be
+      // added to a failure total, the same guard the validity report carries.
+      rankDrift: rankFindings(was, ranking, probeRank),
       pass: wanted && composed,
       // A question the baseline says was answered and that now abstains is the
       // regression this gate exists for, reported separately from a declared
@@ -415,7 +602,16 @@ export function run(api, questions, previous = {}) {
   // the exit code through the floors, and the validity gate is report-only by
   // design (#311) - subtracting voids from it would gate on the question file
   // through the back door, which is the one thing that decision rules out.
-  return { results, byMode, floors, validity: assessValidity(results) };
+  // Named, so a silent rank report cannot read as "nothing regressed" when what
+  // happened is "nothing was compared". `compared` counts the questions the
+  // baseline holds an identifiable evidence key for, which is the only population
+  // any rank claim here covers.
+  const drift = {
+    total: results.length,
+    compared: questions.filter((q) => previousRanking[q.question]?.evidence).length,
+    regressed: results.filter((r) => r.rankDrift.length).length,
+  };
+  return { results, byMode, floors, validity: assessValidity(results), drift };
 }
 
 /** @param {string[]} a @param {string[]} b */
@@ -459,14 +655,20 @@ function loadQuestions(path) {
   return questions;
 }
 
-/** The modes last recorded for each question, from the estate's baseline region.
+/** What was last recorded for each question, from the estate's baseline region.
+ *
+ * `ranking` is absent from any baseline written before #310, and `|| {}` is what
+ * makes that a no-op: every question then has no probe, so nothing is compared
+ * and nothing is reported. A baseline upgrade must not report the whole set as
+ * regressed - `--write-baseline` fills the region in, and the run after that
+ * compares.
  * @param {string} path
- * @returns {Record<string, string[]>}
+ * @returns {{answers: Record<string, string[]>, ranking: Record<string, any>}}
  */
 function readBaseline(path) {
-  if (!path || !existsSync(path)) return {};
+  if (!path || !existsSync(path)) return { answers: {}, ranking: {} };
   const doc = JSON.parse(readFileSync(path, 'utf-8'));
-  return doc.estate?.answers || {};
+  return { answers: doc.estate?.answers || {}, ranking: doc.estate?.ranking || {} };
 }
 
 /** Write the baseline's two regions.
@@ -489,6 +691,14 @@ function writeBaseline(path, results) {
     estate: {
       note: 'The estate owns this region. Review its diff like any other change.',
       answers: Object.fromEntries(results.map((r) => [r.question, r.modes])),
+      // What answered, how clearly, and how much of it a reader is shown - so the
+      // next build can report "this ranks worse than the last one for the same
+      // question" with no declared answer to measure against (#310).
+      //
+      // Recorded values only. A comparison result written in here would make the
+      // next build's baseline a function of the last comparison, and a drift
+      // would then be measured against a number that already carried one.
+      ranking: Object.fromEntries(results.map((r) => [r.question, r.ranking])),
     },
   };
   writeFileSync(path, JSON.stringify(doc, null, 2) + '\n');
@@ -584,6 +794,44 @@ function reportValidity(v) {
   }
 }
 
+/** One question's rank findings, with the artefact they were read from.
+ * @param {any} r
+ */
+function reportOneDrift(r) {
+  console.log(`rank  ${r.question}`);
+  for (const line of r.rankDrift) console.log(`      ${line}`);
+  console.log(`      read from: ${MODE_SOURCE.graph}`);
+}
+
+/** How this build's ranking compares with the baseline's.
+ *
+ * Report-only, and it returns nothing a caller could add to a failure count -
+ * the same guard `reportValidity` carries, and for the same reason: whether rank
+ * movement is stable enough to gate on is a measurement on a real refresh, and a
+ * harness that goes red on ordinary churn is one nobody reads.
+ *
+ * The summary line is printed whether or not anything regressed, because silence
+ * here has two meanings that need telling apart: nothing ranks worse, and nothing
+ * was compared.
+ *
+ * @param {any[]} results @param {{total: number, compared: number, regressed: number}} drift
+ */
+function reportRankDrift(results, drift) {
+  if (!drift.compared) {
+    console.log(`rank drift: the baseline records no ranking for any of these ${drift.total} `
+      + 'question(s), so nothing here compares rank');
+    console.log('      --write-baseline records one; the run after that compares against it');
+    return;
+  }
+  console.log(`rank drift: ${drift.regressed} of ${drift.compared} compared question(s) rank `
+    + `worse than the baseline, of ${drift.total} in the set`);
+  if (drift.regressed) {
+    console.log('      reported, not gated: what ordinary churn looks like across a real '
+      + 'refresh has not been measured yet');
+  }
+  for (const r of results) if (r.rankDrift.length) reportOneDrift(r);
+}
+
 /** @param {string[]} argv */
 function main(argv) {
   let args;
@@ -613,11 +861,16 @@ function main(argv) {
     return 2;
   }
 
-  const previous = readBaseline(args.baseline);
-  const { results, byMode, floors, validity } = run(api, questions, previous);
+  const { answers: previous, ranking: previousRanking } = readBaseline(args.baseline);
+  const { results, byMode, floors, validity, drift } =
+    run(api, questions, previous, previousRanking);
 
+  // Written after the comparison above and before it is printed, so the report is
+  // this build against the LAST baseline and the file left behind is this build.
   if (args.write) writeBaseline(args.baseline, results);
-  if (args.json) console.log(JSON.stringify({ results, byMode, floors, validity }, null, 2));
+  if (args.json) {
+    console.log(JSON.stringify({ results, byMode, floors, validity, drift }, null, 2));
+  }
 
   let failures = 0;
   for (const r of results) failures += reportOne(r, previous);
@@ -636,6 +889,7 @@ function main(argv) {
   const voidedClause = voided ? `, ${voided} of ${total} voided` : '';
   console.log(`\n${passed} of ${counted} questions answered as declared${voidedClause}  (${parts})`);
   reportValidity(validity);
+  reportRankDrift(results, drift);
   console.log(`page: ${args.page}`);
   return failures ? 1 : 0;
 }

@@ -21,63 +21,19 @@
 
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { loadPage } from '../../src/knowledgestore/assets/explorer_harness.mjs';
 import {
   MODES, MODE_SOURCE, BLOCK_SOURCE, run, parseQuestions, probeVerdict,
 } from '../../src/knowledgestore/assets/answer_regression.mjs';
+// The page loading, the assertion recorder and the total live in one place, so
+// two explorer harnesses cannot come to disagree about what a failure looks like.
+import {
+  equal, fail, conclude, fixtureApi, fixturePagePath as page, runnerPath as runner,
+} from './harness.mjs';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, '..', '..');
-const runner = join(root, 'src', 'knowledgestore', 'assets', 'answer_regression.mjs');
-const page = process.env.KSB_FIXTURE_PAGE
-  || join(root, '.fixture-store', 'graphify-out', 'explorer.html');
-
-let api;
-try {
-  ({ api } = loadPage(page));
-} catch (e) {
-  console.error(`FAIL  no usable page at ${page}: ${e instanceof Error ? e.message : e}`);
-  console.error('      run: python3 tests/explorer/fixture.py');
-  process.exit(1);
-}
-
-let failures = 0;
-
-/** @param {string} text */
-const indented = (text) => text.split('\n').map((line) => `      ${line}`).join('\n');
-
-/** Record one assertion by comparing what happened against what should have.
- *
- * Deliberately not a name and a verdict. A pre-computed boolean and a separately
- * written detail string are two expressions that can disagree, so a failure can
- * print evidence about a different check than the one that failed - and this
- * repository's own history is of correct code answering a neighbouring question.
- * Comparing the two values makes the complaint the difference itself, and it puts
- * every expected value in the test as a hand-written literal, which is where the
- * house rules want them.
- *
- * @param {string} name the break this catches, in the words a reader needs
- * @param {unknown} observed what the product did
- * @param {unknown} expected what it should have done, derived by hand
- * @param {string} context further output worth reading when this fails
- */
-function equal(name, observed, expected, context = '') {
-  const got = JSON.stringify(observed);
-  const want = JSON.stringify(expected);
-  if (got === want) {
-    console.log(`ok    ${name}`);
-    return;
-  }
-  failures++;
-  console.error(`FAIL  ${name}`);
-  console.error(`      expected ${want}`);
-  console.error(`      observed ${got}`);
-  if (context) console.error(indented(context));
-}
+const api = fixtureApi();
 
 /** Drive the real runner over an inline question set.
  * @param {string} text @returns {ReturnType<typeof run>}
@@ -326,16 +282,13 @@ equal('the JSON output carries the validity region for consumers',
 // which of the two happened, in the words a reader needs.
 // ---------------------------------------------------------------------------
 if (voidedA.voided === controlA.voided) {
-  failures++;
-  console.error('FAIL  this check can no longer tell a void probe from a valid one');
-  console.error(`      both verdicts came back ${voidedA.voided}`);
-  console.error(voidedA.voided
-    ? '      everything is being voided, which is not the same as voiding the right things'
-    : '      nothing is being voided, so the gate is decoration');
+  fail('this check can no longer tell a void probe from a valid one',
+    `both verdicts came back ${voidedA.voided}`,
+    voidedA.voided
+      ? 'everything is being voided, which is not the same as voiding the right things'
+      : 'nothing is being voided, so the gate is decoration');
 } else {
   console.log('ok    the void verdict discriminates: one voided, one not, same run');
 }
 
-const summary = failures ? `${failures} failure(s)` : 'the question-set validity gate holds';
-console.log(`\n${summary}`);
-process.exit(failures ? 1 : 0);
+conclude('the question-set validity gate holds');
