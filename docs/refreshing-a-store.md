@@ -110,6 +110,28 @@ summaries now sit on. Without it the committed snapshot describes the graph the
 store no longer has, and the next refresh remaps from a baseline that is
 consistently wrong — the one state `remap`'s own guards cannot see.
 
+`snapshot` writes two files and both are part of the baseline:
+`membership-snapshot.json.gz` keyed by node id, and `membership-files.json.gz`
+keyed by `(repository, source_file)`. Commit both. `remap` reads the second one
+for the summaries the node ids lose outright — a rebuild that re-runs semantic
+extraction renames essentially every semantic node id, because those ids are
+built from labels an extraction authored, so prose about a community whose corpus
+files never moved is otherwise withdrawn for no reason connected to the change.
+Read the route split on the output:
+
+```
+Carried by route: N on node ids, M on (repository, source_file)
+```
+
+Every fallback carry is marked `"exact": false` in `remap-report.json` and named
+with `"route": "source-files"`, so those paragraphs can be sampled on their own
+and put at the front of the revision queue.
+
+`remap` writes `communities.json` only when the prose in it changes, the same gate
+`merge` uses. A re-cluster that moved no summary therefore leaves the committed file
+byte-identical and says so on the retention line, so a diff on that file always means
+prose moved.
+
 Read the retention reported by `remap`, and the withdrawal count beside it.
 Expect retention to be low: a summary is carried only onto a community holding
 exactly the node set it describes, so any community that gained or lost a node
@@ -429,7 +451,9 @@ in a store that follows the reference layout. Keep the exact `==` pin, so that
 rebuilding the store resolves the same versions it was built with —
 `check-install-docs` refuses rather than passing when the input states no `==`
 pin, because a lock compared against nothing reports the same clean result as a
-lock that resolves everything.
+lock that resolves everything. A store whose lock is not compiled from an input
+at all declares that instead — see
+[A lock you maintain by hand](#a-lock-you-maintain-by-hand).
 
 ```text
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
@@ -471,6 +495,46 @@ release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer
 skills.
 
+### A lock you maintain by hand
+
+Not every lock is compiled. If yours is written by hand, say so in the lock
+itself:
+
+```text
+# knowledgestore: hand-authored lock
+```
+
+`check-install-docs` then skips comparing the lock against a requirements input,
+and reports on every run that it did:
+
+```text
+requirements.lock declares itself hand-authored at line 3: `# knowledgestore: hand-authored lock`.
+The pin comparison was SKIPPED, not passed - it compared 0 pins.
+```
+
+**Without the line, a lock with no `requirements.txt` beside it fails the check.**
+That is deliberate: an absent input is refused rather than read as agreement,
+because an input renamed out from under the check and a store that resolves
+everything look identical from there. The line is how a store states which of the
+two it is, rather than leaving the check to guess.
+
+Add it only when the lock genuinely is not compiled from anything — it carries
+notes a recompile would destroy, or it pins a combination `uv pip compile` cannot
+resolve. Adding it to a compiled lock hides a renamed input.
+
+Two things the line does not switch off:
+
+- **The documented-command half.** Unchanged: while the lock names no index, every
+  documented command that installs from it still has to pass one.
+- **The comparison, whenever there is something to compare.** A declared lock
+  beside an input that does state a `==` pin is compared like any other, so the
+  line cannot hide a lock that installs a different version from the one the store
+  commits.
+
+A recompile removes the line, because `uv pip compile` keeps no comment it did not
+write. That is the intended behaviour: the skip stops, the check starts refusing
+again, and the cause is one deleted line in the lock's diff.
+
 ### Deciding whether a local check can go
 
 A release often absorbs something a store had built for itself, and the obvious
@@ -510,6 +574,7 @@ Two failures, both reported by store operators:
 | Symptom | Action |
 |---|---|
 | `summaries remap` withdrew most of the prose | Usually correct. A summary is carried only onto a community holding exactly the node set it was written about, so any community that gained or lost a node has its prose withdrawn for revision. Check the clustering first — a clustering command can report success without saving its result, and coverage below the `--coverage` floor is refused rather than reported — then treat the withdrawn file as a backfill queue. |
+| `remap` reports `"available": false` under `fallback` | The `(repository, source_file)` route did not run, and the block says why: no `membership-files.json.gz` (a snapshot taken before the library wrote one, or a store that commits only the node-id file), or one recorded against a different membership snapshot. It is not a measured zero. Re-run `summaries snapshot` against the graph the summaries were written for, before re-clustering. |
 | `summaries adrift` reports drift | The committed snapshot no longer describes the committed graph, so the prose is keyed to communities that moved. Re-take the snapshot from the graph the store ships, then remap or re-author what the report names. |
 | `summaries adrift` exits 2 | The check could not run and the message names why — no membership read, the wrong snapshot, or no graph. Fix that and re-run; do not read it as drift. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |

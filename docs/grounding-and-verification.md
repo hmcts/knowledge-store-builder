@@ -240,6 +240,26 @@ The merged artefact carries the same coverage per community under a reserved
 without re-extracting. Writes to it are gated on a hash of the prose alone: a
 refresh that moved only a count leaves the file untouched and says so.
 
+**Whether the committed prose is still what the stage wrote** is a narrower
+question than grounding, and until now nothing answered it. All three prose
+layers — community summaries, topic briefs and deep dives — now record one digest
+per entry in that same reserved key, and each merge names the entries whose
+committed prose no longer matches before it overwrites them:
+
+```
+1 of 42 entries in <path> no longer carry the prose recorded there - reported, not refused:
+  <entry>: prose differs from the digest recorded beside it
+```
+
+Two properties are load-bearing. The digests cover prose **content** and exclude
+the id it is keyed to, because community ids are positional and `summaries remap`
+re-keys prose onto new ones by design — a record carrying the ids would differ
+after every re-clustering, and a check that fires on the operation the library
+exists to perform gets switched off. And it **reports rather than refuses**: no
+exit code moves on a mismatch, because how often a hand edit is legitimate has not
+been measured on any store. A deletion is not reported; a digest per entry cannot
+distinguish a removal from a re-key.
+
 **`--estate` and name segments.** The estate pass reports `[not in graph]`, which
 is deliberately narrower than "not in the estate": the graph is narrower than the
 corpus. A cited term is corroborated by a whole identifier **or by one of its name

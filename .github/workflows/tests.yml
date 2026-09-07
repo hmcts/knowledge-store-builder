@@ -137,6 +137,14 @@ jobs:
       - name: Answer question-set validity
         run: node tests/explorer/answer-validity.mjs
 
+      # One level up from the step above: those ask whether a question could have
+      # failed at all, this asks whether the answer got worse. The `graph` mode
+      # passes on a non-empty ranking, so the row a reader wants can slide from
+      # rank 1 to rank 40 and the mode still passes (#310). The comparison is
+      # against the previous build, because there is no declared expected node.
+      - name: Answer rank baseline
+        run: node tests/explorer/answer-rank.mjs
+
       # Last, so it judges everything above it. `git add -A` is banned in this
       # repository because the working tree collects generated output, another
       # session's edits and scratch at once - and that rule had no gate, so

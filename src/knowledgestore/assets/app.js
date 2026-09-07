@@ -1401,6 +1401,12 @@ run();
   // The data block's decoder, so its behaviour can be asserted directly rather
   // than only through whether the page happens to answer a question.
   decodeRows,
+  // `runAsk` boosts the ranking by community-summary matches before it renders,
+  // so a harness reading `rankNodes` alone describes an ordering no reader is
+  // ever shown - a different quantity from the one it would be claiming. The
+  // answer gate records the rank its evidence appeared at (#310), so it needs
+  // the ordering the renderer receives, not the one before this ran.
+  applySummaryBoost,
   // The two structures `vTicket` draws its evidence from. Exposed so a harness
   // can ask whether a ticket id has any record here, rather than concluding it
   // from the id appearing in the question - which is true of any string.

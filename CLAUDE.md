@@ -5,6 +5,22 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 
 ## Ground rules
 
+- **Every pull request opens by saying what is lost if it is not taken.** A short
+  section at the top, before the mechanics: what stays broken, what stays
+  unobserved, what an operator keeps hitting. Not a summary of the diff — the
+  reader can read the diff. The question a reviewer is actually answering is
+  whether to take the change, and nothing else in a PR body answers it.
+
+  It is also the cheapest check on whether the change is worth making. A PR that
+  cannot name what its absence costs is usually a PR whose author has not
+  established that the problem is real — and this repository has shipped work
+  aimed at a measured-but-irrelevant target more than once, most recently
+  compressing the prose blocks of a page whose prose was its fourth-largest term.
+  Writing the cost first would have caught it before the branch existed.
+
+  Where the honest answer is "little, but it is cheap and it closes a class",
+  write that. An accurate small claim is worth more than an inflated one, and a
+  reviewer who learns the section is reliable will read it first every time.
 - **No behaviour changes disguised as refactors.** Stage outputs are committed
   artefacts in consumer repositories; a change in what a stage emits is a
   change to their data. Say so explicitly in the PR.

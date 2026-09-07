@@ -867,7 +867,7 @@ path is the failure mode to check for.
 
 ```bash
 knowledgestore summaries adrift     # FIRST: is the committed snapshot still the graph's?
-knowledgestore summaries snapshot   # BEFORE re-clustering
+knowledgestore summaries snapshot   # BEFORE re-clustering; writes two files, commit both
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: re-keys prose whose community is unchanged
 knowledgestore summaries snapshot   # re-key the baseline to the new clustering
@@ -910,6 +910,46 @@ that is not the set the prose was written about is `"exact": false` in the remap
 report. `remap` also refuses to run on a wrong snapshot (no shared node ids) or
 an implausibly small summary set (`--floor`), because both failures silently
 produce an empty file over a good one.
+
+**Commit both snapshot files.** `summaries snapshot` writes
+`knowledge/summaries/membership-snapshot.json.gz` (node ids) and
+`knowledge/summaries/membership-files.json.gz` (the same communities keyed by
+`(repository, source_file)`). The second one is what the remap's fallback route
+reads, and a store that commits only the first loses that route silently — the
+run says so on stderr, once, in a build log nobody reads twice.
+
+**A rebuild that re-runs semantic extraction has a second route.** Semantic node
+ids are built from labels an extraction authored, so a fresh pass renames
+essentially all of them even where the corpus files are unchanged; the ids that
+survive a rebuild are close to just the deterministic AST population. Prose about
+a renamed community is dropped as `members-gone` with nothing wrong with it. So
+for those summaries — and only those — `remap` tries again on
+`(repository, source_file)`, which is a corpus path and identical whoever
+extracted it. Read the split:
+
+```
+Carried by route: N on node ids, M on (repository, source_file)
+```
+
+The route is named per carry in the remap report, so the fallback-only carries
+can be sampled on their own. Three things to know before trusting them:
+
+- **A fallback carry is never `"exact": true`.** The node set the prose was
+  written about is gone by definition, so every one of them is marked inexact
+  and belongs in the revision queue ahead of a node-id carry.
+- **The route cannot rescue anything the node ids decided.** `not-identical`,
+  `below-bar`, `below-precision` and `collision` were all measured against
+  members the graph still holds. Only `members-gone` means there was nothing to
+  measure.
+- **`"available": false` in the report's `fallback` block is not a zero.** It
+  means the route did not run — no file snapshot, or one recorded against a
+  different membership snapshot — and the reason is in the block. A store
+  reading `0 carried` off that has measured nothing.
+
+Communities that key on no file at all are refused by name (`no-file-key`):
+structural nodes carry no `source_file`, so a package-hierarchy community keys
+on nothing, and an empty key set would otherwise match another empty key set
+perfectly.
 
 Whatever `remap` withdraws is then a backfill — but not from scratch. `remap`
 writes `knowledge/summaries/remap-report.json`: every displaced summary with
@@ -1184,6 +1224,25 @@ Questions declare an answer *shape*, not text: `brief`, `dive`, `tickets`,
 answers everything is failing to say when it has nothing. `ticket` is the
 strongest of them, because it asserts the file-to-ticket join, whose canonical
 failure was 0 of 70,655 joined with the build green and both layers present.
+
+**Commit an answer baseline, and re-write it only after a refresh you have
+reviewed.**
+
+```bash
+knowledgestore check-answers --write-baseline    # then commit knowledge/answers/baseline.json
+```
+
+The `graph` mode passes on a non-empty ranking, so the row a reader wants can
+slide from rank 1 to rank 40 and the mode still passes. The baseline records what
+answered and where it ranked, so the next build can report "this ranks worse than
+last time" - which needs no expected node, and is the only thing that sees the
+gradient between rank 1 and the cliff. With no baseline committed, the run says it
+compared nothing.
+
+A rank finding **does not fail the run** (#310), so a zero exit code means the
+declared modes still hold - not that the answers are as good as they were. Read
+the `rank drift:` line, and re-write the baseline as a reviewed decision rather
+than to clear the report.
 
 Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
 `10 of 10` cannot both be reported, but a total alone hides a dead layer behind a

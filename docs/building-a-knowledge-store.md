@@ -897,6 +897,57 @@ failure the mode design exists to avoid. The counts are in the human output and
 under `validity` in `--json`, so gating can be decided on a real refresh's
 numbers instead of a guess (#311).
 
+### A ranking can get worse without the mode changing
+
+The `graph` mode passes on a non-empty ranking, so the row a reader wants can
+slide from rank 1 to rank 40 - or past the results the page shows - and the mode
+still passes. Ranking degrades continuously; a boolean over a ranked list notices
+only the cliff.
+
+Record a baseline, then compare every refresh against it:
+
+```bash
+knowledgestore check-answers --write-baseline   # once, and after a refresh you accept
+knowledgestore check-answers                    # every build after that
+```
+
+Commit `knowledge/answers/baseline.json`. Without it there is nothing to compare,
+and the run says so rather than falling silent:
+
+```
+rank drift: the baseline records no ranking for any of these 12 question(s), so nothing here compares rank
+```
+
+Per question it records what answered, how many rows ranked, how many of those
+the page shows, the top two scores, and the top result's lead over its runner-up.
+A build where the row that answered last time has fallen reports it:
+
+```
+rank drift: 1 of 12 compared question(s) rank worse than the baseline, of 14 in the set
+      reported, not gated: what ordinary churn looks like across a real refresh has not been measured yet
+rank  <one of your questions>
+      the row that ranked first last build is now rank 9 of 41
+      it is: code | <a repository> | <a path> | <a label>
+      the renderer shows 6, so a reader is not shown it at all
+      its lead over the runner-up was 62%; the row now first leads by 4%
+      read from: data + edges blocks (graphify-out/graph.json)
+```
+
+**There is no expected node to declare, and that is deliberate.** A question names
+a mode rather than an id because pinning ids makes a harness that is red after
+every legitimate refresh. The previous build is the only ground truth this needs.
+
+**Reported, not gated** (#310), for the same reason a void is. `--write-baseline`
+after a refresh you have reviewed is what accepts the new ranking. A store holding
+a baseline written before this existed reports nothing until then, rather than
+reporting every question as regressed.
+
+Two things move a rank for reasons that are not a defect, and the record shows
+both. A lead of `0%` means the baseline's top row was **tied**, so which of the
+tied rows was recorded is the index tiebreak, and a fall there is a fact about the
+tiebreak. And every score moves wholesale as the corpus grows and IDF shifts,
+which is why the lead is a ratio rather than a difference.
+
 ### Declare at least one `abstain`
 
 A store that answers everything is not answering well - it is failing to say when

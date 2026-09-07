@@ -50,6 +50,19 @@ rather than on its data is the failure the mode design exists to avoid, and the
 counts are there so that decision can be taken on real numbers rather than a
 guess. `--json` carries the whole report, including its `validity` region.
 
+**The ranking is baselined against the previous build** (#310). The `graph` mode
+passed on a non-empty ranking, which asserts non-emptiness and not relevance: the
+row a reader wants can slide from rank 1 to rank 40, or past the results the page
+shows, and the mode still passes. Declaring an expected node per question would
+measure it and is the wrong fix - a question names a mode rather than an id
+precisely because pinning ids makes a harness red after every legitimate refresh -
+so the previous build supplies the ground truth instead. `--write-baseline`
+records, per question, what answered, how many rows ranked, how many of those the
+page shows, the top two scores and the top result's lead over its runner-up; the
+next run reports any question whose evidence ranks worse. Reported and not gated,
+for the same reason a void is, and a baseline written before this existed reports
+nothing rather than reporting every question as regressed.
+
 Requires Node (the same requirement the explorer tests already carry).
 
 Run: knowledgestore check-answers [--candidate PATH] [--questions PATH]

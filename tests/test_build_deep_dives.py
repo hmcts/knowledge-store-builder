@@ -9,6 +9,7 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
+from knowledgestore import io  # noqa: E402
 from knowledgestore import build_deep_dives as dives
 
 
@@ -260,7 +261,7 @@ class MergeTest(SettingsIsolated):
                 encoding="utf-8",
             )
             code = dives.merge()
-            written = json.loads((root / "in" / "dives.json").read_text())
+            written = io.read_prose_layer(root / "in" / "dives.json")
         self.assertEqual(code, 1)  # bad was rejected
         self.assertEqual(list(written), ["good"])
         self.assertEqual(written["good"]["sha"], "abcd1234")
@@ -270,7 +271,6 @@ class MergeTest(SettingsIsolated):
         """Design promise: an invalid dossier can never enter the store, and
         one bad dossier does not silently block good ones in the same run."""
         import io as std_io
-        import json
         from contextlib import redirect_stdout
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -280,7 +280,7 @@ class MergeTest(SettingsIsolated):
             captured = std_io.StringIO()
             with redirect_stdout(captured):
                 code = dives.merge()
-            written = json.loads((root / "in" / "dives.json").read_text())
+            written = io.read_prose_layer(root / "in" / "dives.json")
         self.assertEqual(code, 1)
         self.assertEqual(list(written), ["good"])  # exactly the valid one entered the store
         self.assertEqual(written["good"]["sha"], "aaaaaaaa")
@@ -328,7 +328,6 @@ class MainDispatchTest(SettingsIsolated):
         """Design promise: `deepdive merge` through the CLI is the same
         contract as calling merge() directly - dispatch adds no behaviour of
         its own, exercised on the mixed valid/invalid batch."""
-        import json
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -336,7 +335,7 @@ class MainDispatchTest(SettingsIsolated):
             _write_mixed_dive_batch(root)
             sys.argv = ["prog", "merge"]
             code = dives.main()
-            written = json.loads((root / "in" / "dives.json").read_text())
+            written = io.read_prose_layer(root / "in" / "dives.json")
         self.assertEqual(code, 1)
         self.assertEqual(list(written), ["good"])
 
