@@ -354,9 +354,22 @@ def markdown_to_html(markdown: str) -> str:
 
 
 def merge() -> int:
+    """Validate, render and write the committed briefs artefact.
+
+    Reports, before overwriting it, any brief in the committed file whose prose no
+    longer matches the digest recorded beside it - a brief edited in
+    `knowledge/topics/briefs.json` after the stage wrote it (#316). Editing
+    `docs/topics/<slug>.md` is the authoring route and is not that: the markdown is
+    the source this renders from, so a change there is a change the stage makes.
+
+    The exit code is unchanged by the report. It stays the validation verdict -
+    whether every configured topic has a brief long enough to enter the store.
+    """
     topics = read_topics(config.TOPICS_CONFIG_PATH)
     briefs: dict[str, dict] = {}
     problems: list[str] = []
+    committed = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
+    drift = io.prose_drift(config.TOPICS_BRIEFS_PATH, committed, io.rendered_prose(committed))
     for topic in topics:
         source = config.TOPICS_DOCS_DIR / f"{topic.slug}.md"
         if not source.exists():
@@ -372,7 +385,18 @@ def merge() -> int:
             "html": markdown_to_html(markdown),
             "source": f"docs/topics/{topic.slug}.md",
         }
-    io.write_json(config.TOPICS_BRIEFS_PATH, briefs, indent=1)
+    io.write_json(
+        config.TOPICS_BRIEFS_PATH,
+        {
+            **briefs,
+            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
+                brief["html"] for brief in briefs.values()
+            ),
+        },
+        indent=1,
+    )
+    for line in drift:
+        print(line)
     for problem in problems:
         print(f"skipped - {problem}")
     print(f"{len(briefs)} briefs -> {config.TOPICS_BRIEFS_PATH}")

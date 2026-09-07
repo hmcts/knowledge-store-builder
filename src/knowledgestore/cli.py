@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import __version__
 
@@ -208,7 +209,28 @@ def main(argv: list[str] | None = None) -> int:
         # so they drift, and the first question when a documented stage is
         # "unknown" is which version is actually installed. There was no way to
         # find out short of importlib.metadata.
+        #
+        # The interpreter and the package path follow, and they answer a different
+        # question: *which* environment is this the version of. A store's gate
+        # asserting "the installed library matches the lock" reads the version in
+        # whichever interpreter runs the gate. One did that from a pre-commit hook
+        # under the machine `python3` while the virtualenv that builds the store
+        # held another version - so it certified an environment that does not build
+        # the store, and could not see the one that does.
+        #
+        # This cannot be *fixed* by a check. Any check ships as code that some
+        # interpreter runs, so a check run under the wrong interpreter reports
+        # faithfully about the wrong interpreter and inherits the defect it exists
+        # to detect. What is available is legibility: this command is already the
+        # right thing to invoke, because as a console script it necessarily runs
+        # under the environment that owns it, so making it *say* which environment
+        # that is puts the evidence in the output a gate captures. The mistake stays
+        # possible and stops being invisible.
+        #
+        # The first line is unchanged byte-for-byte: consumers parse this.
         print(f"knowledgestore {__version__}")
+        print(f"interpreter {sys.executable}")
+        print(f"package {Path(__file__).resolve().parent}")
         return 0
 
     stage = rest[0] if rest else ""

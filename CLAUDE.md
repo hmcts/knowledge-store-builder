@@ -5,6 +5,22 @@ the traps that are not visible in the code, and cost hours when rediscovered.
 
 ## Ground rules
 
+- **Every pull request opens by saying what is lost if it is not taken.** A short
+  section at the top, before the mechanics: what stays broken, what stays
+  unobserved, what an operator keeps hitting. Not a summary of the diff — the
+  reader can read the diff. The question a reviewer is actually answering is
+  whether to take the change, and nothing else in a PR body answers it.
+
+  It is also the cheapest check on whether the change is worth making. A PR that
+  cannot name what its absence costs is usually a PR whose author has not
+  established that the problem is real — and this repository has shipped work
+  aimed at a measured-but-irrelevant target more than once, most recently
+  compressing the prose blocks of a page whose prose was its fourth-largest term.
+  Writing the cost first would have caught it before the branch existed.
+
+  Where the honest answer is "little, but it is cheap and it closes a class",
+  write that. An accurate small claim is worth more than an inflated one, and a
+  reviewer who learns the section is reliable will read it first every time.
 - **No behaviour changes disguised as refactors.** Stage outputs are committed
   artefacts in consumer repositories; a change in what a stage emits is a
   change to their data. Say so explicitly in the PR.
@@ -68,6 +84,7 @@ tests/explorer/check-js.sh          # eslint + tsc --checkJs, the versions CI pi
 node tests/explorer/engine-unit.mjs
 python3 tests/explorer/fixture.py
 node tests/explorer/page-regression.mjs
+node tests/explorer/answer-validity.mjs
 ```
 
 **After merging `main` into a branch, ask what the merge may have staled:**
@@ -333,10 +350,21 @@ source. Two hard rules from it:
 
 - **Inbound deep links are load-bearing.** A consuming store repository links
   into this repository's docs, so renaming a heading it targets breaks that
-  consumer's README silently. Grep the consuming repository for the anchor before
-  renaming or removing any heading — that check is what caught the README's
-  install sections being removed while a consumer still pointed at them. (The
-  consumers are not named here: this repository is public and they are not.)
+  consumer's README silently — that is what happened to the README's install
+  sections, removed while a consumer still pointed at them. (The consumers are
+  not named here: this repository is public and they are not, which is also why
+  the check cannot be written the obvious way round. CI has nothing to grep.)
+
+  So the obligation is inverted. `docs/load-bearing-anchors.txt` declares the
+  anchors other repositories link to, and `tests/test_docs_integrity.py` fails
+  when a declared anchor no longer has a heading behind it — renaming one is a
+  failing suite rather than a thing to remember. Two consequences: **do not
+  delete a line from that file to make the gate pass** — restore the heading, or
+  change the consumer and the line together; and when a consumer adds a deep
+  link, declare it there, because nothing here can notice one that is
+  undeclared. The same gate resolves every relative link and in-page anchor
+  across `README.md`, `docs/` and `skills/`. Run it alone with
+  `python3 tests/docs_integrity.py`.
 - **Install detail lives in the guides, not the README.** `docs/asking-questions.md`
   owns the plugin install and `docs/creating-a-store.md` owns the library
   install. The README routes to them and carries no install commands of its own,
@@ -405,9 +433,21 @@ This library and its consumer stores often share one Python environment.
 Installing a store's pinned release (its `requirements.lock`) silently
 replaces this repo's editable install — after which "local" test runs
 exercise the released wheel, not your working tree: tests for new code
-error while CI passes. Before trusting a local run, confirm
-`python3 -c "import knowledgestore; print(knowledgestore.__file__)"` points
-at `src/` here; `pip install --no-deps -e .` restores it.
+error while CI passes. Before trusting a local run, confirm the answer with
+`knowledgestore --version`, which prints the version, the interpreter and the
+package directory — the `package` line must point at `src/` here, and
+`pip install --no-deps -e .` restores it when it does not.
+
+**Ask through the console script, not a bare `python3`.** This used to say
+`python3 -c "import knowledgestore; print(knowledgestore.__file__)"`, which
+answers for whichever `python3` is on `PATH` and so cannot tell you about the
+environment that runs your pipeline — it is the same trap one directory up. A
+consumer store's pre-commit hook asserted "the installed library matches the
+lock" from the machine `python3` while the virtualenv that builds the store held
+another version, and certified an environment that does not build the store. No
+check can fix that, because a check is code some interpreter runs; the console
+script is the answer because it necessarily runs under the environment that owns
+it, and it now says which one that is.
 
 ## Things that look like bugs but are not
 

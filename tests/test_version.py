@@ -10,6 +10,8 @@ from importlib.metadata import version
 
 import contextlib
 import io
+import sys
+from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 
@@ -37,6 +39,64 @@ class VersionTest(SettingsIsolated):
                     code = cli.main([flag])
                 self.assertEqual(code, 0)
                 self.assertIn(version("hmcts-knowledge-store-builder"), out.getvalue())
+
+    def test_the_first_line_is_the_version_alone_and_unchanged(self):
+        """Break it catches: reformatting the line consumers already parse.
+
+        A store's gate reads this output. The interpreter and package lines were
+        added after stores were already reading the first one, so the first line
+        is a compatibility surface: it must stay `knowledgestore <version>` and
+        nothing else, on line one.
+        """
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(["--version"])
+        first = out.getvalue().splitlines()[0]
+        self.assertEqual(first, f"knowledgestore {version('hmcts-knowledge-store-builder')}")
+
+    def test_the_output_names_the_interpreter_that_answered(self):
+        """Break it catches: a version claim that cannot say whose version it is.
+
+        A store's pre-commit hook asserted "the installed library matches the
+        lock" while running under the machine `python3`, and the virtualenv that
+        builds the store held a different version. It certified an environment
+        that does not build the store.
+
+        No check can fix that - a check is code some interpreter runs, so run
+        under the wrong one it reports faithfully about the wrong one. What is
+        available is legibility, and this is the assertion that keeps it: the
+        output names the interpreter and the package directory the running code
+        was actually loaded from, so a gate capturing it holds evidence of what
+        it certified.
+        """
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(["--version"])
+        printed = out.getvalue()
+        self.assertIn(f"interpreter {sys.executable}", printed)
+        # Derived from the imported module, not from a path this test builds:
+        # the claim is "where the running code lives", and re-deriving it from
+        # the same expression the code uses would assert nothing.
+        self.assertIn(f"package {Path(cli.__file__).resolve().parent}", printed)
+
+    def test_the_package_line_would_expose_a_shared_environment(self):
+        """The case the addition exists for, asserted rather than described.
+
+        `__version__` comes from installed distribution metadata while the code
+        runs from wherever it was imported. When a store's pinned release has
+        replaced an editable install - CLAUDE.md's shared-environment trap - those
+        two disagree, and this output is where the disagreement becomes visible.
+        So the package line must report the imported module's location and never
+        a location derived from the distribution.
+        """
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.main(["--version"])
+        line = [row for row in out.getvalue().splitlines() if row.startswith("package ")]
+        self.assertEqual(len(line), 1, out.getvalue())
+        reported = Path(line[0].removeprefix("package "))
+        self.assertTrue((reported / "cli.py").is_file(), f"{reported} holds no cli.py")
+        self.assertEqual(reported, Path(cli.__file__).resolve().parent)
 
     def test_asking_for_the_version_runs_no_stage(self):
         """The same trap as `--help`: the flag must not be the thing that acts.

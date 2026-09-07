@@ -10,6 +10,7 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
+from knowledgestore import io  # noqa: E402
 from knowledgestore import build_topic_briefs as briefs  # noqa: E402
 
 
@@ -265,9 +266,7 @@ class MergeTest(SettingsIsolated):
             exit_code = briefs.merge()
 
             self.assertEqual(exit_code, 1)  # two topics missing/short
-            import json
-
-            written = json.loads(out.read_text(encoding="utf-8"))
+            written = io.read_prose_layer(out)
             self.assertEqual(list(written), ["present"])
             self.assertIn("<h2>Present topic</h2>", written["present"]["html"])
             self.assertEqual(written["present"]["source"], "docs/topics/present.md")

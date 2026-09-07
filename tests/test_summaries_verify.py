@@ -323,10 +323,16 @@ class VerifyCliTest(VerifyTest):
 
 
 class ProvenanceSplitTest(SettingsIsolated):
-    """verify reports grounding split by carried-vs-authored when a remap
-    report exists - remap preserves coverage while degrading grounding
-    (measured: 9% flagged authored, 37% carried), so retention improvements
-    must never be read without this line beside them."""
+    """verify reports grounding split by provenance when a remap report exists -
+    remap preserves coverage while degrading grounding (measured: 9% flagged
+    authored, 37% carried across a re-cluster), so retention improvements must
+    never be read without this line beside them.
+
+    The carried side is reported in the states `remap` records rather than as one
+    group, because "in the report" and "carried across a move" are different
+    quantities (#314). The entry below therefore carries the `"exact": false`
+    that a real remap writes for prose re-keyed onto a changed set - the group
+    the 37% figure is about."""
 
     def test_split_line_reports_both_groups(self):
         from contextlib import redirect_stdout
@@ -358,7 +364,12 @@ class ProvenanceSplitTest(SettingsIsolated):
                 encoding="utf-8",
             )
             config.REMAP_REPORT_PATH.write_text(
-                json.dumps({"carried": {"2": {"from": "9", "share": 0.9}}, "displaced": {}}),
+                json.dumps(
+                    {
+                        "carried": {"2": {"from": "9", "share": 0.9, "exact": False}},
+                        "displaced": {},
+                    }
+                ),
                 encoding="utf-8",
             )
             out = StringIO()
@@ -366,7 +377,7 @@ class ProvenanceSplitTest(SettingsIsolated):
                 summaries.verify()
         text = out.getvalue()
         self.assertIn("grounding by provenance", text)
-        self.assertIn("carried 100% (1 of 1)", text)
+        self.assertIn("carried across a move 100% (1 of 1)", text)
         self.assertIn("authored 0% (0 of 1)", text)
 
 

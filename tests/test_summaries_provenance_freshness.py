@@ -128,9 +128,12 @@ class ProvenanceFreshnessTest(SettingsIsolated):
         self.build_store()
         out, _ = self.run_stage(summaries.verify)
         # Every summary was carried by a remap onto the clustering it already
-        # described, and every one cites only its own digest: 12 in the carried
-        # group, none flagged, nothing left for the authored group.
-        self.assertIn(f"{SPLIT} 0% (0 of {self.COMMUNITIES})", out)
+        # described, and every one cites only its own digest: 12 carried with
+        # their membership unmoved, none flagged, nothing left for the authored
+        # group. Which state they land in is #314's subject and is pinned in
+        # test_summaries_provenance_states; what this asserts is that the line
+        # is printed and describes all 12.
+        self.assertIn(f"carried unchanged 0% (0 of {self.COMMUNITIES})", out)
         self.assertIn("authored n/a (0 checked)", out)
 
     # --- the half that must go quiet -----------------------------------------
