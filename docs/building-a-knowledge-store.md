@@ -989,6 +989,37 @@ only ever checked against invented input - and a fixture cannot catch it by
 construction. One run against a real estate did, in seconds. When you write anything
 that asserts what real data looks like, run it against real data before you ship it.
 
+### The `graph` mode is what a reader is shown, not what the ranker returned
+
+Your first run after upgrading to a library carrying this may report modes that
+differ from your committed baseline, and one or two questions may change whether
+they pass. The run says how many and which way:
+
+```
+graph mode: 2 of 14 question(s) are decided differently by the ordering the reader receives than by the bare ranking
+      2 gained the mode, 0 lost it; read from: data + edges blocks (graphify-out/graph.json)
+      reported, not gated: the modes above are already the reader's, so this says how far a run reading the bare ranking misreported this set
+mode  <one of your questions>  ->  graph
+      the bare ranking was empty, the ordering the reader receives holds 1, and the engine routes them
+```
+
+**Read those questions before rewriting anything.** A question that gained the
+mode is one the store answers and the gate used to record as an abstention - so if
+it declares `abstain`, it now fails, and the fix is to reword the question the way
+the section above describes. A question that lost it is one the gate would have
+called a graph answer while the engine renders "No evidence in this estate" to a
+reader.
+
+The cause is that a mode is a claim about what a reader gets, and the ranking
+reaches the page through two more gates: a community whose summary matches your
+question's vocabulary has its entries **added** to the ranking, and the engine
+renders its no-evidence finding and stops when every term is unevidenced. The gate
+decided the mode before either (#326). Once the run reports `0 of N`, the two
+readings agree on your set and the line stays as the record that something checked.
+
+`--write-baseline` accepts the new modes, and the diff is worth reading rather
+than taking: the `estate.answers` region is what your next build compares against.
+
 ## 10. Reading a large graph from your own scripts
 
 Most things that read a graph want a few fields per node, not the graph. A store's

@@ -145,6 +145,16 @@ jobs:
       - name: Answer rank baseline
         run: node tests/explorer/answer-rank.mjs
 
+      # Beside the step above rather than under it: those ask whether the answer
+      # got worse, this asks whether the gate's `graph` mode is the one a reader
+      # is shown at all. `runAsk` boosts the ranking by community-summary matches
+      # and abstains before routing when every term is unevidenced, and the mode
+      # was decided before either (#326) - so the harness and the reader could
+      # disagree in both directions, and an `abstain` declaration PASSED on a
+      # question the store answers.
+      - name: Answer graph mode
+        run: node tests/explorer/answer-graph-mode.mjs
+
       # Last, so it judges everything above it. `git add -A` is banned in this
       # repository because the working tree collects generated output, another
       # session's edits and scratch at once - and that rule had no gate, so

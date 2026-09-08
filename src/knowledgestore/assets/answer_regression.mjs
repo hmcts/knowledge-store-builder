@@ -83,6 +83,36 @@
 // is a measurement on a real refresh, not a guess, and a harness that goes red on
 // ordinary churn is one nobody reads.
 //
+// **The `graph` mode was the ranker's answer, not the reader's** (#326). Driving
+// the shipped scorer is not the same as driving the shipped PATH. `classify`
+// called `rankNodes` in `runAsk`'s order and then reduced it with
+// `if (ranked.length)`, while `runAsk` passes the ranking through two more gates
+// before a reader sees anything: `applySummaryBoost` ADDS rows for a community
+// whose summary matches the question's vocabulary, and `reportUnevidenced`
+// returns before routing when every term is unevidenced.
+//
+// The boost was the reachable half, and it misreported one thing two ways: a
+// question the store answers was recorded as `abstain`, which PASSES an `abstain`
+// declaration - a false negative nobody checks - and FAILS a `graph` one, sending
+// someone hunting a layer that is present.
+//
+// The abstention is here because reading the boost alone would introduce the
+// other half rather than close it: the boost matches community-summary prose,
+// which `unevidencedTerms` does not consult, so the questions it pushes rows for
+// are exactly the ones the abstention withholds - and `graph` would then be
+// recorded for a question the reader is shown "No evidence in this estate" for.
+// Before the boost was read that direction needed an expansion term matching a
+// label while every query term was unevidenced, which is why it had not been met.
+//
+// Both gates are the shipped functions, called in `runAsk`'s order, because a
+// second implementation of routing is the mistake this module exists to avoid.
+// What the change costs is stated where it is felt: the modes this gate reports
+// have moved, so **a question declaring `abstain` that a community summary
+// answers now fails, and one declaring `graph` that the boost carries now
+// passes.** A store's first run after this lands may differ from its baseline,
+// and the `graph mode:` line in the output says by how many and in which
+// direction rather than correcting the set silently.
+//
 // **Every finding names the artefact it read.** Each of the four misses across
 // both estates that motivated #134 was false testimony rather than silence -
 // something was counted, and the number meant something other than it appeared
@@ -194,9 +224,15 @@ export function evidenceKey(row) {
  * `applySummaryBoost` before it routes, so a record taken from `rankNodes` alone
  * describes an ordering no reader is ever shown - measured on the fixture, the
  * boost moves a row from rank 4 to rank 3 and cuts the top result's lead from
- * 79% to 11%. The boost runs on a COPY: the caller's array decides the `graph`
- * mode, and boosting it in place would change which questions this gate reports
- * as passing, which is a different change from recording a rank.
+ * 79% to 11%.
+ *
+ * The boost runs on a COPY, and still must (#326). It used to be a copy because
+ * the caller's array decided the `graph` mode and boosting it in place would have
+ * changed which questions the gate passed. That mode decision has since moved
+ * onto this ordering, where the reader's is - so what the copy now preserves is
+ * the caller's PRE-boost array, which is the only thing that can say how the two
+ * predicates differ. Boost it in place and the divergence report below reads the
+ * boosted count for both halves and prints a confident zero.
  *
  * @param {any} api the engine API from explorer_harness
  * @param {[number, number][]} ranked what `rankNodes` returned, unmutated
@@ -335,14 +371,39 @@ export function parseQuestions(text) {
  * the dive match and the no-evidence abstention, so classifying in a different
  * order would report a shape the reader would never be shown.
  *
+ * **The `graph` mode is the reader's, not the ranker's** (#326). It used to be
+ * `if (ranked.length)` over what `rankNodes` returned, and `runAsk` reaches its
+ * renderer through two more gates before a reader sees anything:
+ *
+ *   - `applySummaryBoost` ADDS rows, it does not only re-score them, so a
+ *     question with no bare-ranked rows and a community summary matching its
+ *     vocabulary is rendered an answer while `ranked.length` is still 0;
+ *   - `reportUnevidenced` RETURNS before routing when every term is unevidenced
+ *     and no pre-written prose exempts the question, so a ranking the boost
+ *     pushed rows into reaches nobody.
+ *
+ * The two gates fail in opposite directions, which is why both are here. Reading
+ * the boost alone would swap one misreport for another: the boost matches
+ * community-summary prose, which `unevidencedTerms` does not consult, so the
+ * questions it pushes rows for are exactly the ones that can also be abstained -
+ * measured on the fixture, one invented question of each shape.
+ *
+ * Neither gate is reimplemented. `applySummaryBoost` runs inside `rankingOf`,
+ * whose count this reads, and the abstention is the same `unevidencedTerms` this
+ * already called for `carried`. The pre-boost count is kept so the run can say
+ * how many questions the two predicates disagree about, rather than correcting
+ * them silently.
+ *
  * @param {any} api the engine API from explorer_harness
  * @param {string} question
  * @param {string} probe the evidence key the baseline recorded for this question,
  *        or '' for none - the row whose rank this build reports (#310)
  * @returns {{ modes: string[], composed: boolean, meta: string, chars: number,
- *            carried: string[], ranking: any, probeRank: number }} `carried` names
- *            the terms the estate does have evidence for, which is what makes a
- *            failed `abstain` actionable.
+ *            carried: string[], ranking: any, probeRank: number,
+ *            graphOnBareRanking: boolean }} `carried` names the terms the estate
+ *            does have evidence for, which is what makes a failed `abstain`
+ *            actionable. `graphOnBareRanking` is what the pre-#326 predicate
+ *            would have said, for the divergence report.
  */
 export function classify(api, question, probe = '') {
   // Reset the rendered surfaces so a previous question cannot be read as this one's.
@@ -354,9 +415,12 @@ export function classify(api, question, probe = '') {
   const terms = api.queryTerms(question);
   const expansions = api.expandTerms(terms);
   const ranked = api.rankNodes(terms, expansions);
-  // Before anything reduces the ranking to a boolean. `if (ranked.length)` below
-  // is non-emptiness, and the whole gradient between "rank 1" and "one row left"
-  // is invisible to it (#310); this is where the ordering still exists.
+  // Before anything reduces the ranking to a boolean. The `graph` mode below is
+  // non-emptiness, and the whole gradient between "rank 1" and "one row left" is
+  // invisible to it (#310); this is where the ordering still exists. It also
+  // applies the boost, on a copy, so `ranking.ranked` is the row count the
+  // RENDERER receives and `ranked.length` is still the pre-boost one - which is
+  // what lets the two be compared rather than one silently replacing the other.
   const { ranking, probeRank } = rankingOf(api, ranked, terms, expansions, probe);
   const topic = api.matchTopic(question.toLowerCase(), expansions);
   const dive = topic ? null : api.matchDive(question.toLowerCase());
@@ -366,6 +430,15 @@ export function classify(api, question, probe = '') {
   // actionable rather than puzzling: it names the term that carried the answer.
   const unevidenced = api.unevidencedTerms ? api.unevidencedTerms(terms) : [];
   const carried = terms.filter((/** @type {string} */ t) => !unevidenced.includes(t));
+  // `reportUnevidenced`'s own condition, in its own words: it renders the finding
+  // as the WHOLE answer and returns, so nothing the ranking holds is routed. Its
+  // `prewritten` exemption is `topic || dive`, which is why this sits after them.
+  // A page too old to expose `unevidencedTerms` leaves this false, which is the
+  // pre-#326 reading - the permissive one, and the only honest default for a page
+  // this cannot ask.
+  const abstainsForReader = terms.length > 0
+    && unevidenced.length >= terms.length
+    && !topic && !dive;
 
   /** @type {string[]} */
   const modes = [];
@@ -410,7 +483,14 @@ export function classify(api, question, probe = '') {
   if (topic) modes.push('brief');
   if (dive) modes.push('dive');
   if (evidence.length) modes.push('tickets');
-  if (ranked.length) modes.push('graph');
+  // The two gates the docstring names, in `runAsk`'s order: rows in the ordering
+  // the renderer receives, and the abstention not having returned before it.
+  const graphForReader = ranking.ranked > 0 && !abstainsForReader;
+  if (graphForReader) modes.push('graph');
+  // What `if (ranked.length)` said, kept rather than discarded. A correction that
+  // removes the precondition for a misreport cannot notice the misreport coming
+  // back; this is the number that can.
+  const graphOnBareRanking = ranked.length > 0;
 
   // Abstention is a real answer shape here, not a failure: "no evidence in this
   // estate" is a finding the engine is designed to give. It is only counted when
@@ -434,6 +514,7 @@ export function classify(api, question, probe = '') {
     carried,
     ranking,
     probeRank,
+    graphOnBareRanking,
   };
 }
 
@@ -555,7 +636,7 @@ export function assessValidity(results) {
 export function run(api, questions, previous = {}, previousRanking = {}) {
   const results = questions.map((q) => {
     const was = previousRanking[q.question];
-    const { modes, composed, meta, chars, carried, ranking, probeRank } =
+    const { modes, composed, meta, chars, carried, ranking, probeRank, graphOnBareRanking } =
       classify(api, q.question, was?.evidence || '');
     const wanted = met(modes, q.accept);
     const wasAnswered = previous[q.question] && !previous[q.question].includes('abstain');
@@ -577,6 +658,10 @@ export function run(api, questions, previous = {}, previousRanking = {}) {
       // expectation being unmet so the two are never confused.
       lostAnswer: Boolean(wasAnswered && nowAbstains),
       moved: Boolean(previous[q.question] && !sameSet(previous[q.question], modes)),
+      // Report-only, and held as a fact rather than a verdict: whether the bare
+      // ranking would have decided this question's `graph` mode differently
+      // (#326). The comparison below is drawn from it.
+      graphOnBareRanking,
     };
     return { ...answered, ...probeVerdict(answered) };
   });
@@ -611,7 +696,25 @@ export function run(api, questions, previous = {}, previousRanking = {}) {
     compared: questions.filter((q) => previousRanking[q.question]?.evidence).length,
     regressed: results.filter((r) => r.rankDrift.length).length,
   };
-  return { results, byMode, floors, validity: assessValidity(results), drift };
+  // How far the bare ranking and the ordering the reader receives disagree about
+  // the `graph` mode (#326). Not a comparison against a baseline: both halves are
+  // this run's, so this says which of THESE questions the old predicate got
+  // wrong, and keeps saying it. Split by direction because the two are different
+  // findings with different fixes - `gained` is a question the store answers and
+  // the harness used to call an abstention; `lost` is one the harness would have
+  // called a graph answer while the engine renders its abstention instead.
+  //
+  // `lost` needs an expansion term matching a label while every query term is
+  // unevidenced, so it is the rarer half and no question on the library's fixture
+  // reaches it. Kept as its own number anyway: folding it into one total would
+  // print a count under a sentence describing the other direction, which is the
+  // false-testimony shape this module exists to catch.
+  const graphMode = {
+    total: results.length,
+    gained: results.filter((r) => r.modes.includes('graph') && !r.graphOnBareRanking).length,
+    lost: results.filter((r) => !r.modes.includes('graph') && r.graphOnBareRanking).length,
+  };
+  return { results, byMode, floors, validity: assessValidity(results), drift, graphMode };
 }
 
 /** @param {string[]} a @param {string[]} b */
@@ -832,6 +935,47 @@ function reportRankDrift(results, drift) {
   for (const r of results) if (r.rankDrift.length) reportOneDrift(r);
 }
 
+/** Where the bare ranking and the ordering the reader receives disagree (#326).
+ *
+ * Report-only, and it returns nothing a caller could add to a failure count -
+ * the same guard `reportValidity` and `reportRankDrift` carry. The exit code is
+ * already carried by the modes themselves, which are now the reader's; counting
+ * the disagreement as well would fail a store twice for one fact.
+ *
+ * Printed whether or not anything disagrees, because a store's first run after
+ * this landed needs to be told how big the misreporting was, and a store where
+ * nothing disagrees needs to be told that rather than shown nothing. The
+ * per-question lines say which way, because the two directions have different
+ * fixes: a gained question was being under-reported by the harness, a lost one
+ * over-reported.
+ *
+ * @param {any[]} results
+ * @param {{total: number, gained: number, lost: number}} graphMode
+ */
+function reportGraphMode(results, graphMode) {
+  const changed = graphMode.gained + graphMode.lost;
+  console.log(`graph mode: ${changed} of ${graphMode.total} question(s) are decided differently `
+    + 'by the ordering the reader receives than by the bare ranking');
+  if (!changed) return;
+  console.log(`      ${graphMode.gained} gained the mode, ${graphMode.lost} lost it; `
+    + `read from: ${MODE_SOURCE.graph}`);
+  console.log('      reported, not gated: the modes above are already the reader\'s, so this '
+    + 'says how far a run reading the bare ranking misreported this set');
+  for (const r of results) {
+    if (r.modes.includes('graph') === r.graphOnBareRanking) continue;
+    // `mode  ` rather than `graph `, so a per-question line cannot be matched by
+    // anything looking for the `graph mode:` summary - the same reason the rank
+    // report distinguishes `rank  ` from `rank drift:`.
+    console.log(`mode  ${r.question}  ->  ${r.modes.join(' + ')}`);
+    // Both numbers, not a verdict: "gained the graph mode" does not say whether
+    // the boost supplied the rows or the abstention withheld them, and the two
+    // have different fixes.
+    console.log(`      the bare ranking ${r.graphOnBareRanking ? 'ranked rows' : 'was empty'}, `
+      + `the ordering the reader receives holds ${r.ranking.ranked}, and the engine `
+      + `${r.modes.includes('graph') ? 'routes them' : 'renders its abstention instead'}`);
+  }
+}
+
 /** @param {string[]} argv */
 function main(argv) {
   let args;
@@ -862,14 +1006,14 @@ function main(argv) {
   }
 
   const { answers: previous, ranking: previousRanking } = readBaseline(args.baseline);
-  const { results, byMode, floors, validity, drift } =
+  const { results, byMode, floors, validity, drift, graphMode } =
     run(api, questions, previous, previousRanking);
 
   // Written after the comparison above and before it is printed, so the report is
   // this build against the LAST baseline and the file left behind is this build.
   if (args.write) writeBaseline(args.baseline, results);
   if (args.json) {
-    console.log(JSON.stringify({ results, byMode, floors, validity, drift }, null, 2));
+    console.log(JSON.stringify({ results, byMode, floors, validity, drift, graphMode }, null, 2));
   }
 
   let failures = 0;
@@ -890,6 +1034,7 @@ function main(argv) {
   console.log(`\n${passed} of ${counted} questions answered as declared${voidedClause}  (${parts})`);
   reportValidity(validity);
   reportRankDrift(results, drift);
+  reportGraphMode(results, graphMode);
   console.log(`page: ${args.page}`);
   return failures ? 1 : 0;
 }

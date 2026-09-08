@@ -85,6 +85,7 @@ node tests/explorer/engine-unit.mjs
 python3 tests/explorer/fixture.py
 node tests/explorer/page-regression.mjs
 node tests/explorer/answer-validity.mjs
+node tests/explorer/answer-graph-mode.mjs
 ```
 
 **After merging `main` into a branch, ask what the merge may have staled:**
