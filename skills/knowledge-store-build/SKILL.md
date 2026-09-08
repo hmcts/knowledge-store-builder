@@ -1232,17 +1232,27 @@ reviewed.**
 knowledgestore check-answers --write-baseline    # then commit knowledge/answers/baseline.json
 ```
 
-The `graph` mode passes on a non-empty ranking, so the row a reader wants can
-slide from rank 1 to rank 40 and the mode still passes. The baseline records what
-answered and where it ranked, so the next build can report "this ranks worse than
-last time" - which needs no expected node, and is the only thing that sees the
-gradient between rank 1 and the cliff. With no baseline committed, the run says it
-compared nothing.
+The `graph` mode is decided on the ordering a **reader** receives, not on what
+the ranker returned (#326): a community whose summary matches the question's
+vocabulary has its entries added to the ranking, and the engine renders its
+no-evidence finding and stops when every term is unevidenced. It still passes on
+a non-empty ranking, so the row a reader wants can slide from rank 1 to rank 40
+and the mode still passes. The baseline records what answered and where it
+ranked, so the next build can report "this ranks worse than last time" - which
+needs no expected node, and is the only thing that sees the gradient between rank
+1 and the cliff. With no baseline committed, the run says it compared nothing.
 
 A rank finding **does not fail the run** (#310), so a zero exit code means the
 declared modes still hold - not that the answers are as good as they were. Read
 the `rank drift:` line, and re-write the baseline as a reviewed decision rather
 than to clear the report.
+
+The `graph mode:` line says how many questions those two readings disagree
+about, and is **reported, not gated**. Expect it to be non-zero on the first run
+after upgrading to a library carrying #326, and read the questions it names: one
+that gained the mode is answered by the store and was recorded as an abstention
+before, so an `abstain` declaration on it now fails and wants rewording rather
+than investigating.
 
 Read the per-mode line, not only the total: `brief 4/4, graph 0/6` and
 `10 of 10` cannot both be reported, but a total alone hides a dead layer behind a
