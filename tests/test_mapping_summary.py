@@ -238,7 +238,15 @@ class TheSkippedVerdictCarriesItsProvenanceTest(unittest.TestCase):
     def test_a_run_the_api_gave_no_date_for_says_so(self):
         """Catches an absent date rendering as an empty one. The commit is still
         worth naming, so this is not a `None` case - it is the one place a sentence
-        has to be written for a field the API did not fill in."""
+        has to be written for a field the API did not fill in.
+
+        The commit is the other half, and it goes the other way: a run with no
+        commit to name is no answer at all, so it is `None` rather than a
+        `Verification` carrying an empty sha that the verdict would abbreviate to
+        nothing. `last_verified` returned that empty string before this change and
+        both its callers happened to treat it as absent, which is why the guard
+        needs an observer of its own rather than their luck.
+        """
         found = trigger.last_verification(
             "owner/repo",
             runner=api(
@@ -252,6 +260,16 @@ class TheSkippedVerdictCarriesItsProvenanceTest(unittest.TestCase):
         assert found is not None
         self.assertEqual(found.ran_at, trigger.UNRECORDED)
         self.assertIn(trigger.UNRECORDED, rendered(summary.NOT_LOOKED_AT, found))
+
+        nameless = api(
+            {
+                "workflows/tests.yml/runs": {"workflow_runs": [{"id": 9, "head_sha": ""}]},
+                "runs/9/jobs": legs(*ALL_PASSED),
+            }
+        )
+
+        self.assertIsNone(trigger.last_verification("owner/repo", runner=nameless))
+        self.assertIsNone(trigger.last_verified("owner/repo", runner=nameless))
 
     def test_the_verified_verdict_does_not_offer_an_older_run_as_its_evidence(self):
         """Catches the provenance line escaping the state it belongs to. In the
