@@ -326,9 +326,22 @@ Consequences for anyone changing this library:
   contract is worse than one that never mentioned it, because it reads as
   authoritative. The master lists where it is mirrored — read that list before
   you finish editing it.
+
+  `docs/mirrored-contract.txt` declares the statements the two ends share and
+  `tests/test_docs_integrity.py` holds them to it — **at both ends**. A
+  statement must still be in the master's own prose as well as in the copy,
+  because a list of sentences held only against the skills keeps passing after
+  the master is reworded, over a rule the master no longer states. So rewording
+  a rule fails the suite until the statement and every copy move together, and
+  **deleting the declared line is not the fix**. Blockquotes in the master are
+  not read as its prose: a blockquote there is the mirror list, and a statement
+  cannot be satisfied by the table that points at it.
 - The same applies to any other document whose rules are restated in a skill.
   If you find yourself copying a rule into a skill, add the skill to the master
-  document's mirror list in the same change.
+  document's mirror list in the same change — the same gate reports a document
+  that states two of the contract's rules while the master's list does not name
+  it, which is the same defect pointing outward: the next edit to the master
+  will not reach a copy nobody declared.
 - Keep the pointer as well as the rule: the skill carries the short operative
   form, the document carries the reasoning and the techniques. Neither replaces
   the other.
@@ -371,7 +384,13 @@ source. Two hard rules from it:
   so there is one copy of each to keep correct.
 - **Docs and skills must not disagree.** The README once kept `graphify .` at
   the store root long after the build skill documented why that cannot work.
-  When a skill changes an instruction, grep the docs for the old one.
+  When a skill changes an instruction, grep the docs for the old one — and
+  retire it in `docs/retired-instructions.txt`, which is the checkable half of
+  this rule: the same gate fails when a listed instruction reappears in a
+  fenced block. Only blocks are read, because a document that retires an
+  instruction has to be able to name it, so the prose explaining why it fails
+  stays legal. What that leaves uncaught is an instruction written as a prose
+  imperative.
 
 ## Library examples stay generic
 

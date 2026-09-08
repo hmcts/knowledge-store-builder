@@ -1,0 +1,35 @@
+# Instructions this repository has retired. `tests/test_docs_integrity.py` fails
+# when one comes back in a command block a reader would copy.
+#
+# The incident is in `CLAUDE.md`: the README kept `graphify .` at the store root
+# long after the build skill documented why that cannot work. Nothing failed for
+# as long as that took, because the two documents were each internally
+# consistent and nothing compared them.
+#
+# A general check for "the docs and the skills disagree" is not expressible. A
+# check for "this retired instruction has come back" is, and it is what actually
+# went wrong - so this file is the narrow, checkable version of that rule.
+#
+# Only fenced code blocks are read, and that distinction is the whole of how a
+# false positive is avoided. Prose about a retired instruction is legitimate and
+# common: `docs/creating-a-store.md` says the tool's own documentation will tell
+# you to run `graphify .` and to follow the sequence there instead, and this
+# file names the instruction in order to retire it. What a fenced block holds is
+# not a statement about an instruction, it is the instruction - a block is what
+# an operator copies, which is the same line `tests/doc_sections.py` draws for
+# the gates that require a command to be shown rather than described.
+#
+# The limit that leaves, stated rather than implied: an instruction written as
+# prose imperative - "run `graphify .` at the store root" in a sentence - is not
+# caught. Catching it would mean firing on every sentence that explains why the
+# instruction is wrong, which is the version of this check that gets switched
+# off. The blocks are where an operator's hands go.
+#
+# One entry per line, `instruction :: what to do instead`. The instruction is
+# matched inside a fenced line, bounded at both ends, so `graphify .` does not
+# match `graphify ...`. Blank lines and `#` comments are ignored.
+
+# Extracting at the store root. `repositories/` is gitignored in every store and
+# the scan honours ignore rules, so this builds a graph out of the store's own
+# handful of files, reports success, and leaves a real estate looking thin.
+graphify . :: extract from inside each clone, then `graphify merge-graphs`; see the build skill's "Full build" section

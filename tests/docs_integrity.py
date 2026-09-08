@@ -1,8 +1,8 @@
-"""Two documentation failure modes this repository has already had, as one gate.
+"""Four documentation failure modes this repository has already had, as one gate.
 
-Both are silent. Nothing failed when either happened, and both are recorded in
-`CLAUDE.md` as human obligations - which is to say as things somebody has to
-remember.
+All four are silent. Nothing failed when any of them happened, and each is
+recorded in `CLAUDE.md` as a human obligation - which is to say as something
+somebody has to remember.
 
 **A renamed heading breaks an inbound deep link.** Another repository's README
 links into these docs. Install detail used to live in this repository's README,
@@ -19,6 +19,26 @@ maintainer can discharge inside their own repository: leave a line alone.
 `README.md`, `docs/` and `skills/` are the routing between one persona's
 document and the next, and a heading can be renamed for good reasons by someone
 who has no idea what points at it.
+
+**A mirrored rule that has drifted from its master.**
+`docs/grounding-and-verification.md` states a contract the skills restate at the
+point each one needs it, and the obligation runs one way: an agent reads the
+skill it was invoked with and may never open the master, so a skill carrying a
+superseded rule is the rule that gets applied. `docs/mirrored-contract.txt`
+declares the statements the two ends share, and both ends are checked - the
+master's own prose as well as the copy - because a list of sentences held only
+against the copies keeps passing after the master is reworded. The other
+direction is the same defect pointing outward: a file that carries a copy the
+master's mirror list does not name will not be updated when the master changes,
+so a document restating the contract without being declared is reported too.
+
+**A retired instruction that has come back.** The README kept `graphify .` at
+the store root long after the build skill documented why that cannot work. A
+check for "the docs and the skills disagree" in general is not expressible; a
+check for one named instruction reappearing is, and it is what happened.
+`docs/retired-instructions.txt` is that list, and only fenced blocks are read -
+prose about a retired instruction is legitimate and common, while a block is
+what an operator copies.
 
 Each check is a plain named function taking the repository root and returning a
 `Report`, and `CHECKS` lists them explicitly. Neither half of that is
@@ -50,6 +70,23 @@ ROOT = Path(__file__).resolve().parent.parent
 # maintainer renaming a heading is already working in that directory.
 DECLARATION = Path("docs/load-bearing-anchors.txt")
 
+# The mirrored contract: its master, the statements the copies share with it,
+# and the separator those entries use.
+MASTER = Path("docs/grounding-and-verification.md")
+MIRRORS = Path("docs/mirrored-contract.txt")
+SEPARATOR = " :: "
+
+# The retired instructions that must not reappear in a command block.
+RETIRED = Path("docs/retired-instructions.txt")
+
+# How many of the master's statements a document has to carry before it is a
+# copy of the contract rather than a document that shares its vocabulary. One
+# is a phrase this repository uses everywhere - `summaries verify` is a command
+# name, and two guides run it without restating anything. Two independent
+# statements of the rule is a restatement, and the check names which two it
+# found so a maintainer can declare the mirror or reword the document.
+COPY_THRESHOLD = 2
+
 # What the link check reads. The README plus the two directories a persona is
 # routed through; `CLAUDE.md` and `CHEATSHEET.md` are reached as link targets
 # rather than scanned, which is enough to resolve an anchor into either.
@@ -65,6 +102,15 @@ _LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)>\s]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 # What a GitHub heading slug drops: everything that is not a word character, a
 # hyphen or a space. `Use \`explorer.html\`` becomes `use-explorerhtml`.
 _NOT_IN_SLUG = re.compile(r"[^\w\- ]", re.UNICODE)
+# A path the master's mirror list names, backticked, in a blockquoted line. The
+# master declares its mirrors twice - a table for the contract, a bullet list
+# for the section on estate content - and both are blockquotes, so this reads
+# either without knowing which.
+_MIRROR_PATH = re.compile(r"`([^`]+\.md)`")
+# What a command token may sit against without being that command. A retired
+# instruction has to be bounded at both ends or `graphify .` matches
+# `graphify ...`, which is a different command and a legitimate one.
+_IN_TOKEN = re.compile(r"[\w\-./]")
 
 
 @dataclass(frozen=True)
@@ -91,8 +137,25 @@ class Gate:
     remedy: str
 
 
+def fence_state(text: str) -> Iterator[tuple[int, str, bool]]:
+    """Numbered lines, each with whether it is inside a fenced code block.
+
+    One fence rule for every extractor here, rather than one per extractor.
+    Two of them read outside the fences and one reads inside, and a second copy
+    of the tracking is a second place for it to be subtly different - which is
+    the failure `tests/doc_sections.py` records having had. The fence lines
+    themselves belong to neither side and are not yielded.
+    """
+    fenced = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        yield number, line, fenced
+
+
 def unfenced_lines(text: str) -> Iterator[tuple[int, str]]:
-    """Numbered lines outside fenced code blocks.
+    """Numbered lines outside fenced code blocks: what the document asserts.
 
     Fences are excluded from both extractors for the same reason: what is
     inside one is an example a reader copies, not a statement this repository
@@ -102,13 +165,19 @@ def unfenced_lines(text: str) -> Iterator[tuple[int, str]]:
     precaution: an example naming a path inside somebody else's store would
     fail a check that cannot see their store.
     """
-    fenced = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            continue
-        if not fenced:
-            yield number, line
+    return ((number, line) for number, line, fenced in fence_state(text) if not fenced)
+
+
+def fenced_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Numbered lines inside fenced code blocks: what a reader copies and runs.
+
+    The polarity is the opposite of `unfenced_lines` and deliberately so. A
+    sentence about an instruction is a statement this repository makes about it,
+    often that it is wrong; a line in a block is the instruction. Retiring an
+    instruction has to leave the discussion of it legal, so the retired-
+    instruction check reads only from here.
+    """
+    return ((number, line) for number, line, fenced in fence_state(text) if fenced)
 
 
 def unclosed_fence(text: str) -> int | None:
@@ -169,9 +238,15 @@ def documents(root: Path) -> list[Path]:
     return found
 
 
-def declarations(root: Path) -> list[str]:
-    """The declared anchors, comments and blank lines dropped."""
-    path = root / DECLARATION
+def declared_entries(root: Path, name: Path) -> list[str]:
+    """The entries in one declaration file, comments and blank lines dropped.
+
+    Every declaration this gate reads is a committed list a maintainer edits,
+    so each one explains itself at length in `#` comments and is parsed the
+    same way. A missing file is an empty list rather than an error: the runner
+    reports reading nothing, which is the more useful failure.
+    """
+    path = root / name
     if not path.is_file():
         return []
     return [
@@ -179,6 +254,93 @@ def declarations(root: Path) -> list[str]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
+
+
+def declarations(root: Path) -> list[str]:
+    """The declared anchors, comments and blank lines dropped."""
+    return declared_entries(root, DECLARATION)
+
+
+def paired(entries: list[str]) -> list[tuple[str, str]]:
+    """Declaration entries split on the separator, unsplittable ones dropped.
+
+    A line with no separator is not silently taken as a one-sided entry: the
+    checks count what they read, so an entry that parsed to nothing lowers the
+    count rather than passing as something. Both files that use this shape say
+    what the two halves are.
+    """
+    return [
+        (left.strip(), right.strip())
+        for left, _, right in (entry.partition(SEPARATOR) for entry in entries)
+        if left.strip() and right.strip()
+    ]
+
+
+def collapsed(text: str) -> str:
+    """One line, so a statement matches across a wrapped line break.
+
+    The master and the skills are hard-wrapped prose, so almost every sentence
+    worth pinning is broken by a newline somewhere. Matching raw would make a
+    declared statement unwritable rather than merely awkward.
+    """
+    return " ".join(text.split())
+
+
+def master_prose(root: Path) -> str:
+    """The master's own statements, collapsed, with its mirror lists removed.
+
+    Blockquoted lines are dropped because a blockquote in the master is where it
+    says where it is mirrored, not where it states a rule - and those lists
+    paraphrase the rules closely enough to satisfy a declared statement on
+    their own. Left in, the check would compare the master's table with itself
+    and report agreement for a rule the prose no longer holds.
+    """
+    path = root / MASTER
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    return collapsed(
+        "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    )
+
+
+def master_mirror_list(root: Path) -> list[str]:
+    """The paths the master declares it is mirrored into, in the order given.
+
+    Read from the master rather than restated here, so the list is load-bearing
+    the moment a row is added to it. Both of the master's declarations are
+    blockquotes - a table for the contract, bullets for the section on estate
+    content - so both are read the same way.
+    """
+    path = root / MASTER
+    if not path.is_file():
+        return []
+    found: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.lstrip().startswith(">"):
+            continue
+        found.extend(name for name in _MIRROR_PATH.findall(line) if name not in found)
+    return found
+
+
+def instructed(line: str, instruction: str) -> bool:
+    """Whether one line runs a retired instruction, rather than containing it.
+
+    Bounded at both ends against the characters a command token is made of, so
+    `graphify .` is not found in `graphify ...` - a different command, and one
+    the guides use. Written as a scan rather than a regex over the instruction
+    because the instruction is committed text a maintainer writes, and text
+    that is compiled as a pattern is text that can fail to compile.
+    """
+    start = line.find(instruction)
+    while start != -1:
+        end = start + len(instruction)
+        before = line[start - 1] if start else " "
+        after = line[end] if end < len(line) else " "
+        if not _IN_TOKEN.match(before) and not _IN_TOKEN.match(after):
+            return True
+        start = line.find(instruction, start + 1)
+    return False
 
 
 def shown(root: Path, target: Path) -> str:
@@ -247,6 +409,117 @@ def internal_links_resolve(root: Path) -> Report:
     return Report("internal link(s)", read, problems)
 
 
+def mirrored_contract_agrees(root: Path) -> Report:
+    """Every declared statement is still in the master and still in its mirror.
+
+    Breaks when the master is reworded and a copy is left behind, which is the
+    failure `CLAUDE.md` calls the dangerous one: the skill an agent reads still
+    states the superseded rule, and it reads as authoritative. Breaks the other
+    way too - a copy edited away from a master that has not moved - because
+    which end changed is not knowable from here and both need the same edit.
+
+    Two more failures are the master's list rather than its prose: a declared
+    mirror the list does not name, and a listed mirror with no declared
+    statement. Either leaves the pair uncheckable while looking checked.
+    """
+    problems: list[str] = []
+    prose = master_prose(root)
+    listed = master_mirror_list(root)
+    declared = paired(declared_entries(root, MIRRORS))
+    for path, statement in declared:
+        if path not in listed:
+            problems.append(
+                f"{MIRRORS}: {path}\n    the master's mirror list does not name it, so an"
+                f" edit to {MASTER} would not be pointed at this copy"
+            )
+        target = root / path
+        if not target.is_file():
+            problems.append(f"{MIRRORS}: {path}\n    no such file: {shown(root, target)}")
+            continue
+        if statement not in prose:
+            problems.append(
+                f"{MIRRORS}: {path} :: {statement}\n    {MASTER} no longer states it in its"
+                f" own prose, so the copies now agree with each other and not with a master"
+            )
+        if statement not in collapsed(target.read_text(encoding="utf-8")):
+            problems.append(
+                f"{MIRRORS}: {path} :: {statement}\n    the mirror no longer states it;"
+                f" update the copy in the same change as {MASTER}"
+            )
+    for path in listed:
+        if path not in {declared_path for declared_path, _ in declared}:
+            problems.append(
+                f"{MASTER}: {path}\n    listed as carrying the contract, but {MIRRORS}"
+                f" declares no statement for it, so nothing about it is checked"
+            )
+    return Report("mirrored contract statement(s)", len(declared), problems)
+
+
+def mirrors_are_declared(root: Path) -> Report:
+    """No document restates the contract without the master naming it as a copy.
+
+    Breaks when a fourth skill or guide starts carrying the contract and nobody
+    adds it to the master's mirror list - the same defect as a drifted copy,
+    pointing the other way: the next edit to the master will not reach a copy
+    nothing knows about. Detection is by how many of the master's own statements
+    a document carries, because a copy of a rule is written in the words of the
+    rule.
+    """
+    statements = {statement for _, statement in paired(declared_entries(root, MIRRORS))}
+    listed = set(master_mirror_list(root))
+    problems: list[str] = []
+    read = 0
+    if not statements:
+        problems.append(
+            f"{MIRRORS} declares no statements, so nothing here can recognise a copy"
+            f"\n    every document below would read as carrying none"
+        )
+    for document in documents(root):
+        name = str(document.relative_to(root))
+        if name == str(MASTER) or name in listed:
+            continue
+        read += 1
+        text = collapsed(document.read_text(encoding="utf-8"))
+        carried = sorted(statement for statement in statements if statement in text)
+        if len(carried) >= COPY_THRESHOLD:
+            problems.append(
+                f"{name}: states {len(carried)} of the contract's rules and is not in"
+                f" {MASTER}'s mirror list\n    {carried}\n    declare it as a mirror, or"
+                f" say it in words the master does not use"
+            )
+    return Report("undeclared document(s)", read, problems)
+
+
+def retired_instructions_stay_retired(root: Path) -> Report:
+    """No command block runs an instruction this repository has retired.
+
+    Breaks when a retired instruction comes back in a block a reader copies,
+    which is what happened with `graphify .` at the store root: the README kept
+    it long after the build skill documented why it cannot work, and nothing
+    compared the two documents.
+
+    Prose is not read, and that is the whole of how the check stays usable.
+    Every document that retires an instruction has to be able to name it, so a
+    check over prose would fire on the explanation and be turned off. What it
+    cannot catch is therefore an instruction written as a prose imperative;
+    `docs/retired-instructions.txt` says so rather than implying otherwise.
+    """
+    retired = paired(declared_entries(root, RETIRED))
+    problems: list[str] = []
+    read = 0
+    for document in documents(root):
+        text = document.read_text(encoding="utf-8")
+        for number, line in fenced_lines(text):
+            for instruction, remedy in retired:
+                read += 1
+                if instructed(line, instruction):
+                    problems.append(
+                        f"{document.relative_to(root)}:{number}: {line.strip()}\n    `"
+                        f"{instruction}` was retired: {remedy}"
+                    )
+    return Report("command line(s) against a retired instruction", read, problems)
+
+
 # Listed, not decorated. Import-time registration would make every check
 # unreachable on its own, and each of these has to be callable by name.
 CHECKS: tuple[Gate, ...] = (
@@ -260,6 +533,25 @@ CHECKS: tuple[Gate, ...] = (
         internal_links_resolve,
         "Point the link at what the document is called now, restore the heading, or"
         "\nclose the fence so the rest of the document is read.",
+    ),
+    Gate(
+        "mirrored-contract",
+        mirrored_contract_agrees,
+        f"Move the statement at both ends in one change. {MASTER} is the master, so a"
+        f"\nreworded rule there is not done until every copy carries it - and a copy is"
+        f"\nnot fixed by deleting its line from {MIRRORS}.",
+    ),
+    Gate(
+        "declared-mirrors",
+        mirrors_are_declared,
+        f"Add the document to {MASTER}'s mirror list and declare its statements in"
+        f"\n{MIRRORS}, or point at the master instead of restating it.",
+    ),
+    Gate(
+        "retired-instructions",
+        retired_instructions_stay_retired,
+        f"Show the route that replaced it. {RETIRED} names one per entry, and the"
+        f"\nprose explaining why the retired one fails is what a block must not undo.",
     ),
 )
 
@@ -284,8 +576,8 @@ def main(root: Path = ROOT) -> int:
             continue
         if report.problems:
             print(
-                f"{gate.name}: {len(report.problems)} of {report.read}"
-                f" {report.subject} do not resolve:\n",
+                f"{gate.name}: {len(report.problems)} problem(s) in {report.read}"
+                f" {report.subject}:\n",
                 file=sys.stderr,
             )
             for problem in report.problems:
@@ -293,7 +585,7 @@ def main(root: Path = ROOT) -> int:
             print(f"\n{gate.remedy}", file=sys.stderr)
             failed = 1
             continue
-        print(f"{gate.name}: all {report.read} {report.subject} resolve")
+        print(f"{gate.name}: checked {report.read} {report.subject}, nothing to report")
     return failed
 
 
