@@ -174,6 +174,53 @@ jobs:
             && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
             || { git status --porcelain=v1 --untracked-files=all; exit 1; }
 
+  # The cheap half of the same question, on the event that creates the problem.
+  # `mapping-decision` below never runs on a pull request, and the two jobs after
+  # it never do either - but a merge of `main` into a branch is *where* an observer
+  # set goes stale, and that happens on the way into a pull request. So the window
+  # between "the mapping became wrong" and "anything says so" was a day, and four
+  # branches in one afternoon each had the four legs dispatched by hand to find out
+  # which entries had moved (#293).
+  #
+  # This reads test ids either side of the last verified commit and names the
+  # entries whose sets could have gained an observer. Seconds rather than minutes,
+  # because it runs no test and applies no mutation - which is also the limit of
+  # what it can claim: it sees arrivals, not the source changes that put an
+  # existing test onto a mutated line. The nightly deny-list still owns that half.
+  #
+  # Advisory, and that is a decision rather than an omission. Confirming a
+  # suspicion costs the whole-suite run per entry, so there is no condition here on
+  # which a refusal would be sound - `--refuse` is in the script for a maintainer
+  # who decides otherwise. Not a required check, so it cannot deadlock a pull
+  # request.
+  #
+  # No `pip install` step: the script imports the standard library, the table and
+  # `mapping_trigger`, and nothing from the package.
+  observer-staleness:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Same reason as `mapping-decision`: it reads this workflow's own previous
+      # runs to find the commit the last real verification ran against. Without it
+      # `gh api` fails, which reports as CANNOT_TELL rather than as clean.
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison reaches back to the last verified commit, which is older
+          # than any default depth once a few pull requests have landed.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Name the observer sets this branch's merges may have staled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/observer_staleness.py
+
   # The same mapping check, in slices, because it applies every entry against the
   # whole suite: 1683 seconds in one job, and long enough that nobody dispatches
   # it on demand - which is exactly when a mapping claim most needs checking,
