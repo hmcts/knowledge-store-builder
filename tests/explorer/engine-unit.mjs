@@ -154,6 +154,31 @@ function assert(name, condition, detail = '') {
 }
 const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+// decodeRows: the data block's interned columns, restored (#245)
+//
+// The whole of this file's DATA is un-interned - there is no `dicts` element in
+// the stub above - so every assertion below it already depends on an absent
+// block decoding to the identity. These four exercise the other side directly,
+// because the failure is silent: a row is positional, and a column restored
+// from the wrong table or read with the wrong key type yields `undefined` in a
+// cell every ranking function then reads without complaint.
+assert('decodeRows leaves a page with no dictionaries alone',
+  deepEqual(context.decodeRows([['AddressPipe', 'repo-a']], {}),
+            [['AddressPipe', 'repo-a']]));
+assert('decodeRows restores a scalar column from its table',
+  deepEqual(context.decodeRows([[0, 'x'], [1, 'y']], { 0: ['repo-a', 'repo-b'] }),
+            [['repo-a', 'x'], ['repo-b', 'y']]));
+assert('decodeRows restores every element of a list column',
+  deepEqual(context.decodeRows([['x', [1, 0, 1]]], { 1: ['DEMO-1', 'DEMO-2'] }),
+            [['x', ['DEMO-2', 'DEMO-1', 'DEMO-2']]]));
+// A numeric column interns profitably when its values are wider than their
+// indices - 13-digit epoch milliseconds are the case that retired the "never
+// intern a numeric field" rule - so the table's values must come back as the
+// numbers they were, not as the strings a stringifying decoder would hand back.
+assert('decodeRows gives a numeric column back its numbers',
+  deepEqual(context.decodeRows([[0], [1]], { 0: [1739923200000, 1739923200001] }),
+            [[1739923200000], [1739923200001]]));
+
 // queryTerms: stopwords drop, stemming, dedupe, all-stopword fallback
 assert('queryTerms drops stopwords and stems plurals',
   deepEqual(context.queryTerms('which repositories implement the addresses?'),

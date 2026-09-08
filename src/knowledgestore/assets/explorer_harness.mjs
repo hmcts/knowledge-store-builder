@@ -31,6 +31,18 @@ export const REQUIRED_BLOCKS = [
   'data', 'edges', 'titles', 'summaries', 'synonyms', 'tickets', 'config', 'topics', 'dives',
 ];
 
+/** Blocks the engine reads if they are there and does without if they are not.
+ *
+ * `dicts` carries the per-column dictionary tables for `data`. It is optional
+ * rather than required for a reason a store meets directly: `check-answers` runs
+ * against a store's own PUBLISHED page, which was built by whichever library
+ * version built it, and a page built before interning carries no such block.
+ * Demanding it would turn every such page into a load failure naming a block its
+ * builder never wrote. An absent block leaves the rows already plain, which is
+ * exactly what a page from before this format is.
+ */
+export const OPTIONAL_BLOCKS = ['dicts'];
+
 /** Pull the embedded JSON blocks out of a built page.
  *
  * Linear-time by splitting rather than a regex over a potentially very large
@@ -113,6 +125,12 @@ export function loadPage(pagePath, options = {}) {
   const elements = {};
   for (const id of REQUIRED_BLOCKS) {
     elements[id] = { textContent: blocks[id] };
+  }
+  // The optional blocks after the required ones, and only where the page has
+  // them: a stub carrying `undefined` would parse to nothing useful, and the
+  // engine's own fallback for an absent block is the behaviour being preserved.
+  for (const id of OPTIONAL_BLOCKS) {
+    if (blocks[id]) elements[id] = { textContent: blocks[id] };
   }
 
   // Cast once, deliberately: this DOM is as small as the engine can run against,
