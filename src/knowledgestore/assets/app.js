@@ -212,7 +212,17 @@ function ticketDates(info, hasTitle) {
 
 /** Page configuration embedded at build time (see build_explorer.py;
  * override with env vars, e.g. JIRA_BROWSE_URL for other Jira instances).
- * @type {{jiraBrowseUrl?: string, briefRequestUrl?: string}} */
+ *
+ * `pageFormat` says what shape the page's blocks are in - 1 for a page built
+ * before data-block interning, which carries no marker at all, and 2 for the
+ * interned block. Nothing here reads it, on purpose: a page inlines the app.js
+ * that built it, so the engine running in a browser is always the engine of that
+ * page's own format and cannot mismatch. The reader that CAN mismatch is
+ * `explorer_harness.mjs`, which pairs an installed app.js with a store's
+ * published page, and it refuses there on a format it does not recognise
+ * (#332). A second copy of the number here, kept in step by hand, would guard
+ * nothing and drift.
+ * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string}} */
 const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
 
