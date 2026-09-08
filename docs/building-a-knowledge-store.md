@@ -991,7 +991,7 @@ that asserts what real data looks like, run it against real data before you ship
 
 ### The `graph` mode is what a reader is shown, not what the ranker returned
 
-Your first run after upgrading to a library carrying this may report modes that
+Your first run after upgrading to a library carrying #326 may report modes that
 differ from your committed baseline, and one or two questions may change whether
 they pass. The run says how many and which way:
 
@@ -1005,8 +1005,8 @@ mode  <one of your questions>  ->  graph
 
 **Read those questions before rewriting anything.** A question that gained the
 mode is one the store answers and the gate used to record as an abstention - so if
-it declares `abstain`, it now fails, and the fix is to reword the question the way
-the section above describes. A question that lost it is one the gate would have
+it declares `abstain`, it now fails, and the fix is to reword it as **Declare at
+least one `abstain`** above describes. A question that lost it is one the gate would have
 called a graph answer while the engine renders "No evidence in this estate" to a
 reader.
 
