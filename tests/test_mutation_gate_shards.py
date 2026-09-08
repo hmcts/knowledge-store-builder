@@ -40,7 +40,6 @@ from __future__ import annotations
 import contextlib
 import io
 import os
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -400,6 +399,13 @@ class WorkflowShardsTest(unittest.TestCase):
         self.assertGreater(len(environment), 1, "the mapping job sets nothing up")
         self.assertEqual(environment, self.jobs["tests"]["steps"][: len(environment)])
 
+    def _summarising_step(self) -> dict:
+        steps = self.jobs["mapping-summary"]["steps"]
+        summarising = [step for step in steps if "mapping_summary.py" in str(step.get("run", ""))]
+
+        self.assertEqual(len(summarising), 1, "the summary job does not run the summary module")
+        return summarising[0]
+
     def test_the_summary_is_a_verdict_over_both_the_decision_and_the_legs(self):
         """Catches the summary reporting one verdict that cannot be a bad one, and the
         case the trigger policy added: a skipped `mapping` means two different things.
@@ -407,33 +413,38 @@ class WorkflowShardsTest(unittest.TestCase):
         Skipped because the decision said nothing could have invalidated a mapping is
         a pass. Skipped for any other reason - the decision job failed, or it said run
         and no leg started - is the wiring failing silently, which is exactly the shape
-        a conditional 28-minute check invites. Both inputs reach the script through the
-        environment, which is what lets this drive the real script with the values the
-        runner would supply rather than matching its text.
+        a conditional 28-minute check invites. Both inputs reach the module through the
+        environment, which is what lets `test_mapping_summary` drive the real verdict
+        with the values the runner would supply rather than matching its text - and
+        this is the check that the module those drive is the one this job runs.
         """
-        step = self.jobs["mapping-summary"]["steps"][0]
+        step = self._summarising_step()
+
         self.assertIn("needs.mapping-decision.outputs.run", str(step["env"]))
         self.assertIn("needs.mapping.result", str(step["env"]))
 
-        for decision, result, expected in (
-            ("true", "success", 0),
-            ("false", "skipped", 0),
-            ("true", "failure", 1),
-            ("true", "cancelled", 1),
-            ("true", "skipped", 1),
-            ("false", "success", 1),
-            ("", "skipped", 1),
-        ):
-            with self.subTest(decision=decision, result=result):
-                completed = subprocess.run(
-                    ["bash", "-c", str(step["run"])],
-                    env={**os.environ, "DECISION": decision, "RESULT": result},
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(
-                    completed.returncode, expected, completed.stdout + completed.stderr
-                )
+    def test_the_summary_can_name_the_commit_the_table_was_last_verified_at(self):
+        """Catches the provenance degrading silently. The skipped verdict is a pass
+        that says what it did not read, and the useful half of it - the commit and
+        date the table was last actually verified at - comes from this workflow's own
+        previous runs. Without `actions: read` and a token that call fails, and the
+        verdict falls back to "this run cannot say when the table was last verified":
+        honest, much less useful, and green either way (#331).
+
+        The checkout is the other half. The verdict is a module in this repository
+        now, and a job that never checks the repository out cannot run it.
+        """
+        step = self._summarising_step()
+
+        self.assertIn("GH_TOKEN", str(step["env"]))
+        self.assertIn("actions: read", yaml.dump(self.jobs["mapping-summary"]["permissions"]))
+        self.assertTrue(
+            any(
+                "actions/checkout" in str(each.get("uses", ""))
+                for each in self.jobs["mapping-summary"]["steps"]
+            ),
+            "the summary job runs a module from a repository it never checked out",
+        )
 
     def test_the_summary_runs_even_when_a_leg_failed(self):
         """Catches the summary being skipped by the failure it exists to report. A job

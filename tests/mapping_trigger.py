@@ -79,6 +79,11 @@ LEGS = "mapping ("
 RUNS_LISTED = 60
 RUNS_INSPECTED = 30
 
+# What to say when a run verified the table and the API did not say when. The
+# alternative is an empty string in the middle of a provenance sentence, which
+# reads as a date nobody noticed was missing.
+UNRECORDED = "a time the API did not report"
+
 
 @dataclass(frozen=True)
 class Change:
@@ -94,6 +99,19 @@ class Decision:
 
     run: bool
     reason: str
+
+
+@dataclass(frozen=True)
+class Verification:
+    """A run in which the legs actually verified the table: what, and when.
+
+    Both halves come off the same run, and that is the reason this is one object
+    rather than two lookups. A summary that reports a commit from one run and a
+    date from another is a provenance line that reads precisely and is wrong.
+    """
+
+    head_sha: str
+    ran_at: str
 
 
 def changes_from(text: str) -> tuple[Change, ...]:
@@ -223,15 +241,17 @@ def _api(path: str, *, runner) -> object | None:
         return None
 
 
-def last_verified(repository: str, *, runner=subprocess.run) -> str | None:
-    """The commit the most recent real verification ran against, or None.
+def last_verification(repository: str, *, runner=subprocess.run) -> Verification | None:
+    """The most recent run whose legs actually verified the table, or None.
 
     Read from the legs rather than from a run's own conclusion, because a run in
     which `mapping` was skipped is green and verified nothing. Treating one as a
     verification would ratchet the comparison forward from a check that never ran,
     and every night after it would skip for the same reason.
 
-    None for every failure, which the caller turns into a run.
+    None for every failure, which the callers turn into a run and into a summary
+    that says it cannot name a verification - never into an empty date printed as
+    though it were one.
     """
     listing = _api(
         f"repos/{repository}/actions/workflows/tests.yml/runs?branch=main&per_page={RUNS_LISTED}",
@@ -249,8 +269,24 @@ def last_verified(repository: str, *, runner=subprocess.run) -> str | None:
             job for job in reported.get("jobs", []) if str(job.get("name", "")).startswith(LEGS)
         ]
         if legs and all(job.get("conclusion") == "success" for job in legs):
-            return run.get("head_sha")
+            found = run.get("head_sha")
+            if not found:
+                return None
+            return Verification(str(found), str(run.get("created_at") or UNRECORDED))
     return None
+
+
+def last_verified(repository: str, *, runner=subprocess.run) -> str | None:
+    """The commit the most recent real verification ran against, or None.
+
+    The sha half of `last_verification`, kept as a name because that is all two of
+    the three callers want - `base_for` below and `observer_staleness`, both of
+    which compare commits and have no use for a date. One walk of the API either
+    way: there is one definition of "since the mapping was last known good" and it
+    is the loop above.
+    """
+    found = last_verification(repository, runner=runner)
+    return found.head_sha if found else None
 
 
 def changes_between(

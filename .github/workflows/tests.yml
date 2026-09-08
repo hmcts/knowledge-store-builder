@@ -353,37 +353,56 @@ jobs:
   # it this job would report nothing in exactly the case it exists for. The event
   # condition is repeated because `always()` would otherwise run it on a pull
   # request, where `mapping` was skipped and its result is neither pass nor fail.
+  # The verdict was a shell branch here until #331, and it reported plain success
+  # over legs that never ran: a run in which four legs verified every entry and a
+  # run in which nothing looked at the table produced the same green check. The
+  # skip itself was right and still is - the change is that the summary now says
+  # what it did not read, and names the commit and date the table was last
+  # actually verified at, so the run carries its own provenance.
+  #
+  # It moved into `tests/mapping_summary.py` for the reason the decision did: a
+  # verdict written in shell is a verdict nothing in the suite can drive, and this
+  # one is asymmetric in the way that hides its own failure. The three states and
+  # their exit codes are driven directly in `test_mapping_summary.py`; the checks
+  # in `test_mutation_gate_shards.py` hold this job to running that module with the
+  # inputs it needs.
   mapping-summary:
     needs: [mapping-decision, mapping]
     if: >-
       always() && (github.event_name == 'push' || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Same reason as `mapping-decision`: the skipped verdict reads this
+      # workflow's own previous runs to name the commit the last real
+      # verification ran against. Without it the provenance degrades to "this run
+      # cannot say when the table was last verified", which is honest and much
+      # less useful - so it is asserted rather than left to remember.
+      actions: read
     steps:
+      # A checkout, because the verdict is a module in this repository now. Default
+      # depth: it compares no commits, it only names one the API reported.
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # No `pip install` step: the module imports the standard library and
+      # `mapping_trigger`, and nothing from the package.
+      #
       # Two inputs, because a skipped `mapping` means two different things and
       # only one of them is a pass. Skipped because the decision said so is a
       # verdict; skipped for any other reason - the decision failed, or said run
       # and the legs never started - is the wiring failing silently, which is the
-      # shape this whole policy invites.
+      # shape this whole policy invites. Through the environment rather than
+      # interpolated into the script, which is both the script-injection shape the
+      # analysers read and what lets the suite drive this with the values the
+      # runner would supply.
       - name: Every shard's entries agree with what the suite observed
         env:
+          GH_TOKEN: ${{ github.token }}
           DECISION: ${{ needs.mapping-decision.outputs.run }}
           RESULT: ${{ needs.mapping.result }}
-        run: |
-          if [ "$DECISION" = true ] && [ "$RESULT" = success ]; then
-            echo "Every shard's entries agree with what the suite observed."
-            exit 0
-          fi
-          if [ "$DECISION" = false ] && [ "$RESULT" = skipped ]; then
-            echo "The mapping check did not need to run. Nothing landed that could"
-            echo "move an observer set - the decision job's summary says what it"
-            echo "compared against and what it found."
-            exit 0
-          fi
-          echo "The sharded mapping check did not pass: the decision was"
-          echo "'$DECISION' and the shards reported '$RESULT'."
-          echo "Each shard verifies its own slice of the table against a whole-suite"
-          echo "run per entry, so the entries in a leg that did not pass are entries"
-          echo "whose observers nothing has checked. A decision of 'true' with no"
-          echo "result at all is the legs never having started, which verifies nothing."
-          exit 1
+        run: python3 tests/mapping_summary.py
