@@ -18,6 +18,7 @@ would have stopped the thing that actually happened.
     python3 tests/mutation_gate.py --derive-mapping  # the observers, from a full run
     python3 tests/mutation_gate.py --verify-mapping  # check every entry's observers
     python3 tests/mutation_gate.py --verify-mapping --shard 2/4  # one runner's slice
+    python3 tests/mutation_gate.py --isolate         # run each observer by itself
 
 Each entry names the tests that observe it. A run applies the mutation, runs the
 modules holding those tests, and asks whether the *named* ones failed. Whole
@@ -35,17 +36,32 @@ did, so `caught` meant "a guard noticed the file changed" for four entries whose
 only named module was the one holding them (#274). Those guards are named in
 `TABLE_GUARDS` and subtracted from every set this gate derives or verifies.
 
-The two slow modes are what keep the mapping honest, and neither runs in the
-`tests` job: `--derive-mapping` fills in a new entry from a full suite run, and
+The three slow modes are what keep the mapping honest, and none runs in the
+`tests` job: `--derive-mapping` fills in a new entry from a full suite run,
 `--verify-mapping` applies every entry against the whole suite and refuses a
-named set that does not match the tests that failed. The `tests` workflow runs
-the second one on its schedule and on `workflow_dispatch`, sharded over four
-runners with `--shard N/M` and summarised by one job that fails if any of them
-did: it costs a whole suite run per entry, which was 28 minutes in one job (#285).
+named set that does not match the tests that failed, and `--isolate` re-runs
+each named observer by itself. The `tests` workflow runs the second one on its
+schedule and on `workflow_dispatch`, sharded over four runners with
+`--shard N/M` and summarised by one job that fails if any of them did: it costs
+a whole suite run per entry, which was 28 minutes in one job (#285).
 The slices are reconciled against the table before anything is applied, because a
 shard that drops an entry prints `N of N` over a smaller N and reads as a pass.
 
-The first of them is also the one mode that does not require a valid mapping. It
+The last of them exists because the other two, and every ordinary run, select at
+module granularity - so none of them ever runs a test alone, and a third way an
+entry's claim can be untrue is invisible to all of them. A test that fails in
+module scope because a sibling corrupted shared state is recorded as an
+observer; one that would fail alone but passes in module scope is recorded as not
+one. `--verify-mapping` cannot see either, because it compares a module-scope
+answer against a module-scope answer: the artefact is stable and agrees with
+itself. `--isolate` re-runs each named observer by itself under its entry's
+mutation and refuses one that passes, which is the only shape that separates an
+observation from a sibling's leftovers (#334). One test per subprocess against a
+suite per entry makes it the cheapest of the three by orders of magnitude, and it
+is still off the `tests` job's path, because what it can find is a claim the
+table makes rather than a defect in the product.
+
+`--derive-mapping` is also the one mode that does not require a valid mapping. It
 reads no `observers` at all, and the check that refuses an entry without them runs
 inside the suite - so an unmapped entry made the suite red and the red suite
 blocked the command the refusal named. Deriving therefore excuses exactly the
@@ -3954,6 +3970,42 @@ def module_of(observer: str) -> str:
     return observer.partition(".")[0]
 
 
+def isolable(observer: str) -> bool:
+    """Whether `observer` names a test that can be run by itself.
+
+    A `module.Class.test` can; a name carrying no test - the module alone, which
+    is what unittest reports for an import that raised or a `setUpModule` that
+    did - cannot, because selecting it runs every test the module holds. That is
+    module scope by another route, so `--isolate` reports such a name as
+    unchecked rather than deciding it either way. No shipped entry has one, and
+    the branch is here so that the first one is visible rather than measured in a
+    scope the mode's own sentence denies.
+    """
+    return module_of(observer) != observer
+
+
+def run_alone(observer: str) -> bool:
+    """Whether `observer` failed when it was the only test in the run.
+
+    The discriminator this gate lacked. Every other run shape here selects at
+    module granularity - `run_observers` runs the modules an entry names, and
+    `failing_observers` discovers everything - so a test that fails only because
+    a sibling ran first is indistinguishable from one that observes the defect
+    (#334). Selecting the single test is what separates them.
+
+    Alone means no sibling test, not no fixture: `setUpModule` and `setUpClass`
+    still run, because they are part of what the test is. A test that needs a
+    sibling's leftovers is the thing being looked for; a test that needs its own
+    class's setup is not.
+
+    Whether the *named* test failed rather than whether the run passed, for the
+    same reason `run_observers` asks that: a `tearDownModule` that raises fails
+    the run while naming the module, and reading the verdict would count that as
+    an observation (#274).
+    """
+    return observer in _run((observer,)).observers
+
+
 def run_observers(observers: Sequence[str]) -> tuple[str, ...]:
     """The named observers that failed, from a run of the modules holding them.
 
@@ -4365,6 +4417,152 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
     return 1 if wrong else 0
 
 
+def already_red_alone(observers: Sequence[str]) -> tuple[str, ...]:
+    """The observers that fail alone against the tree as it stands. Run unmutated.
+
+    The control for `--isolate`, and the reason its number means what its
+    sentence says. The mode reads "this test fails alone under the mutation" as
+    "this test observes the mutation", which is only true of a test that passes
+    alone without it. Order dependence has the other polarity too: a test that
+    needs a sibling's leftovers to pass fails alone whatever the tree holds, and
+    would be counted sound by a mode that only looked at the mutated run - the
+    same interference, scored as its own absence.
+
+    Run once over the distinct names rather than per entry, on the unmutated
+    tree, before anything is applied. One subprocess per distinct observer, and
+    an entry's observer is named by several entries on average.
+    """
+    return tuple(observer for observer in observers if isolable(observer) and run_alone(observer))
+
+
+def isolate_mapping(mutations: Sequence[Mutation]) -> int:
+    """Re-run each named observer alone under its entry's mutation. The third slow mode.
+
+    What `--verify-mapping` cannot do. Both of the gate's other run shapes select
+    at module granularity, so an observer that fails only because a sibling ran
+    first is recorded as an observer, and one that would fail alone but passes in
+    module scope is recorded as not one. Verification compares a module-scope
+    answer against a module-scope answer, so the artefact is stable and agrees
+    with itself (#334). Only running the test by itself can tell them apart.
+
+    An observer that fails in module scope and passes alone is an interference
+    artefact: the entry's claim about that test is not true of that test. The
+    mutation is usually still caught, by a different test in the same module, so
+    the gate's headline number stays honest - what degrades is the part a later
+    reader is invited to falsify.
+
+    Its own mode rather than a flag on `--verify-mapping`, which is the shape the
+    issue proposed, because the two questions cost three orders of magnitude
+    apart. Verification runs a whole suite per entry, 43 seconds against 0.07 for
+    a single test, so bolting isolation onto it would have made a four-minute
+    question cost hours and put the measurement the decision needs out of reach
+    of one sitting. They are also different questions over different populations:
+    verification asks whether the named set matches what the whole suite
+    reported, and this asks whether each named test is individually sufficient. A
+    run can want either without the other, and this one shards and selects with
+    `--shard` and `--only` exactly as the other two do.
+
+    Isolating inside `--derive-mapping` was the other candidate, and it stays
+    available without new code: derive an entry, paste the set, then
+    `--isolate --only <name>` on it. Deliberately two commands rather than a
+    filter inside the deriver - a set silently narrowed on the way out is a table
+    nobody can reconcile against a run, and the deriver's output is what an
+    author pastes in.
+
+    Three outcomes per observer rather than two, because a mode that can only say
+    sound or artefact cannot report that it decided nothing: an observer that
+    already fails alone unmutated, and one naming no test at all, are unchecked.
+    They are counted and named separately, and a pass that decided nothing is a
+    refusal rather than a green `0 of 0`.
+    """
+    check_mapping(mutations)
+    named = sorted({observer for mutation in mutations for observer in mutation.observers})
+    unisolable = tuple(observer for observer in named if not isolable(observer))
+    # Before the control pass rather than after it, because that pass is one
+    # subprocess per name and prints nothing while it runs - and because the
+    # sentence at the end is about these names and no others. A reader who is told
+    # afterwards that 753 of 759 claims hold cannot tell whether the six that did
+    # not were six of the table's or six of a selection.
+    print(
+        f"  {len(named)} named observers over {len(mutations)} entries, checked one at a "
+        "time; the control pass over them runs first, unmutated",
+        file=sys.stderr,
+        flush=True,
+    )
+    red_alone = already_red_alone(named)
+    unchecked = frozenset(unisolable) | frozenset(red_alone)
+    artefacts: list[str] = []
+    decided = 0
+
+    def observe(mutation: Mutation) -> None:
+        nonlocal decided
+        passing = [
+            observer
+            for observer in mutation.observers
+            if observer not in unchecked and not run_alone(observer)
+        ]
+        decided += sum(1 for observer in mutation.observers if observer not in unchecked)
+        artefacts.extend(f"{mutation.name}: {observer}" for observer in passing)
+        if passing:
+            verdict = "ARTEFACT"
+        elif all(observer in unchecked for observer in mutation.observers):
+            verdict = "unchecked"
+        else:
+            verdict = "isolated"
+        print(f"  {verdict:<9} {mutation.name}", flush=True)
+
+    interrupted = each_mutation(mutations, observe)
+    if interrupted is not None:
+        return interrupted
+
+    # Observer claims rather than entries, because an entry naming twelve tests
+    # makes twelve claims and one of them can be an artefact while the other
+    # eleven hold. Counting entries would answer a question nobody asked and read
+    # as a far worse result than it is.
+    print(f"\n{decided - len(artefacts)} of {decided} observer claims hold in isolation.")
+    for observer in red_alone:
+        print(
+            f"  UNCHECKED: {observer} fails alone against the unmutated tree, so its "
+            "failing alone under a mutation says nothing about the mutation. That is "
+            "order dependence in the other direction and worth its own look.",
+            file=sys.stderr,
+        )
+    for observer in unisolable:
+        print(
+            f"  UNCHECKED: {observer} names no test - a module that could not be imported, "
+            "or a setUpModule that raised - so selecting it runs the whole module and "
+            "there is no isolation to run.",
+            file=sys.stderr,
+        )
+    for artefact in artefacts:
+        print(f"  INTERFERENCE ARTEFACT: {artefact}", file=sys.stderr)
+    if artefacts:
+        print(
+            "\nEach of those tests fails with the entry applied when its module runs and "
+            "passes when it runs alone, so what the entry names as observing the defect is "
+            "a sibling's leftovers rather than that test. The mutation may well still be "
+            "caught by something else in the module - re-derive the set with "
+            "`--derive-mapping --only <name>` and read what is left, and look for shared "
+            "class or module state in the module holding it.\n\nBefore any of that, "
+            "confirm nothing else was writing this tree while the run was going. A second "
+            "process editing a target file produces artefacts that do not reproduce, and "
+            "the first measurement taken with this mode reported six that way. `git diff` "
+            "over the targets afterwards is the check; a run whose tree is byte-identical "
+            "before and after is the one to believe.",
+            file=sys.stderr,
+        )
+    if not decided:
+        print(
+            f"\nNothing was decided: all {len(named)} named observers were unchecked, so "
+            "this run concluded nothing about any entry rather than confirming them. An "
+            "empty pass over an empty selection reports as a pass, which is why this is "
+            "not one.",
+            file=sys.stderr,
+        )
+        return 1
+    return 1 if artefacts else 0
+
+
 def shard(mutations: Sequence[Mutation], index: int, count: int) -> tuple[Mutation, ...]:
     """The `index`th of `count` interleaved slices of `mutations`, counting from one.
 
@@ -4515,11 +4713,29 @@ def main(argv: list[str] | None = None) -> int:
         help="check each entry's observers against a whole-suite run per entry (slow)",
     )
     parser.add_argument(
+        "--isolate",
+        action="store_true",
+        help="re-run each entry's observers one at a time and refuse one that passes alone",
+    )
+    parser.add_argument(
         "--shard",
         metavar="N/M",
         help="run the Nth of M interleaved slices of the entries, one runner per shard",
     )
     arguments = parser.parse_args(argv)
+    # Refused rather than ordered, unlike the two modes above it, because the issue
+    # that asked for this proposed it as `--verify-mapping --isolate` - so that is
+    # the command an operator will type, and silently running one of the two would
+    # answer a question they did not ask while printing a count that reads like an
+    # answer to it.
+    if arguments.isolate and (arguments.derive_mapping or arguments.verify_mapping):
+        raise SystemExit(
+            "--isolate is its own mode rather than a modifier of the other two. It runs "
+            "one test per subprocess where they run a whole suite per entry, which is "
+            "minutes against hours, and it answers a different question: whether each "
+            "named test fails by itself, not whether the named set matches what the suite "
+            "reported. Run them separately."
+        )
     mutations = selected(arguments.only)
     # Before `--list`, before the recovery record and before the pre-check: a slice
     # that is not a partition means nothing this run prints can be believed, and the
@@ -4579,6 +4795,8 @@ def main(argv: list[str] | None = None) -> int:
             code = derive_mapping(mutations)
         elif arguments.verify_mapping:
             code = verify_mapping(mutations)
+        elif arguments.isolate:
+            code = isolate_mapping(mutations)
         else:
             code = sweep(mutations)
         if reconciliation:

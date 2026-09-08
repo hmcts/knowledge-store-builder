@@ -143,6 +143,53 @@ class Guard(unittest.TestCase):
         self.assertEqual(TARGET.read_text(encoding="utf-8").count("ORIGINAL"), 1)
 """
 
+# Two tests over one mutable class attribute, and the reason `--isolate` exists.
+# `cache` is filled in place by whichever test runs first, never reset, and
+# unittest runs methods in alphabetical order - so `test_b` reads what `test_a`
+# put there. With the mutation applied and the module running as a module, `test_b`
+# fails, and a derivation records it as the observer. Run by itself the cache is
+# empty and it passes: it never reads the target, so it observes nothing. That is
+# the interference artefact this fixture exists to be, built here rather than
+# borrowed from the suite so that the claim does not rest on a defect somebody may
+# fix (#334).
+INTERFERING = """
+import unittest
+from pathlib import Path
+
+TARGET = Path(__file__).resolve().parent.parent / "source" / "target.py"
+
+
+class SharesAClassCache(unittest.TestCase):
+    cache = {}
+
+    def test_a_the_target_can_be_read(self):
+        self.cache["target"] = TARGET.read_text(encoding="utf-8")
+        self.assertTrue(self.cache["target"])
+
+    def test_b_nothing_cached_holds_the_mutation(self):
+        for name, text in sorted(self.cache.items()):
+            self.assertNotIn("MUTATED", text, f"{name} was cached after the target changed")
+"""
+
+# The same order dependence the other way round: `test_b` needs a sibling's
+# leftovers to pass, so it fails by itself whatever the target holds. It says
+# nothing about any mutation, and a mode that only looked at the mutated run would
+# see it fail alone and score it a sound observer - which is why the control pass
+# runs first, unmutated.
+NEEDS_A_SIBLING = """
+import unittest
+
+
+class NeedsASibling(unittest.TestCase):
+    prepared = []
+
+    def test_a_prepares_what_the_next_test_reads(self):
+        self.prepared.append("ready")
+
+    def test_b_something_prepared_it(self):
+        self.assertEqual(self.prepared, ["ready"], "no sibling ran first")
+"""
+
 ORIGINAL = 'VALUE = "ORIGINAL"\n'
 
 # The tests in the fixtures above, named the way an entry names an observer:
@@ -156,21 +203,34 @@ WATCHES_IN_SUBTESTS = (
 QUIET_IN_A_NOISY_MODULE = "test_noisy.Noisy.test_nothing_about_the_target"
 NOISE = "test_noisy.Noisy.test_red_for_its_own_reasons"
 GUARDS_THE_TABLE = "test_guard.Guard.test_the_entry_still_names_one_site"
+FAILS_ONLY_BESIDE_A_SIBLING = (
+    "test_interfering.SharesAClassCache.test_b_nothing_cached_holds_the_mutation"
+)
+FILLS_THE_CACHE = "test_interfering.SharesAClassCache.test_a_the_target_can_be_read"
+FAILS_WITHOUT_A_SIBLING = "test_needs_a_sibling.NeedsASibling.test_b_something_prepared_it"
 
 
 class MutationGateMappingTest(unittest.TestCase):
     def _tree(
-        self, subtest_watcher: bool = False, noisy: bool = False, guard: bool = False
+        self,
+        subtest_watcher: bool = False,
+        noisy: bool = False,
+        guard: bool = False,
+        interfering: bool = False,
+        needs_a_sibling: bool = False,
     ) -> Path:
         """A repository the gate can be pointed at: one source file, two test modules.
 
         `subtest_watcher` adds a third that observes the same mutation through
         `subTest`; `noisy` adds one holding a test that is red for its own
         reasons; `guard` adds one standing in for a table guard, and points
-        `TABLE_GUARDS` at it. All three are opt-in because a module added here
-        fails for every test that builds this tree, and the verifier checks the
-        named set against everything that failed - so adding one unconditionally
-        makes the other checks disagree about what should have been named.
+        `TABLE_GUARDS` at it; `interfering` adds one whose two tests share a
+        mutable class attribute, and `needs_a_sibling` one whose second test
+        fails unless the first ran. All five are opt-in because a module added
+        here fails for every test that builds this tree, and the verifier checks
+        the named set against everything that failed - so adding one
+        unconditionally makes the other checks disagree about what should have
+        been named.
         """
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -190,6 +250,12 @@ class MutationGateMappingTest(unittest.TestCase):
             (root / "tests" / "test_guard.py").write_text(GUARD, encoding="utf-8")
             self.addCleanup(setattr, gate, "TABLE_GUARDS", gate.TABLE_GUARDS)
             gate.TABLE_GUARDS = (GUARDS_THE_TABLE,)
+        if interfering:
+            (root / "tests" / "test_interfering.py").write_text(INTERFERING, encoding="utf-8")
+        if needs_a_sibling:
+            (root / "tests" / "test_needs_a_sibling.py").write_text(
+                NEEDS_A_SIBLING, encoding="utf-8"
+            )
 
         self.addCleanup(setattr, gate, "ROOT", gate.ROOT)
         self.addCleanup(setattr, gate, "SRC", gate.SRC)
@@ -233,6 +299,125 @@ class MutationGateMappingTest(unittest.TestCase):
             code = gate.derive_mapping((mutation,))
         derived = json.loads(printed.getvalue().splitlines()[-1])
         return code, derived["observers"], reported.getvalue()
+
+    def _isolate(self, mutation: gate.Mutation) -> tuple[int, str, str]:
+        printed, reported = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(reported):
+            code = gate.isolate_mapping((mutation,))
+        return code, printed.getvalue(), reported.getvalue()
+
+    def test_an_observer_that_only_fails_beside_a_sibling_is_reported_as_an_artefact(self):
+        """The feature. `test_b` in the interfering module never reads the target: it
+        reads a class attribute a sibling filled, so it fails when the module runs
+        with the mutation applied and passes when it runs by itself. A derivation
+        records it as the observer and the entry then claims something untrue of that
+        test (#334).
+
+        Break it by having `isolate_mapping` select `module_of(observer)` instead of
+        the observer, or by dropping the `run_alone` call: the module-scope answer
+        comes back failing, the artefact reads as isolated, and the run passes. That
+        substitution is the whole defect, so this is the check that has to notice it.
+        """
+        self._tree(interfering=True)
+
+        code, printed, reported = self._isolate(self._entry(FAILS_ONLY_BESIDE_A_SIBLING))
+
+        self.assertEqual(code, 1, f"an artefact was reported as a sound observer: {printed}")
+        self.assertIn("ARTEFACT", printed)
+        self.assertIn("0 of 1 observer claims hold in isolation", printed)
+        self.assertIn("INTERFERENCE ARTEFACT", reported)
+        self.assertIn(FAILS_ONLY_BESIDE_A_SIBLING, reported)
+
+    def test_an_observer_that_fails_by_itself_is_not_reported_as_an_artefact(self):
+        """The over-correction guard, and it is the check that makes the one above mean
+        anything: a mode that flagged every observer would pass that one and be
+        indistinguishable from the feature working.
+
+        `test_watcher` reads the target itself, so it fails alone with the mutation
+        applied and is a genuine observer. Break it by inverting the `run_alone`
+        condition, or by comparing against `passed` where a `tearDownModule` decides
+        the verdict: every entry in the shipped table becomes an artefact and the
+        measurement this mode exists for reads 0 of 759.
+        """
+        self._tree()
+
+        code, printed, reported = self._isolate(self._entry(WATCHES))
+
+        self.assertEqual(code, 0, f"a genuine observer was flagged: {reported}")
+        self.assertIn("isolated", printed)
+        self.assertIn("1 of 1 observer claims hold in isolation", printed)
+        self.assertNotIn("ARTEFACT", printed + reported)
+
+    def test_an_ordinary_sweep_reports_an_artefact_entry_as_caught(self):
+        """Two claims at once: the isolation pass is not on the ordinary run's path, and
+        the fixture above really is an artefact rather than a broken fixture.
+
+        The gate every merge waits on runs whole modules, so the artefact fails and the
+        entry reads `caught` - which is the hole, and is also the reason isolation has
+        to stay off that path. Catches isolation being wired into `sweep`, which would
+        turn a per-entry module run into one subprocess per observer on every run, and
+        catches a fixture that fails alone too and would have proved nothing above.
+        """
+        self._tree(interfering=True)
+
+        code, printed = self._sweep(self._entry(FAILS_ONLY_BESIDE_A_SIBLING))
+
+        self.assertEqual(code, 0, f"the ordinary sweep isolated the observer: {printed}")
+        self.assertIn("caught", printed)
+        self.assertIn("1 of 1 mutations caught", printed)
+
+    def test_an_observer_that_fails_alone_unmutated_is_unchecked_rather_than_sound(self):
+        """Catches the control pass being dropped, which inflates the count with tests
+        that observe nothing. `test_b` in the sibling-needing module fails by itself
+        whatever the target holds, so it fails alone with the mutation applied too - and
+        a mode reading only the mutated run scores that a sound observer. It is the same
+        order dependence as the artefact above, scored as its absence.
+
+        The watcher beside it is the sensitivity half: a control that marked everything
+        unchecked would decide nothing and still print no artefact.
+        """
+        self._tree(needs_a_sibling=True)
+
+        code, printed, reported = self._isolate(self._entry(WATCHES, FAILS_WITHOUT_A_SIBLING))
+
+        self.assertEqual(code, 0, f"an undecidable observer was reported as wrong: {reported}")
+        self.assertIn("1 of 1 observer claims hold in isolation", printed)
+        self.assertIn("UNCHECKED", reported)
+        self.assertIn(FAILS_WITHOUT_A_SIBLING, reported)
+        self.assertNotIn("ARTEFACT", printed + reported)
+
+    def test_a_run_that_could_decide_nothing_is_a_refusal_rather_than_a_pass(self):
+        """Catches `0 of 0 observer claims hold in isolation` returning 0. Every observer
+        of this entry is unchecked, so the loop over decidable ones runs zero times -
+        the shape CLAUDE.md names, where `for x in []` reads as a passing check. The
+        entry's claim is exactly as unverified as before the run, and a green exit says
+        the opposite."""
+        self._tree(needs_a_sibling=True)
+
+        code, printed, reported = self._isolate(self._entry(FAILS_WITHOUT_A_SIBLING))
+
+        self.assertEqual(code, 1, f"a run that decided nothing exited zero: {printed}")
+        self.assertIn("Nothing was decided", reported)
+        self.assertIn("unchecked", printed)
+
+    def test_isolation_is_refused_as_a_modifier_of_the_other_two_modes(self):
+        """Catches `--verify-mapping --isolate` silently running the verifier. That is
+        the command the issue proposing this suggested, so it is what an operator types;
+        the argument chain would take the first branch, print `N of N entries name what
+        observes them`, and answer a question nobody asked in a sentence that reads like
+        an answer to the one they did. Refused before the tree is touched.
+
+        `--only` names nothing on purpose. The refusal runs before the selection, so
+        this asserts the refusal's own words while capping what a missing refusal can
+        do: without it the run stops at the empty selection instead of starting a
+        whole-suite baseline and mapping the shipped table, which is a check that
+        holds the branch for the best part of an hour to report that it is broken."""
+        for other in ("--verify-mapping", "--derive-mapping"):
+            with self.subTest(other=other):
+                with self.assertRaises(SystemExit) as raised:
+                    gate.main([other, "--isolate", "--only", "no entry is named this"])
+
+                self.assertIn("--isolate is its own mode", str(raised.exception))
 
     def test_a_failure_inside_a_subtest_is_attributed_to_its_own_module(self):
         """Catches the reporter losing which module saw a subTest failure.
