@@ -262,13 +262,13 @@ three reasons that only show up together:
   common to every service — collapse into one node and acquire edges belonging to
   all of them. Nothing errors, and the fused graph is confidently wrong.
 
-Extract each repository from inside its clone, without clustering, then merge
-all per-repository graphs in one operation:
+Extract each repository from inside its clone, then merge all per-repository
+graphs in one operation:
 
 ```bash
 while IFS='|' read -r repo _; do
   case "$repo" in ''|\#*) continue;; esac
-  ( cd "repositories/$repo" && graphify update . --no-cluster )
+  ( cd "repositories/$repo" && graphify update . )
 done < config/repositories.txt
 
 knowledgestore merge-inputs        # what the merge will read, and what it cannot account for
@@ -276,6 +276,19 @@ knowledgestore merge-inputs        # what the merge will read, and what it canno
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
+
+**Do not add `--no-cluster` to that extraction**, however wasteful clustering a
+repository looks when the merge is about to discard its communities. That much is
+true, and the conclusion drawn from it is still wrong: the clustering path is also
+where graphify resolves an edge's endpoints against the nodes it holds, and drops
+the edges it cannot resolve as external or standard-library symbols. Skip it and
+those edges survive naming nodes that do not exist, which `merge-graphs` then
+materialises as nodes carrying an id and no content at all — material an authoring
+pass later pays an LLM to summarise. Nothing fails; every stage reports success and
+the graph is simply wrong. What removing the flag costs is real but smaller, and it
+is language-dependent: `/knowledge-store:knowledge-store-build` measures both
+directions and gives `knowledgestore dangling-endpoints` for measuring the trade on
+your own estate.
 
 Reconcile the number of graphs produced with `config/repositories.txt` before
 merging. A shell loop that skipped repositories can still exit successfully.
@@ -371,9 +384,24 @@ the tool produces: correct the day it is written, and wrong by omission the next
 time the pipeline emits something new.
 
 The stage also names every cloned repository that contributed no content file, and
-a non-zero count there is expected on a healthy estate. It refuses — non-zero exit,
-neither artefact written — only when no clone contributed anything while clones are
-present, which is what a scan that never saw the corpus produces.
+a non-zero count there is expected on a healthy estate.
+
+It refuses outright — non-zero exit, neither artefact written — in four cases:
+`--top` below 1, which is a usage error; detect having classified no files at all;
+clones being present while none of them contributed a content file, which is what
+a scan that never saw the corpus produces; and a file in a format that holds
+resolved secret values having reached the set.
+
+That last one refuses rather than reports because a report arrives too late.
+Extracted content persists in the extraction cache and in each clone's own graph,
+so filtering the published graph afterwards reaches neither copy. Remove each named
+file from the corpus and write the detect result again — or, where the estate has
+ruled a named file safe, declare it in `config/content-set-allowed.txt` (one
+store-relative path a line, `#` comments allowed) or pass `--allow <path>` for a
+single run. Prefer the file: it keeps the record of every ruling the estate has
+made, and a flag leaves none. On the graphify version this library ships against
+nothing reaches that refusal, so read it as defence in depth rather than as
+evidence about your estate.
 
 Add business specifications after the merge:
 

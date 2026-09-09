@@ -119,13 +119,16 @@ when you want to share the result.
 
 **Never run graphify at the store root** — `repositories/` is gitignored, so the
 scan sees only the store's own config and docs and produces a near-empty graph.
+**And never add `--no-cluster`**: clustering is also where endpoints are resolved,
+so skipping it leaves unresolvable edges that `merge-graphs` turns into contentless
+nodes. Nothing fails, and an authoring pass then pays to summarise them.
 
 ```bash
 export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # a large graph needs the cap raised
 
 while IFS='|' read -r repo _; do      # repositories.txt is pipe-delimited
   case "$repo" in ''|\#*) continue;; esac
-  ( cd "repositories/$repo" && graphify update . --no-cluster )
+  ( cd "repositories/$repo" && graphify update . )
 done < config/repositories.txt
 
 knowledgestore merge-inputs        # names what the glob below will read

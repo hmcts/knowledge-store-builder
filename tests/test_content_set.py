@@ -32,6 +32,10 @@ from settings_isolation import SettingsIsolated  # noqa: E402
 
 from knowledgestore import build_content_set, cli, config, content_set, status
 
+# This repository, not the store: `config.ROOT` is the store root and the
+# settings-isolated tests move it.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 def write_tree(root: Path, files: dict[str, str]) -> None:
     """Create every named file, so a test's population is stated not implied."""
@@ -1124,6 +1128,152 @@ class NamedFormatStageTest(SettingsIsolated):
         self.assertNotIn("emulator", output)
         manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
         self.assertEqual(manifest["excluded_emulator_dumps"], [])
+
+
+class DocumentedRefusalCountTest(unittest.TestCase):
+    """Both documents must say how many ways this stage refuses, and be right.
+
+    The break this catches shipped: `docs/creating-a-store.md` and the build
+    skill both said the stage exits non-zero **"only when"** no clone
+    contributed anything, while `main` returns 2 at four sites. The site the
+    wording denied was the security one - a file in a format holding resolved
+    secret values - so a reader met a refusal the documentation said could not
+    happen, and the escape it prints (`config/content-set-allowed.txt`,
+    `--allow`) appeared in neither document.
+
+    The count comes from the module's own syntax tree rather than from a number
+    kept in step by hand, so adding a fifth refusal without documenting it fails
+    here. It is read with `ast` rather than by grepping for `return 2`, because a
+    grep also finds the string in a comment and would keep passing after the real
+    site moved.
+
+    The exclusivity half is the one worth having. A count can be corrected while
+    "only when" survives beside it, and "only when" is the word that told a
+    reader not to expect the other three.
+    """
+
+    # The four sites in `build_content_set.main`, named so this is a claim about
+    # the stage rather than a number that happens to match: `--top` below 1, a
+    # detect result classifying nothing, every present clone contributing
+    # nothing, and a secret-bearing format reaching the set.
+    SITES = 4
+    WORD = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+
+    PASSAGES = {
+        "docs/creating-a-store.md": (
+            "The stage also names every cloned repository that contributed no content file"
+        ),
+        "skills/knowledge-store-build/SKILL.md": (
+            "It also reconciles the set against the clones on disk"
+        ),
+    }
+
+    @staticmethod
+    def refusal_sites() -> int:
+        """`return 2` statements in `build_content_set.main`, from the AST."""
+        import ast
+
+        source = Path(build_content_set.__file__).read_text(encoding="utf-8")
+        main = next(
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+        )
+        return sum(
+            1
+            for node in ast.walk(main)
+            if isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Constant)
+            and node.value.value == 2
+        )
+
+    def passage(self, relative: str) -> str:
+        """The section of a document that describes this stage's refusals.
+
+        Bounded at the next heading rather than by a character count, so a
+        neighbouring section cannot satisfy an assertion about this one - the
+        way a check comes to read as compliance for something it never looked
+        at. Lower-cased because the two documents open the sentence
+        differently, and collapsed so a statement matches across a wrapped
+        line break.
+        """
+        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        anchor = self.PASSAGES[relative]
+        start = text.find(anchor)
+        self.assertNotEqual(
+            start, -1, f"{relative} no longer holds the passage this pins; re-anchor it"
+        )
+        rest = text[start:]
+        end = rest.find("\n## ")
+        if end == -1:
+            end = len(rest)
+        heading = rest.find("\n### ")
+        if heading != -1:
+            end = min(end, heading)
+        return " ".join(rest[:end].split()).lower()
+
+    def test_the_module_refuses_at_the_number_of_sites_named_here(self):
+        """Breaks when a refusal is added to or removed from the stage. The
+        finding is then "document it", not "restore the count"."""
+        self.assertEqual(
+            self.refusal_sites(),
+            self.SITES,
+            "the stage's refusal count moved; the two documents below name each one, "
+            "so update them and this number together",
+        )
+
+    def test_each_document_states_the_refusal_count(self):
+        """Breaks if a document goes back to describing one refusal, or states a
+        count the module contradicts."""
+        expected = self.WORD[self.refusal_sites()]
+        for relative in self.PASSAGES:
+            self.assertIn(
+                expected,
+                self.passage(relative),
+                f"{relative} does not say the stage refuses {expected} ways",
+            )
+
+    def test_no_document_claims_the_refusal_is_the_only_one(self):
+        """Breaks if "only when" comes back beside the count. This is the exact
+        wording that denied the security refusal existed."""
+        for relative in self.PASSAGES:
+            self.assertNotIn(
+                "only when",
+                self.passage(relative),
+                f"{relative} claims a sole refusal again",
+            )
+
+    def test_both_documents_carry_the_escape_the_refusal_prints(self):
+        """Breaks if the opt-out goes undocumented again.
+
+        `_refuse_secret_bearing` prints both routes, and its own docstring says
+        why: a refusal whose escape is undocumented is worked around outside the
+        library. That reasoning only holds while the documents carry it.
+        """
+        for relative in self.PASSAGES:
+            window = self.passage(relative)
+            self.assertIn("content-set-allowed.txt", window, f"{relative}: no declaration file")
+            self.assertIn("--allow", window, f"{relative}: no single-run flag")
+
+    def test_a_higher_count_the_module_does_not_support_is_absent(self):
+        """Guards this check's own discriminating power, in the same run.
+
+        If the word for a larger count also sat in the passage, the count test
+        above would pass for a document that had grown a fifth refusal and said
+        nothing about it - which is the drift this pin exists to catch.
+
+        Only the upward neighbour. "three" is legitimate here and deliberately
+        not forbidden: the build skill decomposes the four as three about the
+        corpus and one usage error, which is the sentence that makes the count
+        readable rather than a number to take on trust.
+        """
+        wrong = self.WORD[self.SITES + 1]
+        for relative in self.PASSAGES:
+            self.assertNotIn(
+                wrong,
+                self.passage(relative),
+                f"{relative} names {wrong} refusals as well as {self.SITES}",
+            )
 
 
 if __name__ == "__main__":

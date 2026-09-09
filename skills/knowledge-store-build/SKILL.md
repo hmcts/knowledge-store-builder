@@ -179,11 +179,34 @@ seen before still gets it named.
 **It also reconciles the set against the clones on disk, and this one can stop the
 build.** Cloned repositories that contributed no content file are named, and a
 non-zero count there is expected rather than a defect — a repository created and
-never populated contributes nothing. The stage exits non-zero, writing neither
-artefact, only when *no* clone contributed anything while clones are present:
-that is what a scan which never saw the corpus produces, and the set it reports is
-small rather than empty, so nothing else in the pipeline can tell. Read the
-refusal before acting on it — it says which single case it cannot distinguish.
+never populated contributes nothing.
+
+**Four things make the stage exit non-zero, and it writes neither artefact when
+they do.** Three are about the corpus and one is a usage error:
+
+| Exit 2 | Why it refuses rather than reports |
+|---|---|
+| `--top` below 1 | A usage error, caught before anything is read. |
+| detect classified no files at all | An empty list makes every later search over the corpus come back clean, and no matches reads as an answer about the estate rather than as a missing input. |
+| clones are present and *none* contributed a content file | What a scan that never saw the corpus produces. The set it reports is small rather than empty, so nothing else in the pipeline can tell. All or nothing, with no threshold: every clone contributing nothing is a structural impossibility for a corpus scanned clone by clone. |
+| a file in a format that holds resolved secret values reached the set | Extracted content persists in the extraction cache and in each clone's own graph, neither of which a later filter on the published graph reaches. A report would arrive after the copy that matters was written. |
+
+Read the refusal before acting on it — each one names the case it cannot
+distinguish, and the last one names every offending path rather than counting
+them, because the remedy is per file.
+
+**That last refusal has a documented way past it**, and it is per file on purpose
+rather than a switch: remove each file from the corpus and write the detect result
+again, or, where the estate has ruled a named file safe, declare it in
+`config/content-set-allowed.txt` (one store-relative path a line, `#` comments
+allowed) or pass `--allow <path>` once per file for a single run. Prefer the file
+over the flag — it is the record of every ruling the estate has made, and a flag
+leaves none.
+
+On the peer version this library ships against, nothing reaches that refusal:
+graphify's detect pass does not classify a Terraform state file as content, so the
+rule is defence in depth against that changing rather than a live exposure. Do not
+read a quiet run as evidence the estate holds no such file.
 
 ### Size the AST layer before merging
 
@@ -366,11 +389,14 @@ whichever node won, which asserts relationships that were never in the corpus.
 Conversely a genuinely shared entity that agents named by path gets one id per chunk
 that saw it, so the cross-file linking the layer exists for is lost.
 
-Read all eight counters, not the node total. `merged` and `consolidated` are the
-linking working; `namespaced` is fabrication prevented; `fragmented` is the residue
-of deliberately under-merging; `recovered` are cross-chunk edges a concatenation
-would have thrown away; `ambiguous` and `dangling` are edges dropped rather than
-guessed at.
+Read all nine counters, not the node total. `merged` and `consolidated` are the
+linking working; `namespaced` is fabrication prevented, and `disambig.` is the
+residue of that — namespaced ids that still collided and had to be salted apart,
+counted separately because folding them into `namespaced` overstated it;
+`fragmented` is the residue of deliberately under-merging; `recovered` are
+cross-chunk edges a concatenation would have thrown away; `ambiguous` and
+`dangling` are edges dropped rather than guessed at; `duplicate` are identical
+edges collapsed, which a concatenation would have kept as parallel copies.
 
 Every renamed node carries `original_id`, and the stage refuses to write an id
 carrying a chunk-derived suffix - the extraction spec forbids those outright, and
@@ -1047,11 +1073,19 @@ a re-cluster here will not reproduce these communities"*. A store with no record
 is reported as unknown, so do not read a silent `status` as agreement.
 
 Community ids are not stable across re-clustering, and summaries are keyed by
-id. After a re-cluster, do **not** assume the old file still applies. Either
-regenerate, or remap by membership overlap: for each old cluster, find the new
-cluster holding most of its members and carry the summary across only if the
-overlap is convincing (60% is a reasonable bar). Drop the rest rather than risk
-prose attached to the wrong cluster.
+id. After a re-cluster, do **not** assume the old file still applies: either
+regenerate, or run `summaries remap` and drop the rest rather than risk prose
+attached to the wrong cluster.
+
+**The shipped criterion is `--carry exact`**, which carries a summary only onto a
+community holding exactly the node set its prose was written about and withdraws
+everything else. **The 60% membership-overlap bar applies under `--carry overlap`
+and nowhere else** — that is the opt-in tolerance described above, where `--bar` is
+the share of an old cluster's members that must land in one new cluster (0.6 by
+default) and `--precision` is how much of the new cluster the prose must cover.
+Reaching for 60% by default is the criterion this stage moved away from, because
+it scored a new community that swallowed an old one whole at 1.00 however much
+unrelated material came with it.
 
 ### Removing repositories from an estate
 

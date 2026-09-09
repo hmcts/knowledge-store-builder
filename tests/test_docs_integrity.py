@@ -246,6 +246,22 @@ class NotVacuousTest(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(blocks), COMPARISONS_FLOOR)
 
+    def test_every_route_into_a_store_is_read(self):
+        """Breaks if a document a reader copies commands out of stops being read.
+
+        `CHEATSHEET.md` is the reason this test exists rather than the example
+        it uses. It is one of the three routes into a store and it sat outside
+        `DOC_ROOTS`, so every prose gate here reported "nothing to report" over
+        a file none of them opened - which is how #346 came to have two
+        documents instructing `--no-cluster` while the build skill forbade it.
+        Dropping it from `DOC_ROOTS` again would restore that silence and no
+        other assertion in this module would fall, because every one of them is
+        a floor and the remaining documents clear it on their own.
+        """
+        read = {document.relative_to(ROOT).as_posix() for document in documents(ROOT)}
+        for route in ("README.md", "CHEATSHEET.md", "docs/creating-a-store.md"):
+            self.assertIn(route, read, f"{route} is a route into a store and is not read")
+
     def test_the_real_retired_list_is_not_empty(self):
         """Breaks if the retired instruction is removed from the list rather
         than from the documents. The comparison count would fall to zero and the
