@@ -741,7 +741,9 @@ estate was unchanged and only the sources moved on, yet retention was worse than
 a six-repository addition. Enough source churn re-shapes the graph on its own —
 that refresh consolidated roughly 39,000 communities into 28,000, and most of
 the loss was merged-cluster collisions rather than summaries falling below the
-overlap bar. Two clusters that merge can keep only one summary between them.
+overlap bar — measured while the overlap tolerance was the only criterion, which
+is why the reason below reads differently under today's default. Two clusters
+that merge can keep only one summary between them.
 
 So budget backfill for any refresh, not only for additions, and read the reasons
 on `remap`'s `Withdrawn:` line rather than its retention figure. Five print and,
