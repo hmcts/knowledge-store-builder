@@ -132,7 +132,8 @@ expecting structure that will never appear.
 | Gherkin `.feature` files | Features, scenarios and ticket links in business language | The best bridge from business question to code |
 | Markdown (ADRs, runbooks, designs) | Nothing structurally — **semantic (LLM) extraction only** | Where decisions and rationale live; worth the extraction cost |
 | Architecture DSL (C4, LikeC4, Structurizr) | Nothing structurally — semantic only, but disproportionately valuable | See §4 |
-| Terraform / HCL | **Nothing.** No AST support | Infrastructure value arrives via its YAML, its markdown and file names |
+| Terraform / HCL | A node per block — resource, variable, module, output — with `references` edges between them, **only with `pip install 'graphifyy[terraform]'`** | Without the extra the files parse to nothing, the build succeeds and the graph is short; `knowledgestore status` names the gap and the install |
+| SQL | A node per table and view, with `reads_from` edges, **only with `pip install 'graphifyy[sql]'`** | The same silent zero as Terraform, and the same line in `status` |
 | Helm charts | Chart YAML parses; the deployment topology is in values files | Names every service and its config surface — a good cross-repo index |
 | Postman collections, binary, images | Nothing useful | History and manifest presence only |
 
@@ -742,9 +743,17 @@ that refresh consolidated roughly 39,000 communities into 28,000, and most of
 the loss was merged-cluster collisions rather than summaries falling below the
 overlap bar. Two clusters that merge can keep only one summary between them.
 
-So budget backfill for any refresh, not only for additions, and read the split
-that `remap` reports: collisions mean consolidation, whereas drops below the bar
-mean genuine drift. It also pays to know how long the authoring costs — roughly
+So budget backfill for any refresh, not only for additions, and read the reasons
+on `remap`'s `Withdrawn:` line rather than its retention figure. Five print and,
+under the shipped `exact` criterion, only three can move: **not identical to
+their new community**, which is what that criterion withdraws on — a summary is
+carried only onto a community holding exactly the node set its prose was written
+about; **merged-cluster collisions**, which mean consolidation; and **members
+gone**, which means the nodes left the graph. The other two — below the 60%
+overlap bar, and describing under 20% of their cluster — are 0 on that line until
+you pass `--carry overlap`, so a below-bar count read as drift under the default
+is a line that cannot move. The fallback route reports its own near misses on a
+line of its own. It also pays to know how long the authoring costs — roughly
 1,500 summaries took about thirty parallel subagents and a few minutes of
 wall-clock, which is small against the rebuild itself.
 

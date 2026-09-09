@@ -203,13 +203,14 @@ that in both directions
   Authors are instructed to claim nothing the digest does not show.
 - **`merge` validates shape**: unknown community ids are rejected, as is any
   summary outside 60–700 characters.
-- **`remap` protects continuity** with three refusals: it carries a summary
-  only onto a community holding exactly the node set it was written about, and
-  withdraws the rest to `communities-withdrawn.json` (`--carry overlap` restores
-  the older 60%-of-the-old-members tolerance, `--bar`); it refuses to run at all
-  on an implausibly small summary set (`--floor`, default 10) or when fewer than
-  half the graph's nodes carry a community (`--coverage`) — both of which would
-  silently write a bad file over a good one.
+- **`remap` protects continuity**: it carries a summary only onto a community
+  holding exactly the node set it was written about, and withdraws the rest to
+  `communities-withdrawn.json` (`--carry overlap` restores the older
+  60%-of-the-old-members tolerance, `--bar`). Three refusals stop it running at
+  all: an implausibly small summary set (`--floor`, default 10), fewer than half
+  the graph's nodes carrying a community (`--coverage`), and a snapshot that
+  shares no node ids with the graph. Each would otherwise write a bad file over a
+  good one and report it as legitimate churn.
 - **`verify` checks grounding, not shape**: identifiers cited in each
   summary's prose are normalised (case and punctuation stripped), expanded
   with spelling variants (`.java` suffixes, dotted-name parts, `Test`
