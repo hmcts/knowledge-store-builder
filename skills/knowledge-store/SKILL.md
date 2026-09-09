@@ -228,9 +228,13 @@ what this store holds, not from the world.
 
 Two layers connect code to intent:
 
-1. **Gherkin features as nodes** (`metadata.kind: gherkin_feature`), wired to
-   their scenarios, ticket nodes and the step definitions they exercise. Walk
-   from a component up to the behaviours it implements.
+1. **Gherkin features as nodes** (`metadata.kind: feature`, with
+   `metadata.format` naming the parser that read them), wired to their
+   scenarios, ticket nodes and the step definitions they exercise. Walk from a
+   component up to the behaviours it implements. A store built before kinds
+   became format-agnostic carries the older alias `gherkin_feature` on the same
+   nodes, so match either: a filter on one form alone returns a clean zero, and
+   a clean zero reads as an estate with no Gherkin in it.
 2. **The intent index** — which tickets' commits touched each file:
 
    ```python
@@ -244,17 +248,20 @@ Two layers connect code to intent:
 
    | Field | What it is |
    |---|---|
-   | `d` | the curated description: the subject where it says something, otherwise the body's opening prose |
-   | `s` | the commit subjects as written, including the terse ones `d` filters out |
-   | `b` | the body prose, kept even where the subject was serviceable |
+   | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
+   | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
+   | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
 
-   `s` and `b` are **absent** on a ticket whose commits offered neither, so read
-   them with `.get(...)`. Real tracker titles, if imported, are in
-   `ticket-titles.json.gz`.
+   Every one of the three is a **list of strings**. Quote an element, never the
+   field: `record['d']` is a list, and printing it puts brackets and quotes into
+   an answer. `d` is always present and is `[]` on a ticket whose commits
+   offered nothing usable; `s` and `b` are each **omitted** when their own pool
+   is empty, so read those two with `.get(..., [])`. Real tracker titles, if
+   imported, are in `ticket-titles.json.gz`.
 
 Recipe: graph neighbourhood of X → linked features (business language) →
 intent-index tickets for X's source files → what their commits said. Read `d`
-first; go to `s` and `b` when it is thin or absent, because a ticket with no
+first; go to `s` and `b` when it is empty or thin, because a ticket with no
 description can still have the author's own words. Quote the commit text you are
 using and say whether it was a subject or a body, and say so when no tracker
 title exists. **Never guess what a ticket was about.**
