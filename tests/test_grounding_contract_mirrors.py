@@ -67,10 +67,14 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "before it goes in the document",
     ),
     "docs/building-a-knowledge-store.md": ("not delegable to the author",),
+    "docs/asking-questions.md": (
+        "to evidence in the store",
+        "Absence of evidence is reported as a finding",
+    ),
 }
 
 # Below this the table parse has stopped working rather than the table having
-# shrunk. Four rows exist today; a real removal is a deliberate edit that should
+# shrunk. Five rows exist today; a real removal is a deliberate edit that should
 # lower this line in the same change.
 MINIMUM_MIRRORS = 4
 

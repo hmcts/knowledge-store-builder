@@ -60,6 +60,14 @@ README). One document each.
   declared heading, restore it or change the consumer and the declared line
   together — deleting the line is not the fix. Declare a new inbound link there
   when a consumer adds one.
+- The same gate holds two more of this repository's prose rules, and the same
+  "do not delete the line" applies to both. A statement declared in
+  `docs/mirrored-contract.txt` must be in `docs/grounding-and-verification.md`
+  **and** in the file that mirrors it, so rewording a rule in the master fails
+  until every copy moves with it; a document that states two of the contract's
+  rules without the master's mirror list naming it is reported too. And an
+  instruction listed in `docs/retired-instructions.txt` must not reappear in a
+  fenced block — prose about why it fails is legitimate and is not read.
 - Read the finished page **as the persona**: can they act within a minute?
   Is the first screen worth their next five?
 - Docs that restate a rule from a skill or a master document must name it,
