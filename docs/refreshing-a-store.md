@@ -290,9 +290,14 @@ not the configuration.
 | `repositories/<repo>` | `merge-graphs` is given a shell glob of per-repository graphs, so a removed repository stays in the merged graph |
 | `knowledge/git-history/<repo>` | `intent` globs `*/commits.ndjson`, so removed repositories keep contributing file-to-ticket links |
 
-`sync --prune` prunes git refs, not repositories. `knowledge/provenance.json` is
-the one thing that self-corrects, because `sync` rewrites it from the configured
-set.
+**There is no `sync --prune`.** `sync` accepts no flags of its own, and until
+recently an unrecognised one was ignored — so the command this paragraph used to
+describe ran a full clone-and-hard-reset of every configured repository instead
+of the narrow operation its name suggests. It is now refused, and nothing runs.
+Removing a clone is the manual step the table above describes.
+
+`knowledge/provenance.json` is the one thing that self-corrects, because `sync`
+rewrites it from the configured set.
 
 [`knowledgestore merge-inputs`](#check-what-the-merge-will-read) names any clone
 whose graph `config/repositories.txt` does not declare. Nothing does the same for

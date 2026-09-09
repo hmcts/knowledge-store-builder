@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import contextlib
+import sys
 import unittest
 
 from knowledgestore import cli
@@ -110,3 +111,82 @@ class SelfParsingStaysHonest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AStageThatTakesNoArgumentsRefusesThemTest(unittest.TestCase):
+    """`sync --prune` ran a full clone-and-hard-reset of the estate (#346).
+
+    The `--help` guard above already existed for this reason, and its comment says
+    so: an unrecognised argument fell through to the stage's default action. Only
+    `-h/--help` was caught, so every other flag still did the broadest thing the
+    library can do, silently. The refresh guide described `sync --prune` as a
+    narrow operation and no stage has ever accepted it.
+    """
+
+    def _ran(self, argv):
+        """Drive the CLI with `sync`'s main replaced by a recorder.
+
+        A sentinel rather than a mock assertion: what matters is whether the
+        estate would have been re-synced, and the only honest evidence for "it
+        did not run" is that the side effect did not happen.
+        """
+        ran = []
+        module = __import__("knowledgestore.sync_repositories", fromlist=["main"])
+        original = module.main
+        module.main = lambda: ran.append(True) or 0
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = cli.main(argv)
+        finally:
+            module.main = original
+        return code, ran, out.getvalue() + err.getvalue()
+
+    def test_an_unrecognised_flag_does_not_run_the_stage(self):
+        """The defect: `--prune` ignored, so `sync` fetched and reset every clone."""
+        code, ran, _ = self._ran(["sync", "--prune"])
+        self.assertEqual(ran, [], "the stage ran, so the estate would have been re-synced")
+        self.assertNotEqual(code, 0)
+
+    def test_the_refusal_names_the_argument_it_refused(self):
+        """A refusal that does not say which argument sends the reader guessing."""
+        _, _, printed = self._ran(["sync", "--prune"])
+        self.assertIn("--prune", printed)
+        self.assertIn("Nothing has run", printed)
+
+    def test_a_stage_with_no_arguments_still_runs(self):
+        """The over-correction guard, and the reason this class is not one test.
+
+        Refusing an unrecognised argument must not become refusing to run. A guard
+        broad enough to reject the ordinary invocation would fail every documented
+        route into a store, and would look exactly like the fix working.
+        """
+        code, ran, _ = self._ran(["sync"])
+        self.assertEqual(ran, [True])
+        self.assertEqual(code, 0)
+
+    def test_asking_for_help_still_explains_rather_than_refusing(self):
+        """The pre-existing behaviour, which the generalised guard must preserve."""
+        code, ran, printed = self._ran(["sync", "--help"])
+        self.assertEqual(code, 0)
+        self.assertEqual(ran, [])
+        self.assertIn("takes no arguments of its own", printed)
+
+    def test_a_self_parsing_stage_still_receives_its_own_arguments(self):
+        """`summaries extract` must not be refused - those stages parse for themselves.
+
+        The guard keys on SELF_PARSING, so a stage added to that set later keeps
+        working and a stage removed from it starts being protected. Driving a real
+        self-parsing stage rather than trusting the membership test.
+        """
+        ran = []
+        module = __import__("knowledgestore.build_community_summaries", fromlist=["main"])
+        original = module.main
+        module.main = lambda: ran.append(list(sys.argv[1:])) or 0
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["summaries", "extract"])
+        finally:
+            module.main = original
+        self.assertEqual(code, 0)
+        self.assertEqual(ran, [["extract"]])

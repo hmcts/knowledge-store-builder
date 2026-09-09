@@ -249,11 +249,38 @@ def main(argv: list[str] | None = None) -> int:
     # repository in the estate, which is the opposite of what someone probing an
     # unfamiliar subcommand expects. Handled here rather than in each stage so a
     # stage added later inherits it instead of having to remember.
-    if any(arg in ("-h", "--help") for arg in rest[1:]) and stage not in SELF_PARSING:
-        print(f"knowledgestore {stage}\n\n  {STAGES[stage][1]}\n")
-        print("This stage takes no arguments of its own.")
-        print("Run `knowledgestore` for the full stage list, and see config.py for settings.")
-        return 0
+    if rest[1:] and stage not in SELF_PARSING:
+        asked = [arg for arg in rest[1:] if arg in ("-h", "--help")]
+        if asked:
+            print(f"knowledgestore {stage}\n\n  {STAGES[stage][1]}\n")
+            print("This stage takes no arguments of its own.")
+            print("Run `knowledgestore` for the full stage list, and see config.py for settings.")
+            return 0
+        # Anything else is refused rather than ignored, and the reason is the one
+        # the paragraph above already gives for `--help`: a stage that parses no
+        # arguments used to let an unrecognised one fall through to its default
+        # action. For `sync` that clones and hard-resets every repository in the
+        # estate, so `knowledgestore sync --prune` - which the refresh guide once
+        # described as a narrow operation, and which no stage has ever accepted -
+        # did the broadest thing the library can do and said nothing.
+        #
+        # Refusing is safe in the direction that matters. A caller who meant a
+        # real flag learns the stage has none; a caller who typo'd one does not
+        # re-sync an estate to find out.
+        print(
+            f"knowledgestore {stage} takes no arguments of its own, so "
+            f"{', '.join(rest[1:])} would have been ignored - and ignoring it would "
+            f"have run the stage. Nothing has run.\n",
+            file=sys.stderr,
+        )
+        print(f"  {STAGES[stage][1]}", file=sys.stderr)
+        print(
+            "\nRun `knowledgestore " + stage + " --help` for what it does, or "
+            "`knowledgestore` for the stage list. Settings are environment "
+            "variables and `--root`, not stage flags.",
+            file=sys.stderr,
+        )
+        return 2
 
     module_name = STAGES[stage][0]
     module = __import__(f"{__package__}.{module_name}", fromlist=["main"])
