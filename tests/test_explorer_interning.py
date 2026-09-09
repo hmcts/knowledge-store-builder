@@ -44,6 +44,35 @@ from knowledgestore import build_explorer as explorer  # noqa: E402
 from knowledgestore import io as store_io  # noqa: E402
 
 
+"""The #dicts element the page gains, written out by hand.
+
+Fifty-three bytes: forty-three for the opening tag, nine for the closing one, and
+the line break after it. Typed here rather than read from `explorer.TEMPLATE`, so
+the two are an agreement between independent readings instead of a restatement -
+`dicts_tag_bytes` measuring the wrong line would still equal itself.
+
+The page format is what this describes, so a change to it should be deliberate:
+this literal is the place to make it, and the test naming it says which report
+number moves.
+"""
+DICTS_TAG = '<script id="dicts" type="application/json"></script>\n'
+
+
+def dicts_tag_on(page: str) -> str:
+    """A built page's #dicts element with the tables taken out of it.
+
+    Read off the page, so a reconciliation can compare the report against the
+    file rather than against the constant the report was computed from. Split on
+    the line's first `>` and its last `</script>`: everything between them is
+    JSON, which can hold either sequence, and the build escapes `</` inside
+    strings so the closing tag cannot appear there.
+    """
+    line = next(text for text in page.splitlines(keepends=True) if '<script id="dicts"' in text)
+    opening, remainder = line.split(">", 1)
+    _, trailing = remainder.rsplit("</script>", 1)
+    return f"{opening}></script>{trailing}"
+
+
 def rows_carrying(column: int, values: list) -> list:
     """Full-width page rows carrying `values` in `column`, one value per row.
 
@@ -688,6 +717,66 @@ class InternedPageTest(SettingsIsolated):
         self.assertEqual(sum(item.saving for item in plan if item.interned), actual)
         self.assertGreater(actual, 0)
 
+    def test_the_reported_net_is_the_bytes_the_page_actually_lost(self):
+        """Breaks if the reported figure stops accounting for the tag it added.
+
+        The identity above is true of the block's VALUES and silent about the
+        element that carries the tables, so the headline could be - and was -
+        larger than the bytes the file actually lost (#333). This extends it to
+        the number the operator is given: the plain block, less the encoded
+        block, less the dictionaries, less their script tag.
+
+        The tag term is measured off the built page rather than taken from
+        `dicts_tag_bytes`, so the chain runs report -> model -> template and is
+        settled against the file. A model subtracting a tag the page does not
+        write agrees with itself and disagrees here.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp).resolve())
+            stdout = self._build()
+            page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+            rows, tables, data, dicts = self._blocks()
+
+        plain = json.dumps(explorer.decode_rows(rows, tables), ensure_ascii=False)
+        tag_bytes = len(dicts_tag_on(page).encode("utf-8"))
+        actual = (
+            len(plain.replace("</", "<\\/").encode("utf-8"))
+            - len(data.encode("utf-8"))
+            - len(dicts.encode("utf-8"))
+            - tag_bytes
+        )
+        net = re.search(r"net ([\d,]+) bytes off", stdout)
+
+        assert net is not None, stdout
+        self.assertEqual(int(net.group(1).replace(",", "")), actual)
+        self.assertGreater(actual, 0)
+        self.assertEqual(explorer.dicts_tag_bytes(), tag_bytes)
+
+    def test_the_page_declares_the_format_it_was_built_in(self):
+        """Breaks if the page stops saying what shape its blocks are in (#332).
+
+        The marker is the whole fix, and it is one key in one dict: dropping it
+        leaves every published page unmarked, which a reader is obliged to treat
+        as the pre-interning format - so the mis-read this closes comes straight
+        back, and no reader-side test can notice, because an unmarked page is
+        legitimate and loads.
+
+        The value as well as the key. `pageFormat: 1` on an interned page is the
+        one statement worse than no statement at all: it invites a format-1
+        reader to rank this page's indices as labels and report a score.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(Path(tmp).resolve())
+            self._build()
+            page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+            _, tables, _, _ = self._blocks()
+
+        block = page.split('<script id="config" type="application/json">')[1]
+        declared = json.loads(block.split("</script>")[0])
+
+        self.assertTrue(tables, "nothing was interned, so this page is not format 2")
+        self.assertEqual(declared.get("pageFormat"), 2)
+
     def test_a_build_whose_encoding_is_wrong_stops_instead_of_writing_a_page(self):
         """Breaks if the build stops verifying its encoding before it writes.
 
@@ -764,17 +853,20 @@ class ReportedNumbersTest(unittest.TestCase):
         report = explorer.interning_report(plan)
 
         value_bytes = sum(item.field_bytes for item in plan)
-        saved = sum(item.saving for item in plan if item.interned)
+        net = sum(item.saving for item in plan if item.interned) - len(DICTS_TAG.encode("utf-8"))
         self.assertIn(f"{value_bytes:,} value bytes", report)
-        self.assertIn(f"({saved * 100 // value_bytes}% of them)", report)
+        self.assertIn(f"({net * 100 // value_bytes}% of them)", report)
         self.assertIn("structural bytes", report)
 
-    def test_the_net_line_is_the_sum_of_the_columns_that_won(self):
-        """Breaks if the headline stops being the sum of the reported verdicts.
+    def test_the_net_line_is_the_columns_that_won_less_the_blocks_own_tag(self):
+        """Breaks if the headline stops being reachable from the lines above it.
 
-        A total nobody can reach from the lines above it is a second expression
-        for the same quantity, which is how two numbers describing one thing
-        start disagreeing.
+        A total nobody can reach from the report's own lines is a second
+        expression for the same quantity, which is how two numbers describing one
+        thing start disagreeing. The tag is part of that arithmetic (#333): the
+        columns save bytes off the block's values, the block's script element is
+        a byte cost the page pays whichever way every column went, and the
+        headline is the difference.
         """
         plan, _ = explorer.interning_plan(sample_rows())
         report = explorer.interning_report(plan)
@@ -782,7 +874,58 @@ class ReportedNumbersTest(unittest.TestCase):
         saved = sum(item.saving for item in plan if item.interned)
         net = re.search(r"net ([\d,]+) bytes", report)
         assert net is not None
-        self.assertEqual(int(net.group(1).replace(",", "")), saved)
+        self.assertEqual(int(net.group(1).replace(",", "")), saved - len(DICTS_TAG.encode("utf-8")))
+
+    def test_the_tag_the_report_subtracts_is_the_one_the_template_writes(self):
+        """Breaks if the subtracted cost stops describing the page's own tag.
+
+        The cost is derived from the template line that writes the block rather
+        than written down as a number, because a constant is a second thing to
+        keep in step with the line it describes. This is the other half of that:
+        it compares the derivation against the element spelled out by hand, so a
+        `dicts_tag_bytes` measuring the wrong line - or measuring the tables
+        instead of the tag - fails here rather than agreeing with itself.
+        """
+        self.assertEqual(explorer.dicts_tag_bytes(), len(DICTS_TAG.encode("utf-8")))
+
+    def test_a_template_not_writing_the_block_exactly_once_is_refused(self):
+        """Breaks if the derivation quietly costs a block the page does not write.
+
+        A template writing the block twice makes the page pay twice while the
+        report subtracts once; one writing it not at all makes the report
+        subtract a cost the page never carries. Either leaves the model and the
+        file disagreeing by a constant, which is the whole failure being closed -
+        so neither may return a number.
+        """
+        for template in ('<script id="data">__DATA__</script>\n', explorer.TEMPLATE * 2):
+            with self.subTest(lines=template.count("__DICTS__")):
+                with self.assertRaises(ValueError) as raised:
+                    explorer.dicts_tag_bytes(template)
+                self.assertIn("__DICTS__", str(raised.exception))
+
+    def test_a_page_saving_less_than_its_own_tag_is_reported_as_growing(self):
+        """Breaks if the report can be wrong about the SIGN of its headline.
+
+        The defect this closes (#333), and the reason it is worth closing at a
+        magnitude that is noise on a real page: a report that can be wrong about
+        the direction of its own headline number cannot be checked against the
+        file, and an operator who finds it wrong once stops believing the ones
+        that are right.
+
+        Twelve rows, hand-costed: column 0 holds `"abc"` throughout, so it saves
+        60 - 14 - 12 = 34; the five string columns left empty each save
+        24 - 11 - 12 = 1; the two integer and two list columns lose. That is 39
+        bytes off the values against a 53-byte tag, so the page is 14 bytes
+        LARGER interned than plain - and before this the report called it a
+        saving of 39 with no mention of the tag at all.
+        """
+        plan, _ = explorer.interning_plan(rows_carrying(0, ["abc"] * 12))
+        report = explorer.interning_report(plan)
+
+        self.assertIn("net 14 bytes ONTO the page", report)
+        self.assertIn("save 39 bytes between them", report)
+        # The saving wording belongs to a page that shrank, and this one grew.
+        self.assertNotIn("bytes off the block", report)
 
 
 if __name__ == "__main__":

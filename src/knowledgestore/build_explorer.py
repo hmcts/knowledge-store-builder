@@ -66,6 +66,26 @@ TICKETS_COLUMN = 7
 # entries must be non-method symbols outside backend test trees with at
 # least this many connections. See config.MIN_ENTRY_DEGREE / config.E2E_REPOS.
 E2E_REPOS = config.E2E_REPOS
+# What the page says about its own shape, written into the #config block for
+# whatever loads it (#332). It is bumped when a block stops meaning what an
+# earlier reader assumed, and it exists because the two sides of a published
+# page are installed separately: a store commits `explorer.html` and another
+# environment - a CI job, a stale virtualenv - runs `check-answers` against it
+# with whatever library version it happens to have.
+#
+# 1 is every page built before data-block interning. Those pages carry no
+# marker at all, so an ABSENT `pageFormat` reads as 1 rather than as an error;
+# reading it as an error would turn every page a store has already published
+# into a refusal, which is the trap the optional #dicts block avoided in the
+# other direction.
+# 2 is the interned data block (#245): a column's values replaced by indices
+# into a per-column table in #dicts. A reader that does not decode it ranks
+# integers as labels.
+#
+# The formats a READER accepts are `READS_PAGE_FORMATS` in explorer_harness.mjs,
+# which is the only thing that can say what it understands. The page regression
+# checks the two agree about the page this tree builds.
+PAGE_FORMAT = 2
 
 
 PACKAGE = "knowledgestore"
@@ -706,6 +726,15 @@ def interning_report(plan: tuple[Interning, ...]) -> str:
     block: brackets, commas and row scaffolding are a floor no encoding touches,
     and their share differs measurably between estates, so a percentage of the
     whole block would flatter one store and understate another.
+
+    The headline is net of the #dicts block's own script tag (#333). The per
+    column figures are savings off values, and summing them describes the values
+    rather than the page: interning also adds the tag that carries the tables,
+    which the page pays whether or not any column won. Uncounted, a page whose
+    columns save fewer bytes than the tag costs is reported as shrinking while
+    the file grew - a report wrong about the SIGN of its own headline, which is
+    worse than one that is short by a constant. `dicts_tag_bytes` is defined
+    beside the template it measures, below.
     """
     if not plan:
         return ""
@@ -713,13 +742,25 @@ def interning_report(plan: tuple[Interning, ...]) -> str:
     for item in sorted(plan, key=lambda item: (-item.saving, item.column)):
         lines.append(column_line(item))
     saved = sum(item.saving for item in plan if item.interned)
+    tag = dicts_tag_bytes()
+    net = saved - tag
     total = sum(item.field_bytes for item in plan)
-    share = f" ({saved * 100 // total}% of them)" if total else ""
-    lines.append(
-        f"  net {saved:,} bytes off the block's {total:,} value bytes{share}; structural "
-        "bytes (brackets, commas, row scaffolding) are a floor no encoding touches and "
-        "are excluded from both."
+    structural = (
+        "structural bytes (brackets, commas, row scaffolding) are a floor no encoding "
+        "touches and are excluded from the value counts"
     )
+    if net > 0:
+        share = f" ({net * 100 // total}% of them)" if total else ""
+        lines.append(
+            f"  net {net:,} bytes off the block's {total:,} value bytes{share}, after the "
+            f"{tag:,} bytes the #dicts block's own script tag adds; {structural}."
+        )
+    else:
+        lines.append(
+            f"  net {abs(net):,} bytes ONTO the page: the columns that won save "
+            f"{saved:,} bytes between them and the #dicts block's own script tag costs "
+            f"{tag:,}, so this page is no smaller interned than plain; {structural}."
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -852,6 +893,50 @@ __APP_JS__
 </body>
 </html>
 """
+
+
+# The slot the dictionary tables are substituted into. Named, because
+# `dicts_tag_bytes` measures the line around it and a string literal repeated in
+# two places is a rename away from measuring nothing.
+DICTS_PLACEHOLDER = "__DICTS__"
+
+
+def dicts_tag_bytes(template: str = TEMPLATE) -> int:
+    """What the #dicts block costs the page before it holds anything (#333).
+
+    Interning does not only add dictionary content, it adds the element that
+    carries it - and the page pays for that element whether or not a single
+    column won. It is the one term of the encoding's cost that is not a property
+    of the data, so the report subtracts it from the headline rather than leaving
+    an operator to reconstruct the distinction from the phrase "value bytes".
+
+    Measured off the template line that writes the block, never written down as
+    a number. A hard-coded constant is a second thing to keep in step with the
+    line it describes, and the drift is silent in the direction that matters:
+    renaming the block or dropping its `type` attribute would leave the report
+    subtracting bytes the page no longer spends, and the reconciliation against
+    the page's own size is what would then fail rather than the report.
+
+    The whole line including its newline, because that is what the page gains: a
+    template without this block has neither the tag nor the break after it.
+
+    Raises when the template writes the block anywhere but exactly once. Twice
+    and the page pays twice while the report subtracts once; not at all and the
+    report subtracts a cost the page does not carry. Both leave the model and
+    the file disagreeing by a constant, which is the failure this function
+    exists to close.
+    """
+    lines = [line for line in template.splitlines(keepends=True) if DICTS_PLACEHOLDER in line]
+    if len(lines) != 1:
+        raise ValueError(
+            f"the explorer template writes {DICTS_PLACEHOLDER} on {len(lines)} lines and "
+            "the interning report subtracts the cost of exactly one of them. The reported "
+            "saving is checked against the page's real size, so a block written twice or "
+            "not at all would leave the model and the page disagreeing by a constant - "
+            "keep the block on one line of the template, or change what the report "
+            "subtracts with it."
+        )
+    return len(lines[0].replace(DICTS_PLACEHOLDER, "").encode("utf-8"))
 
 
 def block_name(placeholder: str) -> str:
@@ -1098,6 +1183,11 @@ def main() -> int:
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.
     page_config = {
+        # What the page says about its own shape, so a reader that does not
+        # understand it can say so instead of ranking indices as labels (#332).
+        # First key of the block deliberately: it is the one an operator reading
+        # a published page by eye wants, and the block is written in this order.
+        "pageFormat": PAGE_FORMAT,
         "jiraBrowseUrl": config.TICKET_BROWSE_URL,
         # Where "request a topic brief" links point (pre-filled issue).
         # Empty string hides the link.

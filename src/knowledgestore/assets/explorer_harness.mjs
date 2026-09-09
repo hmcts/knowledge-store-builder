@@ -43,6 +43,78 @@ export const REQUIRED_BLOCKS = [
  */
 export const OPTIONAL_BLOCKS = ['dicts'];
 
+/** The page formats this loader understands, as `#config`'s `pageFormat` (#332).
+ *
+ * The two sides of a published page are installed separately: a store commits
+ * `explorer.html`, and another environment - a CI job, an operator's stale
+ * virtualenv - runs `check-answers` against it with whatever library version it
+ * happens to have. So the page states its format and the reader states what it
+ * reads, and a reader meeting a format not in this list stops.
+ *
+ * 1 is every page built before data-block interning; 2 is the interned block.
+ * Both are here because this loader genuinely reads both - the `#dicts` block is
+ * optional above and `decodeRows` is the identity without it.
+ *
+ * Without this, a format-2 page read by a format-1 library failed on
+ * `a.localeCompare is not a function` - a sort over a column that now held
+ * integers. Loud, but incidental: on a path not reaching that sort first, the
+ * integers would have been ranked as labels and the run would have reported a
+ * plausible score instead of a failure. The number the build writes is
+ * `PAGE_FORMAT` in build_explorer.py.
+ */
+export const READS_PAGE_FORMATS = [1, 2];
+
+/** The format a page declares: its `pageFormat`, or 1 where it declares none.
+ *
+ * An unmarked page is format 1, NOT an error. Every page published before the
+ * marker existed carries no `pageFormat`, and reading absence as a mismatch
+ * would turn all of them into a refusal - the failure this check exists to
+ * prevent, reintroduced by the check itself.
+ *
+ * A `#config` block that will not parse returns 1 rather than throwing here.
+ * The engine parses the same block moments later and fails on it by name, and a
+ * format refusal over a page whose config is simply broken would name the wrong
+ * problem.
+ *
+ * @param {string|undefined} configText
+ * @returns {unknown} whatever the page declared, unvalidated
+ */
+export function declaredPageFormat(configText) {
+  if (!configText) return 1;
+  try {
+    const config = JSON.parse(configText);
+    return config?.pageFormat ?? 1;
+  } catch {
+    return 1;
+  }
+}
+
+/** Why this page cannot be read, or null when it can.
+ *
+ * A refusal rather than a warning, and the choice is the harness's to make:
+ * this module is what `check-answers` loads a store's published page with, and
+ * its whole purpose is to fail on a store that is broken. A warning here would
+ * be printed above a full set of scores computed over indices treated as
+ * labels, and a reader cannot tell that from a healthy run.
+ *
+ * The browser is deliberately not the same decision. A page inlines the app.js
+ * that built it, so the engine a browser runs is always the engine of that
+ * page's own format and cannot mismatch - which is why app.js carries no copy of
+ * this check. A second copy of the format number, kept in step by hand, to guard
+ * a case that cannot arise is a drift risk rather than a safety net.
+ *
+ * @param {string} pagePath
+ * @param {string|undefined} configText
+ * @returns {string|null}
+ */
+export function pageFormatRefusal(pagePath, configText) {
+  const declared = declaredPageFormat(configText);
+  if (READS_PAGE_FORMATS.includes(/** @type {any} */ (declared))) return null;
+  return `page at ${pagePath} was built with page format ${JSON.stringify(declared)}; `
+    + `this library reads page format ${READS_PAGE_FORMATS.join(' and ')}. Upgrade `
+    + 'hmcts-knowledge-store-builder, or read the page with the version that built it.';
+}
+
 /** Pull the embedded JSON blocks out of a built page.
  *
  * Linear-time by splitting rather than a regex over a potentially very large
@@ -116,6 +188,13 @@ export function loadPage(pagePath, options = {}) {
   }
 
   const blocks = extractJsonBlocks(html);
+  // Before the missing-block check and before app.js is required, both
+  // deliberately. A page from a future format may be missing a block this
+  // version demands, or may crash the engine while it is being loaded, and
+  // either would report a symptom over a cause an operator can act on. There is
+  // nothing to do about a page this library cannot read except say so.
+  const refusal = pageFormatRefusal(pagePath, blocks.config);
+  if (refusal) throw new Error(refusal);
   const missing = REQUIRED_BLOCKS.filter((id) => !blocks[id]);
   if (missing.length) {
     throw new Error(`page at ${pagePath} is missing embedded JSON block(s): ${missing.join(', ')}`);

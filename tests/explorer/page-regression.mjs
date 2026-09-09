@@ -16,7 +16,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { APP_PATH, loadPage, strip } from '../../src/knowledgestore/assets/explorer_harness.mjs';
+import {
+  APP_PATH, READS_PAGE_FORMATS, extractJsonBlocks, loadPage, strip,
+} from '../../src/knowledgestore/assets/explorer_harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pagePath = process.env.KSB_FIXTURE_PAGE
@@ -418,6 +420,78 @@ for (const hostile of ['<img src=x onerror=alert(1)>', '"><script>alert(1)</scri
   assertInert(`the meta line for: ${hostile}`, api.meta.textContent);
 }
 
+// --- the page format marker, both directions (#332) -----------------------
+// A store publishes `explorer.html`; another environment runs `check-answers`
+// against it with whatever library version it has installed. Before the marker,
+// an interned page read by a pre-interning library failed on
+// `a.localeCompare is not a function` - loud, but only by accident: a sort over
+// a column that now held integers, not a format check. On a path not reaching
+// that sort first, the integers would have been ranked as labels and the run
+// would have reported a plausible score.
+//
+// Three assertions, and the second and third are what stop the first being a
+// trap. A refusal on an unrecognised format is worth nothing if it also refuses
+// the pages already published, which carry no marker at all.
+const pageConfig = JSON.parse(jsonBlocks.config || '{}');
+if (READS_PAGE_FORMATS.includes(pageConfig.pageFormat)) {
+  console.log(`ok    page format: this page declares format ${pageConfig.pageFormat}, which`
+    + ' this library reads');
+} else {
+  failures++;
+  console.error('FAIL  page format: the built page declares'
+    + ` ${JSON.stringify(pageConfig.pageFormat)}, which is not a format this library reads`);
+  console.error(`      (it reads ${READS_PAGE_FORMATS.join(' and ')}). A page that declares`);
+  console.error('      nothing must be read as format 1, so a builder that stopped writing');
+  console.error('      the marker would leave every reader-side check green - the two lines');
+  console.error('      that carry this: PAGE_FORMAT in build_explorer.py, and READS_PAGE_FORMATS');
+  console.error('      in explorer_harness.mjs');
+}
+
+// A format from the future, refused by name. The whole point of the marker: a
+// reader that cannot decode a page says so, instead of ranking whatever it
+// finds. Written into a copy of the real page, so what is refused is a page that
+// is otherwise entirely loadable.
+const futureDir = mkdtempSync(join(tmpdir(), 'ksb-futureformat-'));
+try {
+  const futurePage = join(futureDir, 'explorer.html');
+  const built = readFileSync(pagePath, 'utf-8');
+  const futureHtml = built.replace(
+    /(<script id="config" type="application\/json">)[^]*?(<\/script>)/,
+    (_m, open, close) => open + JSON.stringify({ ...pageConfig, pageFormat: 99 }) + close
+  );
+  if (!futureHtml.includes('"pageFormat":99')) {
+    failures++;
+    console.error('FAIL  page format: the fixture for an unreadable page was not built,');
+    console.error('      so the refusal below would be asserted against the real page');
+  } else {
+    writeFileSync(futurePage, futureHtml);
+    let refusal = '';
+    try {
+      loadPage(futurePage, { requireVerbatim: false });
+    } catch (e) {
+      refusal = e instanceof Error ? e.message : String(e);
+    }
+    // By name, not merely by throwing: the failure this replaces was a
+    // `TypeError` from a sort, and a reader could not tell it from a bug in the
+    // engine. The message has to name the page's format, this library's, and
+    // what to do about it.
+    const wanted = ['page format 99', 'this library reads page format 1 and 2',
+      'Upgrade hmcts-knowledge-store-builder'];
+    const absent = wanted.filter((s) => !refusal.includes(s));
+    if (refusal && !absent.length) {
+      console.log('ok    page format: a page declaring a format this library cannot read is'
+        + ' refused by name');
+    } else {
+      failures++;
+      console.error('FAIL  page format: a page declaring format 99 was not refused by name');
+      console.error(`      got: ${refusal || '(loaded without complaint)'}`);
+      for (const s of absent) console.error(`      message missing: "${s}"`);
+    }
+  }
+} finally {
+  rmSync(futureDir, { recursive: true, force: true });
+}
+
 // --- a page built before interning still loads and answers (#245) ---------
 // Two lines carry that guarantee - `OPTIONAL_BLOCKS` in the shipped harness and
 // app.js's `|| '{}'` fallback - and neither was observed. Moving `dicts` into
@@ -448,8 +522,21 @@ try {
   // both draw a Sonar smell that the JavaScript analyser will not let a
   // NOSONAR silence.
   const plain = JSON.stringify(api.DATA).replaceAll('</', String.raw`<\/`);
+  // The `pageFormat` marker goes too (#332). A page from before interning
+  // carries no marker, because the marker did not exist - and an unmarked page
+  // must read as format 1 rather than as a refusal, or the check that exists to
+  // stop a silent mis-read becomes a refusal of every page already published.
+  // Leaving the built page's `"pageFormat": 2` in place here would test a page
+  // no builder ever wrote, and this assertion would then say nothing about the
+  // pages actually at risk.
+  const legacyConfig = { ...pageConfig };
+  delete legacyConfig.pageFormat;
   const legacyHtml = built
     .replace(/<script id="dicts" type="application\/json">[^]*?<\/script>\n/, '')
+    .replace(
+      /(<script id="config" type="application\/json">)[^]*?(<\/script>)/,
+      (_m, open, close) => open + JSON.stringify(legacyConfig) + close
+    )
     .replace(
       /(<script id="data" type="application\/json">)[^]*?(<\/script>)/,
       (_m, open, close) => open + plain + close
@@ -461,6 +548,12 @@ try {
   if (/<script id="dicts"/.test(legacyHtml)) problems.push('the #dicts block was not removed');
   if (legacyHtml === built) problems.push('the page was not rewritten at all');
   if (legacyHtml.includes('"demo-core"') === false) problems.push('the plain rows are missing');
+  // The block, not the page: app.js documents the marker in a comment, and it is
+  // inlined here, so a search over the whole page finds `pageFormat` whatever
+  // the config block says.
+  if ('pageFormat' in JSON.parse(extractJsonBlocks(legacyHtml).config || '{}')) {
+    problems.push('the pageFormat marker was not removed');
+  }
   if (problems.length) {
     failures++;
     console.error('FAIL  pre-interning page: the fixture for it was not built');
@@ -477,15 +570,17 @@ try {
       // requireVerbatim off: this page deliberately does NOT inline app.js
       // byte-for-byte, which is the whole situation a published page is in.
       const legacy = loadPage(legacyPage, { appPath: legacyApp, requireVerbatim: false });
-      checkRows('a page carrying no #dicts block loads and holds the same rows', legacy.api.DATA);
+      checkRows('a page with no #dicts block and no pageFormat marker loads and holds the'
+        + ' same rows', legacy.api.DATA);
     } catch (e) {
       failures++;
       console.error('FAIL  pre-interning page: a page built before interning no longer loads,');
       console.error('      so every store that has committed one and not yet rebuilt would');
       console.error('      have `check-answers` fail against its own published page.');
       console.error(`      ${e.message}`);
-      console.error('      the two lines that carry this: OPTIONAL_BLOCKS in explorer_harness.mjs,');
-      console.error("      and app.js's `|| '{}'` fallback for an absent #dicts block");
+      console.error('      the three lines that carry this: OPTIONAL_BLOCKS in');
+      console.error("      explorer_harness.mjs, app.js's `|| '{}'` fallback for an absent");
+      console.error('      #dicts block, and `declaredPageFormat` reading an absent marker as 1');
     }
   }
 } finally {
