@@ -110,10 +110,13 @@ sentence-level semantics.
 
 | Layer | Artefact | Produced by |
 |---|---|---|
-| Graph | `graphify-out/graph.json` | graphify, plus the `gherkin` stage |
+| Graph | `graphify-out/graph.json` | graphify, plus the `gherkin`, `packages` and `deployments` stages |
 | Community summaries | `knowledge/summaries/communities.json` | `summaries` + an LLM at build time |
 | Semantic token index | `knowledge/semantic/token-neighbours.json.gz` | `semantic` (local model) |
-| Intent index and ticket descriptions | `knowledge/intent/*.json.gz` | `intent` |
+| Intent index and ticket descriptions | `knowledge/intent/file-tickets.json.gz`, `knowledge/intent/ticket-descriptions.json.gz` | `intent` |
 | Ticket titles | `knowledge/intent/ticket-titles.json.gz` | `ticket-titles` (tracker CSV) |
-| Topic briefs | `docs/topics/*.md`, `briefs.json` | `topics` + an LLM at build time |
+| Tracker detail | `knowledge/intent/ticket-tracker.json.gz` | `fetch-tickets` (opt-in, needs credentials) |
+| Topic briefs | `knowledge/topics/briefs.json`, `docs/topics/*.md` | `topics` + an LLM at build time |
+| Repository deep dives | `knowledge/deep-dives/dives.json`, `docs/deep-dives/*.md` | `deepdive` + an LLM at build time |
+| Build provenance | `knowledge/provenance.json` | `sync` |
 | The consumer surface | `graphify-out/explorer.html` | `explorer` |

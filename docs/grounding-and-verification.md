@@ -261,8 +261,10 @@ exit code moves on a mismatch, because how often a hand edit is legitimate has n
 been measured on any store. A deletion is not reported; a digest per entry cannot
 distinguish a removal from a re-key.
 
-**`--estate` and name segments.** The estate pass reports `[not in graph]`, which
-is deliberately narrower than "not in the estate": the graph is narrower than the
+**`--estate` and name segments.** The estate pass reports a flagged term as
+`[not in graph]` when the store has no history datasets to split against, and as
+`[not in graph or history]` or `[not in graph, in history]` when it has. All three
+are deliberately narrower than "not in the estate": the graph is narrower than the
 corpus. A cited term is corroborated by a whole identifier **or by one of its name
 segments** — `NgRx` against `@ngrx/store`, a class against a Java package that
 contains it, a resource against a Terraform module address. A whole-label match
@@ -310,13 +312,22 @@ split, since a split over an artefact nothing read would report the whole flagge
 total as possible invention. The lookup is one streaming pass over the datasets
 shared by every flagged term, and it stops as soon as the last term is located.
 
-**Calibrating on a real store.** Tuned against ~5,300 authored summaries:
-summaries written directly against their own digest flagged at 9%, while
-summaries carried across a re-cluster by `summaries remap` flagged at 37%. Two
-things follow. The four-fold gap is the check working — remapped prose cites the
+**Calibrating on a real store.** Prose authored against its own digest flagged
+at 9%; prose carried across a re-cluster by `summaries remap` flagged at 37%. Two
+things follow. The four-fold gap is the check working — carried prose cites the
 evidence of the cluster it was written for, not the one it now sits on. And a
 remap preserves *coverage* while degrading *grounding*, which is worth knowing
 before treating a high retention figure as a clean result.
+
+**Which is why the flag rate is split four ways, not two.** `verify` reports it
+for `authored` prose, for `carried unchanged`, for `carried across a move`, and
+for `carried with no record of the move`. Only the third is the population the
+37% describes: a remap that did not move a summary's community leaves the prose
+describing exactly the set it was written about, whatever id it now sits under, so
+it grounds as authored prose does — and reading it beside the 37% invites the
+opposite conclusion. The fourth is a remap report written before the library
+recorded the distinction; re-run `summaries remap` to record it, rather than
+reading a missing record as an unchanged one.
 
 Neither residual figure is all fabrication; both include interpretation and
 spellings the checker has not been taught. Use it to find the worst cases and to
