@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io as _io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -454,3 +455,134 @@ class TheIdNamingSteps(unittest.TestCase):
         )
         for entry in nodes.values():
             self.assertEqual(entry["original_id"], "slug")
+
+
+class DocumentedCounterCountTest(SettingsIsolated):
+    """The build skill must name every counter this stage prints.
+
+    The break this catches shipped: the skill said "Read all **eight**
+    counters" and explained seven, while `main` prints nine. An operator told
+    to read eight reads until they run out of named ones and stops - and the
+    two it never named, `disambig.` and `duplicate`, are the two that say
+    whether the namespacing and the edge de-duplication did anything, which is
+    the whole reason the stage exists rather than a concatenation.
+
+    The count is taken from the stage's own stdout rather than from its source,
+    because stdout is the artefact an operator reads. A counter seeded in the
+    dict and never printed is not one they can read, and counting the dict
+    would have made the skill's eight look defensible: `merge_nodes` seeds
+    seven keys, `resolve_edges` four, and neither total is nine.
+    """
+
+    # Two counter blocks print together, so neither module's dict is the answer:
+    # merged/namespaced/disambig./consolidated/fragmented from `merge_nodes`, and
+    # recovered/ambiguous/dangling/duplicate from `resolve_edges`.
+    EXPECTED = 9
+    SKILL = Path(__file__).resolve().parent.parent / "skills" / "knowledge-store-build" / "SKILL.md"
+    # `  name    <digits>  description`, which is what the counter block prints and
+    # nothing else in the output does. The follow-on paragraphs open with two
+    # spaces too, so requiring a name before the number is what keeps them out.
+    LINE = re.compile(r"^ {2}([a-z.]+)\s*(\d+) {2}\S", re.MULTILINE)
+
+    def printed(self) -> list[str]:
+        """Every counter the real stage prints, from a real two-chunk merge.
+
+        Two chunks sharing an id under one label and colliding under another, so
+        the block is exercised rather than printed as a row of zeros - a
+        single-chunk fixture prints the same nine lines and would pin the
+        formatting while saying nothing about the counters being real.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "graphify-out").mkdir()
+            config.configure(root=str(root))
+            for number, payload in (
+                (
+                    "0001",
+                    {
+                        "nodes": [
+                            node("registry", "shared registry name", "a/one.yaml"),
+                            node("keyholder", "one thing", "a/one.yaml"),
+                        ],
+                        "edges": [
+                            {"source": "registry", "target": "keyholder", "relation": "uses"},
+                            {"source": "registry", "target": "keyholder", "relation": "uses"},
+                            {"source": "registry", "target": "nowhere_at_all", "relation": "uses"},
+                        ],
+                    },
+                ),
+                (
+                    "0002",
+                    {
+                        "nodes": [
+                            node("registry", "shared registry name", "b/two.yaml"),
+                            node("keyholder", "a different thing", "b/two.yaml"),
+                        ],
+                        "edges": [],
+                    },
+                ),
+            ):
+                (root / "graphify-out" / f".graphify_chunk_{number}.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            out = _io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = merge_chunks.main([])
+            text = out.getvalue()
+        self.assertEqual(code, 0, text)
+        return [found.group(1) for found in self.LINE.finditer(text)]
+
+    def test_the_stage_prints_the_number_of_counters_named_here(self):
+        """Breaks when a counter is added to or removed from the printed block.
+        The finding is then "name it in the skill", not "restore the number"."""
+        printed = self.printed()
+        self.assertEqual(
+            len(printed),
+            self.EXPECTED,
+            f"the printed counter block changed; it now prints {printed}",
+        )
+
+    def test_the_skill_states_the_count_the_stage_prints(self):
+        """Breaks if the skill's number and the stage's output diverge again."""
+        words = {8: "eight", 9: "nine", 10: "ten", 11: "eleven"}
+        text = " ".join(self.SKILL.read_text(encoding="utf-8").split())
+        self.assertIn(
+            f"Read all {words[len(self.printed())]} counters",
+            text,
+            "the skill does not tell an operator to read the number of counters that print",
+        )
+
+    def test_the_skill_names_every_counter_that_prints(self):
+        """Breaks when a counter prints unexplained - the half a count alone
+        cannot catch, because "nine" is satisfied by naming any nine things.
+
+        This is what the shipped defect actually cost: `disambig.` and
+        `duplicate` printed with nothing in the skill saying what either meant.
+        """
+        text = self.SKILL.read_text(encoding="utf-8")
+        window = text[text.find("Read all") :][:1400]
+        for name in self.printed():
+            self.assertIn(
+                f"`{name}`",
+                window,
+                f"the stage prints `{name}` and the skill does not say what it means",
+            )
+
+    def test_a_counter_the_stage_does_not_print_would_not_satisfy_this(self):
+        """Guards the extractor in the same run.
+
+        Every assertion above rests on `LINE` matching the counter block and
+        nothing else. If it also matched the conditional paragraph that follows
+        the block - which opens with two spaces and a number - the count would
+        be right by accident and would move for the wrong reason.
+        """
+        self.assertEqual(
+            self.LINE.findall("  1,234 of these ids would be spelled differently under x\n"),
+            [],
+            "the extractor reads the follow-on paragraph as a counter",
+        )
+        self.assertEqual(
+            self.LINE.findall("  merged           3  same id and label across chunks\n"),
+            [("merged", "3")],
+            "the extractor no longer reads a counter line",
+        )

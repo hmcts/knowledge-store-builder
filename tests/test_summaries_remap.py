@@ -1044,5 +1044,84 @@ class RemapWriteGateTest(SettingsIsolated):
         self.assertNotIn("\\u", text)
 
 
+class DocumentedCarryBarIsConditionalTest(unittest.TestCase):
+    """The 60% bar must never be stated as this stage's criterion.
+
+    The break this catches shipped, and the skill contradicted itself: one
+    section describes `--carry exact` as the shipped default and `--carry
+    overlap` as an opt-in tolerance, while a later section told an operator
+    after a re-cluster to "remap by membership overlap ... (60% is a reasonable
+    bar)" with no condition on it. An operator reading only the second passage
+    reaches for a criterion this stage deliberately moved away from - and it is
+    the criterion that scored a new community which swallowed an old one whole
+    at 1.00 however much unrelated material came with it, which is the failure
+    the default exists to prevent.
+
+    Both halves are asserted because they fail apart. The default is a fact
+    about the code, so it is read from the module; the condition is a fact about
+    the prose, so it is read from the skill. Fixing the sentence while the
+    default moves to `overlap` would leave the skill correct about a condition
+    that no longer distinguishes anything, and this fails in that direction too.
+    """
+
+    SKILL = Path(__file__).resolve().parent.parent / "skills" / "knowledge-store-build" / "SKILL.md"
+    # Every way the bar gets written. `0.6` is the constant's own spelling and
+    # `60%` is the prose's; a passage using either is making the same claim.
+    BAR = re.compile(r"60\s?%|\b0\.6\b")
+    CONDITION = "--carry overlap"
+
+    def paragraphs(self) -> list[str]:
+        """The skill's paragraphs, collapsed so a claim matches across a wrap."""
+        text = self.SKILL.read_text(encoding="utf-8")
+        return [" ".join(block.split()) for block in text.split("\n\n") if block.strip()]
+
+    def test_the_shipped_criterion_is_exact(self):
+        """Breaks if the default moves. The bar would then apply by default and
+        every conditional sentence in the skill would be wrong the other way."""
+        self.assertEqual(summaries.DEFAULT_CARRY, summaries.CARRY_EXACT)
+        self.assertEqual(summaries.CARRY_CRITERIA, (summaries.CARRY_EXACT, summaries.CARRY_OVERLAP))
+
+    def test_the_bar_the_skill_quotes_is_the_constant(self):
+        """Breaks if `DEFAULT_BAR` moves and the skill keeps quoting 60%, which
+        is a number in prose drifting from the number in the code."""
+        self.assertEqual(summaries.DEFAULT_BAR, 0.6)
+
+    def test_every_passage_quoting_the_bar_names_the_criterion_it_belongs_to(self):
+        """Breaks if the bar is stated unconditionally anywhere in the skill."""
+        quoting = [block for block in self.paragraphs() if self.BAR.search(block)]
+        self.assertTrue(
+            quoting, "no passage quotes the carry bar any more; re-point or remove this pin"
+        )
+        for block in quoting:
+            self.assertIn(
+                self.CONDITION,
+                block,
+                "a passage states the carry bar without saying it applies only under "
+                f"`{self.CONDITION}`: {block[:200]}",
+            )
+
+    def test_the_skill_says_which_criterion_ships(self):
+        """Breaks if the skill stops naming the default. Knowing the bar is
+        conditional is no use without knowing which side of the condition an
+        operator is on by default."""
+        text = " ".join(self.SKILL.read_text(encoding="utf-8").split())
+        self.assertIn("`--carry exact`", text)
+
+    def test_an_unconditional_passage_would_be_caught(self):
+        """Guards this check's discriminating power in the same run.
+
+        The assertion above is a scan for absence, and a scan for absence over
+        a pattern that never matches passes on everything. This drives the
+        wording that shipped through the same predicate and requires it to fail.
+        """
+        shipped = (
+            "Either regenerate, or remap by membership overlap: for each old cluster, "
+            "find the new cluster holding most of its members and carry the summary "
+            "across only if the overlap is convincing (60% is a reasonable bar)."
+        )
+        self.assertTrue(self.BAR.search(shipped), "the bar pattern no longer matches the bar")
+        self.assertNotIn(self.CONDITION, shipped)
+
+
 if __name__ == "__main__":
     unittest.main()

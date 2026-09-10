@@ -87,10 +87,19 @@ RETIRED = Path("docs/retired-instructions.txt")
 # found so a maintainer can declare the mirror or reword the document.
 COPY_THRESHOLD = 2
 
-# What the link check reads. The README plus the two directories a persona is
-# routed through; `CLAUDE.md` and `CHEATSHEET.md` are reached as link targets
-# rather than scanned, which is enough to resolve an anchor into either.
-DOC_ROOTS = ("README.md", "docs", "skills")
+# What every check here reads: the README, the cheatsheet, and the two
+# directories a persona is routed through. `CLAUDE.md` is reached as a link
+# target rather than scanned, which is enough to resolve an anchor into it.
+#
+# `CHEATSHEET.md` was a link target too until #346, and being one is not enough
+# for the checks that read command blocks: it is a route into a store, an
+# operator copies from it, and it instructed `--no-cluster` while the build
+# skill forbade it. Every gate here reported "nothing to report" over a file
+# none of them opened. `test_docs_integrity.py` pins its presence, because
+# dropping it from this tuple restores that silence without failing anything
+# else - every other assertion in that module is a floor the remaining
+# documents clear on their own.
+DOC_ROOTS = ("README.md", "CHEATSHEET.md", "docs", "skills")
 
 # Schemes that leave this repository. Nothing here can say whether they resolve.
 EXTERNAL = ("http://", "https://", "mailto:")

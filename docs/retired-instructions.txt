@@ -33,3 +33,18 @@
 # the scan honours ignore rules, so this builds a graph out of the store's own
 # handful of files, reports success, and leaves a real estate looking thin.
 graphify . :: extract from inside each clone, then `graphify merge-graphs`; see the build skill's "Full build" section
+
+# Skipping clustering during per-repository extraction. Clustering is also where
+# graphify resolves an edge's endpoints against the nodes it holds and drops the
+# ones it cannot resolve as external or standard-library symbols, so
+# `--no-cluster` leaves edges naming nodes that do not exist and `merge-graphs`
+# materialises each one as a node carrying an id and no content. Two of the three
+# routes into a store instructed it while the build skill forbade it in bold,
+# which is the same shape as the entry above: two documents, each internally
+# consistent, and nothing comparing them.
+#
+# The flag rather than a whole command line, because the harm is the flag and not
+# how the extraction loop is spelled - a store that writes the loop differently
+# would walk straight past a longer entry. The build skill discusses the flag in
+# prose and in a comparison table, neither of which is a fenced block.
+--no-cluster :: extract with plain `graphify update .`; the build skill measures what the flag costs, and `knowledgestore dangling-endpoints` measures it on your own estate

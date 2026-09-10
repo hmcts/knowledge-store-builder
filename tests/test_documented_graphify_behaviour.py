@@ -288,3 +288,101 @@ class DetectClassificationOfNamedFormatsTest(unittest.TestCase):
             "graphify no longer classifies an emulator dump as content, so nothing "
             "reaches the exclusion in `content-set` and it is now dead code.",
         )
+
+
+@needs_graphify
+class ClusteringResolvesEdgeEndpointsTest(unittest.TestCase):
+    """Why the guides must not instruct `--no-cluster`, measured on the peer.
+
+    `docs/creating-a-store.md` and `CHEATSHEET.md` both told operators to extract
+    with `--no-cluster`, which the build skill forbids in bold. The skill is
+    right, and the reason is a claim about **graphify**: the clustering path is
+    also where an edge's endpoints are resolved against the node set, and the
+    edges it cannot resolve are dropped as external or standard-library symbols.
+    Dump the raw extraction instead and those edges survive naming nodes that do
+    not exist, which `merge-graphs` then materialises as nodes carrying an id and
+    no content - material an authoring pass pays an LLM to summarise.
+
+    `dedupe_nodes`/`dedupe_edges` are what the flag's write path applies to the
+    raw extraction, and `build_from_json` is what the clustered path runs, so the
+    comparison below is the flag's two branches rather than an imitation of them.
+    Asserted here because it is a third-party behaviour: if graphify starts
+    resolving endpoints on the raw path, the retired entry in
+    `docs/retired-instructions.txt` is over-strict and the skill's table is stale
+    - the finding would be "graphify changed, go correct the guidance", not "fix
+    this repository".
+
+    Deliberately NOT asserting the skill's own node and edge totals: those were
+    measured on one repository of an estate and are not reproducible here. What
+    is reproducible, and what the guidance actually rests on, is the direction -
+    dangling endpoints on the raw path, none on the clustered one, from one
+    extraction of the same files.
+    """
+
+    def _extraction(self) -> dict:
+        """One real extraction of a file importing modules the tree does not hold."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "a.py").write_text(
+            "import os\nimport json\n\n\ndef helper(value):\n    return json.dumps(value)\n",
+            encoding="utf-8",
+        )
+        (root / "b.py").write_text(
+            "import a\nimport logging\n\n\ndef run():\n    logging.getLogger(__name__)\n"
+            "    return a.helper({})\n",
+            encoding="utf-8",
+        )
+        from graphify.extract import collect_files, extract
+
+        return extract(collect_files(root), root=root)
+
+    @staticmethod
+    def _dangling(nodes, edges) -> set:
+        held = {node["id"] for node in nodes}
+        return {
+            end
+            for edge in edges
+            for end in (edge.get("source"), edge.get("target"))
+            if end is not None and end not in held
+        }
+
+    def test_the_raw_path_keeps_edges_whose_endpoints_no_node_holds(self):
+        """Break it catches: graphify resolving endpoints without clustering,
+        which would make the flag harmless and this repository's guidance wrong.
+
+        The control is the assertion that edges were extracted at all - an empty
+        extraction has no dangling endpoints either, and would read as the
+        flattering answer rather than a measurement.
+        """
+        from graphify.build import dedupe_edges, dedupe_nodes
+
+        extraction = self._extraction()
+        nodes = dedupe_nodes(extraction.get("nodes", []))
+        edges = dedupe_edges(extraction.get("edges", []))
+        self.assertTrue(edges, "nothing was extracted, so this measured nothing")
+        self.assertTrue(
+            self._dangling(nodes, edges),
+            "graphify now resolves endpoints on the raw path, so `--no-cluster` no "
+            "longer leaves dangling edges. Re-check the build skill's table and the "
+            "entry in docs/retired-instructions.txt.",
+        )
+
+    def test_the_clustered_path_resolves_or_drops_every_endpoint(self):
+        """Break it catches: the clustered path keeping unresolvable edges too,
+        which would mean removing the flag buys nothing and the guides were no
+        worse for instructing it."""
+        from graphify.build import build_from_json
+
+        extraction = self._extraction()
+        built = build_from_json(extraction)
+        nodes = [{"id": nid} for nid in built.nodes]
+        edges = [{"source": src, "target": tgt} for src, tgt in built.edges]
+        self.assertTrue(edges, "the built graph has no edges, so this measured nothing")
+        self.assertEqual(
+            self._dangling(nodes, edges),
+            set(),
+            "the clustered path now leaves dangling endpoints as well, so dropping "
+            "`--no-cluster` no longer buys a resolved graph",
+        )
