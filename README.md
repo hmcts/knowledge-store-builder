@@ -20,12 +20,14 @@ evidence is a finding here, not a silence.
 
 ## What a build produces
 
-Point the library at a GitHub organisation, choose the repositories, and it
-writes static files you commit alongside the code:
+Point the library at a GitHub organisation and choose the repositories. It
+drives [graphify](https://github.com/safishamsi/graphify) for the extraction
+itself, then enriches and indexes what comes back. The build writes static
+files you commit alongside the code:
 
 | Artefact | What it holds |
 |---|---|
-| `graphify-out/graph.json` | the estate graph — code, concepts, business features, deployments |
+| `graphify-out/graph.json` | the estate graph, merged from graphify's per-repository extraction and enriched here with business features, package and deployment edges |
 | `graphify-out/explorer.html` | the self-contained page above |
 | `knowledge/git-history/` | per-repository commit history as NDJSON |
 | `knowledge/intent/` | which tickets changed which files |
