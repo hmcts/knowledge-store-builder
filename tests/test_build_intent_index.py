@@ -21,6 +21,8 @@ from knowledgestore import build_intent_index as intent  # noqa: E402
 from knowledgestore import check_evidence  # noqa: E402
 from knowledgestore import config  # noqa: E402
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def make_descriptions():
     # The stage owns the shape, so a field added there is present here too.
@@ -767,6 +769,253 @@ class EvidenceFieldsTest(SettingsIsolated):
         ]
         commits = [make_commit(f"DD-1: {subject}") for subject in subjects]
         self.assertEqual(self._artefact(commits)["DD-1"]["s"], sorted(subjects))
+
+
+SKILL = ROOT / "skills/knowledge-store/SKILL.md"
+
+# The artefact whose field shapes the query skill documents. Named rather than
+# discovered: the block is found by the filename the skill quotes, and the
+# floor below fails if that stops locating anything.
+ARTEFACT = "ticket-descriptions.json.gz"
+TEXT_VIEWS = ("d", "s", "b")
+# A list of strings the record carries that is not one of the commit-text views,
+# so a fourth view arriving is not read as this one. `repos` is a list of
+# repository names; the table documents what the commits said.
+NOT_A_TEXT_VIEW = frozenset({"repos"})
+
+NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+FIELD_ROW = re.compile(r"^\s*\|\s*`([a-z]+)`\s*\|(.+?)\|\s*$", re.MULTILINE)
+STATED_CAP = re.compile(r"up to (\w+)")
+
+
+def documented_block(text: str) -> str:
+    """The part of the skill that describes the ticket-descriptions record.
+
+    Bounded at the next heading, because "absent" is a word the rest of the
+    skill uses about other things - a presence claim read out of the whole file
+    would be answering a neighbouring question.
+    """
+    start = text.find(ARTEFACT)
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start)
+    return text[start : end if end > 0 else len(text)]
+
+
+def documented_shape(text: str) -> dict:
+    """What the skill claims about each field: its cap, and whether it is always
+    there.
+
+    Claims are read out of the prose rather than listed here, so a row edited in
+    the skill is checked in its new wording and a row deleted stops being
+    claimed at all - which `shape_problems` then reports against the artefact.
+    """
+    block = documented_block(text)
+    caps: dict[str, int | None] = {}
+    for field, description in FIELD_ROW.findall(block):
+        stated = STATED_CAP.search(description)
+        word = stated.group(1) if stated else ""
+        caps[field] = NUMBER_WORDS.get(word, int(word) if word.isdigit() else None)
+    always = {f for f in caps if re.search(rf"`{f}`[^.;]{{0,60}}always present", block)}
+    omitted = {f for f in caps if re.search(rf"`{f}`[^.;]*?\b(?:omitted|absent)\b", block)}
+    return {"caps": caps, "always_present": always, "omitted": omitted}
+
+
+def observed_shape() -> dict:
+    """What the stage writes, measured by running it.
+
+    Two runs, because the two claims need different commits: one ticket with
+    more distinct text than any cap allows, and one whose commits offered
+    nothing worth keeping.
+    """
+    subjects = [
+        "widen the address field to thirty-five characters",
+        "correct the postcode lookup on the summary page",
+        "reject long lines on address entry",
+        "align the hearing list with the downstream schema",
+    ]
+    bodies = [f"Body prose number {i} about the address entry rules." for i in range(4)]
+    rich = run_stage([make_commit(f"DD-1: {s}", body=b) for s, b in zip(subjects, bodies)])[0][
+        "DD-1"
+    ]
+    empty = run_stage([make_commit("DD-2")])[0]["DD-2"]
+    text_views = {
+        field
+        for field, value in rich.items()
+        if field not in NOT_A_TEXT_VIEW
+        and isinstance(value, list)
+        and all(isinstance(v, str) for v in value)
+    }
+    return {
+        "caps": {field: len(rich[field]) for field in sorted(text_views)},
+        "always_present": {field for field in text_views if field in empty},
+        "omitted": {field for field in text_views if field not in empty},
+        "fields": text_views,
+    }
+
+
+def shape_problems(text: str, observed: dict) -> list[str]:
+    """The complaints against the skill's account of the record.
+
+    Separate from the assertion so the sensitivity checks can drive it with
+    forged prose. A clean result from the one real file cannot say whether this
+    still tells a stale description from a current one.
+    """
+    claimed = documented_shape(text)
+    complaints = []
+    for field in sorted(observed["fields"] - set(claimed["caps"])):
+        complaints.append(
+            f"the record carries `{field}`, a list of {observed['caps'][field]} strings "
+            "at most, and the table does not document it"
+        )
+    for field, cap in sorted(claimed["caps"].items()):
+        seen = observed["caps"].get(field)
+        if seen is None:
+            complaints.append(f"the table documents `{field}`, which the record does not carry")
+        elif cap is None:
+            complaints.append(
+                f"the row for `{field}` states no maximum, so it reads as one string; "
+                f"the stage writes a list of up to {seen}"
+            )
+        elif cap != seen:
+            complaints.append(f"`{field}` is documented as up to {cap} and is up to {seen}")
+    for field in sorted(observed["always_present"]):
+        if field not in claimed["always_present"]:
+            complaints.append(
+                f"`{field}` is written on every ticket, empty list included, and the skill "
+                "does not say so - a reader will guard a field that is always there"
+            )
+    for field in sorted(observed["omitted"]):
+        if field not in claimed["omitted"]:
+            complaints.append(
+                f"`{field}` is omitted when there is nothing to store and the skill does not "
+                "say so - a reader will index it and raise KeyError"
+            )
+    return complaints
+
+
+# A block in the shape of the skill's own, and the fixture every sensitivity
+# check below is driven with. Forging from the real file instead was the first
+# attempt and is worse: a single stale row in the skill then fails the whole
+# class, so one defect arrives looking like a broken test module rather than
+# like the one document that has drifted.
+FORGED = """`ticket-descriptions.json.gz` holds, per ticket, three views of what its
+commits said:
+
+| Field | What it is |
+|---|---|
+| `d` | up to two curated descriptions |
+| `s` | up to three commit subjects as written |
+| `b` | up to two body-prose extracts |
+
+Every one of the three is a list of strings. `d` is always present and is `[]`
+on a ticket whose commits offered nothing usable; `s` and `b` are each
+**omitted** when their own pool is empty, so read those two with `.get`.
+
+## The next heading, which bounds the block
+"""
+
+
+def _forged(old: str, new: str) -> str:
+    """`FORGED` with one claim changed, asserting the change landed.
+
+    A replacement that matches nothing leaves the fixture clean, and a
+    sensitivity check driven with a clean fixture reports that the reader missed
+    a defect that was never there.
+    """
+    assert FORGED.count(old) == 1, f"forged fixture no longer contains {old!r}"
+    return FORGED.replace(old, new)
+
+
+class DocumentedRecordShapeTest(SettingsIsolated):
+    """The query skill's account of a ticket record must match what the stage writes.
+
+    The break: the skill described `d` as "the curated description", one string,
+    and the stage writes a list of at most two. An agent following the skill
+    quotes `record['d']` into a published answer, which puts a Python list -
+    brackets, quotes and all - where a sentence of commit prose was promised.
+    Nothing failed, because both sides were self-consistent: the tests above
+    assert the list and the skill described a string, and no check compared them.
+
+    The caps are the load-bearing half. A cap in the prose is a claim only a
+    list can satisfy, so pinning the number pins the shape: reverting the row to
+    a singular description leaves no number to read, which is reported rather
+    than passed over.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.observed = observed_shape()
+        self.skill = SKILL.read_text(encoding="utf-8")
+
+    def test_the_block_and_the_rows_are_found(self):
+        # The floor. A parse that matches nothing reads exactly like a document
+        # with no defects, and every judgement below is made against this parse.
+        self.assertTrue(documented_block(self.skill), f"no block quoting {ARTEFACT}")
+        self.assertEqual(sorted(documented_shape(self.skill)["caps"]), sorted(TEXT_VIEWS))
+
+    def test_the_caps_are_the_hand_derived_ones_on_both_sides(self):
+        # Derived by hand from the stage: `d` slices at two, SUBJECT_LIMIT is
+        # three, BODY_LIMIT is two. Asserted of the run and of the prose, so
+        # neither side is checked only against the other.
+        self.assertEqual(self.observed["caps"], {"d": 2, "s": 3, "b": 2})
+        self.assertEqual(documented_shape(self.skill)["caps"], {"d": 2, "s": 3, "b": 2})
+
+    def test_only_d_is_written_on_a_ticket_with_nothing_to_store(self):
+        self.assertEqual(self.observed["always_present"], {"d"})
+        self.assertEqual(self.observed["omitted"], {"s", "b"})
+
+    def test_the_skill_agrees_with_the_record_it_documents(self):
+        problems = shape_problems(self.skill, self.observed)
+        self.assertEqual(problems, [], "; ".join(problems))
+
+    def test_the_forged_block_this_gate_is_driven_with_is_itself_clean(self):
+        # Without this, every case below could be passing for the wrong reason -
+        # a forged block the reader cannot parse reports nothing about the
+        # mutation and everything about the fixture.
+        self.assertEqual(shape_problems(FORGED, self.observed), [])
+
+    def test_a_singular_description_is_reported(self):
+        forged = _forged("| `d` | up to two curated descriptions |", "| `d` | the description |")
+        problems = shape_problems(forged, self.observed)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("states no maximum", problems[0])
+        self.assertIn("up to 2", problems[0])
+
+    def test_a_cap_the_stage_does_not_keep_is_reported(self):
+        forged = _forged("up to three commit subjects", "up to five commit subjects")
+        self.assertEqual(
+            shape_problems(forged, self.observed),
+            ["`s` is documented as up to 5 and is up to 3"],
+        )
+
+    def test_an_undocumented_view_is_reported(self):
+        forged = _forged("| `b` | up to two body-prose extracts |\n", "")
+        problems = shape_problems(forged, self.observed)
+        self.assertTrue(any("does not document it" in p for p in problems), problems)
+
+    def test_a_documented_view_the_record_does_not_carry_is_reported(self):
+        forged = _forged(
+            "| `b` | up to two body-prose extracts |",
+            "| `b` | up to two body-prose extracts |\n| `z` | up to two inventions |",
+        )
+        problems = shape_problems(forged, self.observed)
+        self.assertEqual(problems, ["the table documents `z`, which the record does not carry"])
+
+    def test_a_wrong_presence_claim_is_reported(self):
+        forged = _forged(
+            "**omitted** when their own pool is empty",
+            "kept when their own pool is empty",
+        )
+        problems = shape_problems(forged, self.observed)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all("raise KeyError" in p for p in problems), problems)
+
+    def test_an_always_present_field_not_declared_as_one_is_reported(self):
+        forged = _forged("`d` is always present and is `[]`", "`d` is `[]`")
+        problems = shape_problems(forged, self.observed)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("written on every ticket", problems[0])
 
 
 # Invented, and only ever invented: all-zero case references in a ZZ block, the
