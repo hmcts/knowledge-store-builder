@@ -1,65 +1,95 @@
 # knowledge-store-builder
 
-## What this repository does
-
-Build a knowledge store from one or more GitHub repositories and use it to ask
-questions about your software estate with cited answers.
-
-For example:
+Ask questions about a software estate and get answers that cite the code,
+the commits and the tickets behind them.
 
 > Which applications implement their own address formatting, and which tickets
 > changed them?
 
-Two independent products in one repository work together to provide this
-capability.
+<img src="docs/images/explorer-answering-a-question.png" alt="The explorer page answering 'how are addresses validated?'. A headline verdict reads: each application formats addresses with its own copy of AddressPipe; there is no shared implementation. Below it, sections headed How it works, Where it lives, and What this is NOT, then the business features in the area and the commits that changed them, each citing a repository, a file path or a ticket id." width="580">
 
-**The Python library** builds the knowledge store. Point it at a GitHub
-organisation and select the repositories to analyse. It reads source code,
-commit history and Gherkin specifications, then generates static artefacts
-including:
+That is `explorer.html`, one of the artefacts a build produces. It is a single
+file, it runs from `file://`, and it answers with no server, no network and no
+LLM. The screenshot is this repository's own test fixture, so you can produce
+it yourself: `python3 tests/explorer/fixture.py`.
 
-- a graph of the estate;
-- business features as first-class nodes;
-- links from source files to the tickets that changed them; and
-- a self-contained HTML application that searches and answers without a server
-  or an LLM.
+Note the section headed **What this is NOT**. Two applications have a
+same-named `AddressPipe` and no edge connects them, so the store reports them
+as independent implementations rather than guessing they are shared. Absence of
+evidence is a finding here, not a silence.
 
-**The Claude Code plugin** provides the Claude Code experience. It includes
-three skills:
+## What a build produces
 
-- ask a knowledge store questions and receive cited answers;
-- build and refresh a knowledge store; and
-- export findings with sensitive values removed.
+Point the library at a GitHub organisation and choose the repositories. It
+drives [graphify](https://github.com/safishamsi/graphify) for the extraction
+itself, then enriches and indexes what comes back. The build writes static
+files you commit alongside the code:
 
-The two products are designed to work together. The Python library provides
-the `knowledgestore` commands that build the knowledge store. Querying reads
-the committed artefacts directly through the `graphify` CLI, which the
-plugin's query skill installs automatically. Building requires both products.
-Querying with Claude Code requires only the plugin; the browser page requires
-neither Claude nor the plugin.
+| Artefact | What it holds |
+|---|---|
+| `graphify-out/graph.json` | the estate graph, merged from graphify's per-repository extraction and enriched here with business features, package and deployment edges |
+| `graphify-out/explorer.html` | the self-contained page above |
+| `knowledge/git-history/` | per-repository commit history as NDJSON |
+| `knowledge/intent/` | which tickets changed which files |
+| `knowledge/summaries/`, `docs/topics/`, `docs/deep-dives/` | prose an LLM wrote at build time from graph evidence, then reviewed |
 
-## What do you need?
+Everything is a committed file. Consumers clone and read; nothing is computed
+at query time.
 
-Choose the path that matches your role:
+## The three ways to ask
 
-- **Build a knowledge store** — You own a software estate and want to create
-  its knowledge store.
-  → [Creating a knowledge store](docs/creating-a-store.md)
-- **Refresh a knowledge store** — You maintain an existing store and want to
-  update its sources, generated layers or library version.
-  → [Refreshing and maintaining a knowledge store](docs/refreshing-a-store.md)
-- **Use a knowledge store** — Someone has already built one, and you want to
-  ask questions about it.
-  → [Asking questions](docs/asking-questions.md)
+**In a browser** — open `explorer.html`. No install, no Claude licence, no
+network.
 
-**Using** a store needs the plugin and nothing else — no Python, no `pip`. The
-query skill installs the one tool it needs,
-[graphify](https://github.com/safishamsi/graphify). Without a Claude licence,
-`explorer.html` answers in a browser with no network access at all.
+**In Claude Code** — install the plugin and ask in English. The skill reads the
+committed artefacts and cites them.
 
-**Building** a store needs the plugin, the Python library for the
-`knowledgestore` commands, and graphify for extraction — plus Python 3.10 or
-later, Git and the GitHub CLI. The guides list them.
+```
+/plugin marketplace add hmcts/knowledge-store-builder
+/plugin install knowledge-store@knowledge-store-builder
+/reload-plugins
+```
+
+**From the terminal** — `graphify query` against the committed graph.
+
+## Building a store
+
+The library ships the `knowledgestore` command, one stage per step. A build is
+that sequence run in order, and each stage writes files the next one reads:
+
+```bash
+knowledgestore discover        # list the estate's repositories
+knowledgestore sync            # clone or update them
+knowledgestore extract-ast     # the code layer, one repository at a time
+knowledgestore export-history  # per-repository commit history
+knowledgestore intent          # join files to the tickets that changed them
+knowledgestore explorer        # build the page
+knowledgestore status          # what is present, what is stale
+```
+
+`knowledgestore` with no arguments lists all 32 stages with a line each.
+`knowledgestore <stage> --help` explains one. The full sequence, the extraction
+extras and the authoring steps are in
+[Creating a knowledge store](docs/creating-a-store.md), which also carries the
+install command — the guides own install detail so there is one copy to keep
+correct.
+
+Building needs Python 3.10+, Git, the GitHub CLI and
+[graphify](https://github.com/safishamsi/graphify), which does the extraction.
+This library prepares its inputs and enriches its output; it does not
+re-implement it.
+
+## Start here
+
+| You want to | Go to |
+|---|---|
+| ask questions about a store someone built | [Asking questions](docs/asking-questions.md) |
+| build a store for your estate | [Creating a knowledge store](docs/creating-a-store.md) |
+| refresh a store you maintain | [Refreshing a store](docs/refreshing-a-store.md) |
+| see every command with nothing around it | [`CHEATSHEET.md`](CHEATSHEET.md) |
+
+Asking needs the plugin and nothing else — no Python, no `pip`. Without a
+Claude licence, `explorer.html` answers in a browser.
 
 ## How it is designed
 
