@@ -163,6 +163,15 @@ How that looks in this codebase:
   shown to fail against the broken code before it is trusted — check out
   or temporarily revert the fix and watch it fail. A pin that has never
   failed is unverified protection.
+
+  **Clear `__pycache__` between a bite and its restore.** Python treats a cached
+  module as valid on size and mtime-to-the-second, so restoring a file whose
+  edit was the *same byte length* within the *same second* leaves the mutated
+  bytecode in place: the suite then runs the mutation over restored source. It
+  reported nine failures once, one of them in a test the branch had never
+  touched, and the source hashed correctly the whole time — so the usual proof
+  that a restore worked cannot see this. `mutation_gate.py` already passes `-B`
+  for exactly this reason (#228); a bite-check by hand has no such guard.
 - **A green suite means the code runs, not that it works.** Every stage that has
   shipped, or nearly shipped, doing nothing here had passing tests at the time: a
   `repositories.txt` parser that read the clone-URL field, because every fixture
@@ -421,9 +430,14 @@ study.
   file-to-ticket join — the intent index is keyed on repo-relative paths. The
   only symptom is that nodes lose their tickets.
 - **Community ids are not stable across re-clustering.** Community summaries
-  are keyed by id, so re-clustering strands them. Remap by membership overlap
-  (60% is a reasonable bar) or regenerate; never assume the old file still
-  applies.
+  are keyed by id, so re-clustering strands them. Remap or regenerate; never
+  assume the old file still applies. The shipped criterion is
+  `DEFAULT_CARRY = CARRY_EXACT` — a summary is carried only onto a set identical
+  to the one it described. The 60% overlap bar this file used to quote
+  unconditionally applies only under the opt-in `--carry overlap`, and quoting
+  it as *the* rule is the same defect three shipped documents carried until
+  #346; `docs/building-a-knowledge-store.md` is now pinned against
+  `DEFAULT_BAR`, and this paragraph was the copy nothing checked.
 - **Structural nodes carry no label.** Newer graphify emits Java
   package-hierarchy nodes with neither `label` nor `source_file`. Anything
   iterating nodes must tolerate that — the explorer index and the summary
