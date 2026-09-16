@@ -1675,6 +1675,8 @@ MUTATIONS = (
         ".tfstate, so the refusal is dormant defence-in-depth and this entry keeps its "
         "shape alive until the peer version changes",
         (
+            "test_content_set.DocumentedRefusalCountTest.test_each_document_states_the_refusal_count",
+            "test_content_set.DocumentedRefusalCountTest.test_the_module_refuses_at_the_number_of_sites_named_here",
             "test_content_set.NamedFormatStageTest.test_a_state_file_in_the_content_set_refuses_the_run",
             "test_content_set.NamedFormatStageTest.test_the_refusal_names_every_offending_path_and_the_way_past_it",
         ),
@@ -3503,6 +3505,7 @@ MUTATIONS = (
         "had a community and every community still had prose, so the store looked healthy "
         "and the retention figure read as reassurance while being the opposite",
         (
+            "test_documented_reference_tables.TheDocumentedEnumerationsAgreeWithTheCode.test_below_the_bar_is_unreachable_under_the_shipped_criterion",
             "test_summaries_provenance_states.ProvenanceStatesTest.test_each_group_carries_its_own_flag_rate",
             "test_summaries_provenance_states.ProvenanceStatesTest.test_prose_re_keyed_onto_a_changed_set_is_reported_as_carried_across_a_move",
             "test_summaries_provenance_states.ProvenanceStatesTest.test_the_remap_marked_exactly_the_two_communities_whose_members_moved",
@@ -3531,6 +3534,8 @@ MUTATIONS = (
         "tested, so every assertion about it passes with the default pointing at it. What "
         "ships is the criterion nobody passes an argument for",
         (
+            "test_documented_reference_tables.TheDocumentedEnumerationsAgreeWithTheCode.test_below_the_bar_is_unreachable_under_the_shipped_criterion",
+            "test_summaries_remap.DocumentedCarryBarIsConditionalTest.test_the_shipped_criterion_is_exact",
             "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
             "test_summaries_remap.RemapCliTest.test_carried_and_withdrawn_reconcile_against_the_summaries_read",
             "test_summaries_remap.RemapCliTest.test_the_swallowed_communitys_prose_is_withdrawn_rather_than_dropped",
