@@ -15,6 +15,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 > | `skills/knowledge-store/SKILL.md` — honesty rules | traceability of every claim; absence is a fact about membership; say which layer answered |
 > | `skills/knowledge-store-build/SKILL.md` — before merging | verify grounding, not only coverage; the dispatcher verifies and cannot delegate; run `summaries verify` |
 > | `skills/knowledge-store-export/SKILL.md` — before publishing | re-derive anything a subagent found |
+> | `skills/knowledge-store-assess/SKILL.md` — grounding | traceability of every claim; absence is a fact about membership; say which layer answered; the dispatcher verifies and cannot delegate |
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
 > | `docs/asking-questions.md` — understand the answer | traceability of every claim; absence reported as a finding |
 >
