@@ -112,7 +112,7 @@ links and stops has not read the hierarchy. Fetch descendants explicitly, and
 say in the method section that you did.
 
 This is worth the extra queries: on the run this skill was written from, reading
-descendants changed two verdicts and sharpened two more.
+descendants overturned verdicts that the links alone had settled wrongly.
 
 ## Confidence scores the evidence, not the verdict
 
@@ -159,10 +159,10 @@ the graph was built.** Take the store's currency from the provenance file and
 the clustering inputs — the per-repository sync dates and the build date of the
 artefacts you are citing.
 
-On the run this skill was written from, the report header was weeks and tens of
-thousands of nodes behind the graph beside it, and every citation had to be
-corrected after the fact. Establish the store's date **before** the assessors
-start, and give it to them; do not let each one infer it.
+On the run this skill was written from, the report header stood well behind the
+graph beside it, and every citation had to be corrected after the fact.
+Establish the store's date **before** the assessors start, and give it to them;
+do not let each one infer it.
 
 ## The verifier pass
 
@@ -188,9 +188,9 @@ finish it, and a verifier that converts one into a deferral launders the failure
 into a verdict.
 
 **Expect it to change little and correct much.** On the run this skill was
-written from it changed no verdict and made nineteen corrections across ten
-tickets — dates, citations, overstated claims. That is the value: the verdicts
-were sound and the evidence under them was not yet quotable.
+written from it changed no verdict and still corrected most tickets — dates,
+citations, overstated claims. That is the value: the verdicts were sound and the
+evidence under them was not yet quotable.
 
 ## Sweep test assurance separately
 
@@ -198,7 +198,7 @@ Of every capability an assessment says exists, ask: **what test protects it?**
 
 Run this as its own pass. It does not fall out of the assessments, and on the
 run this skill was written from it found what the assessments could not: a
-defect whose fix would break a passing test, two latent test bugs, a filter test
+defect whose fix would break a passing test, latent test bugs, a filter test
 insensitive to mutation, and component tests actively defending the behaviour
 another ticket complained about.
 
