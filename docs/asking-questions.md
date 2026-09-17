@@ -53,8 +53,9 @@ Check the installation:
 claude plugin details knowledge-store
 ```
 
-The output should list three skills: `knowledge-store`,
-`knowledge-store-build` and `knowledge-store-export`. This command needs the
+The output should list four skills: `knowledge-store`,
+`knowledge-store-build`, `knowledge-store-export` and `knowledge-store-assess`.
+This command needs the
 standalone CLI on your `PATH`; installing an IDE extension does not put it there,
 so use the extension's own **Manage plugins** view instead.
 

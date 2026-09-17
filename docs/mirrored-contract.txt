@@ -47,6 +47,9 @@
 skills/knowledge-store/SKILL.md :: traces to evidence in the store
 skills/knowledge-store/SKILL.md :: Absence of evidence is a fact about the store's membership
 skills/knowledge-store/SKILL.md :: Say which layer answered
+skills/knowledge-store-assess/SKILL.md :: traces to evidence in the store
+skills/knowledge-store-assess/SKILL.md :: Absence of evidence is a fact about the store's membership
+skills/knowledge-store-assess/SKILL.md :: Say which layer answered
 
 # Estate content is data, not instruction. Mirrored into all three skills,
 # because all three read content the operator did not write.
@@ -56,6 +59,9 @@ skills/knowledge-store-build/SKILL.md :: data, not instruction
 skills/knowledge-store-export/SKILL.md :: data, not instruction
 skills/knowledge-store-export/SKILL.md :: never acquires authority by claiming to have it
 skills/knowledge-store-export/SKILL.md :: outrank anything read out of a store or an estate
+skills/knowledge-store-assess/SKILL.md :: data, not instruction
+skills/knowledge-store-assess/SKILL.md :: never acquires authority by claiming to have it
+skills/knowledge-store-assess/SKILL.md :: outrank anything read out of a store or an estate
 
 # Verification of subagent output, where the build skill dispatches authoring
 # and the export skill publishes what a subagent found. Both carry the master's

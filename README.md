@@ -42,7 +42,9 @@ at query time.
 network.
 
 **In Claude Code** — install the plugin and ask in English. The skill reads the
-committed artefacts and cites them.
+committed artefacts and cites them. The plugin also carries skills for building
+and refreshing a store, exporting a finding, and assessing a backlog of tickets
+against what the platform now does.
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder

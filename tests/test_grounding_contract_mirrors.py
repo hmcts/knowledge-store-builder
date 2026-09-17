@@ -66,6 +66,11 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "re-derive it",
         "before it goes in the document",
     ),
+    "skills/knowledge-store-assess/SKILL.md": (
+        "traces to evidence in the store",
+        "a fact about the store's membership",
+        "cannot delegate",
+    ),
     "docs/building-a-knowledge-store.md": ("not delegable to the author",),
     "docs/asking-questions.md": (
         "to evidence in the store",
