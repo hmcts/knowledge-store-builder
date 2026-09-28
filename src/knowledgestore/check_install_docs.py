@@ -144,7 +144,10 @@ _PINNED = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)(?:\[[^\]]*\])?==(?P<version>[^
 # that writes the lock, so producing one pip cannot install is a failure of the
 # documented route rather than of the person following it.
 ACCEPTED_HASHES = ("sha256", "sha384", "sha512")
-_HASH = re.compile(r"--hash[= ]([A-Za-z0-9_]+):")
+# `\w` rather than an ASCII class: it only widens what is *read* as an algorithm
+# name, and anything outside ACCEPTED_HASHES is refused, so the widening lands on
+# the safe side.
+_HASH = re.compile(r"--hash[= ](\w+):")
 
 
 @dataclass(frozen=True)
