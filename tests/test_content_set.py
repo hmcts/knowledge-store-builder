@@ -496,7 +496,62 @@ class StageTest(SettingsIsolated):
         code, output = run()
         self.assertEqual(code, 0)
         manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(manifest["corpus"]["content_files_absent_from_the_tree"], 1)
+        self.assertEqual(manifest["corpus"]["content_files_not_on_disk"], 1)
+        self.assertIn("are not on disk", output)
+
+    def test_a_classified_file_outside_the_corpus_is_not_reported_missing(self):
+        """Break it catches: counting "outside `repositories/`" and calling it "not on disk".
+
+        The documented detect scan runs from the store root, so it classifies the
+        store's own documents as content. Those can never be in the corpus walk, and
+        the stage reported every one of them as missing from disk - in a sentence
+        that also named a cause it had not established. The figure was non-zero on
+        every real store and grew as the store accumulated its own artefacts, so the
+        one signal that means "re-scan" was permanently on.
+
+        Fails against the old measurement with 1, which is this file's whole point:
+        `notes.md` is written here and is on disk.
+        """
+        self.build_a_store()
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "notes.md").write_text("present", encoding="utf-8")
+        detect_for(
+            self.root,
+            {
+                "document": ["repositories/alpha/docs/guide.md", "docs/notes.md"],
+                "code": ["repositories/beta/src/main.py"],
+            },
+        )
+        code, output = run()
+        self.assertEqual(code, 0)
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            manifest["corpus"]["content_files_not_on_disk"],
+            0,
+            "a classified file outside the corpus subtree is on disk and must not be "
+            "counted as missing from it",
+        )
+        self.assertNotIn("are not on disk", output)
+
+    def test_it_still_counts_one_that_is_genuinely_gone_from_outside_the_corpus(self):
+        """The over-correction guard: the fix must not answer zero to everything.
+
+        The cheap way to pass the test above is to stop looking outside the corpus
+        subtree at all, which would lose the detection for exactly the paths most
+        likely to go stale.
+        """
+        self.build_a_store()
+        detect_for(
+            self.root,
+            {
+                "document": ["repositories/alpha/docs/guide.md", "docs/never-written.md"],
+                "code": ["repositories/beta/src/main.py"],
+            },
+        )
+        code, output = run()
+        self.assertEqual(code, 0)
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["corpus"]["content_files_not_on_disk"], 1)
         self.assertIn("are not on disk", output)
 
     def test_it_warns_when_a_path_could_not_be_made_relative(self):

@@ -108,6 +108,52 @@ class SelfParsingStaysHonest(unittest.TestCase):
                     "help is being shadowed",
                 )
 
+    def test_the_two_lists_do_not_overlap(self):
+        """They answer different questions and an entry in both hides which one applies."""
+        self.assertEqual(
+            cli.SELF_PARSING & cli.TAKES_ARGUMENTS,
+            frozenset(),
+            "a stage that builds its own parser owns --help too, so it belongs in "
+            "SELF_PARSING alone",
+        )
+
+    def test_every_stage_that_takes_arguments_really_reads_them(self):
+        """TAKES_ARGUMENTS is hand-maintained, so it drifts the same way SELF_PARSING does.
+
+        An entry naming a stage that reads no arguments would exempt it from the guard
+        for nothing, which is the hole `sync --prune` went through.
+        """
+        for stage in sorted(cli.TAKES_ARGUMENTS):
+            with self.subTest(stage=stage):
+                self.assertIn(stage, cli.STAGES, f"{stage} is not a stage at all")
+                self.assertIn(
+                    "sys.argv",
+                    self._module_source(stage),
+                    f"{stage} is listed as taking arguments but never reads sys.argv, so "
+                    "the guard is being relaxed for a stage that ignores them",
+                )
+
+    def test_no_stage_outside_either_list_reads_arguments(self):
+        """The check that would have caught this at the source rather than through the docs.
+
+        Three stages dispatched on a subcommand and were in neither list, so widening the
+        guard from `--help` to every unrecognised argument refused six command lines the
+        shipped documentation prints. The gate that read those lines asserted the stage
+        existed, which it did - the wrong question, asked correctly.
+
+        Reading the source answers it directly: a stage that reads `sys.argv` and is in
+        neither list is one the guard will refuse.
+        """
+        for stage in sorted(set(cli.STAGES) - cli.SELF_PARSING - cli.TAKES_ARGUMENTS):
+            with self.subTest(stage=stage):
+                self.assertNotIn(
+                    "sys.argv",
+                    self._module_source(stage),
+                    f"{stage} reads sys.argv but is in neither SELF_PARSING nor "
+                    "TAKES_ARGUMENTS, so the argument guard refuses every argument it "
+                    "was written to accept and the stage never runs",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

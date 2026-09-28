@@ -79,11 +79,72 @@ def _roles(key: str) -> tuple[bool, bool]:
     return bool(_STORE_ROLE.search(normalised)), bool(_ENTRY_ROLE.search(normalised))
 
 
+def _roles_one_level_down(item: object) -> tuple[bool, bool]:
+    """(names a store, names an entry) from the keys of `item`, one level down.
+
+    The store half of a reference is routinely named a level down - the docstring
+    below has always said so, and replacing a role key's whole value is how that
+    was handled. The entry half is named a level down just as often and was not:
+    `remoteRef` carries no role in its own name, and `remoteRef.key` was never
+    looked at, so the canonical external-secret shape
+
+        secretStoreRef: {name: ...}
+        remoteRef:      {key: ..., property: ...}
+
+    read as a mapping that names a store and no entry, and published both. A list
+    is walked for the same reason: the same shape puts its entries under `data:`,
+    one list deep, and stopping at the list would leave the commonest arrangement
+    of all uncovered.
+
+    One level only. Searching the whole subtree would make any values file with a
+    vault in it and a `path` anywhere else a single secret reference, and redact
+    the lot.
+    """
+    if isinstance(item, list):
+        found = [_roles_one_level_down(element) for element in item]
+        return any(store for store, _ in found), any(entry for _, entry in found)
+    if not isinstance(item, dict):
+        return False, False
+    store = entry = False
+    for key in item:
+        names_store, names_entry = _roles(str(key))
+        store, entry = store or names_store, entry or names_entry
+    return store, entry
+
+
+def _effective_roles(key: object, item: object) -> tuple[bool, bool]:
+    """The roles one entry of a mapping carries, by its own name or one level down.
+
+    Detection and replacement must read the same roles. They did not: detection was
+    widened to look a level down while the replacement loop still asked `_roles`
+    about the key alone, so `remoteRef` was recognised as the entry half of a
+    reference and then left in place, because its own name carries no role. The
+    mapping was correctly identified and nothing was withheld.
+    """
+    store, entry = _roles(str(key))
+    below_store, below_entry = _roles_one_level_down(item)
+    return store or below_store, entry or below_entry
+
+
 def _is_secret_reference(mapping: dict) -> bool:
-    roles = {str(key): _roles(str(key)) for key in mapping}
+    """One key names the store, a different key names the entry inside it.
+
+    Descent supplies the *missing half*, never both. Requiring at least one role to
+    be named by a key's own name is what keeps the rule tight: without it, any two
+    unrelated sections of a values file pair up into one reference - a `gateway`
+    holding a `path` and an `artifacts` holding an `artifactStore` are neither a
+    store nor an entry, and redacting them is as useless as redacting nothing.
+
+    It also keeps the flattened structure. A mapping of named credentials, each of
+    which is itself a reference, is not one reference: without this the whole
+    mapping is replaced by a single placeholder and the names are lost, where
+    recursion redacts each one and keeps them.
+    """
+    roles = {str(key): _effective_roles(key, item) for key, item in mapping.items()}
     stores = {key for key, (store, _) in roles.items() if store}
     entries = {key for key, (_, entry) in roles.items() if entry}
-    return bool(stores) and bool(entries) and len(stores | entries) > 1
+    named_outright = any(any(_roles(str(key))) for key in mapping)
+    return bool(stores) and bool(entries) and len(stores | entries) > 1 and named_outright
 
 
 def withhold_secret_locations(value: object) -> object:
@@ -99,7 +160,7 @@ def withhold_secret_locations(value: object) -> object:
         reference = _is_secret_reference(value)
         withheld: dict[object, object] = {}
         for key, item in value.items():
-            store, entry = _roles(str(key))
+            store, entry = _effective_roles(key, item)
             withheld[key] = (
                 PLACEHOLDER if reference and (store or entry) else withhold_secret_locations(item)
             )

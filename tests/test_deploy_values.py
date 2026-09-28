@@ -182,6 +182,80 @@ class SecretReferences(unittest.TestCase):
         self.assertNotIn("shared-platform-store", published)
         self.assertNotIn("billing/production/outbound", published)
 
+    def test_the_entry_may_be_named_a_level_down_as_the_store_already_could(self):
+        """Break it catches: the shape every external-secret operator actually writes.
+
+        The policy replaced a role key's whole value so that a store named one level
+        down (`secretStoreRef.name`) was covered, and the docstring said so. The entry
+        half was not: `remoteRef` carries no role in its own name and nothing looked
+        inside it, so this mapping read as naming a store and no entry, and published
+        the store, the entry and the property.
+
+        Derived by hand from the operator's documented shape, not from any store.
+        """
+        flat = deploy_values.flatten(
+            {
+                "secretStoreRef": {"name": "invented-store"},
+                "remoteRef": {"key": "invented/entry", "property": "invented-property"},
+            },
+            60,
+            200,
+        )
+        self.assertEqual(
+            flat,
+            {
+                "remoteRef": deploy_values.PLACEHOLDER,
+                "secretStoreRef": deploy_values.PLACEHOLDER,
+            },
+        )
+
+    def test_the_entry_may_be_a_level_down_through_a_list(self):
+        """The same operator's other documented arrangement, entries under `data:`.
+
+        Stopping the descent at the list would leave the commoner of the two shapes
+        uncovered while the test above passed.
+        """
+        flat = deploy_values.flatten(
+            {
+                "secretStoreRef": {"name": "invented-store"},
+                "data": [{"secretKey": "LOCAL_NAME", "remoteRef": {"key": "invented/entry"}}],
+            },
+            60,
+            200,
+        )
+        self.assertEqual(
+            flat,
+            {"data": deploy_values.PLACEHOLDER, "secretStoreRef": deploy_values.PLACEHOLDER},
+        )
+
+    def test_a_mapping_of_named_references_keeps_its_names(self):
+        """The over-correction guard on the descent, and the reason it is one level.
+
+        A mapping whose every value is a reference is not itself one reference. Read
+        that way, the whole mapping collapses to a single placeholder and the names go
+        with it - and the names are the structure this module exists to record. Each
+        reference must be redacted where it sits.
+        """
+        flat = deploy_values.flatten(
+            {
+                "env": {
+                    "A_TOKEN": {"secretStore": "one", "key": "invented/a"},
+                    "B_TOKEN": {"secretStore": "two", "key": "invented/b"},
+                }
+            },
+            60,
+            200,
+        )
+        self.assertEqual(
+            flat,
+            {
+                "env.A_TOKEN.key": deploy_values.PLACEHOLDER,
+                "env.A_TOKEN.secretStore": deploy_values.PLACEHOLDER,
+                "env.B_TOKEN.key": deploy_values.PLACEHOLDER,
+                "env.B_TOKEN.secretStore": deploy_values.PLACEHOLDER,
+            },
+        )
+
     def test_an_ordinary_mapping_is_untouched(self):
         """Fails if the policy widens to mappings that name no store.
 
