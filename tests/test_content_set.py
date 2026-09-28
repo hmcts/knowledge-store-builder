@@ -398,6 +398,87 @@ class StageTest(SettingsIsolated):
         self.assertIn("accounting for 3 of 3 non-content files", output)
         self.assertIn("of which 3 (60.0%) are not in the content set", output)
 
+    def test_it_does_not_list_its_own_outputs_as_content(self):
+        """Break it catches: the content set telling a consumer to search itself.
+
+        The documented detect scan runs from the store root with `gitignore=False`,
+        which is what makes `repositories/` visible and `knowledge/` with it. From
+        the second run onwards the stage classifies the two files it wrote last
+        time, so `content-files.txt` listed itself.
+
+        Not cosmetic: the artefact is a grep target and the stage prints the
+        `xargs grep` line that consumes it, so every search also searched a listing
+        of every path in the estate. Any term appearing in a path came back with a
+        hit in the one file that is not estate content.
+        """
+        self.build_a_store()
+        detect_for(
+            self.root,
+            {
+                "document": [
+                    "repositories/alpha/docs/guide.md",
+                    "knowledge/corpus/content-files.txt",
+                ],
+                "code": ["repositories/beta/src/main.py"],
+                "data": ["knowledge/corpus/content-set.json"],
+            },
+        )
+        code, _output = run()
+        self.assertEqual(code, 0)
+        # Asserted by tail rather than by exact string: this fixture writes the
+        # absolute paths graphify's own detect writes, and a store reached through
+        # a symlinked root keeps them absolute for anything outside `repositories/`.
+        # Pinning one spelling would pass or fail on the platform, not on the fix.
+        listed = config.CONTENT_FILES_PATH.read_text(encoding="utf-8").splitlines()
+        for artefact in ("knowledge/corpus/content-files.txt", "knowledge/corpus/content-set.json"):
+            self.assertFalse(
+                [path for path in listed if path.endswith(artefact)],
+                f"{artefact} is listed as content in the artefact it is the listing for",
+            )
+        manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            sorted(path.rsplit("knowledge/", 1)[-1] for path in manifest["excluded_own_outputs"]),
+            ["corpus/content-files.txt", "corpus/content-set.json"],
+        )
+        self.assertEqual(
+            manifest["classified_files"],
+            manifest["content_files"]
+            + len(manifest["excluded_emulator_dumps"])
+            + len(manifest["excluded_own_outputs"]),
+        )
+
+    def test_it_still_lists_other_files_under_knowledge(self):
+        """The over-correction guard: only this stage's own artefacts are excluded.
+
+        The cheap way to pass the test above is to drop everything under
+        `knowledge/`, which would take the history export and the written briefs
+        with it - estate text a consumer has every reason to search.
+        """
+        self.build_a_store()
+        (self.root / "knowledge" / "git-history").mkdir(parents=True, exist_ok=True)
+        (self.root / "knowledge" / "git-history" / "alpha.md").write_text("log", encoding="utf-8")
+        detect_for(
+            self.root,
+            {
+                "document": [
+                    "repositories/alpha/docs/guide.md",
+                    "knowledge/git-history/alpha.md",
+                    "knowledge/corpus/content-files.txt",
+                ],
+                "code": ["repositories/beta/src/main.py"],
+            },
+        )
+        code, _output = run()
+        self.assertEqual(code, 0)
+        listed = config.CONTENT_FILES_PATH.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(
+            [path for path in listed if path.endswith("knowledge/git-history/alpha.md")],
+            "the history export is estate text and must stay searchable",
+        )
+        self.assertFalse(
+            [path for path in listed if path.endswith("knowledge/corpus/content-files.txt")],
+        )
+
     def test_it_reports_content_files_that_are_no_longer_on_disk(self):
         """Break it catches: silence about a detect result older than the tree.
 
@@ -1130,9 +1211,13 @@ class NamedFormatStageTest(SettingsIsolated):
         # a bucket count comes to exceed the population it describes.
         self.assertEqual(manifest["classified_files"], 4)
         self.assertEqual(manifest["content_files"], 2)
+        # Every exclusion list, not just the one this test drives: an exclusion
+        # added without a column here leaves a tally that no longer adds up.
         self.assertEqual(
             manifest["classified_files"],
-            manifest["content_files"] + len(manifest["excluded_emulator_dumps"]),
+            manifest["content_files"]
+            + len(manifest["excluded_emulator_dumps"])
+            + len(manifest["excluded_own_outputs"]),
         )
 
     def test_a_truncated_list_of_dumps_says_how_many_it_did_not_name(self):
