@@ -79,11 +79,24 @@ def _corpus_measurement(content: list[str]) -> dict:
     held = set(content)
     roots = content_set.noise_roots(tree, content)
     non_content = len([path for path in tree if path not in held])
+    # Only the paths the corpus walk did not see can be missing, and a path the walk
+    # returned is on disk by construction - so the stat runs on the candidates rather
+    # than on the whole content set, and the figure is exact either way.
+    #
+    # It used to be `len(held - set(tree))`, which is the count of content files
+    # outside `repositories/`. That is a different quantity, and on any real store it
+    # is large and permanent: the documented detect scan runs from the store root, so
+    # it classifies the store's own `docs/`, `config/` and `knowledge/` as content.
+    # Every one of those is present on disk and can never be in the corpus walk, so
+    # the stage reported them as missing, in a sentence that named a cause it had not
+    # established. The name said `absent_from_the_tree` and was accurate; the sentence
+    # said "not on disk" and was not.
+    missing = [path for path in sorted(held - set(tree)) if not (config.ROOT / path).exists()]
     return {
         "measured": True,
         "tree_files": len(tree),
         "non_content_files": non_content,
-        "content_files_absent_from_the_tree": len(held - set(tree)),
+        "content_files_not_on_disk": len(missing),
         "noise_roots": [
             {"path": root.path, "files": root.files, "repositories": root.repositories}
             for root in roots
@@ -109,7 +122,7 @@ def _report_corpus(corpus: dict, content: int, top: int) -> None:
         f"({noise / tree:.1%}) are not in the content set",
         flush=True,
     )
-    absent = corpus["content_files_absent_from_the_tree"]
+    absent = corpus["content_files_not_on_disk"]
     if absent:
         print(
             f"  {absent:,} of {content:,} content files are not on disk: detect is older "
