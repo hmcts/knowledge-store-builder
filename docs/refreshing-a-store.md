@@ -484,6 +484,19 @@ pip install -r requirements.lock
 The emit flags write the package feed and the binary-only setting into the lock,
 so installing from it needs no extra arguments.
 
+**Strip any `--hash` line that is not sha256, sha384 or sha512 before installing.**
+`uv` writes every digest the index advertises, so an index publishing md5 beside
+sha256 produces a lock `pip` refuses when it parses the file, before reading
+anything:
+
+```
+error: Allowed hash algorithms for --hash are sha256, sha384, sha512.
+```
+
+The same compile command that was fine before starts producing it when either the
+index or `uv` changes, and the sha256 line beside each refused one is the one pip
+would have used. `knowledgestore check-install-docs` reports them by line.
+
 **A lock compiled without them does not name the feed**, and installing from it
 fails with `No matching distribution found` until `--extra-index-url` is passed
 on the command line. Existing stores can be in that state; recompiling with the
