@@ -68,7 +68,51 @@ from __future__ import annotations
 
 import argparse
 
+import os
+
 from . import config, content_set, io, store_paths
+
+
+def _own_outputs(content: list[str]) -> list[str]:
+    """This stage's own artefacts, where a scan has classified them as content.
+
+    The documented detect scan runs from the store root with `gitignore=False`,
+    which is what makes `repositories/` visible - and makes `knowledge/` visible
+    with it. So from the second run onwards the stage classifies the two files it
+    wrote last time, and `content-files.txt` lists itself.
+
+    That is not a cosmetic duplicate. The artefact is a grep target - the stage
+    prints the `xargs grep` line that consumes it - so every search also searches
+    the listing of every path, and any term that appears in a path comes back with
+    a hit in the listing itself. The one file guaranteed to match is the one that
+    is not estate content at all.
+
+    Derived from `config` rather than spelt out here, so moving either artefact
+    moves its exclusion with it.
+
+    Matched under both spellings on purpose. `store_paths.relative` deliberately
+    never resolves, and on macOS a store under `/var` is reached through a symlink
+    to `/private/var` - so a detect result naming these absolutely does not
+    relativise, and falls back to the `repositories/` marker, which a path under
+    `knowledge/` does not carry. Comparing the relative spelling alone therefore
+    misses the case on the one platform where it arises. The real-path comparison
+    runs only for a path already sharing a basename with one of the two, so it
+    costs a stat on a handful of paths rather than on the content set.
+    """
+    artefacts = (config.CONTENT_FILES_PATH, config.CONTENT_SET_PATH)
+    mine = {store_paths.relative(path) for path in artefacts}
+    mine |= {str(path) for path in artefacts}
+    real = {os.path.realpath(path) for path in artefacts}
+    basenames = {path.name for path in artefacts}
+
+    def is_mine(path: str) -> bool:
+        if path in mine:
+            return True
+        if os.path.basename(path) not in basenames:
+            return False
+        return os.path.realpath(config.ROOT / path) in real
+
+    return sorted(path for path in content if is_mine(path))
 
 
 def _corpus_measurement(content: list[str]) -> dict:
@@ -371,18 +415,22 @@ def main(argv: list[str] | None = None) -> int:
         _refuse_secret_bearing(refused, len(content))
         return 2
     dumps = content_set.emulator_dumps(content, allowed)
-    dropped = set(dumps)
+    own = _own_outputs(content)
+    dropped = set(dumps) | set(own)
     exposed = [path for path in content if path not in dropped]
 
     corpus = _corpus_measurement(exposed)
     kinds = content_set.kind_counts(detect)
     manifest = {
         "generated_from": io.layer_digests([config.DETECT_PATH], config.ROOT),
-        # Both numbers, so the exclusion reconciles in the artefact and not only
-        # in the report: classified = content_files + excluded, exactly.
+        # Every number, so the exclusions reconcile in the artefact and not only
+        # in the report: classified = content_files + every excluded list, exactly.
+        # A new exclusion that does not appear here turns the manifest into a
+        # tally that no longer adds up, which is worse than no tally.
         "classified_files": len(content),
         "content_files": len(exposed),
         "excluded_emulator_dumps": dumps,
+        "excluded_own_outputs": own,
         "kinds": kinds,
         "corpus": corpus,
     }
