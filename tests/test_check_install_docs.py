@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +76,36 @@ class InstallDocsGateTest(SettingsIsolated):
                 },
             )
             self.assertEqual(gate.main(), 1)
+
+    def test_a_lock_pip_would_refuse_fails_the_stage(self):
+        """The wiring for the hash half, and it was missing.
+
+        Found by mutation rather than by writing it: severing the hash result from
+        `main`'s exit - `return resolution` in place of `return resolution or
+        hashes` - left every test passing, so the check could have been disconnected
+        and nothing would have noticed. The refusal is tested directly elsewhere;
+        this drives the stage with both other halves deliberately satisfied, so a
+        non-zero exit can only have come from the hashes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                f"--extra-index-url {FEED}\n--only-binary :all:\n\nthing==1.0 \\\n"
+                "    --hash=sha256:aaa \\\n    --hash=md5:bbb\n",
+                {},
+            )
+            self.assertEqual(gate.main(), 1)
+
+    def test_a_lock_of_accepted_hashes_leaves_the_stage_passing(self):
+        """The control for the test above, so its mutation result means something."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(
+                tmp,
+                f"--extra-index-url {FEED}\n--only-binary :all:\n\nthing==1.0 \\\n"
+                "    --hash=sha256:aaa\n",
+                {},
+            )
+            self.assertEqual(gate.main(), 0)
 
     def test_agreeing_files_leave_the_stage_passing(self):
         """The control. A stage that failed on an agreeing pair would be switched
@@ -289,6 +320,61 @@ class InstallDocsGateTest(SettingsIsolated):
                 },
             )
             self.assertEqual(gate.main(), 0, "another repository's docs are not this store's")
+
+
+class ALockPipWillNotInstallTest(unittest.TestCase):
+    """`pip` accepts three hash algorithms and refuses the file for any other.
+
+    It is a parse-time rule, so a lock naming one more is not a weaker lock - it is
+    a lock from which nothing installs at all. This repository documents the
+    `uv pip compile --generate-hashes` that writes it, and `uv` writes every digest
+    the index advertises, so an index that starts publishing md5 beside sha256
+    turns a working command into one that produces an uninstallable lock. Nothing
+    in the compile reports it; the failure surfaces at install time on another
+    machine.
+    """
+
+    def _lock(self, body: str) -> Path:
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory, True)
+        lock = directory / "requirements.lock"
+        lock.write_text(body, encoding="utf-8")
+        return lock
+
+    def test_it_names_the_line_and_the_algorithm_pip_refuses(self):
+        lock = self._lock("thing==1.0 \\\n    --hash=sha256:aaa \\\n    --hash=md5:bbb\n")
+        report = gate.refused_hashes(lock)
+        self.assertEqual(report.refused, [(3, "md5")])
+        self.assertEqual(report.read, 2, "both hashes must be read, not only the refused one")
+
+    def test_a_lock_of_accepted_algorithms_is_clean(self):
+        lock = self._lock("a==1 \\\n    --hash=sha256:aaa\nb==2 \\\n    --hash=sha512:bbb\n")
+        report = gate.refused_hashes(lock)
+        self.assertEqual(report.refused, [])
+        self.assertEqual(report.read, 2)
+
+    def test_every_algorithm_pip_accepts_is_accepted_here(self):
+        """The over-correction guard: the rule is pip's list, not sha256 alone.
+
+        Narrowing it to sha256 would pass every test above and reject a lock pip
+        installs perfectly well.
+        """
+        for algorithm in gate.ACCEPTED_HASHES:
+            with self.subTest(algorithm=algorithm):
+                lock = self._lock(f"thing==1.0 \\\n    --hash={algorithm}:aaa\n")
+                self.assertEqual(gate.refused_hashes(lock).refused, [])
+
+    def test_a_lock_with_no_hashes_is_not_reported_as_clean(self):
+        """The vacuity guard, and the reason `read` is carried at all.
+
+        A scan that matched nothing returns an empty refused list, which is
+        indistinguishable from a lock that is fine. It is not fine: `pip install
+        --require-hashes` refuses a lock with no hashes just as firmly.
+        """
+        lock = self._lock("thing==1.0\n")
+        report = gate.refused_hashes(lock)
+        self.assertEqual(report.read, 0)
+        self.assertEqual(report.refused, [])
 
 
 class TheLockMustResolveThePinTest(unittest.TestCase):

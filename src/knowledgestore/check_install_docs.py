@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
@@ -132,6 +133,86 @@ AUTHORED_MARKER = "# knowledgestore: hand-authored lock"
 # version a lock can be checked against, and inventing a comparison for the others
 # would report a disagreement that is not one.
 _PINNED = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)(?:\[[^\]]*\])?==(?P<version>[^\s;#]+)")
+
+
+# pip's own list, and it is a parse-time rule rather than a verification one: a lock
+# naming anything else is refused before pip reads a single file, with
+#
+#   error: Allowed hash algorithms for --hash are sha256, sha384, sha512.
+#
+# Checked here because this repository documents the `uv pip compile --generate-hashes`
+# that writes the lock, so producing one pip cannot install is a failure of the
+# documented route rather than of the person following it.
+ACCEPTED_HASHES = ("sha256", "sha384", "sha512")
+_HASH = re.compile(r"--hash[= ]([A-Za-z0-9_]+):")
+
+
+@dataclass(frozen=True)
+class HashReport:
+    """What the hash scan read, and what it refused.
+
+    `read` is carried so that zero hashes is distinguishable from zero problems. A
+    lock with no hashes at all is not a lock pip will accept under
+    `--require-hashes` either, and a checker that reports nothing about it looks
+    exactly like one reporting that all is well.
+    """
+
+    read: int
+    refused: list[tuple[int, str]]
+
+
+def refused_hashes(lock: Path) -> HashReport:
+    """Every `--hash` in the lock pip will not accept, with its line number."""
+    read = 0
+    refused: list[tuple[int, str]] = []
+    for number, line in enumerate(lock.read_text(encoding="utf-8").splitlines(), start=1):
+        for match in _HASH.finditer(line):
+            read += 1
+            algorithm = match.group(1).lower()
+            if algorithm not in ACCEPTED_HASHES:
+                refused.append((number, algorithm))
+    return HashReport(read=read, refused=refused)
+
+
+def _report_refused_hashes(lock: Path) -> int:
+    report = refused_hashes(lock)
+    if not report.read:
+        # Said rather than failed. A lock with no hashes is a supported shape - the
+        # documented install is `pip install -r <lock>`, and `--require-hashes` is the
+        # stricter route a store may or may not take - so failing here would reject a
+        # configuration that works. What must not happen is silence: a scan that
+        # matched nothing returns an empty refused list, which reads exactly like a
+        # lock that is fine.
+        print(
+            f"{lock.name} carries no --hash, so this half read 0 hashes and says "
+            "nothing about whether pip would accept them. A store installing with "
+            "--require-hashes needs a lock compiled with --generate-hashes."
+        )
+        return 0
+    if not report.refused:
+        print(f"{lock.name}: {report.read:,} hashes, all of an algorithm pip accepts")
+        return 0
+
+    algorithms = sorted({algorithm for _number, algorithm in report.refused})
+    print(
+        f"\n{lock.name} names {len(report.refused):,} hash(es) pip will not accept "
+        f"({', '.join(algorithms)}), so nothing installs from it:\n",
+        file=sys.stderr,
+    )
+    for number, algorithm in report.refused[:10]:
+        print(f"  {lock.name}:{number}  --hash={algorithm}:...", file=sys.stderr)
+    if len(report.refused) > 10:
+        print(f"  ... and {len(report.refused) - 10:,} more", file=sys.stderr)
+    print(
+        "\npip refuses these when it parses the file, before reading anything: "
+        f"\n  Allowed hash algorithms for --hash are {', '.join(ACCEPTED_HASHES)}."
+        "\n\nNewer uv writes every digest the index advertises, so an index publishing "
+        "md5 beside sha256 produces this from the same compile command that was fine "
+        "before. Strip the refused lines after compiling; the sha256 line beside each "
+        "is the one pip uses.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _normalise(name: str) -> str:
@@ -455,6 +536,10 @@ def main() -> int:
     # Both halves always run, and the exit code carries either. Stopping at the
     # first would hide the second from whoever fixes the first.
     resolution = _report_unresolved(config.REQUIREMENTS_PATH, lock)
+    # A third half, and the same reasoning: a lock pip refuses at parse time fails
+    # regardless of whether its versions resolve or its index is named, so reporting
+    # only the first problem sends someone round the loop twice.
+    hashes = _report_refused_hashes(lock)
 
     # One exit for the resolution result rather than one per passing branch. With a
     # `return resolution` in each, either could be severed on its own - and every
@@ -483,7 +568,7 @@ def main() -> int:
             )
             return 1
         print(_installs_line(lock.name, len(installs)))
-    return resolution
+    return resolution or hashes
 
 
 if __name__ == "__main__":
