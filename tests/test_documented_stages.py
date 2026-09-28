@@ -347,3 +347,131 @@ class TheCapabilityCheckCanStillTell(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+# --- appended to tests/test_documented_stages.py ---
+
+# A documented command line, read out of a code fence or an inline code span rather than
+# out of prose. The stage name alone is not the claim being checked here: `knowledgestore
+# topics merge` names a real stage and was still refused, so a scan that captures only the
+# stage answers a neighbouring question and reports clean.
+CODE_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+INLINE_CODE = re.compile(r"`([^`\n]+)`")
+# `(?<!from )` for the same reason as INVOCATION above: `from knowledgestore import
+# graph_stream` is a code span in these documents and reads as the stage `import`.
+COMMAND_LINE = re.compile(r"(?<!from )\bknowledgestore\s+([a-z][a-z0-9-]*)([^\n]*)")
+# Where a shell line stops being arguments to this command.
+TAIL = re.compile(r"\s(?:#|\||&&|\|\||;)|\s*$")
+
+
+def documented_invocations(text: str) -> list[tuple[str, list[str], str]]:
+    """Every `knowledgestore <stage> <arguments>` printed as a command, with its line.
+
+    Prose is excluded deliberately: "`knowledgestore status` never returns non-zero" is a
+    sentence about a stage, not a line anyone runs, and reading the following words as
+    arguments would make this fire on documentation that is correct.
+    """
+    regions = [m.group(1) for m in CODE_FENCE.finditer(text)]
+    regions += [m.group(1) for m in INLINE_CODE.finditer(text)]
+    found = []
+    for region in regions:
+        for match in COMMAND_LINE.finditer(region):
+            stage, tail = match.group(1), match.group(2)
+            cut = TAIL.search(tail)
+            arguments = tail[: cut.start()].split() if cut else tail.split()
+            found.append((stage, arguments, match.group(0).strip()))
+    return found
+
+
+class DocumentedInvocationsAreAccepted(unittest.TestCase):
+    """Every command line the documentation prints must survive the argument guard.
+
+    `test_every_documented_stage_is_a_real_stage` above checks the stage exists. That is a
+    different property, and the gap between them shipped: the guard in `cli` was widened
+    from refusing an unrecognised `--help` to refusing every unrecognised argument, three
+    stages that dispatch on a subcommand were not in `SELF_PARSING`, and six lines in the
+    shipped documentation stopped working. Every one of them still named a real stage, so
+    nothing here failed.
+
+    The guard is asked directly rather than restated. A copy of the condition would pass
+    this file while the real one refused the user.
+    """
+
+    def test_the_scan_finds_invocations_that_carry_arguments(self):
+        """Without this the class below is vacuous in the one way that matters.
+
+        An invocation with no arguments can never be refused, so a scan that captured only
+        bare `knowledgestore <stage>` lines would report clean over a guard refusing
+        everything else.
+        """
+        with_arguments = [
+            (stage, args)
+            for path in shipped_documentation()
+            for stage, args, _line in documented_invocations(path.read_text(encoding="utf-8"))
+            if args
+        ]
+        self.assertGreater(
+            len(with_arguments),
+            5,
+            f"only {len(with_arguments)} documented invocations carry arguments; the scan "
+            "is no longer reading the lines this check exists for",
+        )
+        stages = {stage for stage, _ in with_arguments}
+        for expected in ("topics", "deepdive"):
+            self.assertIn(
+                expected,
+                stages,
+                f"`{expected}` takes a subcommand and the scan found no documented line "
+                "passing it one",
+            )
+
+    def test_no_documented_invocation_is_refused(self):
+        for path in shipped_documentation():
+            text = path.read_text(encoding="utf-8")
+            for stage, arguments, line in documented_invocations(text):
+                if stage not in cli.STAGES:
+                    continue  # the check above owns that failure
+                with self.subTest(file=str(path.relative_to(ROOT)), line=line):
+                    self.assertFalse(
+                        cli.refuses_arguments(stage, arguments),
+                        f"{path.relative_to(ROOT)} tells a reader to run `{line}`, and the "
+                        f"argument guard refuses it: `{stage}` is not in SELF_PARSING, so "
+                        f"{', '.join(arguments)} is rejected and the stage never runs",
+                    )
+
+
+class TheAcceptanceScanCanStillTell(unittest.TestCase):
+    """Drive the scan with text it must flag and text it must ignore, in this run."""
+
+    def test_it_flags_a_documented_line_the_guard_would_refuse(self):
+        forged = "Run this:\n\n```bash\nknowledgestore sync --prune\n```\n"
+        found = documented_invocations(forged)
+        self.assertEqual(found[0][:2], ("sync", ["--prune"]))
+        self.assertTrue(
+            cli.refuses_arguments(*found[0][:2]),
+            "the fixture must be an invocation the guard actually refuses",
+        )
+
+    def test_it_reads_arguments_off_a_real_documented_line(self):
+        found = documented_invocations("```bash\nknowledgestore deepdive extract <repo>\n```")
+        self.assertEqual(found[0][:2], ("deepdive", ["extract", "<repo>"]))
+
+    def test_it_stops_at_a_trailing_comment(self):
+        found = documented_invocations("```\nknowledgestore topics merge  # renders briefs\n```")
+        self.assertEqual(found[0][:2], ("topics", ["merge"]))
+
+    def test_it_ignores_a_python_import_in_a_code_span(self):
+        """`from knowledgestore import graph_stream` is not a command line."""
+        self.assertEqual(documented_invocations("`from knowledgestore import graph_stream`"), [])
+
+    def test_it_ignores_prose(self):
+        """Words after a stage in a sentence are not arguments to it."""
+        self.assertEqual(documented_invocations("knowledgestore status never returns non-zero"), [])
+
+    def test_it_reads_an_inline_span_as_a_command_without_swallowing_the_sentence(self):
+        found = documented_invocations("see `knowledgestore status` for drift, which is normal")
+        self.assertEqual(found[0][:2], ("status", []))
+
+    def test_the_guard_still_accepts_help_for_a_stage_with_no_arguments(self):
+        """The over-correction guard: widening SELF_PARSING must not silence `--help`."""
+        self.assertFalse(cli.refuses_arguments("sync", ["--help"]))
+        self.assertFalse(cli.refuses_arguments("sync", []))
+        self.assertTrue(cli.refuses_arguments("sync", ["--prune"]))
