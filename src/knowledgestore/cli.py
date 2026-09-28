@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
@@ -42,6 +43,34 @@ SELF_PARSING = frozenset(
         "size-cuts",
     }
 )
+
+# Stages that take arguments of their own but build no parser for them: a subcommand
+# they dispatch on by hand, or a path they read positionally.
+#
+# This is a different property from SELF_PARSING and separating the two is the fix.
+# SELF_PARSING means "owns its own --help", which is why every entry there must build
+# an ArgumentParser. These stages own no flags and should keep the generic --help, but
+# refusing their arguments stops them running at all - which is what happened when the
+# guard was widened from an unrecognised --help to every unrecognised argument, and
+# six documented command lines started being refused.
+#
+# Membership here is not a licence to ignore an argument. Each of these prints its
+# usage and returns 1 on anything it does not recognise, which is the property the
+# guard exists to enforce and `test_cli_help.py` checks against the source.
+TAKES_ARGUMENTS = frozenset({"topics", "deepdive", "ticket-titles"})
+
+
+def refuses_arguments(stage: str, arguments: Sequence[str]) -> bool:
+    """Whether the argument guard in `main` would refuse this invocation.
+
+    Extracted so that `tests/test_documented_stages.py` can ask the real guard about
+    every command line the shipped documentation prints, rather than restating the
+    condition and drifting from it. A copy of a rule is not a check on it.
+    """
+    if not arguments or stage in SELF_PARSING or stage in TAKES_ARGUMENTS:
+        return False
+    return not any(argument in ("-h", "--help") for argument in arguments)
+
 
 # name -> (module attribute, one-line help). Order is the pipeline run order.
 STAGES: dict[str, tuple[str, str]] = {
@@ -249,13 +278,16 @@ def main(argv: list[str] | None = None) -> int:
     # repository in the estate, which is the opposite of what someone probing an
     # unfamiliar subcommand expects. Handled here rather than in each stage so a
     # stage added later inherits it instead of having to remember.
-    if rest[1:] and stage not in SELF_PARSING:
-        asked = [arg for arg in rest[1:] if arg in ("-h", "--help")]
-        if asked:
-            print(f"knowledgestore {stage}\n\n  {STAGES[stage][1]}\n")
-            print("This stage takes no arguments of its own.")
-            print("Run `knowledgestore` for the full stage list, and see config.py for settings.")
-            return 0
+    asked_for_help = any(argument in ("-h", "--help") for argument in rest[1:])
+    if asked_for_help and stage not in SELF_PARSING:
+        # A stage in TAKES_ARGUMENTS reaches here too: it owns positional arguments,
+        # not flags, so the generic description is still the right answer to --help.
+        print(f"knowledgestore {stage}\n\n  {STAGES[stage][1]}\n")
+        print("This stage takes no arguments of its own.")
+        print("Run `knowledgestore` for the full stage list, and see config.py for settings.")
+        return 0
+
+    if refuses_arguments(stage, rest[1:]):
         # Anything else is refused rather than ignored, and the reason is the one
         # the paragraph above already gives for `--help`: a stage that parses no
         # arguments used to let an unrecognised one fall through to its default
