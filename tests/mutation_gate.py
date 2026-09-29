@@ -1725,7 +1725,9 @@ MUTATIONS = (
             "test_content_set.NamedFormatStageTest.test_a_state_file_in_the_content_set_refuses_the_run",
             "test_content_set.NamedFormatStageTest.test_the_refusal_names_every_offending_path_and_the_way_past_it",
             "test_content_set.NamedFormatsTest.test_a_state_file_is_caught_at_any_depth",
+            "test_content_set.StageTest.test_it_does_not_list_its_own_outputs_as_content",
             "test_content_set.StageTest.test_it_reports_content_files_that_are_no_longer_on_disk",
+            "test_content_set.StageTest.test_it_still_lists_other_files_under_knowledge",
             "test_content_set.StatusReportsTheContentSetTest.test_it_claims_no_tree_percentage_when_the_manifest_did_not_measure_one",
             "test_content_set.StatusReportsTheContentSetTest.test_it_does_not_call_a_set_stale_when_there_is_no_detect_result_to_compare",
             "test_content_set.StatusReportsTheContentSetTest.test_it_says_a_content_set_is_stale_when_detect_has_moved_on",
@@ -2979,8 +2981,11 @@ MUTATIONS = (
         "committed. Every test of the primitive itself still passes with the call site "
         "gone - the wiring-never-asserted class this gate exists for",
         (
+            "test_deploy_values.SecretReferences.test_a_mapping_of_named_references_keeps_its_names",
             "test_deploy_values.SecretReferences.test_a_nested_store_reference_is_withheld_whole",
             "test_deploy_values.SecretReferences.test_a_reference_keeps_the_variable_and_withholds_store_and_entry",
+            "test_deploy_values.SecretReferences.test_the_entry_may_be_a_level_down_through_a_list",
+            "test_deploy_values.SecretReferences.test_the_entry_may_be_named_a_level_down_as_the_store_already_could",
             "test_deploy_values.SecretReferences.test_the_policy_keeps_the_sorted_cap_and_ignores_insertion_order",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
@@ -2997,7 +3002,11 @@ MUTATIONS = (
         "#88: the store half is frequently a mapping rather than a scalar, so withholding "
         "only scalars leaves the store name one level down, published under a key that "
         "reads as structure - a redaction that looks applied and is not",
-        ("test_deploy_values.SecretReferences.test_a_nested_store_reference_is_withheld_whole",),
+        (
+            "test_deploy_values.SecretReferences.test_a_nested_store_reference_is_withheld_whole",
+            "test_deploy_values.SecretReferences.test_the_entry_may_be_a_level_down_through_a_list",
+            "test_deploy_values.SecretReferences.test_the_entry_may_be_named_a_level_down_as_the_store_already_could",
+        ),
     ),
     Mutation(
         "the second deployment layout unwired",
@@ -3169,8 +3178,9 @@ MUTATIONS = (
     Mutation(
         "one role word is enough to redact",
         "deploy_values.py",
-        "    return bool(stores) and bool(entries) and len(stores | entries) > 1",
-        "    return bool(stores) or bool(entries)",
+        "    return bool(stores) and bool(entries) and len(stores | entries) > 1 "
+        "and named_outright",
+        "    return (bool(stores) or bool(entries)) and named_outright",
         "#88: `path`, `key` and `store` are ordinary configuration words on their own, so a "
         "rule satisfied by one of them withholds real configuration facts. This is the "
         "failure that reads as extra safety: a policy redacting everything answers no "
