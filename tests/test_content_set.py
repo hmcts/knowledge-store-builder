@@ -257,7 +257,15 @@ class StageTest(SettingsIsolated):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Resolved, because `config.configure` resolves and the two must agree.
+        # On macOS a temporary directory is reached through the /var -> /private/var
+        # symlink, so an unresolved root makes `store_paths.relative` fail to
+        # relativise the absolute paths this fixture writes. It falls back to the
+        # `repositories/` marker, which rescues corpus paths and leaves anything under
+        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
+        # shape here than on Linux, and a mutation keyed on path shape had a
+        # platform-dependent observer set.
+        self.root = Path(self.tmp.name).resolve()
         config.configure(root=self.root)
 
     def build_a_store(self) -> None:
@@ -425,20 +433,23 @@ class StageTest(SettingsIsolated):
         )
         code, _output = run()
         self.assertEqual(code, 0)
-        # Asserted by tail rather than by exact string: this fixture writes the
-        # absolute paths graphify's own detect writes, and a store reached through
-        # a symlinked root keeps them absolute for anything outside `repositories/`.
-        # Pinning one spelling would pass or fail on the platform, not on the fix.
+        # Exact, now that the harness root is resolved: the fixture writes the
+        # absolute paths graphify's own detect writes, and they relativise on every
+        # platform. They did not before - a macOS temporary root is reached through
+        # the /var -> /private/var symlink, so anything outside `repositories/` stayed
+        # absolute here and was relative on Linux. Pinning the spelling is what stops
+        # that returning.
         listed = config.CONTENT_FILES_PATH.read_text(encoding="utf-8").splitlines()
         for artefact in ("knowledge/corpus/content-files.txt", "knowledge/corpus/content-set.json"):
-            self.assertFalse(
-                [path for path in listed if path.endswith(artefact)],
+            self.assertNotIn(
+                artefact,
+                listed,
                 f"{artefact} is listed as content in the artefact it is the listing for",
             )
         manifest = json.loads(config.CONTENT_SET_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
-            sorted(path.rsplit("knowledge/", 1)[-1] for path in manifest["excluded_own_outputs"]),
-            ["corpus/content-files.txt", "corpus/content-set.json"],
+            manifest["excluded_own_outputs"],
+            ["knowledge/corpus/content-files.txt", "knowledge/corpus/content-set.json"],
         )
         self.assertEqual(
             manifest["classified_files"],
@@ -471,13 +482,12 @@ class StageTest(SettingsIsolated):
         code, _output = run()
         self.assertEqual(code, 0)
         listed = config.CONTENT_FILES_PATH.read_text(encoding="utf-8").splitlines()
-        self.assertTrue(
-            [path for path in listed if path.endswith("knowledge/git-history/alpha.md")],
+        self.assertIn(
+            "knowledge/git-history/alpha.md",
+            listed,
             "the history export is estate text and must stay searchable",
         )
-        self.assertFalse(
-            [path for path in listed if path.endswith("knowledge/corpus/content-files.txt")],
-        )
+        self.assertNotIn("knowledge/corpus/content-files.txt", listed)
 
     def test_it_reports_content_files_that_are_no_longer_on_disk(self):
         """Break it catches: silence about a detect result older than the tree.
@@ -621,7 +631,15 @@ class ClonesThatContributedNothingTest(SettingsIsolated):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Resolved, because `config.configure` resolves and the two must agree.
+        # On macOS a temporary directory is reached through the /var -> /private/var
+        # symlink, so an unresolved root makes `store_paths.relative` fail to
+        # relativise the absolute paths this fixture writes. It falls back to the
+        # `repositories/` marker, which rescues corpus paths and leaves anything under
+        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
+        # shape here than on Linux, and a mutation keyed on path shape had a
+        # platform-dependent observer set.
+        self.root = Path(self.tmp.name).resolve()
         config.configure(root=self.root)
 
     def declare(self, names: list[str]) -> None:
@@ -810,7 +828,15 @@ class StatusReportsTheContentSetTest(SettingsIsolated):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Resolved, because `config.configure` resolves and the two must agree.
+        # On macOS a temporary directory is reached through the /var -> /private/var
+        # symlink, so an unresolved root makes `store_paths.relative` fail to
+        # relativise the absolute paths this fixture writes. It falls back to the
+        # `repositories/` marker, which rescues corpus paths and leaves anything under
+        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
+        # shape here than on Linux, and a mutation keyed on path shape had a
+        # platform-dependent observer set.
+        self.root = Path(self.tmp.name).resolve()
         config.configure(root=self.root)
 
     def status_output(self) -> tuple[int, str]:
@@ -1068,7 +1094,15 @@ class NamedFormatStageTest(SettingsIsolated):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Resolved, because `config.configure` resolves and the two must agree.
+        # On macOS a temporary directory is reached through the /var -> /private/var
+        # symlink, so an unresolved root makes `store_paths.relative` fail to
+        # relativise the absolute paths this fixture writes. It falls back to the
+        # `repositories/` marker, which rescues corpus paths and leaves anything under
+        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
+        # shape here than on Linux, and a mutation keyed on path shape had a
+        # platform-dependent observer set.
+        self.root = Path(self.tmp.name).resolve()
         config.configure(root=self.root)
 
     def build_a_store_holding(self, extra: dict[str, str]) -> None:
