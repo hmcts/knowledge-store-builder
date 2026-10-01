@@ -99,7 +99,7 @@ COPY_THRESHOLD = 2
 # dropping it from this tuple restores that silence without failing anything
 # else - every other assertion in that module is a floor the remaining
 # documents clear on their own.
-DOC_ROOTS = ("README.md", "CHEATSHEET.md", "docs", "skills")
+DOC_ROOTS = ("README.md", "VISION.md", "CHEATSHEET.md", "docs", "skills")
 
 # Schemes that leave this repository. Nothing here can say whether they resolve.
 EXTERNAL = ("http://", "https://", "mailto:")
