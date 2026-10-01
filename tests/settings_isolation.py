@@ -101,3 +101,29 @@ class EstateGraphIsolated(SettingsIsolated):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             return summaries.absent_from_estate(unsupported)
+
+
+def store_root(case: unittest.TestCase) -> pathlib.Path:
+    """A temporary store root for `case`, resolved, removed when the test ends.
+
+    Resolved is the whole point. `config.configure` resolves the root it is
+    given, so a test that keeps the unresolved spelling holds a different string
+    for the same directory - and on macOS a temporary directory is reached
+    through the `/var` -> `/private/var` symlink, so the two really do differ.
+
+    What that costs is not obvious, which is why this exists. `store_paths`
+    deliberately never resolves, so when the two spellings disagree it cannot
+    relativise an absolute path and falls back to the `repositories/` marker.
+    That rescues corpus paths and has no equivalent for anything else, so a
+    path under `knowledge/` or `docs/` stays absolute on macOS and is relative
+    on Linux. Tests then exercise a different path shape on each platform:
+    assertions pinned to one spelling pass or fail on the operating system
+    rather than on the product, and a mutation keyed on path shape acquires a
+    platform-dependent observer set.
+
+    Both of those shipped. Prefer this over building the directory by hand;
+    `tests/test_settings_isolation.py` pins that what comes back is resolved.
+    """
+    tmp = tempfile.TemporaryDirectory()
+    case.addCleanup(tmp.cleanup)
+    return pathlib.Path(tmp.name).resolve()

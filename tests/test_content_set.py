@@ -28,7 +28,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from settings_isolation import SettingsIsolated  # noqa: E402
+from settings_isolation import SettingsIsolated, store_root  # noqa: E402
 
 from knowledgestore import build_content_set, cli, config, content_set, status
 
@@ -255,17 +255,7 @@ class StageTest(SettingsIsolated):
     """The stage, end to end, through the real writer and the real walk."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        # Resolved, because `config.configure` resolves and the two must agree.
-        # On macOS a temporary directory is reached through the /var -> /private/var
-        # symlink, so an unresolved root makes `store_paths.relative` fail to
-        # relativise the absolute paths this fixture writes. It falls back to the
-        # `repositories/` marker, which rescues corpus paths and leaves anything under
-        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
-        # shape here than on Linux, and a mutation keyed on path shape had a
-        # platform-dependent observer set.
-        self.root = Path(self.tmp.name).resolve()
+        self.root = store_root(self)
         config.configure(root=self.root)
 
     def build_a_store(self) -> None:
@@ -629,17 +619,7 @@ class ClonesThatContributedNothingTest(SettingsIsolated):
     """
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        # Resolved, because `config.configure` resolves and the two must agree.
-        # On macOS a temporary directory is reached through the /var -> /private/var
-        # symlink, so an unresolved root makes `store_paths.relative` fail to
-        # relativise the absolute paths this fixture writes. It falls back to the
-        # `repositories/` marker, which rescues corpus paths and leaves anything under
-        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
-        # shape here than on Linux, and a mutation keyed on path shape had a
-        # platform-dependent observer set.
-        self.root = Path(self.tmp.name).resolve()
+        self.root = store_root(self)
         config.configure(root=self.root)
 
     def declare(self, names: list[str]) -> None:
@@ -826,17 +806,7 @@ class StatusReportsTheContentSetTest(SettingsIsolated):
     """`status` is where an operator looks for what the store is missing."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        # Resolved, because `config.configure` resolves and the two must agree.
-        # On macOS a temporary directory is reached through the /var -> /private/var
-        # symlink, so an unresolved root makes `store_paths.relative` fail to
-        # relativise the absolute paths this fixture writes. It falls back to the
-        # `repositories/` marker, which rescues corpus paths and leaves anything under
-        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
-        # shape here than on Linux, and a mutation keyed on path shape had a
-        # platform-dependent observer set.
-        self.root = Path(self.tmp.name).resolve()
+        self.root = store_root(self)
         config.configure(root=self.root)
 
     def status_output(self) -> tuple[int, str]:
@@ -1092,17 +1062,7 @@ class NamedFormatStageTest(SettingsIsolated):
     """
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        # Resolved, because `config.configure` resolves and the two must agree.
-        # On macOS a temporary directory is reached through the /var -> /private/var
-        # symlink, so an unresolved root makes `store_paths.relative` fail to
-        # relativise the absolute paths this fixture writes. It falls back to the
-        # `repositories/` marker, which rescues corpus paths and leaves anything under
-        # `knowledge/` or `docs/` absolute - so those tests exercised a different path
-        # shape here than on Linux, and a mutation keyed on path shape had a
-        # platform-dependent observer set.
-        self.root = Path(self.tmp.name).resolve()
+        self.root = store_root(self)
         config.configure(root=self.root)
 
     def build_a_store_holding(self, extra: dict[str, str]) -> None:
