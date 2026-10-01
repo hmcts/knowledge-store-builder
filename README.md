@@ -41,16 +41,43 @@ at query time.
 **In a browser** — open `explorer.html`. No install, no Claude licence, no
 network.
 
-**In Claude Code** — install the plugin and ask in English. The skill reads the
-committed artefacts and cites them. The plugin also carries skills for building
-and refreshing a store, exporting a finding, and assessing a backlog of tickets
-against what the platform now does.
+**In Claude Code** — install the plugin and ask in English.
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
 /plugin install knowledge-store@knowledge-store-builder
 /reload-plugins
 ```
+
+`/reload-plugins` is not optional; the skills do not load without it. Then ask:
+
+```
+> how are addresses validated across these services?
+
+  Each application formats addresses with its own copy of AddressPipe.
+  There is no shared implementation.
+
+  Where it lives
+    demo-core   src/address/AddressPipe.java      (graph, built 2026-09-28)
+    demo-web    src/address/AddressPipe.java      (graph, built 2026-09-28)
+
+  What this is NOT
+    These two are not one component. They share a name and no edge
+    connects them, so the store reports them separately rather than
+    assuming they are the same.
+
+  Answered from: the graph, and the commit history for both files.
+
+> export that as a finding I can send to the platform team
+```
+
+That answer is the same content as the screenshot above, from the same test
+fixture, so you can reproduce it rather than take it on trust. Every line
+names the layer it came from and the date the store holds for it; an answer
+the store cannot support says so instead of filling the gap.
+
+The plugin also carries skills for building and refreshing a store, exporting a
+finding, and assessing a backlog of tickets against what the platform now does.
 
 **From the terminal** — `graphify query` against the committed graph.
 
