@@ -1,15 +1,29 @@
 # Working on this library
 
-The README explains what the library does. This file is for whoever changes it:
+The README explains what the library does. `VISION.md` says what it is for and
+what it will never be, which settles scope. This file is for whoever changes it:
 the traps that are not visible in the code, and cost hours when rediscovered.
 
-## Ground rules
+**Rules here are numbered so they can be cited.** Write `CLAUDE.md 2.7` in a pull
+request, a review or a message to another session, rather than quoting a
+paragraph and hoping the reader finds it. Several sessions read this file and
+had no shared way to point at one line of it. Section numbers are stable;
+inserting a rule appends to its section rather than renumbering the others.
 
-- **Every pull request opens by saying what is lost if it is not taken.** A short
-  section at the top, before the mechanics: what stays broken, what stays
-  unobserved, what an operator keeps hitting. Not a summary of the diff — the
-  reader can read the diff. The question a reviewer is actually answering is
-  whether to take the change, and nothing else in a PR body answers it.
+## 1. Ground rules
+
+- **1.1 Every pull request opens by saying what taking it gives you.** A short
+  section at the top, headed *What this change gives you*, before the mechanics:
+  what starts working, what becomes observable, what an operator stops hitting.
+  Not a summary of the diff — the reader can read the diff. The question a
+  reviewer is actually answering is whether to take the change, and nothing else
+  in a PR body answers it.
+
+  Lead with the gain; the gap belongs underneath it. The section was first
+  written the other way round, as what is lost by not taking the change, and the
+  content was right while the register was wrong: a body that opens on what is
+  broken reads as a complaint, and a reviewer meets the problem before the
+  reason to care.
 
   It is also the cheapest check on whether the change is worth making. A PR that
   cannot name what its absence costs is usually a PR whose author has not
@@ -21,18 +35,18 @@ the traps that are not visible in the code, and cost hours when rediscovered.
   Where the honest answer is "little, but it is cheap and it closes a class",
   write that. An accurate small claim is worth more than an inflated one, and a
   reviewer who learns the section is reliable will read it first every time.
-- **No behaviour changes disguised as refactors.** Stage outputs are committed
+- **1.2 No behaviour changes disguised as refactors.** Stage outputs are committed
   artefacts in consumer repositories; a change in what a stage emits is a
   change to their data. Say so explicitly in the PR.
-- **Deterministic output is a feature.** Two runs on the same inputs must be
+- **1.3 Deterministic output is a feature.** Two runs on the same inputs must be
   byte-identical. Anything that iterates a `set` or a `dict` keyed by unordered
   data needs an explicit tiebreak — sort by name, not just by score. Hash
   randomisation across processes has broken this before and it is invisible
   until someone diffs two builds.
-- **Gates are blocking on purpose:** ruff, `ruff format`, pyright, the scorer
+- **1.4 Gates are blocking on purpose:** ruff, `ruff format`, pyright, the scorer
   unit tests and the page regression. Do not make one non-blocking to land a
   change.
-- **Take a multi-step change through to the end.** Most work here is a sequence
+- **1.5 Take a multi-step change through to the end.** Most work here is a sequence
   with an obvious next step — change, test, format, lint, commit, PR — so run the
   sequence rather than stopping between steps for permission to continue. Working
   that way raises the bar on self-checking rather than lowering it, because nobody
@@ -59,7 +73,7 @@ the traps that are not visible in the code, and cost hours when rediscovered.
   Stop and ask when the next step is a decision rather than a step: a release, an
   output change consumers will see, or anything that rewrites published history.
 
-- **Stage explicit paths. Never `git add -A` or `git add .`** The working tree
+- **1.6 Stage explicit paths. Never `git add -A` or `git add .`** The working tree
   here routinely holds three things that must not be committed together:
   generated pipeline output, another session's in-progress edits, and scratch
   files. `-A` cannot tell them apart, and it has swept all three into commits on
@@ -67,7 +81,7 @@ the traps that are not visible in the code, and cost hours when rediscovered.
   broken link and survived a later cleanup. Read `git status --short`, list the
   paths, then confirm with `git show --stat HEAD` that nothing rode along.
 
-## Testing
+## 2. Testing
 
 Install the development tools and run the checks from the repository root:
 
@@ -150,16 +164,16 @@ In more detail (the house distillation of the superpowers
 
 How that looks in this codebase:
 
-- **Stub the IO boundary through the injectable seams** — `run=` on the
+- **2.1 Stub the IO boundary through the injectable seams** — `run=` on the
   git helpers, `runner=` on the gh helpers. Everything downstream of the
   seam is real code, and assertions land on what it produced: the
   provenance file's contents, the merged `dives.json`, the exit code.
-- **The explorer harnesses build through the real pipeline.**
+- **2.2 The explorer harnesses build through the real pipeline.**
   `tests/explorer/fixture.py` writes real inputs and runs the real merge
   and page build; the regression then drives the shipped `app.js` against
   the page those produced. Never fake a generated artefact to test its
   consumer.
-- **Bite-check regression tests.** A test pinning a fixed bug must be
+- **2.3 Bite-check regression tests.** A test pinning a fixed bug must be
   shown to fail against the broken code before it is trusted — check out
   or temporarily revert the fix and watch it fail. A pin that has never
   failed is unverified protection.
@@ -172,7 +186,7 @@ How that looks in this codebase:
   touched, and the source hashed correctly the whole time — so the usual proof
   that a restore worked cannot see this. `mutation_gate.py` already passes `-B`
   for exactly this reason (#228); a bite-check by hand has no such guard.
-- **A green suite means the code runs, not that it works.** Every stage that has
+- **2.4 A green suite means the code runs, not that it works.** Every stage that has
   shipped, or nearly shipped, doing nothing here had passing tests at the time: a
   `repositories.txt` parser that read the clone-URL field, because every fixture
   used bare names; a stage whose 23 tests passed against a stubbed HTTP boundary
@@ -180,18 +194,18 @@ How that looks in this codebase:
   green, do one end-to-end run on real inputs and **read the output rather than
   the exit code**. Where a fixture stands in for a file format something else
   owns, add one carrying the real format verbatim.
-- **Name every input file, and reconcile what landed against what you sent.** A
+- **2.5 Name every input file, and reconcile what landed against what you sent.** A
   glob in a merge command picked up a previous run's outputs and would have
   rewritten 397 clusters with prose describing different data — mechanically
   valid, entirely wrong. The merge reported "331 merged" and looked healthy. A
   tool's own count is not verification: compare the result against the inputs you
   named. For a replace-in-place operation assert the total is *unchanged*, because
   a revision must never add.
-- **Mutation check before finishing:** mentally flip a branch, drop a side
+- **2.6 Mutation check before finishing:** mentally flip a branch, drop a side
   effect, return the default — at least one test should fail for each
   realistic mutation. A mutation nothing catches is unprotected behaviour
   or a tautological test.
-- **Name the quantity you are claiming, then check the code computes that
+- **2.7 Name the quantity you are claiming, then check the code computes that
   quantity and not a neighbour of it.** Every wrong measurement this codebase
   has shipped or nearly shipped was *correct code answering a different
   question*: `$?` after a pipeline reads the last command's exit status, not
@@ -204,7 +218,7 @@ How that looks in this codebase:
   uniform* across populations differing in every other respect indicts the
   instrument, not the populations; and a count is not a finding until you can
   say which layer it counted.
-- **Every gate asserts its own sensitivity in the same run**, and every gate
+- **2.8 Every gate asserts its own sensitivity in the same run**, and every gate
   names what it covers. Break what it protects, confirm it notices, restore. A
   gate that can only pass or fail cannot report that it has become *vacuous* —
   and the way it goes vacuous is usually an improvement: moving markdown
@@ -218,7 +232,7 @@ How that looks in this codebase:
   incidental coverage cannot self-report. A named mutation entry caught it. Both
   halves are needed, and a separate mutation run is not a substitute for the
   first: it only catches a vacuous test if somebody wrote a mutation for it.
-- **Self-verification bottoms out, and the fix is naming what verifies the
+- **2.9 Self-verification bottoms out, and the fix is naming what verifies the
   verifier.** A check cannot establish that its own sensitivity loop ran: `for x in
   []` reads as a passing loop, and no assertion inside a function proves the
   assertion was reached. Three instances here, each a check that could not fail: a
@@ -237,19 +251,19 @@ How that looks in this codebase:
   Adding a fourth self-referential check feels like coverage and is not: it has the
   same blind spot as the three below it.
 
-- **A check's silence only licenses a claim about the artefact it read.** A
+- **2.10 A check's silence only licenses a claim about the artefact it read.** A
   zero-tolerance rule running where the violation cannot occur reads as
   compliance for something it never looked at: `validate_chunk` forbids
   chunk-numbered ids and reported 0 errors across 1,556 chunk files, while the
   graph those files merge into holds 187 of them. The check was correct, present
   and passing. Before trusting a green result, say which artefact it read and
   whether that is the artefact that can be wrong.
-- **A correction ships the check that makes it durable.** Removing the
+- **2.11 A correction ships the check that makes it durable.** Removing the
   *precondition* for an error is not detecting its recurrence - naming the metric
   in a table's column headings stopped two quantities looking comparable, and
   would not have noticed the same substitution returning. If a change explains
   what was wrong, it should also fail when that thing is wrong again.
-- **An issue body is the opening claim, not the current state. Read the comments
+- **2.12 An issue body is the opening claim, not the current state. Read the comments
   before acting on any number in it, or on its account of what the finding is.**
   The operators reporting into this tracker retract their own figures in comments,
   promptly and unprompted — which is the best thing about working with them and
@@ -271,7 +285,7 @@ How that looks in this codebase:
   Unlike most rules here this one has no gate behind it. Nothing fails when it is
   broken, which is why it is written where it will be read. Cost of the check: one
   `--comments` flag.
-- **A claim about your own artefact needs the same treatment as a claim about
+- **2.13 A claim about your own artefact needs the same treatment as a claim about
   your own numbers, and gets it less often.** Between two operators and this
   repository, one week produced seven corrections of the form "I described
   something I built and was wrong": a plan characterised as directory-grouped
@@ -280,7 +294,7 @@ How that looks in this codebase:
   what you built runs on your model of it, and that model is what you would check
   *with* - so it cannot be what you check *against*. Re-derive it from the
   artefact, or have someone else do it.
-- **A non-editable install of this library shadows `src/` for the whole
+- **2.14 A non-editable install of this library shadows `src/` for the whole
   suite.** Test modules put `src/` on `sys.path` at import time, but once any
   earlier module has imported `knowledgestore`, `sys.modules` is already bound
   and the insert does nothing — so discovery silently exercises the *installed*
@@ -292,18 +306,18 @@ How that looks in this codebase:
   written to move a number, with no break it can catch, costs maintenance
   forever and protects nothing.
 
-## The skills are the enforcement point, not the docs
+## 3. The skills are the enforcement point, not the docs
 
 **Skills live in `skills/`**, the directory Claude Code scans by default, and
 `plugin.json` declares no `skills` field. A store may reasonably choose the
 other arrangement, so be precise about why this one fails:
 
-- **`skills` is a valid manifest field.** What is invalid is a path that does
+- **3.1 `skills` is a valid manifest field.** What is invalid is a path that does
   not start with `./` — every component path must be relative to the plugin
   root and begin with `./`. `".claude/skills/"` fails install with
   `skills: Invalid input`; `"./.claude/skills/"` is accepted. The message names
   the field, which reads as though the field were unsupported. It is not.
-- **`skills` adds to the default scan** rather than replacing it — except when
+- **3.2 `skills` adds to the default scan** rather than replacing it — except when
   a marketplace entry's `source` resolves to the marketplace root, as ours does
   (`"source": "./"`), where naming subdirectories replaces the default `skills/`
   scan instead.
@@ -329,7 +343,7 @@ Consequences for anyone changing this library:
   dispatch step), `knowledge-store-export` (re-derive anything a subagent found
   before publishing it). Adding a fourth skill that produces or reports store
   content means carrying the rule into it too. Do not rely on the pointer.
-- **`docs/grounding-and-verification.md` is the master. The statements inside the
+- **3.3 `docs/grounding-and-verification.md` is the master. The statements inside the
   skills are copies, and they must be updated whenever the master changes.** The
   obligation runs one way: editing the master without updating the skills leaves
   agents enforcing a superseded rule, and a skill that has drifted from the
@@ -356,7 +370,7 @@ Consequences for anyone changing this library:
   form, the document carries the reasoning and the techniques. Neither replaces
   the other.
 
-## Writing documentation
+## 4. Writing documentation
 
 User-facing docs are **persona-led**: one document, one reader. The README
 serves the evaluator and routes the other two personas to their guide.
@@ -371,7 +385,7 @@ Before writing or reworking any of them, use the `technical-writer` skill in
 prose, the banned-word list) and the verification steps, and it names its
 source. Two hard rules from it:
 
-- **Inbound deep links are load-bearing.** A consuming store repository links
+- **4.1 Inbound deep links are load-bearing.** A consuming store repository links
   into this repository's docs, so renaming a heading it targets breaks that
   consumer's README silently — that is what happened to the README's install
   sections, removed while a consumer still pointed at them. (The consumers are
@@ -388,11 +402,11 @@ source. Two hard rules from it:
   undeclared. The same gate resolves every relative link and in-page anchor
   across `README.md`, `docs/` and `skills/`. Run it alone with
   `python3 tests/docs_integrity.py`.
-- **Install detail lives in the guides, not the README.** `docs/asking-questions.md`
+- **4.2 Install detail lives in the guides, not the README.** `docs/asking-questions.md`
   owns the plugin install and `docs/creating-a-store.md` owns the library
   install. The README routes to them and carries no install commands of its own,
   so there is one copy of each to keep correct.
-- **Docs and skills must not disagree.** The README once kept `graphify .` at
+- **4.3 Docs and skills must not disagree.** The README once kept `graphify .` at
   the store root long after the build skill documented why that cannot work.
   When a skill changes an instruction, grep the docs for the old one — and
   retire it in `docs/retired-instructions.txt`, which is the checkable half of
@@ -402,7 +416,7 @@ source. Two hard rules from it:
   stays legal. What that leaves uncaught is an instruction written as a prose
   imperative.
 
-## Library examples stay generic
+## 5. Library examples stay generic
 
 This repository is **public** and reusable. Skills, docs and examples must not
 carry any consuming estate's specifics: no repository names, no field names, no
@@ -417,19 +431,19 @@ belong in the store that owns them. The single deliberate exception is the
 operator guide naming the estate it was written from, as attribution for a case
 study.
 
-## Graph handling
+## 6. Graph handling
 
-- **Never merge a graph that is already merged.** `graphify merge-graphs`
+- **6.1 Never merge a graph that is already merged.** `graphify merge-graphs`
   namespaces node ids as `<repo>::<id>`; feeding it a merged graph namespaces
   them again as `repo::<repo>::<id>`, sets every `repo` attribute to the string
   `"repo"`, and silently breaks Gherkin de-duplication. Always merge flat, from
   every per-repo graph plus the knowledge corpus, in one call.
-- **Extract per repository from inside that repository.** Running the
+- **6.2 Extract per repository from inside that repository.** Running the
   extraction with a path like `repositories/<name>` prefixes every
   `source_file` with `repositories/<name>/`, which silently breaks the
   file-to-ticket join — the intent index is keyed on repo-relative paths. The
   only symptom is that nodes lose their tickets.
-- **Community ids are not stable across re-clustering.** Community summaries
+- **6.3 Community ids are not stable across re-clustering.** Community summaries
   are keyed by id, so re-clustering strands them. Remap or regenerate; never
   assume the old file still applies. The shipped criterion is
   `DEFAULT_CARRY = CARRY_EXACT` — a summary is carried only onto a set identical
@@ -438,19 +452,19 @@ study.
   it as *the* rule is the same defect three shipped documents carried until
   #346; `docs/building-a-knowledge-store.md` is now pinned against
   `DEFAULT_BAR`, and this paragraph was the copy nothing checked.
-- **Structural nodes carry no label.** Newer graphify emits Java
+- **6.4 Structural nodes carry no label.** Newer graphify emits Java
   package-hierarchy nodes with neither `label` nor `source_file`. Anything
   iterating nodes must tolerate that — the explorer index and the summary
   digests skip them.
-- **Node kinds are format-agnostic** (`feature`, `scenario`, `ticket`) with a
+- **6.5 Node kinds are format-agnostic** (`feature`, `scenario`, `ticket`) with a
   separate `format` field. `kinds.py` still reads the old format-specific kinds
   so stores built earlier keep working. Write the current kind, read either.
-- **`deepdive extract` loads the full graph** (can be ~1.6 GB decompressed);
+- **6.6 `deepdive extract` loads the full graph** (can be ~1.6 GB decompressed);
   `status` deliberately never does. Keep it that way.
-- **`status` never returns non-zero.** Drift and coverage gaps are normal
+- **6.7 `status` never returns non-zero.** Drift and coverage gaps are normal
   operating conditions; the stage reports, humans decide.
 
-## Repository sync
+## 7. Repository sync
 
 Per-repo graphs live untracked *inside* each clone, at
 `repositories/<name>/graphify-out/`. `git clean -fd` therefore deletes them,
@@ -461,7 +475,7 @@ Full clones are deliberate: the history export diffs every commit, so a
 `--filter=blob:none` clone re-fetches blobs one commit at a time and is far
 slower overall.
 
-## The shared-environment trap
+## 8. The shared-environment trap
 
 This library and its consumer stores often share one Python environment.
 Installing a store's pinned release (its `requirements.lock`) silently
@@ -483,7 +497,7 @@ check can fix that, because a check is code some interpreter runs; the console
 script is the answer because it necessarily runs under the environment that owns
 it, and it now says which one that is.
 
-## Things that look like bugs but are not
+## 9. Things that look like bugs but are not
 
 - `str.strip()` treats `\x1f` and `\x1e` as whitespace. The history export uses
   them as field separators, so stripping whitespace silently drops
@@ -493,7 +507,7 @@ it, and it now says which one that is.
 - Very large graphs need `GRAPHIFY_VIZ_NODE_LIMIT` raised, or the HTML
   visualisation export refuses to run.
 
-## Required checks and paths-ignore do not mix
+## 10. Required checks and paths-ignore do not mix
 
 The `main` ruleset requires the `tests` and `CodeQL` status checks. A workflow
 skipped by `paths-ignore` **never reports its check at all** — GitHub waits for
@@ -507,7 +521,7 @@ and `lint.yml` may keep theirs because they are not required. If skipping a
 required check on prose ever becomes worth the effort, add a companion job that
 reports the same context for the ignored paths.
 
-## Releases
+## 11. Releases
 
 **Cutting a release is the maintainer's call, not a contributor's.** Publishing
 moves a feed other repositories consume, so finish at a merged PR on `main` and
@@ -536,9 +550,9 @@ fails `tests/test_documented_stages.py`, which also holds every
 `knowledgestore <stage>` in the shipped documentation to be a stage of this
 release — that is what makes the skill's stage comparison worth performing.
 
-## SonarCloud, learned the hard way
+## 12. SonarCloud, learned the hard way
 
-- **A green quality gate does not mean no issues.** The gate tolerates open
+- **12.1 A green quality gate does not mean no issues.** The gate tolerates open
   issues, so `gh pr checks` can be entirely green while criticals sit unread.
   Query the issues API after every push, and poll until the analysis for the
   current head SHA has concluded — a stale one reports the pre-fix number:
@@ -547,7 +561,7 @@ release — that is what makes the skill's stage comparison worth performing.
   curl -sS "https://sonarcloud.io/api/issues/search?componentKeys=<key>&pullRequest=<n>&resolved=false"
   ```
 
-- **Two lint metrics are not one gate.** eslint measures cyclomatic complexity
+- **12.2 Two lint metrics are not one gate.** eslint measures cyclomatic complexity
   and Sonar measures cognitive complexity; satisfying one says nothing about the
   other. `complexipy` is closer but is not a proxy either — it has read both above
   and below Sonar on this codebase, once by 9 points.
@@ -561,7 +575,7 @@ release — that is what makes the skill's stage comparison worth performing.
 - YAML trap: `run: pip install --only-binary :all: -r x.txt` fails to parse,
   because `: ` ends a plain scalar. Use a block scalar (`run: |`).
 
-## When to act and when to ask
+## 13. When to act and when to ask
 
 Building a store means a long run of decisions nobody is watching. This is where
 to stop, and it holds whether you are working alone or alongside other sessions.
@@ -581,14 +595,14 @@ the rest of this section is a short list of exceptions.
 
 **Ask the owner first.** Four categories, and only these:
 
-- **Leaving your own repository** — publishing to a public or third-party project,
+- **13.1 Leaving your own repository** — publishing to a public or third-party project,
   filing upstream, or moving content between repositories of different visibility.
-- **Irreversible** — deleting an issue, rewriting history, force-pushing, re-cloning
+- **13.2 Irreversible** — deleting an issue, rewriting history, force-pushing, re-cloning
   a corpus, re-clustering a graph whose summaries are keyed by community id, or
   anything else that discards an artefact that cost real time to build.
-- **A shared contract** — the library, a documented route, or a policy other stores
+- **13.3 A shared contract** — the library, a documented route, or a policy other stores
   follow.
-- **Cost nobody agreed to** — a large rebuild, a release, or hours that are not
+- **13.4 Cost nobody agreed to** — a large rebuild, a release, or hours that are not
   yours to spend.
 
 **Never idle while waiting.** Do the reversible part, stage the rest, and say what
