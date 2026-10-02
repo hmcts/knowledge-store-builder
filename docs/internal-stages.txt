@@ -1,0 +1,14 @@
+# Stages that no user-facing document needs to name.
+#
+# `tests/test_documented_stages.py` requires every stage in `cli.STAGES` to be
+# named by at least one shipped document, or to be listed here. The list is the
+# escape hatch for a stage that genuinely has no operator-facing use - something
+# the pipeline calls internally and nobody runs by hand.
+#
+# It is deliberately empty. Every stage this release ships is documented, and an
+# entry added here is a claim that an operator never needs to know a stage
+# exists. That claim is cheap to make and expensive to be wrong about: `convert`
+# and `check-corpus` were undocumented for months, and the reason was not that
+# anyone decided they were internal - it was that nothing asked.
+#
+# One stage name per line. Blank lines and `#` comments are ignored.
