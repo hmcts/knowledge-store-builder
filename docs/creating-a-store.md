@@ -206,6 +206,8 @@ should run and the checkpoints you should expect.
 
 ```bash
 knowledgestore sync
+knowledgestore convert
+knowledgestore check-corpus
 knowledgestore export-history
 knowledgestore context
 knowledgestore intent
@@ -216,6 +218,21 @@ the estate and build the file-to-ticket index. Stages are independent and
 idempotent, so a failed stage can be rerun. If `sync` reports any failed
 repositories, fix them before continuing: it records successful repositories
 and exits non-zero, leaving the estate incomplete.
+
+**`convert` runs after `sync` and before any extraction.** Extraction reads PDF
+and a wide spread of code and markup, and is blind to Office formats, so a
+design document, a field mapping or an interface specification contributes its
+filename and nothing else until this stage turns it into Markdown beside the
+original. Those are the documents a store exists to answer questions from, so
+skipping it does not fail the build — it produces a store that answers from
+code alone and cannot say what it did not read.
+
+**`check-corpus` reports harness configuration the corpus carries.** A cloned
+repository may contain its own agent instructions — `CLAUDE.md`, `AGENTS.md`,
+a `.claude/` directory — and those are estate content rather than instructions
+to the agent building the store. The stage names what it found so you decide
+before extraction reads it. It reports and exits zero; what to do about a
+finding is yours.
 
 Before graph extraction, complete the secret-scanning and untrusted-input gates
 in [Building an effective knowledge store](building-a-knowledge-store.md#5-gate-before-you-build-not-after).

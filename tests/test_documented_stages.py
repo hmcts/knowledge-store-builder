@@ -107,6 +107,20 @@ def capability_problem(skill: str) -> str | None:
     return None
 
 
+# The user-facing files that live at the repository root rather than under
+# `docs/`. CHEATSHEET.md is the most command-dense file here and was scanned by
+# nothing: its stage names were correct by luck rather than by a check, and
+# `extract-ast` is named in these files and nowhere else - so without them the
+# reverse check below would have reported a documented stage as undocumented.
+ROOT_DOCUMENTS = ("README.md", "VISION.md", "CHEATSHEET.md")
+
+# The escape hatch for the reverse check, and the reason it is a committed file
+# rather than a constant: adding a stage to it is a claim that no operator needs
+# to know the stage exists, and a claim like that belongs where it can be read
+# and argued with.
+INTERNAL_STAGES = Path("docs/internal-stages.txt")
+
+
 def shipped_documentation() -> list[Path]:
     """Every file that tells a reader to run something, plans excluded."""
     skills = sorted(ROOT.joinpath("skills").rglob("SKILL.md"))
@@ -115,7 +129,20 @@ def shipped_documentation() -> list[Path]:
         for p in sorted(ROOT.joinpath("docs").rglob("*.md"))
         if "superpowers" not in p.relative_to(ROOT).parts
     ]
-    return skills + docs
+    roots = [ROOT / name for name in ROOT_DOCUMENTS if (ROOT / name).is_file()]
+    return skills + docs + roots
+
+
+def declared_internal() -> set[str]:
+    """Stage names a maintainer has declared no document needs to name."""
+    path = ROOT / INTERNAL_STAGES
+    if not path.is_file():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
 
 
 class DocumentedStagesExist(unittest.TestCase):
@@ -159,6 +186,73 @@ class DocumentedStagesExist(unittest.TestCase):
                         "which is not a stage in this release - a reader following it "
                         "gets `unknown stage`",
                     )
+
+
+class EveryStageIsDocumented(unittest.TestCase):
+    """The other direction, which nothing here asked for.
+
+    Every gate in this repository asks "does this documented thing exist?" and
+    the answer is always yes, because a stage that was renamed shows up
+    immediately. None asked "is this existing thing documented?", so a stage no
+    document mentions was structurally invisible - and two were. `convert` turns
+    Office documents into something extraction can read, without which they
+    contribute a filename; `check-corpus` reports agent instructions the corpus
+    carries. Neither was internal. Nobody had decided they should be
+    undocumented; nothing had ever asked.
+    """
+
+    def test_every_stage_is_named_by_a_shipped_document(self):
+        named = {
+            m.group(1)
+            for path in shipped_documentation()
+            for m in INVOCATION.finditer(path.read_text(encoding="utf-8"))
+        }
+        internal = declared_internal()
+        for stage in sorted(cli.STAGES):
+            with self.subTest(stage=stage):
+                self.assertTrue(
+                    stage in named or stage in internal,
+                    f"`knowledgestore {stage}` is a stage of this release and no shipped "
+                    f"document names it. Document it, or add it to {INTERNAL_STAGES} to "
+                    "say that no operator needs to know it exists",
+                )
+
+    def test_the_reverse_scan_reads_the_stages_and_the_documents(self):
+        """The vacuity guard. An empty stage table or an empty scan passes above.
+
+        Both halves, because either one going to zero makes the check green over
+        nothing, and the failure looks identical from the outside.
+        """
+        self.assertGreater(len(cli.STAGES), 20, "the stage table is suspiciously small")
+        named = {
+            m.group(1)
+            for path in shipped_documentation()
+            for m in INVOCATION.finditer(path.read_text(encoding="utf-8"))
+        }
+        self.assertGreater(
+            len(named & set(cli.STAGES)), 20, "the scan found almost no documented stages"
+        )
+
+    def test_the_internal_list_is_read_and_is_not_a_dumping_ground(self):
+        """An escape hatch nobody can see the size of stops being an escape hatch."""
+        internal = declared_internal()
+        self.assertTrue(
+            (ROOT / INTERNAL_STAGES).is_file(),
+            f"{INTERNAL_STAGES} is missing, so the check above has no escape hatch and "
+            "the next internal stage will be documented under protest or the gate "
+            "deleted",
+        )
+        for stage in internal:
+            with self.subTest(stage=stage):
+                self.assertIn(
+                    stage, cli.STAGES, f"{INTERNAL_STAGES} names {stage}, which is not a stage"
+                )
+        self.assertLess(
+            len(internal),
+            len(cli.STAGES) // 2,
+            "more than half the stages are declared internal; the exception has become "
+            "the rule and this gate is no longer saying anything",
+        )
 
 
 class TheScanCanStillTell(unittest.TestCase):
