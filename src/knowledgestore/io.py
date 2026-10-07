@@ -87,26 +87,6 @@ def checked_write_target(path: Path) -> Path:
     return Path(path)
 
 
-def checked_read_source(path: Path) -> Path:
-    """Raise `ValueError` if any component of a path a caller named climbs upward.
-
-    The read-side twin of `checked_write_target`, with the same property and the
-    same shape: called for the raise rather than the return value, checked
-    lexically before any resolution. Reads need it for the same reason writes do.
-    A stage that takes paths off the command line parses whatever file it is
-    pointed at, so whoever builds the arguments - an operator, a script, an agent -
-    decides which file on the machine is read. A `..` component is never
-    legitimate in a path named directly. Confining reads to a declared boundary
-    belongs at the stage, where the boundary is known, not in this helper.
-    """
-    climbs = [part for part in Path(path).parts if part == ".."]
-    if climbs:
-        raise ValueError(
-            f"refusing to read a path that traverses upward: {path}. Name the path directly."
-        )
-    return Path(path)
-
-
 def _read_json_file(path: Path):
     """Parse a JSON file that exists, gzipped or not. The suffix decides.
 

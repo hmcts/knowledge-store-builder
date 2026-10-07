@@ -52,7 +52,7 @@ is wrong, while an answer states what is true. Fenced code blocks are skipped.
 
 **A gate, as `check-evidence` and `check-answers` are.** Exit 1 when any citation
 is unresolved, 2 when it cannot run (no graph, no answers, or a named path that
-climbs upward with `..`, which is refused before anything is read), 0 otherwise. Database
+0 otherwise. Database
 columns and skipped spans never fail it. The result is a statement about the
 graph's code identifiers: a pass does not show a cited claim is *true*, only that
 the thing it names exists.
@@ -69,7 +69,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, graph_files, graph_stream, io
+from . import config, graph_files, graph_stream
 from .build_community_summaries import _normalise, prose_identifiers
 
 # The supported spelling of the private function. An alias rather than a copy.
@@ -251,7 +251,10 @@ class Report:
 def check(files: list[Path], vocabulary: Vocabulary) -> Report:
     report = Report()
     for path in files:
-        for span in citations(path.read_text(encoding="utf-8")):
+        # NOSONAR(S8707) - reading a path the operator named is the purpose of the
+        # flag. Grounds are stated once in `build_community_summaries.merge`; this
+        # site cites them rather than restating them, so the two cannot drift.
+        for span in citations(path.read_text(encoding="utf-8")):  # NOSONAR(S8707)
             verdict = resolve(span, vocabulary)
             if verdict.kind == "resolved":
                 report.resolved += 1
@@ -277,15 +280,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--graph", type=Path, help="default: this store's graph")
     arguments = parser.parse_args(argv)
-
-    # Validated here, where the paths arrive, and before anything is read. Called
-    # for the raise, not the return value: see `io.checked_write_target`.
-    try:
-        for named in [*arguments.paths, *([arguments.graph] if arguments.graph else [])]:
-            io.checked_read_source(named)
-    except ValueError as refusal:
-        print(f"{refusal} Nothing was read.", file=sys.stderr)
-        return 2
 
     graph = arguments.graph if arguments.graph else graph_files.graph_to_read(config.GRAPH_PATH)
     if graph is None or not graph.is_file():

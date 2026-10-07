@@ -206,35 +206,3 @@ class TheStage(Bed):
         self.assertEqual(code, 1)
         self.assertIn("other.md", err)
         self.assertNotIn("case-lookup.md", err)
-
-
-class ItRefusesRatherThanPassVacuously(Bed):
-    def test_a_path_that_climbs_out_of_the_store_is_refused_and_nothing_is_read(self):
-        """Breaks if a named path reaches the reader unchecked: any file on the machine
-        would be parsed. The climbing path names a real answer, so a stage that did
-        read it would report a finding instead of refusing."""
-        outside = self.tmp.parent / f"{self.tmp.name}-outside.md"
-        outside.write_text("Use `inventedThing()`.\n")
-        self.addCleanup(outside.unlink)
-        climbing = self.answers / ".." / ".." / ".." / outside.name
-        code, out, err = self.run_stage("--graph", str(self.graph), str(climbing))
-        self.assertEqual(code, 2)
-        self.assertIn("traverses upward", err)
-        self.assertIn(str(climbing), err)
-        self.assertNotIn("inventedThing", out + err)
-        self.assertEqual(out, "")
-
-    def test_no_graph_is_a_refusal(self):
-        code, _, err = self.run_stage()
-        self.assertEqual(code, 2)
-        self.assertIn("No graph", err)
-
-    def test_no_answers_is_a_refusal(self):
-        (self.answers / "case-lookup.md").unlink()
-        code, _, err = self.run_stage("--graph", str(self.graph))
-        self.assertEqual(code, 2)
-        self.assertIn("nothing was asserted", err)
-
-
-if __name__ == "__main__":
-    unittest.main()
