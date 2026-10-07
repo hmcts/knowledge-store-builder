@@ -1,12 +1,47 @@
 // Refuses command shapes this library has documented as destructive. Pure:
 // it reads nothing, writes nothing and calls nothing outside its arguments.
 
+/** Blank the contents of quoted spans, keeping the quotes and the length, so
+ *  a separator or a flag inside a string cannot manufacture a segment or a
+ *  token. This is what makes the note on argsOf true: masking can only stop a
+ *  guard firing, never cause one to fire. */
+export function maskQuoted(command) {
+  let out = "";
+  let quote = null;
+  for (const ch of String(command ?? "")) {
+    if (quote) {
+      out += ch === quote ? ch : "X";
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Segments with the separator that precedes each one, over masked text. */
+export function chainLinks(command) {
+  const masked = maskQuoted(command);
+  const links = [];
+  const separator = /\s*(&&|\|\||;)\s*/g;
+  let last = 0;
+  let before = null;
+  let match;
+  while ((match = separator.exec(masked)) !== null) {
+    links.push({ text: masked.slice(last, match.index).trim(), before });
+    before = match[1];
+    last = match.index + match[0].length;
+  }
+  links.push({ text: masked.slice(last).trim(), before });
+  return links.filter((link) => link.text);
+}
+
 /** Split a command into its &&, || and ; separated segments. */
 export function chainSegments(command) {
-  return String(command ?? "")
-    .split(/\s*(?:&&|\|\||;)\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return chainLinks(command).map((link) => link.text);
 }
 
 /** The first command of a segment's pipeline. */
@@ -23,13 +58,37 @@ export function argsOf(segment) {
 
 const EXCLUDES_GRAPHIFY_OUT = /(?:-e|--exclude)[=\s]+graphify-out\b/;
 
+function isFlag(argument) {
+  return argument.startsWith("-");
+}
+
+/** True when the clean names a path to clean, which cannot reach
+ *  graphify-out at the repository root. The value after -e or --exclude is
+ *  that flag's, not a pathspec. */
+function hasPathspec(args) {
+  const after = args.slice(args.indexOf("clean") + 1);
+  for (let i = 0; i < after.length; i++) {
+    if (after[i] === "-e" || after[i] === "--exclude") {
+      i++;
+      continue;
+    }
+    if (!isFlag(after[i])) return true;
+  }
+  return false;
+}
+
 function unexcludedClean(segment, cwd) {
   const args = argsOf(segment);
   if (args[0] !== "git" || !args.includes("clean")) return null;
   const flags = args.filter((a) => /^-[^-]/.test(a)).join("");
   if (!(flags.includes("f") && flags.includes("d"))) return null;
+  if (flags.includes("n") || args.includes("--dry-run")) return null;
   if (EXCLUDES_GRAPHIFY_OUT.test(segment)) return null;
-  const inClone = /(^|\/)repositories\//.test(cwd) || /(^|\s)repositories\//.test(segment);
+  if (hasPathspec(args)) return null;
+  // The cwd must be a clone, not merely somewhere under a directory of that
+  // name: a store at /x/repositories/mystore is not a clone.
+  const inClone =
+    /^\/[^/]+\/repositories\/[^/]+\/?$/.test(cwd) || /(^|\s)repositories\//.test(segment);
   if (!inClone) return null;
   return (
     "This clean would delete the per-repo graphs. They live untracked at " +
@@ -53,8 +112,13 @@ function indiscriminateStage(segment) {
 
 const EXTRACTION_VERBS = new Set(["update", "extract"]);
 
+function asksForHelp(args) {
+  return args.includes("-h") || args.includes("--help");
+}
+
 function outsideExtraction(segment) {
   const args = argsOf(segment);
+  if (asksForHelp(args)) return null;
   // Only the extraction verbs. merge-graphs is given repositories/*/... by the
   // build skill itself, so matching every graphify subcommand would refuse the
   // documented merge.
@@ -68,28 +132,36 @@ function outsideExtraction(segment) {
   );
 }
 
-const CHECKERS = /^(?:pytest|ruff|pyright|tsc|eslint|node|npm|npx|python3?|uv)\b/;
+// Real checkers only. A general-purpose interpreter in a pipeline is ordinary
+// work, not a gate, so node, npm, npx and bare python are deliberately absent.
+const CHECKERS = /^(?:pytest|ruff|pyright|tsc|eslint|mypy)\b|^python3?\s+-m\s+(?:unittest|pytest)\b/;
 const PUBLISHES = /^git\s+(?:push|commit)\b/;
 
 /** Reads the whole command rather than one segment: the hazard is the
- *  relationship between a piped checker and a later push. */
+ *  relationship between a piped checker and a later commit or push. Only an
+ *  unbroken run of `&&` gates - `;` runs the next command whatever happened,
+ *  and `||` runs it only on failure, so neither can be masked by the pipe. */
 function pipedGate(command) {
-  const segments = chainSegments(command);
-  const pipedChecker = segments.findIndex(
-    (s) => s.includes("|") && CHECKERS.test(pipelineHead(s)),
-  );
-  if (pipedChecker === -1) return null;
-  const publishesAfter = segments.slice(pipedChecker + 1).some((s) => PUBLISHES.test(s));
-  if (!publishesAfter) return null;
-  return (
-    "A pipeline's exit status is its last command's, not the checker's, so " +
-    "this pushes whatever the checker did. Redirect the checker to a file and " +
-    "read it, or test ${PIPESTATUS[0]}."
-  );
+  const links = chainLinks(command);
+  for (let i = 0; i < links.length; i++) {
+    if (!links[i].text.includes("|")) continue;
+    if (!CHECKERS.test(pipelineHead(links[i].text))) continue;
+    for (let j = i + 1; j < links.length && links[j].before === "&&"; j++) {
+      if (PUBLISHES.test(links[j].text)) {
+        return (
+          "A pipeline's exit status is its last command's, not the checker's, " +
+          "so this commits or pushes whatever the checker did. Redirect the " +
+          "checker to a file and read it, or test ${PIPESTATUS[0]}."
+        );
+      }
+    }
+  }
+  return null;
 }
 
 function unreconciledMerge(segment, _cwd, state) {
   const args = argsOf(segment);
+  if (asksForHelp(args)) return null;
   if (args[0] !== "graphify" || args[1] !== "merge-graphs") return null;
   if (state && state.mergeInputsRan) return null;
   return (

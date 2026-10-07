@@ -100,6 +100,52 @@ test("absent state behaves as not run rather than throwing", () => {
   assert.equal(r.allow, false);
 });
 
+test("a quoted separator does not manufacture a segment", () => {
+  assert.equal(decide({ command: 'git commit -m "do not; git add -A ever"' }).allow, true);
+});
+
+test("a piped checker followed by ; does not gate", () => {
+  assert.equal(decide({ command: "pytest | tail -1; git commit -m x" }).allow, true);
+});
+
+test("the PIPESTATUS remedy the message recommends is allowed", () => {
+  const c = "pytest | tee out.txt; test ${PIPESTATUS[0]} -eq 0 && git push";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("a general-purpose interpreter in a pipeline is not a checker", () => {
+  assert.equal(decide({ command: "python3 gen.py | jq . && git commit -m x" }).allow, true);
+});
+
+test("a dry-run clean is allowed", () => {
+  assert.equal(decide({ command: "git clean -fdn", cwd: "/s/repositories/a" }).allow, true);
+});
+
+test("a pathspec-limited clean is allowed", () => {
+  assert.equal(decide({ command: "git clean -fd src/", cwd: "/s/repositories/a" }).allow, true);
+});
+
+test("a store root merely under a repositories directory is not a clone", () => {
+  assert.equal(decide({ command: "git clean -fd", cwd: "/home/u/repositories/mystore" }).allow, true);
+});
+
+test("the --exclude= form is honoured", () => {
+  const r = decide({ command: "git clean -fd --exclude=graphify-out", cwd: "/s/repositories/a" });
+  assert.equal(r.allow, true);
+});
+
+test("graphify extract from outside is refused too", () => {
+  assert.equal(decide({ command: "graphify extract repositories/alpha" }).allow, false);
+});
+
+test("asking a guarded subcommand for help is allowed", () => {
+  assert.equal(decide({ command: "graphify merge-graphs --help" }).allow, true);
+});
+
+test("git add -A keeps being refused even when a path is named", () => {
+  assert.equal(decide({ command: "git add -A src/" }).allow, false);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try { fn(); console.log(`ok   ${name}`); }
