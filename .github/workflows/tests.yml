@@ -123,6 +123,9 @@ jobs:
           python3 tests/explorer/fixture.py
           node tests/explorer/page-regression.mjs
 
+      - name: Command guards unit tests
+        run: node tests/guards/guards-unit.mjs
+
       # The answer gate, broken on purpose. Three successive versions of its
       # ticket predicate passed the good page and every assertion while failing to
       # notice a dead file-to-ticket join - the defect the gate exists for. Only

@@ -23,4 +23,9 @@ export default [
     languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: nodeGlobals },
     rules,
   },
+  {
+    files: ['hooks/*.mjs', 'tests/guards/*.mjs'],
+    languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: nodeGlobals },
+    rules: { ...rules, 'no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
+  },
 ];

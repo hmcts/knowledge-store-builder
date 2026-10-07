@@ -506,6 +506,28 @@ provenance, layer coverage, dangling citations, the recorded partitioner and
 whether the page predates a layer it embeds. It always exits zero because drift and missing optional layers
 are conditions to assess, not build failures; read the report.
 
+### Know what the command guards refuse
+
+The plugin refuses five command shapes before Claude Code runs them, each a
+mistake this library has documented as costly:
+
+- `git clean -fd` inside a clone under `repositories/` without
+  `-e graphify-out`, which deletes the untracked per-repo graphs.
+- `git add -A`, `git add --all` or `git add .`, which stages generated output
+  and other sessions' edits together.
+- `graphify update` or `graphify extract` given a `repositories/<name>` path,
+  which prefixes every `source_file` and silently breaks the file-to-ticket join.
+- A checker piped into something and chained with `&&` to `git commit` or
+  `git push`, where the pipeline's exit status hides the checker's.
+- `graphify merge-graphs` before `knowledgestore merge-inputs` has run in the
+  session.
+
+These guards bind only a Claude Code session with the plugin installed. CI, a
+person at a terminal, and any session without the plugin see nothing of them.
+They are an early warning, not a gate: a fault in a guard lets the command
+through, and they replace no check in CI or the library. They match command
+text, so a command written another way is not caught.
+
 ## Publish the store
 
 A store becomes shareable when its generated static artefacts are committed.
