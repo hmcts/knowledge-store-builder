@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { decide } from "../../hooks/guards.mjs";
+import { decide, maskQuoted } from "../../hooks/guards.mjs";
 
 const cases = [];
 const test = (name, fn) => cases.push([name, fn]);
@@ -203,6 +203,16 @@ test("the reverse order does not satisfy it", () => {
 test("a flag's value is not read as a path", () => {
   const c = "graphify update . --exclude repositories/vendor";
   assert.equal(decide({ command: c }).allow, true);
+});
+
+test("an emoji inside a quote does not shift the later segments", () => {
+  const c = 'echo "\u{1F600}\u{1F600}\u{1F600} x" && cd repositories/a && git clean -fd -e "graphify-out" && git add pyproject.toml';
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("masking preserves length so raw slices stay aligned", () => {
+  const c = 'echo "\u{1F600} a; b" && cd x';
+  assert.equal(maskQuoted(c).length, c.length);
 });
 
 let failed = 0;

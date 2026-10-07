@@ -11,7 +11,11 @@
 export function maskQuoted(command) {
   let out = "";
   let quote = null;
-  for (const ch of String(command ?? "")) {
+  const text = String(command ?? "");
+  // Per UTF-16 unit, not per code point: an astral character is two units, and
+  // chainLinks slices the original at offsets found in this string.
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
     if (quote) {
       out += ch === quote ? ch : "X";
       if (ch === quote) quote = null;
