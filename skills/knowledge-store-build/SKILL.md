@@ -69,8 +69,8 @@ knowledgestore intent          # file -> ticket index, descriptions from commits
 Then build the graph. **Do not run graphify at the store root.** `repositories/`
 is gitignored in every store, and graphify's scan honours ignore rules, so a root
 run sees only the store's own config and docs and produces a near-empty graph.
-On one estate that produced a graph three orders of magnitude too small; only
-graphify's overwrite guard stopped it replacing the store. Extract per
+That produces a graph orders of magnitude too small; only graphify's overwrite
+guard stops it replacing the store. Extract per
 repository, from inside each one, then merge:
 
 ```bash
@@ -145,9 +145,9 @@ reader assumes:
   file was never excluded by that repository's `.gitignore` and cannot be, so it
   widens the scan only over what a repository generates and ignores.
 
-**Where the scan does not complete, this route is unavailable.** On at least one
-real estate the scan does not finish at that scale, and that store builds its
-content set from extraction output instead. There is no substitute to recommend:
+**Where the scan does not complete, this route is unavailable.** On a large
+estate the scan does not finish, and such a store builds its content set from
+extraction output instead. There is no substitute to recommend:
 such a store has to produce `graphify-out/.graphify_detect.json` another way, and
 every stage reading it takes it at face value. Say which route produced it.
 
@@ -156,13 +156,12 @@ Two things come out of `content-set`, and both are committed.
 **The path list is what a corpus search must read.** Anyone who falls back from the
 graph to `grep` otherwise searches the raw tree, and the tree holds each clone's
 extraction cache and graph, its VCS pack files and any vendored bundles alongside
-the corpus. Measured on two estates, a naive search sees several times as many
-files as the store considers content. Do not hand-maintain an exclusion list to
+the corpus. On a large estate a naive search sees several times as many files as the store
+considers content. Do not hand-maintain an exclusion list to
 work around it: a list is a second model of what the tool produces, correct the day
 it is written and silently wrong the next time the pipeline emits something new.
-One store's list covered dependency bundles, build output and state files and not
-the pipeline's own directory, so hundreds of its own artefacts were being fed back
-to the extractor.
+A list that covers dependency bundles, build output and state files but not the
+pipeline's own directory feeds the pipeline's own artefacts back to the extractor.
 
 **The report names where the noise is, and now is when that is cheap to act on.**
 Each row is the shallowest directory in a repository under which the store found no
@@ -227,16 +226,16 @@ layer held.
 Three rules when an estate asks for a content cut, and none of them is a number:
 
 - **Size a candidate by its surviving edges, not its node count.** An edge
-  survives only when both endpoints do. The most attractive candidate by nodes on
-  one estate kept only file-level nodes — tens of thousands of them, joined by low
-  hundreds of edges, because AST edges connect symbols rather than files.
-- **Never propose a threshold, a cap or a per-language ban.** Two estates measured
-  AST-to-semantic node ratios roughly a factor of a hundred apart, so a constant
-  is wrong on one of them by two orders of magnitude. Compare against that store's
+  survives only when both endpoints do. The most attractive candidate by nodes can
+  keep only file-level nodes — very many of them, joined by few edges, because AST
+  edges connect symbols rather than files.
+- **Never propose a threshold, a cap or a per-language ban.** AST-to-semantic node ratios
+  can differ by two orders of magnitude between estates, so a constant is wrong
+  on one of them. Compare against that store's
   own previous refresh in `knowledge/telemetry.json`, which is what recording it
   is for.
 - **Do not prune by cross-file connectivity.** It was measured and abandoned:
-  roughly three quarters of Java nodes had a cross-file edge and rather fewer
+  most Java nodes had a cross-file edge and rather fewer
   Terraform nodes did, so the axis marks ordinary imports rather than relevance. A
   cut is a statement of what the store is for — say it in the store's own
   documentation, so a reader knows the shape of what is missing.
@@ -267,9 +266,9 @@ the corpus sits outside the store and the plan will not survive a clone.
 **Choose `--kinds` before your first run.** The default plans `document,paper,image`,
 because code is the AST layer's job and semantically re-extracting it pays twice for
 the same nodes. But graphify classifies **YAML and Terraform as `code`**, so on an
-infrastructure estate the default covers a quarter of the corpus - measured at 4,651
-of 17,539 paths on one, where the interesting content is Flux Kustomizations, Helm
-values and `variables.tf`. Such a store should pass `--kinds code,document`
+infrastructure estate the default can cover only about a quarter of the corpus (N of
+M paths), where the interesting content is orchestration manifests, chart values
+and variable definitions. Such a store should pass `--kinds code,document`
 deliberately.
 
 **Expect many chunks smaller than the 20-25 graphify's skill mentions.** One
@@ -282,22 +281,22 @@ relate things that have no relation.
 
 **Passing `code` is also a decision about fan-out cost.** Directory purity on an
 estate whose code is spread thinly across deep trees produces many small chunks:
-measured at 6,704 chunks averaging 3.3 files, against 762 averaging 22 for the same
-corpus partitioned ad-hoc. That is roughly nine times the agent dispatches, which
-interacts with the fan-out's own limits. Decide both together - the limits are in
-"Dispatching the semantic fan-out" below, and nine times the dispatches is nine
-times the exposure to every one of them.
+the same corpus can yield several times as many chunks, each averaging a few files,
+as an ad-hoc partition averaging about twenty. That is several times the agent
+dispatches, which interacts with the fan-out's own limits. Decide both together -
+the limits are in "Dispatching the semantic fan-out" below, and several times the
+dispatches is several times the exposure to every one of them.
 
-**Adopting this planner is a full re-archive.** On the one estate with an existing
-plan, matching its path set exactly, only 799 chunks have identical membership - and
-794 of those are single-image chunks, which agree by construction. Of its 762 text
-chunks, **5 agree**. All the extraction value is in the text chunks.
+**Adopting this planner is a full re-archive.** Against an existing plan covering
+exactly the same path set, almost no text chunks keep identical membership: the
+ones that agree are mostly single-image chunks, which agree by construction. All
+the extraction value is in the text chunks.
 
-Note what that estate's plan is, because it is the reason this stage exists: nothing
-generates it. Eight scripts read it and none writes it - it was partitioned in an
+Note what an existing plan usually is, because it is the reason this stage exists:
+nothing generates it. Scripts read it and none writes it - it was partitioned in an
 agent's context during a build and never captured, so it cannot be regenerated,
-audited, or even described reliably. Its own operator described it to me as
-directory-grouped; it is not.
+audited, or even described reliably. Check whether it is actually directory-grouped
+rather than taking its description on trust.
 
 **Chunk numbering is the archive's only index.** If you change `--chunk-size`
 between refreshes the numbering moves, and an archive of previous extractions is no
@@ -382,10 +381,9 @@ you can reconcile against what you dispatched; it exits non-zero only when there
 is no plan to measure against.
 
 **A dispatch log is a cache of intent, not a record of fact.** Both halves of that
-have cost real work. A coverage gap of ninety-odd chunks was announced by diffing
-the plan against a log without intersecting disk, and a redundant round of a dozen
-agents was launched for a gap that did not exist - the log simply did not cover the
-early rounds. Separately, a log assembled by appending batch files that carried no
+have cost real work. A coverage gap was announced by diffing the plan against a log without
+intersecting disk, and a redundant round of agents was launched for a gap that did
+not exist - the log did not cover the early rounds. Separately, a log assembled by appending batch files that carried no
 trailing newline fused the last id of one file onto the first of the next; those
 tokens matched no chunk, counted as dispatched-but-absent, and for several rounds
 inflated `in flight` and deflated `NEVER SENT` while every total stayed plausible.
@@ -441,9 +439,8 @@ errors, because the id exists.
 
 The extraction spec drops the file extension from the id stem, so a component and
 its template are assigned one id by design - which is why this scales with how
-much of a corpus is authored in paired files rather than occurring at random. One
-estate measured 98 such collisions carrying 311 edges, every one between files
-with different labels.
+much of a corpus is authored in paired files rather than occurring at random. On a
+real estate such collisions carried edges between files with different labels.
 
 Read both collision counts, not the node total. `same label` is one entity both
 layers found and is benign; `DIFFERENT labels` is the dangerous case, and the
@@ -456,53 +453,44 @@ looks.** The merge does discard per-repository communities, so the reasoning is
 sound and the conclusion is wrong: the clustering path also runs **symbol
 resolution**, and skipping it leaves dangling edges that `merge-graphs` then
 materialises as contentless nodes — `id`, `local_id`, `repo`, and nothing else.
-Measured on one repository, same version, only the flag differing:
+On the same repository and version, with only the flag differing, `--no-cluster`
+keeps the same nodes, carries extra edges, and leaves dangling endpoints where
+the clustered path leaves **none**.
 
-| | nodes | edges | dangling endpoints |
-|---|---|---|---|
-| `--no-cluster` | 1,288 | 2,711 | 166 |
-| without | 1,288 | 2,236 | **0** |
-
-Across that estate it produced **+6% nodes and +22% edges of material carrying no
-content** — 49,506 contentless nodes with 339,159 edges pointing at them, almost
-all JDK and test-library symbols (`assertthat`, `ioexception`, `mock`,
-`loggerfactory`). Clustering would then have placed contentless nodes into
+Across a large estate this adds a material share of nodes and edges carrying no
+content — contentless nodes with edges pointing at them, almost all standard-library
+and test-library symbols. Clustering would then have placed contentless nodes into
 communities and billed an authoring pass to summarise them.
 
 **What removing the flag costs, which is not nothing.** The clustered path drops
 edges whose endpoints it cannot resolve, on the grounds that they are external or
 standard-library symbols. That is right most of the time and **language-dependent**
-— measured on two estates by matching dropped endpoint names against node labels:
-
-| | estate A | estate B |
-|---|---|---|
-| Java | 35.0% | 24-26% |
-| Groovy | 63.9% | - |
-| TypeScript | 0.2% | 0 of 265 repos |
-| Terraform | 0.1% | 0 of 38 repos |
+— measured by matching dropped endpoint names against node labels. The share
+that names an entity the store holds is high for Java and Groovy, and close to zero
+for TypeScript and Terraform.
 
 So on an infrastructure or TypeScript estate the dropped edges really are external
-and this costs nothing. On a Java-heavy estate roughly a quarter of them connect
+and this costs nothing. On a Java-heavy estate a substantial share of them connect
 two entities the store *does* hold, and dropping them removes a real relationship
 between two displayed nodes.
 
-Extract without the flag anyway: contentless nodes are the larger harm at +6%
-nodes and +22% edges, and they cannot be cited or explained at all. But know that
+Extract without the flag anyway: contentless nodes are the larger harm
+(a material share of nodes and edges), and they cannot be cited or explained at all. But know that
 on a Java estate this is a trade rather than a clean win, and that the underlying
 defect is an id-matching failure rather than the flag.
 
 **A post-merge prune is not an equivalent fix**, which is worth knowing before
 reaching for the cheap one: clustering *resolves* some of those references into
 real nodes rather than discarding them, so pruning drops edges the correct path
-keeps (2,213 against 2,236 on that repository, and two fewer nodes). Re-extract
+keeps (fewer edges, and fewer nodes, than the clustered path on the same repository). Re-extract
 rather than clean up afterwards.
 
 Nothing fails when the flag is used. Every stage reports success and the graph
-is simply wrong, which is why this is documented here rather than left to be
+is wrong, which is why this is documented here rather than left to be
 noticed.
 
 **Measure that trade on this estate before acting on it.** The share above
-varies by three orders of magnitude between estates measured with the same
+can vary by orders of magnitude between estates measured with the same
 predicate, and by different mechanisms, so no figure from another estate
 predicts yours:
 
@@ -530,11 +518,10 @@ recoverable count is what a repair could win, and the absent count is what
 materialising from `local_id` would turn into labelled nodes nobody asked for.
 
 **Pin the hash seed before clustering.** Without it the same graph file can yield
-a different community membership in each process — measured on two estates, and
-on one the committed graph matched none of its own rebuilds. It is input-dependent
-(11 of 12 communities over 100 nodes on one graph, 1 of 16 under 20) and the
-rate varies between graphs — two other estates saw no instability at 899 and
-2,832 nodes — so a store that tests clean has learned about its own graph today
+a different community membership in each process — and on one
+graph the committed clustering matched none of its own rebuilds. It is
+input-dependent (most large communities unstable on one graph, few small ones) and
+the rate varies between graphs — some graphs show no instability at all — so a store that tests clean has learned about its own graph today
 and nothing that transfers. Summaries are keyed by
 community id, so the loss is authored prose:
 
@@ -690,10 +677,10 @@ Two things decide whether the prose survives:
 
 ### `sync` on a case-insensitive filesystem
 
-Where a remote has branches differing only in casing (`team/DEVOPS` and
-`team/devops`), git cannot store both with the `files` ref backend on macOS or
-Windows, and the fetch exits non-zero. On one estate roughly a fifth of the
-repositories were affected.
+Where a remote has branches differing only in casing (`team/OPS` and
+`team/ops`), git cannot store both with the `files` ref backend on macOS or
+Windows, and the fetch exits non-zero. On a large estate a material share of the
+repositories can be affected.
 
 `sync` isolates that: it names the failure, carries on with the rest, records
 provenance for everything that succeeded, and **exits non-zero** with a list of
@@ -714,7 +701,7 @@ so the next fetch recreates the collision.
 
 ### Trust counts, not exit codes
 
-Long rebuilds fail quietly, and every failure in a real estate refresh was
+Long rebuilds fail quietly, and every failure in a large refresh was
 caught by reconciling a number against an expectation rather than by a tool
 reporting failure:
 
@@ -735,7 +722,7 @@ build:
 
 ```
 Telemetry, against the last record in knowledge/telemetry.json:
-  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
+  explorer.rows_with_tickets: N -> M (-P%)
 ```
 
 **Read the movements and carry them into your report.** Every number in that
@@ -746,9 +733,9 @@ record; commit it with the rest of the store.
 
 Nothing fails on a movement, because an estate change moves all of these
 legitimately. The single exception is a measurement that was non-zero and is now
-zero, which goes to stderr as a warning. Do not add a threshold of your own: two
-estates measured the AST-to-semantic node ratio a hundredfold apart, so any
-constant is wrong on one of them, and the comparison that works is against this
+zero, which goes to stderr as a warning. Do not add a threshold of your own: the
+AST-to-semantic node ratio can differ by two orders of magnitude between estates,
+so any constant is wrong on one of them, and the comparison that works is against this
 store's own history.
 
 ### Adding repositories to an estate
@@ -791,15 +778,14 @@ it, each of which has already cost someone an afternoon:
   unrelated programmes. Report the coordinate as written and let a human resolve
   it from the published POM's `<scm>` URL.
 - **Unbuilt does not mean addable, and this stage never proposes an addition.**
-  On the estate the method was measured against, roughly a hundred coordinates
-  were unbuilt and one was worth adding. Rank, explain, and hand the decision to
+  Expect many coordinates to be unbuilt and very few to be worth adding. Rank, explain, and hand the decision to
   the operator - including the decision to record a rejected candidate in
   `config/estate-boundary.txt`.
 
 Widening the name prefixes instead is the intuitive move and the measured
-answer was no: on that estate it would have added mostly reusable
-infrastructure wrappers and empty repositories, and contradicted an exclusion
-the estate had already recorded deliberately.
+answer was no: it adds mostly reusable infrastructure wrappers and empty
+repositories, and can contradict an exclusion the estate had already recorded
+deliberately.
 
 ## Writing community summaries
 
@@ -829,9 +815,9 @@ and a term missing from the first as informational. Then:
    exist.** An agent writes its JSON, then validates it, and may rewrite it. A
    file therefore appears on disk before the agent has finished with it, so a
    merge gated on "all N files present" reads some of them mid-write. This has
-   happened: 141 valid summaries out of 502 were silently left out, and the only
-   reason it surfaced was comparing `merge`'s "361 merged" against the 502 the
-   agents had written. Re-running the merge after all agents reported took every
+   happened: valid summaries (N of M) were silently left out, and the only
+   reason it surfaced was comparing `merge`'s "merged" count against the number
+   the agents had written. Re-running the merge after all agents reported took every
    one of them.
 3. **Merge and validate:**
 
@@ -852,9 +838,10 @@ and a term missing from the first as informational. Then:
 
 Rules to give each subagent, verbatim in spirit:
 
-- One paragraph per digest, 120–600 characters, plain prose, no markdown.
+- One paragraph per digest, target 120–600 characters (`merge` rejects anything
+  outside 60–700), plain prose, no markdown.
 - Describe what the cluster **is** and **does**, in business or architectural
-  terms, in the estate's own language (British English for HMCTS estates).
+  terms, in the estate's own language and spelling.
 - Base every claim only on the digest: node names, paths, repository names,
   feature names. Interpreting what a field or class name implies is fine;
   inventing behaviour the names do not show is not.
@@ -970,7 +957,7 @@ run says so on stderr, once, in a build log nobody reads twice.
 **A rebuild that re-runs semantic extraction has a second route.** Semantic node
 ids are built from labels an extraction authored, so a fresh pass renames
 essentially all of them even where the corpus files are unchanged; the ids that
-survive a rebuild are close to just the deterministic AST population. Prose about
+survive a rebuild are close to only the deterministic AST population. Prose about
 a renamed community is dropped as `members-gone` with nothing wrong with it. So
 for those summaries — and only those — `remap` tries again on
 `(repository, source_file)`, which is a corpus path and identical whoever
@@ -1036,7 +1023,7 @@ to it.
 
 Snapshot immediately **before each** re-cluster, not once per session. A
 snapshot of a clustering the summaries are no longer keyed to is not refused; it
-just retains less, and says nothing about why.
+retains less, and says nothing about why.
 
 **Verify the clustered graph, never the clustering command's exit code.**
 `graphify cluster-only` can compute a clustering, decline to write it, and still
@@ -1266,21 +1253,23 @@ A refresh can leave every count healthy and every artefact well-formed while the
 store has quietly stopped answering what it was built for. Declare the estate's
 questions once, then gate every refresh on them:
 
+Copy `examples/questions.txt` from the library checkout, or write your own:
+
 ```bash
-cp examples/questions.txt config/questions.txt   # once, then make them your own
+cp <library-checkout>/examples/questions.txt config/questions.txt   # once, then make them your own
 knowledgestore check-answers --candidate graphify-out/explorer.html   # before publishing
 knowledgestore check-answers                                          # after
 ```
 
 Check the **candidate** before committing it. Reading only the published page can
-diagnose a bad publish and never prevent one - one estate's suite reported 12/12
-while a rebuild sat unexamined, because every check read the published artefact.
+diagnose a bad publish and never prevent one - one suite reported every question
+passing while a rebuild sat unexamined, because every check read the published artefact.
 
 Questions declare an answer *shape*, not text: `brief`, `dive`, `tickets`,
 `graph`, `ticket`, `abstain`. Declare at least one `abstain` - a store that
 answers everything is failing to say when it has nothing. `ticket` is the
 strongest of them, because it asserts the file-to-ticket join, whose canonical
-failure was 0 of 70,655 joined with the build green and both layers present.
+failure was N of M joined with the build green and both layers present.
 
 **Commit an answer baseline, and re-write it only after a refresh you have
 reviewed.**
@@ -1290,7 +1279,7 @@ knowledgestore check-answers --write-baseline    # then commit knowledge/answers
 ```
 
 The `graph` mode is decided on the ordering a **reader** receives, not on what
-the ranker returned (#326): a community whose summary matches the question's
+the ranker returned: a community whose summary matches the question's
 vocabulary has its entries added to the ranking, and the engine renders its
 no-evidence finding and stops when every term is unevidenced. It still passes on
 a non-empty ranking, so the row a reader wants can slide from rank 1 to rank 40
@@ -1299,14 +1288,14 @@ ranked, so the next build can report "this ranks worse than last time" - which
 needs no expected node, and is the only thing that sees the gradient between rank
 1 and the cliff. With no baseline committed, the run says it compared nothing.
 
-A rank finding **does not fail the run** (#310), so a zero exit code means the
+A rank finding **does not fail the run**, so a zero exit code means the
 declared modes still hold - not that the answers are as good as they were. Read
 the `rank drift:` line, and re-write the baseline as a reviewed decision rather
 than to clear the report.
 
 The `graph mode:` line says how many questions those two readings disagree
 about, and is **reported, not gated**. Expect it to be non-zero on the first run
-after upgrading to a library carrying #326, and read the questions it names: one
+after upgrading to a library that decides on the reader's ordering, and read the questions it names: one
 that gained the mode is answered by the store and was recorded as an abstention
 before, so an `abstain` declaration on it now fails and wants rewording rather
 than investigating.

@@ -5,19 +5,11 @@ description: Use when a product or delivery team asks whether historic backlog t
 
 # Assessing a backlog against a knowledge store
 
-A team holds tickets raised months or years ago. Some were delivered by work
-nobody linked back. Some were made irrelevant by a process change. Some are
-still exactly right. Reviewing them by hand means holding a whole platform in
-your head, so in practice they are never reviewed and the backlog grows a tail
-nobody trusts.
-
-The store holds the platform. This skill assesses each ticket against it and
-returns, per ticket and separately, **a committed answer on whether the
-requirement is still needed, and a recommendation for the ticket itself, with
-every claim cited and dated.**
-
-The output is a judgement a product owner can act on — not a search result, and
-not the question handed back.
+A team holds tickets raised months or years ago, some delivered by work nobody
+linked back and some made irrelevant since. The store holds the platform. This
+skill assesses each ticket against it and returns, per ticket and separately,
+**a committed answer on whether the requirement is still needed, and a
+recommendation for the ticket itself, with every claim cited and dated.**
 
 ## What you produce
 
@@ -62,16 +54,16 @@ decision — whether the organisation still wants this — and never where the
 blocker is that the search was not finished. Before writing it, say what else
 you could have read; if that list is not empty, read it instead.
 
-The pull towards deferring is strong and it is not honesty. An assessment that
-hands the question back reads, to someone who was not there, as an assessment
-that looked and agreed the work was outstanding. Committing to one of the first
-three costs more and is the deliverable.
+Committing to one of the first three is the deliverable; an assessment that
+hands the question back reads as one that looked and agreed the work was
+outstanding.
 
 ## The evidence recipe, in this order
 
-1. **Place the ticket on the estate's capability map** — which capability rows,
-   which subdomain, which products and repositories.
-2. **Read that capability's own documents** — how it works, its flows, any topic
+1. **Place the ticket.** If the store carries a capability map, use it; otherwise
+   place the ticket by repository and topic brief. Say which products and
+   repositories it touches.
+2. **Read that area's own documents** — how it works, its flows, any topic
    brief or finding already written about it.
 3. **Search the tracker text and the commit-mined text** for the ticket's nouns
    and for its linked issue keys. Note the status and date of anything that
@@ -111,9 +103,6 @@ ticket and its links will report a gap that was closed in a child story.
 links and stops has not read the hierarchy. Fetch descendants explicitly, and
 say in the method section that you did.
 
-This is worth the extra queries: on the run this skill was written from, reading
-descendants overturned verdicts that the links alone had settled wrongly.
-
 ## Confidence scores the evidence, not the verdict
 
 | | |
@@ -147,7 +136,7 @@ has taken, and you can cite what you read to establish that.
 - **Say which layer you are quoting** — tracker text, commit-mined text, a live
   tracker read, the graph, or an authored document. They have different
   authority and different currency.
-- **Name no person.** Owners are capability rows, subdomains and teams. Name a
+- **Name no person.** Owners are capabilities, areas and teams. Name a
   role only where the action needs one.
 - **Re-derive every number from the artefact**, never from memory of having
   produced it.
@@ -159,8 +148,6 @@ the graph was built.** Take the store's currency from the provenance file and
 the clustering inputs — the per-repository sync dates and the build date of the
 artefacts you are citing.
 
-On the run this skill was written from, the report header stood well behind the
-graph beside it, and every citation had to be corrected after the fact.
 Establish the store's date **before** the assessors start, and give it to them;
 do not let each one infer it.
 
@@ -187,20 +174,16 @@ check is sent back, not downgraded** — the answer to an unfinished search is t
 finish it, and a verifier that converts one into a deferral launders the failure
 into a verdict.
 
-**Expect it to change little and correct much.** On the run this skill was
-written from it changed no verdict and still corrected most tickets — dates,
-citations, overstated claims. That is the value: the verdicts were sound and the
-evidence under them was not yet quotable.
+**Expect it to correct dates, citations and overstated claims** even where it
+changes no verdict: the value is evidence that can be quoted.
 
 ## Sweep test assurance separately
 
 Of every capability an assessment says exists, ask: **what test protects it?**
 
-Run this as its own pass. It does not fall out of the assessments, and on the
-run this skill was written from it found what the assessments could not: a
-defect whose fix would break a passing test, latent test bugs, a filter test
-insensitive to mutation, and component tests actively defending the behaviour
-another ticket complained about.
+Run this as its own pass; it does not fall out of the assessments. It finds what
+they cannot: a fix that would break a passing test, tests that cannot fail, and
+component tests defending the behaviour another ticket complains about.
 
 A capability with no test protecting it is a different risk from a capability
 that is missing, and a product owner deciding whether to close a ticket needs to
@@ -212,8 +195,9 @@ A finding that silently drops a ticket, or answers one with an empty field,
 **looks complete to a reader who did not have the export in front of them** —
 and they will act on it as complete.
 
-Gate it. The check reads the supplied keys from a committed list, not from the
-spreadsheet, so it needs nothing outside the repository, and it asserts:
+Gate it. The check reads the supplied keys from a list held in the same repository as
+the finding (a plain file with one key per line), not from the original export,
+so it needs nothing outside the repository, and it asserts:
 
 - every supplied key has exactly one section;
 - every section carries all eleven required fields, and carries **The smallest
@@ -230,7 +214,7 @@ validation verdict with no questions, a `A small change would deliver it` with
 no sizing field — each of which must fail. A gate that cannot fail reports a
 confidence worth nothing.
 
-## Two traps worth knowing before you start
+## Two traps
 
 **A tracker's search endpoint may return only the most recent comments per
 issue.** Older history is then silently missing, and an assessment reading it
@@ -258,8 +242,9 @@ anyone can use it.
 - **Expand or avoid every abbreviation the estate defines more than one way.**
   Where sources disagree on what one stands for, do not pick: name the thing in
   words, and keep the abbreviation only inside quotations.
-- **Never publish an internal index.** A capability's row number means nothing
-  outside the map. Name the capability, and say once where the names come from.
+- **Never publish an internal index.** A row number or id means nothing outside
+  the map it came from. Name the capability, and say once where the names come
+  from.
 - **Explain any column whose meaning is not self-evident**, beside it.
   Confidence in particular reads as likelihood of delivery unless it says
   otherwise.
