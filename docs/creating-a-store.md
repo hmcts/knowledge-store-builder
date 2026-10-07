@@ -84,10 +84,10 @@ and capture all three in any check that asserts what is installed.
 
 **Ask through the console script, never a bare `python3`.** A check reading
 `python3 -c "import knowledgestore; ..."` answers for whichever `python3` sits on
-`PATH`, which need not be the one that runs your pipeline. One store's
-pre-commit hook asserted that the installed library matched its lock, from the
-machine interpreter, while the virtualenv building the store held a different
-version — so it passed on an environment that never builds the store. No check
+`PATH`, which need not be the one that runs your pipeline. A
+pre-commit hook can assert that the installed library matches its lock, from the
+machine interpreter, while the virtualenv building the store holds a different
+version — so it passes on an environment that never builds the store. No check
 can close that gap, because a check is code some interpreter runs and inherits
 whichever one ran it. `knowledgestore` is a console script inside the
 virtualenv, so it can only answer for the environment that owns it.
@@ -270,8 +270,8 @@ three reasons that only show up together:
   There is no error, and the finished store looks like a thin estate rather than a
   failed build.
 - A single pass over a large corpus gives no per-repository progress, so a slow
-  repository and a hung one are indistinguishable. One operator saw eight minutes
-  at full CPU with no output and no way to tell which repository to blame.
+  repository and a hung one are indistinguishable. A long run can sit at full CPU
+  with no output and no way to tell which repository to blame.
 - **It skips `merge-graphs`, which is what keeps node ids distinct between
   repositories.** `merge-graphs` prefixes each input graph with a unique repository
   tag; a single root-level pass has nothing to prefix, so declarations that share a
@@ -302,7 +302,7 @@ the edges it cannot resolve as external or standard-library symbols. Skip it and
 those edges survive naming nodes that do not exist, which `merge-graphs` then
 materialises as nodes carrying an id and no content at all — material an authoring
 pass later pays an LLM to summarise. Nothing fails; every stage reports success and
-the graph is simply wrong. What removing the flag costs is real but smaller, and it
+the graph is wrong. What removing the flag costs is real but smaller, and it
 is language-dependent: `/knowledge-store:knowledge-store-build` measures both
 directions and gives `knowledgestore dangling-endpoints` for measuring the trade on
 your own estate.
@@ -378,18 +378,17 @@ reader tends to assume the opposite of both:
   ignores. Anything committed that must not be extracted needs excluding
   explicitly either way.
 
-**Where the scan does not complete, this route is unavailable.** On at least one
-real estate the scan does not finish at that scale, and that store builds its
-content set from extraction output instead. There is no substitute route to
-recommend: a store in that position has to produce
-`graphify-out/.graphify_detect.json` some other way, and every stage reading it
-takes it at face value — nothing downstream can tell how it was made.
+**Where the scan does not complete, this route is unavailable.** Where the scan
+does not finish at that scale, there is no substitute route to recommend: the
+store has to produce `graphify-out/.graphify_detect.json` another way, and every
+stage reading it takes it at face value, so nothing downstream can tell how it
+was made. Say which route produced it.
 
 `knowledgestore content-set` commits `knowledge/corpus/content-files.txt`, the
 set of files the pipeline itself classified as content, and the list a corpus
 search must read — the tree also holds each clone's extraction cache and graph,
-its VCS pack files and any vendored bundles, which on two measured estates
-outnumbered the corpus several times over. The report names the directories
+its VCS pack files and any vendored bundles, which can
+outnumber the corpus several times over. The report names the directories
 holding no content, aggregated across every repository holding one; excluding
 those with a `.graphifyignore` before extracting is much cheaper than filtering
 after, because extraction persists in the cache and in each clone's own graph
@@ -416,9 +415,8 @@ file from the corpus and write the detect result again — or, where the estate 
 ruled a named file safe, declare it in `config/content-set-allowed.txt` (one
 store-relative path a line, `#` comments allowed) or pass `--allow <path>` for a
 single run. Prefer the file: it keeps the record of every ruling the estate has
-made, and a flag leaves none. On the graphify version this library ships against
-nothing reaches that refusal, so read it as defence in depth rather than as
-evidence about your estate.
+made, and a flag leaves none. With the graphify release this library is tested against, no file reaches that
+refusal; it is a backstop, not evidence about your estate.
 
 Add business specifications after the merge:
 

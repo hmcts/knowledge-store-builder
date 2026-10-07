@@ -30,8 +30,8 @@ to tell you whose head.
 
 ## 2. Defining the estate
 
-The estate definition is the highest-leverage decision you will make, and the
-easiest to get quietly wrong.
+The estate definition decides what every later stage can answer, and is easy to
+get quietly wrong.
 
 **Three ways to select repositories, in ascending order of reliability:**
 
@@ -40,11 +40,10 @@ easiest to get quietly wrong.
   convention is enforced. It silently misses anything renamed or predating the
   convention, so pair it with explicit `repo` lines for the strays.
 
-  `prefix cpp-` and `match cpp-*` are the same selection: use `prefix` for the
+  `prefix alpha-` and `match alpha-*` are the same selection: use `prefix` for the
   common case, `match` where a prefix cannot reach. There is deliberately no
-  `suffix` rule, because a glob already covers it — and one estate needed **55
-  explicit `repo` lines** for a `{product}-shared-infrastructure` convention
-  before this existed. A glob of nothing but wildcards (`match *`) is refused: it
+  `suffix` rule, because a glob already covers it — and a suffix convention without
+  it needs one explicit `repo` line per repository. A glob of nothing but wildcards (`match *`) is refused: it
   would select a whole organisation from one character, and the result would look
   every bit as deliberate as an estate somebody chose.
 - **By ownership** (`team <slug>`) — the right tool when a team's repositories
@@ -376,8 +375,7 @@ legacy repositories are the likely offenders. Scan the working tree, because
 that is what gets ingested, and be clear about the limit: a working-tree scan
 says nothing about git history. When something is found, drop the repository
 from the estate, record the finding with its location — never its value — and
-say what has to change before it returns. On that estate this caught a
-hardcoded database credential that had been in a file since 2019.
+say what has to change before it returns.
 
 **A rewrite that lands on a real file cannot be caught by checking that files
 are real.** A store normalising committed paths ran a rewrite that resolved
@@ -432,9 +430,7 @@ Excluding them needs a `.graphifyignore`, and **where it goes depends on how
 extraction is invoked, which is easy to get wrong because the wrong placement
 fails silently rather than erroring.** The file is read at the scan root and its
 ancestors up to the enclosing VCS root; a file *below* the scan root is inert.
-Measured, one symlink and its target:
-
-Re-measured on graphify 0.9.40, all four cells, with the clone and the store root
+Measured on graphify 0.9.40, all four cells, with the clone and the store root
 each a real git repository:
 
 | `.graphifyignore` at | per-repository scan | single-root scan |
@@ -442,19 +438,16 @@ each a real git repository:
 | inside the cloned repository | **excluded** | **excluded** |
 | the store root / `repositories/` | ignored — above the repository's VCS root | **excluded** |
 
-**The top-right cell previously read "ignored — below the scan root", and that no
-longer reproduces.** A file inside a clone is honoured by a single-root scan at the
-store root, in every shape constructed: with and without a VCS root at the store,
-and with `gitignore=False`. Whether graphify changed or the row was generalised
-from something narrower is not recoverable from here, so it is recorded as measured
-against 0.9.40 rather than presented as timeless.
+A file inside a clone is honoured by a single-root scan at the store root, in every
+shape constructed: with and without a VCS root at the store, and with
+`gitignore=False`. This is recorded as measured against 0.9.40 rather than
+presented as timeless.
 
 **So the placements are not mutually exclusive, and there is one that always
 works.** Inside the clone is honoured by both scans; the store root is honoured
-only by the single-root scan. The trade this passage used to describe — that the
-placement surviving `sync` only works for the invocation which costs you
-per-repository namespacing — dissolves, because the placement that works
-everywhere is the one inside the clone.
+only by the single-root scan. There is no trade between surviving `sync` and keeping
+per-repository namespacing, because the placement that works everywhere is the
+one inside the clone.
 
 What remains, and it is the whole remaining cost: **`sync` deletes it.** `sync`
 ends with `git clean -fd -e graphify-out`, so an ignore file inside a clone is
@@ -516,18 +509,15 @@ sync stage ends with `git clean -fd -e graphify-out`, which deletes untracked
 files in every clone and exempts only `graphify-out/`. So the per-repository
 placement above is a build step to re-apply after every sync, never the source
 of truth for what an estate excludes. Nothing announces its disappearance; the
-symptom is `status` reverting to reporting symlinks it had previously called
-excluded.
+symptom is `status` reverting to reporting symlinks it had called excluded.
 
-One further trap, and it is narrower than it first looked: `collect_files()`
+One further trap, and it is narrow: `collect_files()`
 called directly with a **relative** path silently does not apply
 `.graphifyignore` — it returns everything, with no error. The **CLI resolves the
 path first**, so `graphify update .` from inside a repository, which is the form
 the build skill documents and the pipeline uses, honours the ignore file
-normally. So this bites the Python API, not the documented route. Measured both
-ways; an earlier revision of this guide stated it as a general rule about
-extraction, which would have had operators adding an absolute-path requirement
-they do not need.
+normally. So this bites the Python API, not the documented route, and no
+absolute-path requirement applies to the CLI.
 
 ## 6. The prose layers, and what they cost
 
@@ -675,7 +665,7 @@ and strands committed summaries, which must then be remapped: `remap` carries a
 summary only onto a community holding exactly the node set it was written about,
 and withdraws the rest for revision rather than misattach prose.
 
-**That bar measures recall, and a precision floor now measures fit.** It asks how much of the *old* cluster
+**That bar measures recall, and a precision floor measures fit.** It asks how much of the *old* cluster
 landed together, and nothing about how much of the *new* cluster those members
 constitute. A summary can therefore clear the bar and still describe a small
 corner of the cluster it lands on — most of that cluster being newly arrived
@@ -685,7 +675,7 @@ rate split by provenance rather than the headline. That split names three
 states, and only `carried across a move` is prose re-keyed onto a set it was not
 written about.
 
-`remap` now also drops a summary whose target cluster grew so much that the
+`remap` also drops a summary whose target cluster grew so much that the
 prose describes a corner of it (`--precision`, default 20%). Measured on one
 refresh: a community of 37 members grew to 458 with *every* old member
 retained — recall 1.00, clearing a 60% bar comfortably, precision 0.08. The
@@ -695,11 +685,10 @@ money; the run prints the whole distribution so an operator can tighten it
 against their own numbers rather than a guess.
 
 **The damage scales with what you add, not with the act of re-clustering.** The
-retention figures below were measured under the older *overlap* criterion, which
+retention figures below were measured under an *overlap* criterion, which
 carried a summary whenever the new cluster held 60% of the old one's members.
-They are kept because the *ratios between them* are the finding, and they are not
-the retention to expect from a current build — the criterion is now set equality,
-which withdraws far more and did so on the rebuild that motivated the change:
+The *ratios between them* are the finding; they are not the retention to expect
+from a current build, whose criterion is set equality and withdraws far more:
 
 | Change | Summary retention (overlap criterion) |
 |---|---|
@@ -833,7 +822,7 @@ independently, neither knowing the other had (#134). The library now ships the
 runner, so the third estate does not have to.
 
 **The library owns the runner; the estate owns the questions.** A question like
-"what is crime case readiness?" means nothing on another estate - generalise the
+"what is order readiness?" means nothing on another estate - generalise the
 questions and every store fights the result, generalise the runner and every store
 gets the gate for free.
 
@@ -977,7 +966,7 @@ word produces an answer. Measured on real estates:
 
 The last is the one to remember: the expansion is **morphological, not semantic**,
 so "pick something obviously from another domain" is not a strategy. `orchestra` is
-as far from a court estate as a word gets and it still matched. Two or three terms
+as far from a regulated-domain estate as a word gets and it still matched. Two or three terms
 from an unrelated technical field, with no everyday verb among them, is what works -
 `gluon confinement lattice chromodynamics` abstains on both estates that tried it.
 
@@ -1002,9 +991,9 @@ that asserts what real data looks like, run it against real data before you ship
 
 ### The `graph` mode is what a reader is shown, not what the ranker returned
 
-Your first run after upgrading to a library carrying #326 may report modes that
-differ from your committed baseline, and one or two questions may change whether
-they pass. The run says how many and which way:
+A run reports any questions whose mode differs between the bare ranking and the
+ordering the reader receives, and which way. A question may change whether it
+passes:
 
 ```
 graph mode: 2 of 14 question(s) are decided differently by the ordering the reader receives than by the bare ranking
@@ -1015,7 +1004,7 @@ mode  <one of your questions>  ->  graph
 ```
 
 **Read those questions before rewriting anything.** A question that gained the
-mode is one the store answers and the gate used to record as an abstention - so if
+mode is one the store answers, which a bare-ranking run would record as an abstention - so if
 it declares `abstain`, it now fails, and the fix is to reword it as **Declare at
 least one `abstain`** above describes. A question that lost it is one the gate would have
 called a graph answer while the engine renders "No evidence in this estate" to a
@@ -1121,7 +1110,7 @@ wrong here first:
 
 - **Advance an index; never re-slice per object.** `buffer = buffer[end:]` copies
   the remainder once per object, and on that estate measured **13.1s against 5.3s
-  for simply loading the file** - two and a half times slower than the thing it
+  for loading the file** - two and a half times slower than the thing it
   replaced, with an excellent memory graph. `raw_decode` takes a start index.
 - **Read size sets peak memory; the compaction threshold barely matters.** 64 KiB
   gives 0.030 GB and 4 MiB gives 0.239 GB, with wall clock flat across the range.

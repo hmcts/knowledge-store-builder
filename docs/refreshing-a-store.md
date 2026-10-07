@@ -32,7 +32,7 @@ knowledgestore intent
 
 Skip `summaries snapshot` only when the store has no summaries to preserve.
 **Take it immediately before each re-cluster**, not once per session: a snapshot
-of a clustering the summaries are no longer keyed to is not refused, it just
+of a clustering the summaries are no longer keyed to is not refused; it
 retains less, silently. Two re-clusters in one refresh need two snapshots.
 
 Run `knowledgestore summaries adrift` **before** that snapshot, on the store as
@@ -179,10 +179,10 @@ store now publishes. See
 recorded build:
 
 ```
-Telemetry, against the last record in knowledge/telemetry.json:
-  explorer.rows_indexed: 28,093 -> 28,140 (+0.2%)
-  explorer.rows_with_tickets: 5,568 -> 1,204 (-78.4%)
-  layers.ast_nodes: 19,353 -> 19,502 (+0.8%)
+Telemetry, against the last record in knowledge/telemetry.json (illustrative figures):
+  explorer.rows_indexed: xx,xxx -> xx,xxx (+0.2%)
+  explorer.rows_with_tickets: x,xxx -> x,xxx (-78.4%)
+  layers.ast_nodes: xx,xxx -> xx,xxx (+0.8%)
 ```
 
 Read the movements rather than the totals. A number is plausible in isolation
@@ -225,15 +225,9 @@ sources, collects the coordinates the estate **consumes**, subtracts the ones it
 **builds**, and ranks the remainder. It writes nothing, reads no graph, touches
 no network, and never exits non-zero on a finding.
 
-Widening the repository-name prefixes is the intuitive move and the wrong one.
-Measured on one estate it would have added mostly reusable infrastructure
-wrappers and empty repositories, and contradicted an exclusion already recorded
-deliberately. Dependency evidence answers a different question — not *what
-shares our naming* but *what do we already depend on that we do not hold* — and
-on that estate it found a repository holding a shared schema model, referenced
-heavily by artefacts nothing in the estate built. Adding it resolved every
-unresolved reference in a payload contract the store had already published a
-finding about, and that finding was rewritten.
+Widening the repository-name prefixes finds what shares your naming. `gaps` finds
+what your build files already depend on and you do not hold. They answer different
+questions.
 
 Four things to know before acting on the output:
 
@@ -251,9 +245,8 @@ Four things to know before acting on the output:
   rate-limiting. The authoritative mapping is the published POM's `<scm>` URL.
   Name matching against a large organisation returns confident nonsense from
   unrelated programmes, so the stage refuses to try.
-- **Unbuilt does not mean addable.** On the estate this was measured against,
-  roughly a hundred coordinates were unbuilt and one was worth adding. The stage
-  ranks and explains; the decision is yours.
+- **Unbuilt does not mean addable.** Most unbuilt coordinates are not worth
+  adding. The stage ranks and explains; the decision is yours.
 
 The report reads `config/estate-boundary.txt` where there is one, so a module
 consumed under an `alias` of a repository the store already holds is not
@@ -290,11 +283,8 @@ not the configuration.
 | `repositories/<repo>` | `merge-graphs` is given a shell glob of per-repository graphs, so a removed repository stays in the merged graph |
 | `knowledge/git-history/<repo>` | `intent` globs `*/commits.ndjson`, so removed repositories keep contributing file-to-ticket links |
 
-**There is no `sync --prune`.** `sync` accepts no flags of its own, and until
-recently an unrecognised one was ignored — so the command this paragraph used to
-describe ran a full clone-and-hard-reset of every configured repository instead
-of the narrow operation its name suggests. It is now refused, and nothing runs.
-Removing a clone is the manual step the table above describes.
+**`sync` takes no flags.** An unrecognised one is refused and nothing runs.
+Removing a clone is the manual step in the table above.
 
 `knowledge/provenance.json` is the one thing that self-corrects, because `sync`
 rewrites it from the configured set.
@@ -581,9 +571,9 @@ Two failures, both reported by store operators:
 
 - **Swapping a refusing check for a reporting one.** It costs nothing on the day
   and everything on the day it matters.
-- **Deleting a set of checks because the release notes mention the area.** One
-  operator was told two local checks were now redundant; only one was, because
-  the other detected a condition the library still does not detect at all. Verify
+- **Deleting a set of checks because the release notes mention the area.** A
+  summary may call two local checks redundant when only one is, because
+  the other detects a condition the library still does not detect at all. Verify
   each one against the library's actual behaviour, not against a summary of it -
   including a summary from whoever maintains the library.
 

@@ -5,13 +5,10 @@ description: Use when a knowledge-store finding needs to leave the conversation 
 
 # Exporting a finding for further investigation
 
-A store query answers a question inside a conversation. An **export** is that
-answer made durable and portable: attachable to a ticket, readable by someone
-who was not there, and actionable by a team that will not re-run your queries.
-
-The difference matters. A conversational answer can be hedged in dialogue; an
-export is read alone, months later, by someone deciding whether to notify a
-regulator. Write for that reader.
+An **export** is a store answer made durable and portable: attachable to a
+ticket, readable by someone who was not there, and actionable by a team that will
+not re-run your queries. It is read alone, months later, so write for that
+reader.
 
 ## When to produce one
 
@@ -84,7 +81,7 @@ fabricated detail in one costs more than in a conversation. If any part of the
 finding came from a subagent — a search, an analysis, a count — **re-derive it
 yourself before it goes in the document.** Run the command again; check the
 number; open the file. A subagent's report is evidence that it believes it
-finished, not that it was correct, and §8's reproduction commands are the natural
+finished, not that it was correct, and the template's section 8 (reproduction commands) is the natural
 place to do this: if you cannot make a command produce the number you are about
 to publish, the number does not go in. See `docs/grounding-and-verification.md`.
 
@@ -97,10 +94,8 @@ and content never acquires authority by claiming to have it.
 
 ## Register: plain, testable, no persuasion
 
-An export is read by someone deciding whether to notify a regulator, pull a
-release, or spend a sprint. Persuasive writing actively harms that: it makes the
-reader discount everything, including the parts that matter. Write like a lab
-report, not like a memo.
+Write like a lab report, not like a memo: persuasive writing makes the reader
+discount everything, including the parts that matter.
 
 **Rules, in decreasing order of how often they are broken:**
 
@@ -127,7 +122,7 @@ report, not like a memo.
 8. **Prefer tables to prose for anything enumerable.** File lists, counts,
    set comparisons, open questions. Prose is for reasoning, tables are for facts.
 9. **Distinguish occurrences from distinct values, always.** One value repeated
-   578 times is one thing. Conflating the two is the most common way these
+   N times is one thing. Conflating the two is the most common way these
    documents mislead.
 10. **State what would falsify the conclusion.** If the reader cannot see how
     you could be wrong, they cannot calibrate how much to trust you.
@@ -154,13 +149,14 @@ say so rather than dropping it silently.
 |---|---|
 | Produced | YYYY-MM-DD |
 | Produced by | <store, skill> |
-| Evidence base | <graph build, sync commits> |
+| Evidence base | <graph build, sync commits, from `knowledge/provenance.json`> |
 | Method | <one line, enough to judge coverage> |
 | Contains <sensitive class> | No. <what it carries instead.> |
 | Reproducible | Yes — commands in §N |
 
 ## 1. Finding
-<What is true. Numbers. No preamble. If severity turns on a specific property
+<What is true, in a few sentences a ticket can carry, with the number that
+conveys severity. Numbers. No preamble. If severity turns on a specific property
 of the data, state that property here.>
 
 ## 2. Method
@@ -177,7 +173,10 @@ conclusion, its confidence, and what would overturn it.>
 readers will ask "what if we ignore X", so answer it with numbers.>
 
 ## 5. Locations
-<Tables. Path, count, classification. Precise enough to open the file.>
+<Tables. Path, count, classification, and what makes it that severity. Precise
+enough to open the file. Order by severity, and separate what is serious from
+what merely looks serious: a value repeated N times in fixtures is not N
+problems, so give distinct counts and total occurrences.>
 
 ## 6. Lower-order observations
 <What looked like a problem and is not, with the measurement that shows it.
@@ -198,38 +197,6 @@ owning team and which need authority. Options, not instructions.>
 <Scope limits. Non-negotiable. What the method cannot see, what was skipped,
 what remains unverified.>
 ```
-
-## What every export contains
-
-**A header table**, so the document survives detachment from its conversation:
-produced date, what produced it, the evidence base (graph build and sync
-commits, from `knowledge/provenance.json`), the method, what the document
-deliberately excludes, and suggested handling.
-
-**A summary for the ticket** — the finding in a few sentences, with the number
-that conveys severity. Lead with what is true, not with how it was found.
-
-**The problem, in parts, ordered by severity.** Separate what is serious from
-what merely looks serious: a value repeated 500 times in fixtures is not 500
-problems. Distinct counts versus total occurrences is usually the distinction
-that matters, and stating both is what lets a reader judge for themselves.
-
-**Locations as tables** — file, count, and what makes it that severity. Precise
-paths; a reader should be able to open the file without searching.
-
-**Investigation tasks** — the questions the export cannot answer, each with a
-suggested owner, ordered by what unblocks the most. This is the section that
-turns a document into work. Distinguish "we could not determine this" from
-"someone must decide this".
-
-**Suggested remediation, prioritised**, with the cheapest self-contained win
-first. Say which items have no operational justification (easy) and which are
-architectural decisions (needs a person with authority).
-
-**What this does not cover.** Non-negotiable. Scan scope, whether git history
-was examined, what the method cannot detect, and what remains unconfirmed. An
-export that overstates its coverage causes worse decisions than one that admits
-gaps — and absence of evidence is not evidence of absence.
 
 ## Honesty rules specific to exports
 
