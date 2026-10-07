@@ -159,6 +159,24 @@ def _is_path(span: str) -> bool:
 
 
 def _nearest(target: str, pool: list[str]) -> str:
+    """The closest real identifier, because "does not resolve" is a frustrating
+    verdict on its own.
+
+    Cost is linear in the pool and paid once per miss. Measured on this
+    interpreter with randomly generated labels: 0.016s per miss over 10,000
+    labels, 0.164s over 100,000, 0.655s over 400,000 - so an estate-sized graph
+    with fifty misses spends roughly half a minute here. That is tolerable for a
+    publish-time gate and is recorded so the next reader need not re-measure:
+
+        python3 -c "import difflib,random,string,time; random.seed(7); \
+        pool=[''.join(random.choices(string.ascii_lowercase,k=12)) for _ in range(400000)]; \
+        t=time.perf_counter(); difflib.get_close_matches('setvaluenull',pool,n=1,cutoff=0.7); \
+        print(time.perf_counter()-t)"
+
+    If it ever stops being tolerable, cap the misses that get a suggestion
+    rather than lowering the cutoff: a lower cutoff returns worse suggestions at
+    the same cost.
+    """
     close = difflib.get_close_matches(target, pool, n=1, cutoff=NEAREST_CUTOFF)
     return close[0] if close else ""
 
