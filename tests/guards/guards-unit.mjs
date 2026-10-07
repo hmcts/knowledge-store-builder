@@ -58,6 +58,29 @@ test("a guard does not fire on its own name inside a quoted string", () => {
   assert.equal(decide({ command: "echo 'run git add -A never'" }).allow, true);
 });
 
+test("a checker piped and chained to a push is refused", () => {
+  const r = decide({ command: "pytest | tail -1 && git push" });
+  assert.equal(r.allow, false);
+  assert.match(r.deny, /exit status/);
+});
+
+test("a checker piped with no push is allowed", () => {
+  assert.equal(decide({ command: "pytest | tail -1" }).allow, true);
+});
+
+test("a checker chained to a push without a pipe is allowed", () => {
+  assert.equal(decide({ command: "pytest && git push" }).allow, true);
+});
+
+test("|| is not mistaken for a pipe", () => {
+  assert.equal(decide({ command: "pytest || git push" }).allow, true);
+});
+
+test("every segment is judged, not only the first", () => {
+  const r = decide({ command: "echo one && git add -A" });
+  assert.equal(r.allow, false);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try { fn(); console.log(`ok   ${name}`); }

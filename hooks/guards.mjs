@@ -68,9 +68,31 @@ function outsideExtraction(segment) {
   );
 }
 
+const CHECKERS = /^(?:pytest|ruff|pyright|tsc|eslint|node|npm|npx|python3?|uv)\b/;
+const PUBLISHES = /^git\s+(?:push|commit)\b/;
+
+/** Reads the whole command rather than one segment: the hazard is the
+ *  relationship between a piped checker and a later push. */
+function pipedGate(command) {
+  const segments = chainSegments(command);
+  const pipedChecker = segments.findIndex(
+    (s) => s.includes("|") && CHECKERS.test(pipelineHead(s)),
+  );
+  if (pipedChecker === -1) return null;
+  const publishesAfter = segments.slice(pipedChecker + 1).some((s) => PUBLISHES.test(s));
+  if (!publishesAfter) return null;
+  return (
+    "A pipeline's exit status is its last command's, not the checker's, so " +
+    "this pushes whatever the checker did. Redirect the checker to a file and " +
+    "read it, or test ${PIPESTATUS[0]}."
+  );
+}
+
 const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction];
 
 export function decide({ command, cwd = "", state = {} } = {}) {
+  const whole = pipedGate(command);
+  if (whole) return { allow: false, deny: whole };
   for (const segment of chainSegments(command)) {
     for (const guard of GUARDS) {
       const deny = guard(segment, cwd, state, command);
