@@ -1168,14 +1168,17 @@ function applySummaryBoost(ranked, terms, expansions) {
   const commBoost = matchSummaries(terms, expansions);
   if (!commBoost.size) return;
   const present = new Set(ranked.map((r) => DATA[r[1]][8]));
+  // Boost the rows ranking already held first, then push the missing
+  // communities at their single boost: pushing first would let this loop boost
+  // the pushed rows a second time.
+  for (const r of ranked) {
+    const b = commBoost.get(DATA[r[1]][8]);
+    if (b) r[0] += b * 40;
+  }
   for (const [cid, hits] of commBoost) {
     if (!present.has(cid) && communityFirst[cid] !== undefined) {
       ranked.push([hits * 40, communityFirst[cid]]);
     }
-  }
-  for (const r of ranked) {
-    const b = commBoost.get(DATA[r[1]][8]);
-    if (b) r[0] += b * 40;
   }
   ranked.sort((a, b) => b[0] - a[0]);
 }

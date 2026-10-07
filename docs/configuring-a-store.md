@@ -19,8 +19,8 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_E2E_REPOS` | none | Repositories whose test code should be indexed as business documentation |
 | `KSB_FEATURES_DIR` | `features/` | Feature-directory segment used to group Gherkin features |
 | `KSB_SENSITIVE_PATTERNS` | email address (the only shipped rule; estates declare their own formats) | Extra rules for mined commit text that must not be stored, as a JSON object of rule name → regex merged over the defaults: `KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'`. Anything matching a rule is replaced by a placeholder naming what was removed, and counted in the run report; a value left with only placeholders is not stored. Malformed JSON raises rather than emptying the rules — see [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record) |
-| `KSB_TRACKER_BASE_URL` | none | Issue-tracker API root for the `fetch-tickets` stage, for example `https://tracker.example/jira`. Empty means the stage is not configured and does nothing |
-| `KSB_TRACKER_TOKEN` | none | Personal access token, sent as `Authorization: Bearer`. Never written to an artefact, a summary line or an error message |
+| `KSB_TRACKER_BASE_URL` | none | Issue-tracker API root for the `fetch-tickets` stage, for example `https://tracker.example/jira`. The stage speaks **Jira Data Center or Server only**: Bearer authentication and `GET /rest/api/2/search`. Jira Cloud uses Basic authentication and has removed that endpoint, so it is not supported. Empty means the stage is not configured and does nothing |
+| `KSB_TRACKER_TOKEN` | none | Data Center personal access token, sent as `Authorization: Bearer`. Never written to an artefact, a summary line or an error message |
 | `KSB_TRACKER_PROJECTS` | none | Comma-separated ticket prefixes this store may read, for example `AAA,BBB`. Empty means none, which is not the same as all |
 | `KSB_TRACKER_DENY` | none | Prefixes that must never be requested, whatever the allowlist says. A deny entry wins, so an allowlist edit cannot re-enable a project somebody withdrew |
 | `KSB_TRACKER_FETCH_DESCRIPTION` | `false` | Add each ticket's description to the request |
@@ -42,6 +42,11 @@ base URL or token it names the missing settings, writes nothing, and the rest of
 the pipeline runs unchanged. Historic tickets do not change, so a ticket that has
 been fetched is never fetched again — a later build with no credentials reads the
 committed cache rather than degrading.
+
+The stage speaks Jira Data Center or Server: a personal access token sent as a
+Bearer credential, and `GET /rest/api/2/search`. Against Jira Cloud the search
+request answers 404 or 410, and the run says so by name rather than printing the
+status alone.
 
 Requests are batched into one search per `KSB_TRACKER_PAGE_SIZE` keys, with a
 single request in flight, `Retry-After` honoured, and a pause between pages. The

@@ -338,6 +338,31 @@ class OutcomeTest(FetchTicketsTestCase):
         self.assertEqual(cached, {}, "a reply that names no ticket is not an answer")
         self.assertIn("1 failed", output)
 
+    def test_a_missing_search_endpoint_says_which_jira_this_stage_speaks(self):
+        """Breaks if a 404 or 410 from the search endpoint is reported as a bare
+        status. That reply is what Jira Cloud gives to the Data Center search
+        path, and an operator who reads only "404" will debug the URL or the
+        token rather than learn the stage speaks one Jira flavour."""
+        for status in (404, 410):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                self._store(tmp, ["AAA-1"])
+                code, output = self._run_stage(FakeTracker(statuses=[status]))
+                cached = self._cache()
+            self.assertEqual(code, 0)
+            self.assertEqual(cached, {})
+            self.assertIn(f"{status} (1 tickets)", output)
+            self.assertIn("this is a Jira Cloud deployment", output)
+            self.assertIn("Jira Data Center or Server", output)
+
+    def test_other_statuses_do_not_claim_the_tracker_is_jira_cloud(self):
+        """Breaks if the Jira Cloud hint is attached to every failure. A 503 is
+        an unwell tracker, and naming a flavour mismatch would send the operator
+        the wrong way."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            _code, output = self._run_stage(FakeTracker(statuses=[503]))
+        self.assertNotIn("Jira Cloud", output)
+
     def test_transport_failure_is_not_cached(self):
         """Breaks if a connection error is treated as an answer. Same reasoning
         as a 5xx, by a different route: an OSError from the opener carries no

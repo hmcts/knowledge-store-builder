@@ -221,12 +221,14 @@ equal('the pre-boost count is still the pre-boost one, so the divergence is meas
   { graphOnBareRanking: boosted.graphOnBareRanking, readerRows: boosted.ranking.ranked },
   { graphOnBareRanking: false, readerRows: 1 });
 // The boosted row's score, derived by hand from the fixture's one summary: four
-// of the question's terms appear in it at two points each, and `applySummaryBoost`
-// scores a pushed row at `hits * 40` and then boosts every row of its community,
-// the pushed one now included - 8 * 40 twice.
+// of the question's terms appear in it at two points each, so eight hits, and
+// `applySummaryBoost` scores a pushed row at `hits * 40` - once. This read 640
+// until #343: the boost loop ran after the push and walked `ranked`, which by
+// then held the pushed rows, so a community matched only by summary prose scored
+// twice what the constant says and outranked one holding the content.
 equal('the boosted record is the ordering the renderer receives, scored as it scores it',
   { top: boosted.ranking.top, evidence: boosted.ranking.evidence },
-  { top: 640, evidence: 'code | demo-core | src/payment.service.ts | PaymentService' });
+  { top: 320, evidence: 'code | demo-core | src/payment.service.ts | PaymentService' });
 
 // ---------------------------------------------------------------------------
 // The rest drives the shipped CLI, because the exit code and the human output are

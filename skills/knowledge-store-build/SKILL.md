@@ -29,7 +29,16 @@ knowledgestore   # every stage this install has, in run order
 **Read that list against the `knowledgestore <stage>` commands below, and stop if
 any of them is absent. Do not continue to any step below.** Say which stage is
 missing, that the installed library is older than these skills, and that the fix is
-`pip install --upgrade hmcts-knowledge-store-builder`. Continuing produces
+the command below, which needs the `hmcts-lib` feed because the package is published
+nowhere else (a bare `pip install` ends in `No matching distribution found`):
+
+```bash
+pip install --upgrade --extra-index-url \
+  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+  hmcts-knowledge-store-builder
+```
+
+Continuing produces
 `unknown stage` partway through a build, after earlier stages have already written
 committed artefacts - a worse place to stop than here.
 
