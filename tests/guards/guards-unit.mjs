@@ -81,6 +81,25 @@ test("every segment is judged, not only the first", () => {
   assert.equal(r.allow, false);
 });
 
+test("a merge with no merge-inputs run is refused", () => {
+  const r = decide({ command: "graphify merge-graphs a/graph.json --out out.json" });
+  assert.equal(r.allow, false);
+  assert.match(r.deny, /merge-inputs/);
+});
+
+test("a merge after merge-inputs is allowed", () => {
+  const r = decide({
+    command: "graphify merge-graphs a/graph.json --out out.json",
+    state: { mergeInputsRan: true },
+  });
+  assert.equal(r.allow, true);
+});
+
+test("absent state behaves as not run rather than throwing", () => {
+  const r = decide({ command: "graphify merge-graphs a/graph.json" });
+  assert.equal(r.allow, false);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try { fn(); console.log(`ok   ${name}`); }

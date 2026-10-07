@@ -88,7 +88,19 @@ function pipedGate(command) {
   );
 }
 
-const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction];
+function unreconciledMerge(segment, _cwd, state) {
+  const args = argsOf(segment);
+  if (args[0] !== "graphify" || args[1] !== "merge-graphs") return null;
+  if (state && state.mergeInputsRan) return null;
+  return (
+    "Run knowledgestore merge-inputs first and read its output. The merge is " +
+    "driven by a shell glob, and a glob has picked up a previous run's outputs " +
+    "here before - the merge reported a healthy count over the wrong inputs. " +
+    "This guard does not inspect any graph; merge-inputs makes that judgement."
+  );
+}
+
+const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction, unreconciledMerge];
 
 export function decide({ command, cwd = "", state = {} } = {}) {
   const whole = pipedGate(command);
