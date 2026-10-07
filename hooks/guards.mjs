@@ -77,7 +77,7 @@ function hasPathspec(args) {
   return false;
 }
 
-function unexcludedClean(segment, cwd) {
+function unexcludedClean(segment, _state, command) {
   const args = argsOf(segment);
   if (args[0] !== "git" || !args.includes("clean")) return null;
   const flags = args.filter((a) => /^-[^-]/.test(a)).join("");
@@ -85,11 +85,12 @@ function unexcludedClean(segment, cwd) {
   if (flags.includes("n") || args.includes("--dry-run")) return null;
   if (EXCLUDES_GRAPHIFY_OUT.test(segment)) return null;
   if (hasPathspec(args)) return null;
-  // The cwd must be a clone, not merely somewhere under a directory of that
-  // name: a store at /x/repositories/mystore is not a clone.
-  const inClone =
-    /^\/[^/]+\/repositories\/[^/]+\/?$/.test(cwd) || /(^|\s)repositories\//.test(segment);
-  if (!inClone) return null;
+  // The context is read from the whole command, not this segment: the form an
+  // agent writes is `cd repositories/<name> && git clean -fd`, where the cd is
+  // a different segment. A clone and a store root that merely sits under a
+  // directory named repositories share a path shape, so cwd cannot tell them
+  // apart and is not consulted.
+  if (!/(^|\s)repositories\//.test(maskQuoted(command))) return null;
   return (
     "This clean would delete the per-repo graphs. They live untracked at " +
     "repositories/<name>/graphify-out/, and a clean without the exclusion " +
@@ -98,7 +99,7 @@ function unexcludedClean(segment, cwd) {
   );
 }
 
-function indiscriminateStage(segment) {
+function indiscriminateStage(segment, _state, _command) {
   const args = argsOf(segment);
   if (args[0] !== "git" || args[1] !== "add") return null;
   const rest = args.slice(2);
@@ -116,7 +117,7 @@ function asksForHelp(args) {
   return args.includes("-h") || args.includes("--help");
 }
 
-function outsideExtraction(segment) {
+function outsideExtraction(segment, _state, _command) {
   const args = argsOf(segment);
   if (asksForHelp(args)) return null;
   // Only the extraction verbs. merge-graphs is given repositories/*/... by the
@@ -159,7 +160,7 @@ function pipedGate(command) {
   return null;
 }
 
-function unreconciledMerge(segment, _cwd, state) {
+function unreconciledMerge(segment, state, _command) {
   const args = argsOf(segment);
   if (asksForHelp(args)) return null;
   if (args[0] !== "graphify" || args[1] !== "merge-graphs") return null;
@@ -174,12 +175,12 @@ function unreconciledMerge(segment, _cwd, state) {
 
 const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction, unreconciledMerge];
 
-export function decide({ command, cwd = "", state = {} } = {}) {
+export function decide({ command, state = {} } = {}) {
   const whole = pipedGate(command);
   if (whole) return { allow: false, deny: whole };
   for (const segment of chainSegments(command)) {
     for (const guard of GUARDS) {
-      const deny = guard(segment, cwd, state, command);
+      const deny = guard(segment, state, command);
       if (deny) return { allow: false, deny };
     }
   }

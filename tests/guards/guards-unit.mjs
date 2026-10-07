@@ -4,15 +4,15 @@ import { decide } from "../../hooks/guards.mjs";
 const cases = [];
 const test = (name, fn) => cases.push([name, fn]);
 
-test("an unexcluded clean in a clone is refused", () => {
-  const r = decide({ command: "git clean -fd", cwd: "/store/repositories/alpha" });
+test("the form an agent writes is refused", () => {
+  const r = decide({ command: "cd repositories/alpha && git clean -fd" });
   assert.equal(r.allow, false);
   assert.match(r.deny, /graphify-out/);
 });
 
 test("the library's own clean is allowed", () => {
-  const r = decide({ command: "git clean -fd -e graphify-out", cwd: "/store/repositories/alpha" });
-  assert.equal(r.allow, true);
+  const c = "cd repositories/alpha && git clean -fd -e graphify-out";
+  assert.equal(decide({ command: c }).allow, true);
 });
 
 test("an empty command does not throw", () => {
@@ -117,21 +117,25 @@ test("a general-purpose interpreter in a pipeline is not a checker", () => {
   assert.equal(decide({ command: "python3 gen.py | jq . && git commit -m x" }).allow, true);
 });
 
+test("the --exclude= form is honoured", () => {
+  const c = "cd repositories/alpha && git clean -fd --exclude=graphify-out";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
 test("a dry-run clean is allowed", () => {
-  assert.equal(decide({ command: "git clean -fdn", cwd: "/s/repositories/a" }).allow, true);
+  assert.equal(decide({ command: "cd repositories/alpha && git clean -fdn" }).allow, true);
 });
 
 test("a pathspec-limited clean is allowed", () => {
-  assert.equal(decide({ command: "git clean -fd src/", cwd: "/s/repositories/a" }).allow, true);
+  assert.equal(decide({ command: "cd repositories/alpha && git clean -fd src/" }).allow, true);
 });
 
-test("a store root merely under a repositories directory is not a clone", () => {
-  assert.equal(decide({ command: "git clean -fd", cwd: "/home/u/repositories/mystore" }).allow, true);
+test("a clean with no store context is allowed", () => {
+  assert.equal(decide({ command: "git clean -fd" }).allow, true);
 });
 
-test("the --exclude= form is honoured", () => {
-  const r = decide({ command: "git clean -fd --exclude=graphify-out", cwd: "/s/repositories/a" });
-  assert.equal(r.allow, true);
+test("a repositories path inside quotes does not supply the context", () => {
+  assert.equal(decide({ command: 'git clean -fd -m "repositories/x"' }).allow, true);
 });
 
 test("graphify extract from outside is refused too", () => {
