@@ -244,7 +244,7 @@ class ArtefactWritersNameTheGraphTest(GraphPair, SettingsIsolated):
         silence. The strongest case of the class: a check reading the wrong
         artefact passes on the wrong data, and its silence then licenses a claim
         about something it never looked at."""
-        self.assertIn("MISMATCH", self._stderr_of(summaries.estate_identifiers))
+        self.assertIn("MISMATCH", self._stderr_of(summaries.estate_vocabulary))
 
 
 if __name__ == "__main__":

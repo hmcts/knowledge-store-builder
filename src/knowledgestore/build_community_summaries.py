@@ -2567,12 +2567,6 @@ def estate_vocabulary() -> tuple[set[str], set[str]]:
     return identifiers, {part for part in segments if len(part) >= MIN_SEGMENT_MATCH}
 
 
-def estate_identifiers() -> set[str]:
-    """The whole identifiers only. Kept because a caller wanting the strict set
-    should not have to discard the segments to get it."""
-    return estate_vocabulary()[0]
-
-
 def name_segments(identifier: str) -> set[str]:
     """The parts of a name a cited term may legitimately refer to.
 
