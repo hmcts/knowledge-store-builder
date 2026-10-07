@@ -1,6 +1,11 @@
 // Refuses command shapes this library has documented as destructive. Pure:
 // it reads nothing, writes nothing and calls nothing outside its arguments.
 
+/** @param {unknown} value @returns {string} */
+function asText(value) {
+  return typeof value === "string" ? value : "";
+}
+
 /** Blank the contents of quoted spans, keeping the quotes and the length, so
  *  a separator or a flag inside a string cannot manufacture a segment or a
  *  token. Masking hides text, so on its own it can only stop a guard firing.
@@ -11,11 +16,10 @@
 export function maskQuoted(command) {
   let out = "";
   let quote = null;
-  const text = String(command ?? "");
+  const text = asText(command);
   // Per UTF-16 unit, not per code point: an astral character is two units, and
   // chainLinks slices the original at offsets found in this string.
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  for (const ch of text.split("")) {
     if (quote) {
       out += ch === quote ? ch : "X";
       if (ch === quote) quote = null;
@@ -34,11 +38,11 @@ export function maskQuoted(command) {
  *  or "\n" (a bare line break), null for the first. */
 /** @param {unknown} command @returns {{ text: string, raw: string, before: string|null }[]} */
 export function chainLinks(command) {
-  const original = String(command ?? "");
+  const original = asText(command);
   const masked = maskQuoted(original);
   const links = [];
   // An operator wins over a line break, so `a &&\nb` keeps its `&&`.
-  const separator = /[ \t]*(&&|\|\||;)[ \t\r\n]*|[ \t]*(\r?\n)[ \t]*/g;
+  const separator = /(&&|\|\||;)[ \t\r\n]*|(\r?\n)/g;
   let last = 0;
   let before = null;
   let match;
@@ -64,18 +68,18 @@ export function chainSegments(command) {
 /** The first command of a segment's pipeline. */
 /** @param {unknown} segment @returns {string} */
 export function pipelineHead(segment) {
-  return String(segment ?? "").split(/\s*\|\s*/)[0].trim();
+  return asText(segment).split("|")[0].trim();
 }
 
 /** A segment's whitespace-separated tokens. Quoting is not honoured, which
  *  can only cause a guard to stay silent, never to fire wrongly. */
 /** @param {unknown} segment @returns {string[]} */
 export function argsOf(segment) {
-  const t = String(segment ?? "").trim();
+  const t = asText(segment).trim();
   return t ? t.split(/\s+/) : [];
 }
 
-const EXCLUDES_GRAPHIFY_OUT = /(?:--exclude[=\s]+|-e\s*=?\s*)["']?graphify-out["']?/;
+const EXCLUDES_GRAPHIFY_OUT = /(?:--exclude|-e)[=\s]*["']?graphify-out["']?/;
 
 /** @param {string} argument @returns {boolean} */
 function isFlag(argument) {
@@ -151,7 +155,7 @@ function outsideExtraction(segment, _state, _command, _raw) {
   if (args[0] !== "graphify" || !EXTRACTION_VERBS.has(args[1])) return null;
   // A flag's value is that flag's, not a path to extract.
   const rest = args.slice(2);
-  if (!rest.some((a, i) => /^repositories\//.test(a) && !(i > 0 && isFlag(rest[i - 1])))) return null;
+  if (!rest.some((a, i) => a.startsWith("repositories/") && !(i > 0 && isFlag(rest[i - 1])))) return null;
   return (
     "Extract from inside the repository. A path like repositories/<name> " +
     "prefixes every source_file with it, which breaks the file-to-ticket join " +
@@ -179,7 +183,7 @@ function pipedGate(command) {
     // Only a publish immediately `&&`-chained is ungated. Any link between the
     // checker and the publish is reading the saved output, which is the remedy.
     const next = links[i + 1];
-    if (next && next.before === "&&" && PUBLISHES.test(next.text)) {
+    if (next?.before === "&&" && PUBLISHES.test(next.text)) {
       return (
         "A pipeline's exit status is its last command's, not the checker's, " +
         "so this commits or pushes whatever the checker did. Redirect the " +
@@ -195,7 +199,7 @@ function unreconciledMerge(segment, state, _command, _raw) {
   const args = argsOf(segment);
   if (asksForHelp(args)) return null;
   if (args[0] !== "graphify" || args[1] !== "merge-graphs") return null;
-  if (state && state.mergeInputsRan) return null;
+  if (state?.mergeInputsRan) return null;
   return (
     "Run knowledgestore merge-inputs first and read its output. The merge is " +
     "driven by a shell glob, and a glob has picked up a previous run's outputs " +
