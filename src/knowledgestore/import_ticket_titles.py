@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 
-from . import config
+from . import config, io
 
 TICKET = re.compile("^" + config.TICKET_PATTERN.pattern.strip("\\b") + "$")
 
@@ -85,7 +85,9 @@ def main() -> int:
         print(f"{path}: merged")
 
     config.TICKET_TITLES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(config.TICKET_TITLES_PATH, "wt", encoding="utf-8", compresslevel=9) as out:
+    # io.gzip_text, not gzip.open: the latter stamps the header with the current
+    # time and the output filename, so this committed artefact churned on every run.
+    with io.gzip_text(config.TICKET_TITLES_PATH) as out:
         json.dump(dict(sorted(titles.items())), out, ensure_ascii=False)
 
     print(f"{added:,} titles added/updated; {len(titles):,} total -> {config.TICKET_TITLES_PATH}")

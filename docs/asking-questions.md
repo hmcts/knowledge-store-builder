@@ -173,8 +173,8 @@ predates it — a builder adds it with `knowledgestore content-set`, and
 | `/knowledge-store:knowledge-store-export` | Produce a dated, evidence-backed finding for a ticket or owner without copying sensitive values into it |
 
 Individual stores can provide an additional skill containing estate-specific
-context. The three plugin skills provide the shared query, build and export
-workflows.
+context. The four plugin skills provide the shared query, build, export and
+assess workflows.
 
 ## Update the plugin
 
