@@ -92,6 +92,8 @@ USER_AGENT = (
 
 DENIED_STATUSES = (401, 403)
 TOO_MANY_REQUESTS = 429
+# The statuses a search endpoint that does not exist answers with.
+WRONG_ENDPOINT_STATUSES = (404, 410)
 # Attempts per page while the tracker is asking us to wait. After this the page
 # is a failure, which means uncached and retried by the next run.
 MAX_ATTEMPTS = 3
@@ -510,6 +512,13 @@ def _report_failures(report: Report) -> None:
         for status, count in sorted(report.failures.items())
     )
     print(f"  replies that carried no answer, so nothing was cached: {named}")
+    if any(status in WRONG_ENDPOINT_STATUSES for status in report.failures):
+        print(
+            "  a 404 or 410 on the search endpoint usually means this is a Jira Cloud "
+            "deployment. This stage speaks Jira Data Center or Server: Bearer token, "
+            "GET /rest/api/2/search. Cloud authenticates with Basic and has removed "
+            "that endpoint, so no setting here will make it answer."
+        )
 
 
 def _report_redactions(report: Report) -> None:
