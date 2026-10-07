@@ -41,7 +41,8 @@ if [[ ! -x "$bin/eslint" ]] || [[ ! -x "$bin/tsc" ]] \
 fi
 
 echo "eslint $ESLINT_VERSION"
-"$bin/eslint" src/knowledgestore/assets/app.js src/knowledgestore/assets/*.mjs tests/explorer/*.mjs
+"$bin/eslint" src/knowledgestore/assets/app.js src/knowledgestore/assets/*.mjs tests/explorer/*.mjs \
+  hooks/guards.mjs tests/guards/*.mjs
 
 echo "tsc $TYPESCRIPT_VERSION --checkJs (browser: app.js)"
 "$bin/tsc" --checkJs --noEmit --target es2020 --lib es2020,dom \
@@ -57,6 +58,7 @@ echo "tsc $TYPESCRIPT_VERSION --checkJs (node: the shipped harness and answer ga
   --module nodenext --moduleResolution nodenext \
   --typeRoots "$prefix/node_modules/@types" --types node \
   src/knowledgestore/assets/explorer_harness.mjs \
-  src/knowledgestore/assets/answer_regression.mjs
+  src/knowledgestore/assets/answer_regression.mjs \
+  hooks/guards.mjs
 
 echo "explorer JavaScript gates pass"

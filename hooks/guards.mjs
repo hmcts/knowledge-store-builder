@@ -5,6 +5,7 @@
  *  a separator or a flag inside a string cannot manufacture a segment or a
  *  token. This is what makes the note on argsOf true: masking can only stop a
  *  guard firing, never cause one to fire. */
+/** @param {unknown} command @returns {string} */
 export function maskQuoted(command) {
   let out = "";
   let quote = null;
@@ -23,6 +24,7 @@ export function maskQuoted(command) {
 }
 
 /** Segments with the separator that precedes each one, over masked text. */
+/** @param {unknown} command @returns {{ text: string, before: string|null }[]} */
 export function chainLinks(command) {
   const masked = maskQuoted(command);
   const links = [];
@@ -40,17 +42,20 @@ export function chainLinks(command) {
 }
 
 /** Split a command into its &&, || and ; separated segments. */
+/** @param {unknown} command @returns {string[]} */
 export function chainSegments(command) {
   return chainLinks(command).map((link) => link.text);
 }
 
 /** The first command of a segment's pipeline. */
+/** @param {unknown} segment @returns {string} */
 export function pipelineHead(segment) {
   return String(segment ?? "").split(/\s*\|\s*/)[0].trim();
 }
 
 /** A segment's whitespace-separated tokens. Quoting is not honoured, which
  *  can only cause a guard to stay silent, never to fire wrongly. */
+/** @param {unknown} segment @returns {string[]} */
 export function argsOf(segment) {
   const t = String(segment ?? "").trim();
   return t ? t.split(/\s+/) : [];
@@ -58,6 +63,7 @@ export function argsOf(segment) {
 
 const EXCLUDES_GRAPHIFY_OUT = /(?:-e|--exclude)[=\s]+graphify-out\b/;
 
+/** @param {string} argument @returns {boolean} */
 function isFlag(argument) {
   return argument.startsWith("-");
 }
@@ -65,6 +71,7 @@ function isFlag(argument) {
 /** True when the clean names a path to clean, which cannot reach
  *  graphify-out at the repository root. The value after -e or --exclude is
  *  that flag's, not a pathspec. */
+/** @param {string[]} args @returns {boolean} */
 function hasPathspec(args) {
   const after = args.slice(args.indexOf("clean") + 1);
   for (let i = 0; i < after.length; i++) {
@@ -77,6 +84,7 @@ function hasPathspec(args) {
   return false;
 }
 
+/** @param {string} segment @param {{ mergeInputsRan?: boolean }} _state @param {string|undefined} command @returns {string|null} */
 function unexcludedClean(segment, _state, command) {
   const args = argsOf(segment);
   if (args[0] !== "git" || !args.includes("clean")) return null;
@@ -99,6 +107,7 @@ function unexcludedClean(segment, _state, command) {
   );
 }
 
+/** @param {string} segment @param {{ mergeInputsRan?: boolean }} _state @param {string|undefined} _command @returns {string|null} */
 function indiscriminateStage(segment, _state, _command) {
   const args = argsOf(segment);
   if (args[0] !== "git" || args[1] !== "add") return null;
@@ -113,10 +122,12 @@ function indiscriminateStage(segment, _state, _command) {
 
 const EXTRACTION_VERBS = new Set(["update", "extract"]);
 
+/** @param {string[]} args @returns {boolean} */
 function asksForHelp(args) {
   return args.includes("-h") || args.includes("--help");
 }
 
+/** @param {string} segment @param {{ mergeInputsRan?: boolean }} _state @param {string|undefined} _command @returns {string|null} */
 function outsideExtraction(segment, _state, _command) {
   const args = argsOf(segment);
   if (asksForHelp(args)) return null;
@@ -142,6 +153,7 @@ const PUBLISHES = /^git\s+(?:push|commit)\b/;
  *  relationship between a piped checker and a later commit or push. Only an
  *  unbroken run of `&&` gates - `;` runs the next command whatever happened,
  *  and `||` runs it only on failure, so neither can be masked by the pipe. */
+/** @param {string|undefined} command @returns {string|null} */
 function pipedGate(command) {
   const links = chainLinks(command);
   for (let i = 0; i < links.length; i++) {
@@ -160,6 +172,7 @@ function pipedGate(command) {
   return null;
 }
 
+/** @param {string} segment @param {{ mergeInputsRan?: boolean }} state @param {string|undefined} _command @returns {string|null} */
 function unreconciledMerge(segment, state, _command) {
   const args = argsOf(segment);
   if (asksForHelp(args)) return null;
@@ -175,6 +188,9 @@ function unreconciledMerge(segment, state, _command) {
 
 const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction, unreconciledMerge];
 
+/** @typedef {{ allow: true } | { allow: false, deny: string }} Verdict */
+
+/** @param {{ command?: string, state?: { mergeInputsRan?: boolean } }} [input] @returns {Verdict} */
 export function decide({ command, state = {} } = {}) {
   const whole = pipedGate(command);
   if (whole) return { allow: false, deny: whole };
