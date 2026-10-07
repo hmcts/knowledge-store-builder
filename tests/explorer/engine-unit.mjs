@@ -423,6 +423,37 @@ const unchanged = createHash('sha256')
 assert('a question with no ticket evidence renders exactly as before',
   unchanged === '734c03f122f115a1689d34123e3fca76b0e5eb1e211cdfc5722a4bb79fe282cc', unchanged);
 
+// applySummaryBoost: a community matched ONLY by summary prose is represented
+// once, at its single boost (#343)
+//
+// Catches: the representative row pushed for a summary-only community being
+// boosted a second time by the loop that boosts the rows ranking already held,
+// which scored it hits * 80 where the code and its constant say hits * 40 and
+// put prose matches above communities holding the actual matching content.
+//
+// Hand-derived. Community 3's summary is "Recording of hearing outcomes and
+// results for court."; the terms ['result', 'court'] each appear in it, 2 hits
+// apiece, so 4 hits, and the boost is 4 * 40 = 160. Community 3 has no row in
+// `ranked`, so it is pushed at 160. Community 1 holds the content match (row 0,
+// AddressPipe) at 200 and has no summary, so it takes no boost and stays 200.
+// Correct order: content (200) above the summary-only row (160). Broken: the
+// pushed row reaches 320 and leads.
+{
+  const row = DATA.findIndex((d) => d[8] === 3); // community 3's first row
+  const rows = [[200, 0]];
+  context.applySummaryBoost(rows, ['result', 'court'], []);
+  assert('a summary-only community is pushed at hits * 40, not boosted twice',
+    deepEqual(rows.find((r) => r[1] === row), [160, row]), JSON.stringify(rows));
+  assert('a summary-only community does not outrank a community with content',
+    rows[0][1] === 0 && rows[0][0] === 200, JSON.stringify(rows));
+
+  // A community ranking already holds is boosted once as well: 100 + 160.
+  const held = [[100, row], [200, 0]];
+  context.applySummaryBoost(held, ['result', 'court'], []);
+  assert('a community ranking already held takes the boost once',
+    deepEqual(held, [[260, row], [200, 0]]), JSON.stringify(held));
+}
+
 if (failures) {
   console.error('\n' + failures + ' engine assertion(s) failed');
   process.exit(1);
