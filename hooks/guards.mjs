@@ -39,7 +39,36 @@ function unexcludedClean(segment, cwd) {
   );
 }
 
-const GUARDS = [unexcludedClean];
+function indiscriminateStage(segment) {
+  const args = argsOf(segment);
+  if (args[0] !== "git" || args[1] !== "add") return null;
+  const rest = args.slice(2);
+  if (!rest.some((a) => a === "-A" || a === "--all" || a === ".")) return null;
+  return (
+    "Stage explicit paths. The working tree here routinely holds generated " +
+    "pipeline output, another session's edits and scratch files at once, and " +
+    "-A cannot tell them apart. Read git status --short, then name the paths."
+  );
+}
+
+const EXTRACTION_VERBS = new Set(["update", "extract"]);
+
+function outsideExtraction(segment) {
+  const args = argsOf(segment);
+  // Only the extraction verbs. merge-graphs is given repositories/*/... by the
+  // build skill itself, so matching every graphify subcommand would refuse the
+  // documented merge.
+  if (args[0] !== "graphify" || !EXTRACTION_VERBS.has(args[1])) return null;
+  if (!args.slice(2).some((a) => /^repositories\//.test(a))) return null;
+  return (
+    "Extract from inside the repository. A path like repositories/<name> " +
+    "prefixes every source_file with it, which breaks the file-to-ticket join " +
+    "silently - the only symptom is that nodes lose their tickets. " +
+    "Run: ( cd repositories/<name> && graphify update . )"
+  );
+}
+
+const GUARDS = [unexcludedClean, indiscriminateStage, outsideExtraction];
 
 export function decide({ command, cwd = "", state = {} } = {}) {
   for (const segment of chainSegments(command)) {
