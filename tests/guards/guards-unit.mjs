@@ -150,6 +150,61 @@ test("git add -A keeps being refused even when a path is named", () => {
   assert.equal(decide({ command: "git add -A src/" }).allow, false);
 });
 
+test("a newline separates commands, so the clean is still caught", () => {
+  assert.equal(decide({ command: "cd repositories/alpha\ngit clean -fd" }).allow, false);
+});
+
+test("a newline does not glue two commands into a false refusal", () => {
+  assert.equal(decide({ command: "git add pyproject.toml\nruff format ." }).allow, true);
+});
+
+test("a newline breaks a gating run as a semicolon does", () => {
+  assert.equal(decide({ command: "pytest | tail -1\ngit push" }).allow, true);
+});
+
+test("an operator keeps its chain across a line break", () => {
+  assert.equal(decide({ command: "pytest | tail -1 &&\ngit push" }).allow, false);
+});
+
+test("a quoted exclusion is honoured", () => {
+  const c = 'cd repositories/alpha && git clean -fd -e "graphify-out"';
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("an attached exclusion value is honoured", () => {
+  const c = "cd repositories/alpha && git clean -fd -egraphify-out";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("the PIPESTATUS remedy chained with && is allowed", () => {
+  const c = "pytest | tee out.txt && test ${PIPESTATUS[0]} -eq 0 && git push";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("reading the saved output before pushing is allowed", () => {
+  const c = 'pytest | tee out.txt && grep -q "0 failed" out.txt && git push';
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("a piped checker pushed immediately is still refused", () => {
+  assert.equal(decide({ command: "pytest | tail -1 && git push" }).allow, false);
+});
+
+test("merge-inputs earlier in the same command satisfies the precondition", () => {
+  const c = "knowledgestore merge-inputs && graphify merge-graphs repositories/a/graphify-out/graph.json --out o.json";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
+test("the reverse order does not satisfy it", () => {
+  const c = "graphify merge-graphs a/graph.json --out o.json && knowledgestore merge-inputs";
+  assert.equal(decide({ command: c }).allow, false);
+});
+
+test("a flag's value is not read as a path", () => {
+  const c = "graphify update . --exclude repositories/vendor";
+  assert.equal(decide({ command: c }).allow, true);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try { fn(); console.log(`ok   ${name}`); }
