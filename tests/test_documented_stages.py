@@ -70,7 +70,14 @@ STAGE_LISTING = re.compile(r"^knowledgestore[ \t]*(?:#.*)?$", re.MULTILINE)
 # sentence carries a newline wherever the wrap happens to fall, and a pattern spelt
 # with spaces reads a reworded skill and a rewrapped one as the same defect.
 STOP_ON_A_MISSING_STAGE = re.compile(r"stop\s+if\s+any\b[^.]*\babsent\b", re.IGNORECASE)
-UPGRADE_COMMAND = "pip install --upgrade hmcts-knowledge-store-builder"
+HMCTS_LIB_FEED = "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/"
+# Wrapped the way docs/creating-a-store.md wraps its install, so the skill and the guide
+# show one command. The package publishes only to the hmcts-lib feed.
+UPGRADE_COMMAND = (
+    "pip install --upgrade --extra-index-url \\\n"
+    f"  {HMCTS_LIB_FEED} \\\n"
+    "  hmcts-knowledge-store-builder"
+)
 
 
 def capability_problem(skill: str) -> str | None:
@@ -375,6 +382,15 @@ class TheCapabilityCheckCanStillTell(unittest.TestCase):
         if upgrade:
             parts.append(f"The fix is `{UPGRADE_COMMAND}`.\n")
         return "\n".join(parts)
+
+    def test_the_pinned_upgrade_command_can_resolve(self):
+        """Catches a bare `pip install` creeping back in as the pinned fix: it cannot
+        resolve this package, and the gate used to require exactly that. Presence of the
+        command was asserted for a long time; its validity was not.
+        """
+        self.assertIn(f"--extra-index-url \\\n  {HMCTS_LIB_FEED}", UPGRADE_COMMAND)
+        self.assertIn("--upgrade", UPGRADE_COMMAND)
+        self.assertTrue(UPGRADE_COMMAND.endswith("hmcts-knowledge-store-builder"))
 
     def test_the_shape_it_accepts(self):
         """The control: without this, every assertion below could be reporting a problem
