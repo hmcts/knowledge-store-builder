@@ -431,6 +431,42 @@ community before continuing. Do not substitute `graphify cluster-only`: it can
 report success without persisting the clustered graph when run at the store
 root.
 
+### Extract the AST layer
+
+```bash
+pip install --extra-index-url \
+  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+  'hmcts-knowledge-store-builder[ast]'
+knowledgestore extract-ast
+```
+
+`extract-ast` writes `graphify-out/.graphify_ast.json`, the file `merge-layers`
+reads. The `[ast]` extra installs the third-party parser; the stage refuses to
+run without it. It reads the content set from
+`graphify-out/.graphify_detect.json`, so write that first, as above.
+
+It is the supported route to the AST layer. A hand-written per-repository loop
+reaches the same extractor and lacks four properties this stage carries, each
+from a defect that reached a real estate:
+
+- **A time bound per repository.** `--timeout` (default 600 seconds, 0 disables)
+  ends a repository that will not finish and names it. One whole-corpus call
+  gives a hung run and a slow run the same silence.
+- **One failure does not cost the others.** A repository that fails is named and
+  counted, the rest still extract, the partial layer is written, and the exit
+  code is non-zero so a hole is not committed as success.
+- **It refuses the pipeline's own output.** Input from inside a `graphify-out`
+  directory is refused, whichever route supplied the list. A hand-kept exclusion
+  list missed that directory, and the graph then described itself.
+- **It consumes the computed content set.** There is no exclusion pattern to
+  maintain, so there is no second model to drift from the first. `--files`
+  takes an explicit path list instead; `--detect` and `--out` move the input and
+  the layer.
+
+A run also compares each repository's node count with the last run and reports
+decreases, absences and new repositories. It reports and does not refuse, because
+deleted code is a legitimate reason for a smaller layer.
+
 ### Add the retrieval layers
 
 Community summaries give the explorer plain-English descriptions of graph

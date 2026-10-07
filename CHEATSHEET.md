@@ -147,6 +147,21 @@ clustered: graphify uses Leiden where `graspologic` is installed and Louvain whe
 it is not, and that choice re-keys every community — so `status` needs the record
 to tell an operator whose environment cannot reproduce the committed clustering.
 
+### The AST layer, one repository at a time
+
+```bash
+pip install --extra-index-url \
+  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+  'hmcts-knowledge-store-builder[ast]'
+knowledgestore extract-ast         # reads graphify-out/.graphify_detect.json
+```
+
+`extract-ast` writes `graphify-out/.graphify_ast.json` for `merge-layers`. Unlike a
+hand-written loop it bounds each repository (`--timeout`, default 600 seconds),
+names a failing repository without losing the others, refuses the pipeline's own
+output as input, and takes the computed content set rather than an exclusion
+list. See *Extract the AST layer* in `docs/creating-a-store.md`.
+
 ### Checks worth running
 
 ```bash
