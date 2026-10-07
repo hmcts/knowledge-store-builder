@@ -19,7 +19,10 @@ Four constraints, chosen up front, decide most of the design:
    composition are pure functions of the sources: two runs on the same inputs
    produce byte-identical output. Compression included: every gzip writer uses
    level 9 with neither timestamp nor filename in the header — the behaviour
-   of `gzip -9 -n` (`src/knowledgestore/io.py`, `gzip_text`).
+   of `gzip -9 -n` (`src/knowledgestore/io.py`, `gzip_text`). That *every*
+   is held by `tests/test_gzip_writes_stay_deterministic.py`, which reads the
+   source for a gzip write that bypasses the helper: one had, and the
+   artefact it wrote churned on every run.
 4. **Every claim traces to evidence.** The
    [grounding contract](grounding-and-verification.md) governs anything a
    model authored; absence of evidence is reported as a finding, not filled.

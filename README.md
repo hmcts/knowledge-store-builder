@@ -58,8 +58,8 @@ network.
   There is no shared implementation.
 
   Where it lives
-    demo-core   src/address/AddressPipe.java      (graph, built 2026-09-28)
-    demo-web    src/address/AddressPipe.java      (graph, built 2026-09-28)
+    demo-app-a  src/pipes/address.pipe.ts         (graph)
+    demo-app-b  src/pipes/address.pipe.ts         (graph)
 
   What this is NOT
     These two are not one component. They share a name and no edge
@@ -71,10 +71,10 @@ network.
 > export that as a finding I can send to the platform team
 ```
 
-That answer is the same content as the screenshot above, from the same test
-fixture, so you can reproduce it rather than take it on trust. Every line
-names the layer it came from and the date the store holds for it; an answer
-the store cannot support says so instead of filling the gap.
+The repositories and the file are the ones in `tests/explorer/fixture.py`,
+which builds the page in the screenshot. Every line names the layer it came
+from, and an answer the store cannot support says so instead of filling the
+gap.
 
 The plugin also carries skills for building and refreshing a store, exporting a
 finding, and assessing a backlog of tickets against what the platform now does.
@@ -96,7 +96,7 @@ knowledgestore explorer        # build the page
 knowledgestore status          # what is present, what is stale
 ```
 
-`knowledgestore` with no arguments lists all 32 stages with a line each.
+`knowledgestore` with no arguments lists every stage with a line each.
 `knowledgestore <stage> --help` explains one. The full sequence, the extraction
 extras and the authoring steps are in
 [Creating a knowledge store](docs/creating-a-store.md), which also carries the
