@@ -2568,6 +2568,7 @@ MUTATIONS = (
             "test_cli_help.SelfParsingStaysHonest.test_every_self_parsing_stage_really_builds_a_parser",
             "test_cli_help.SelfParsingStaysHonest.test_no_stage_outside_the_list_builds_a_parser",
             "test_documented_stages.DocumentedStagesExist.test_every_documented_stage_is_a_real_stage",
+            "test_documented_stages.EveryStageIsDocumented.test_every_stage_is_named_by_a_shipped_document",
             "test_ingestion_gaps.TheStageIsWired.test_the_cli_runs_the_stage_and_reports_a_finding_without_failing",
             "test_repo_list_and_sync.CliTest.test_stages_are_listed_in_pipeline_order",
         ),
