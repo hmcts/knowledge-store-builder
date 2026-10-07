@@ -119,3 +119,4 @@ estate uses another language or layout.
 | `status` | report only | Report provenance, coverage, citations, freshness, recorded telemetry and optional drift |
 | `check-install-docs` | report only | Check the documented install commands against what the lock declares |
 | `check-evidence` | report only | Fail if a committed ticket-descriptions artefact holds mined text matching a withholding rule |
+| `check-citations` | report only | Fail if a published answer cites code the graph does not hold; name the nearest real identifier and list database columns apart |
