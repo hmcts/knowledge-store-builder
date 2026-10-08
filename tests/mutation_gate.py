@@ -259,6 +259,7 @@ MUTATIONS = (
             "test_config_and_io.TheJsonReaderHandlesGzip.test_a_gzipped_json_object_is_read",
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_outside_the_configured_store_root_succeeds",
             "test_read_path_policy.ReadsAreNotConfinedTest.test_a_read_path_that_climbs_upward_is_accepted",
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_absent_plain_graph_is_not_called_stale_and_the_archive_is_read",
         ),
     ),
     Mutation(
@@ -357,6 +358,7 @@ MUTATIONS = (
         "the strongest form of the class: a truthfulness gate reading the wrong artefact passes on the wrong data, and its silence then licenses a claim about something it never looked at",
         (
             "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_the_estate_check_names_the_other_graph",
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_a_genuine_disagreement_still_reports_the_mismatch",
         ),
     ),
     Mutation(
@@ -796,12 +798,14 @@ MUTATIONS = (
         "readers already accepted the `.gz` and only the guard refused, and the "
         "way out was a multi-gigabyte gunzip for a report documented as cheap",
         (
+            "test_check_citations.TheStage.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
             "test_graph_to_read.GraphToReadTest.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_an_estate_sharing_no_pair_still_prints_nothing",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_names_the_file_it_read",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_ranks_from_the_archive_alone",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_names_the_file_it_read",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_ranks_from_the_archive_alone",
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_absent_plain_graph_is_not_called_stale_and_the_archive_is_read",
             "test_summaries_membership_drift.AdriftStage.test_a_refusal_message_names_the_file_that_was_actually_read",
             "test_summaries_membership_drift.AdriftStage.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
         ),
@@ -818,17 +822,35 @@ MUTATIONS = (
         (
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_truncated_name_is_still_reported_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_word_out_of_a_camel_case_name_is_still_reported_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_identifier_in_a_phrase_label_no_longer_reads_as_absent",
+            "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_an_invented_term_is_still_reported_absent",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_genuinely_absent_term_is_still_reported",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_scoped_package_no_longer_reads_as_absent",
+            "test_estate_segment_match.AbsentFromEstateTest.test_a_short_term_is_not_matched_against_a_segment",
             "test_graph_to_read.GraphToReadTest.test_the_archive_is_offered_from_a_path_that_already_names_it",
             "test_graph_to_read.GraphToReadTest.test_the_plain_graph_is_preferred_when_both_exist",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_central_reads_the_plain_graph_when_both_exist",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_duplicates_reads_the_plain_graph_when_both_exist",
             "test_most_connected.StatusCentralTest.test_the_flag_reports_the_ranking",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_store_with_no_history_datasets_does_not_claim_the_split",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_a_recorded_file_path_names_is_credited_to_history",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_term_in_neither_the_graph_nor_history_is_the_class_that_can_contain_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_a_ticket_the_history_datasets_cite_is_not_counted_as_possible_invention",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_history_credits_a_whole_token_rather_than_a_longer_name_containing_it",
+            "test_summaries_flagged_term_classes.FlaggedTermClassesTest.test_the_two_classes_sum_to_the_flagged_total",
+            "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_the_estate_check_names_the_other_graph",
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_a_genuine_disagreement_still_reports_the_mismatch",
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_empty_plain_graph_says_it_is_empty_and_names_what_was_read",
             "test_summaries_membership_drift.AdriftStage.test_a_healthy_store_exits_zero",
             "test_summaries_membership_drift.AdriftStage.test_drift_exits_non_zero_so_a_refresh_can_gate_on_it",
             "test_summaries_membership_drift.AdriftStage.test_no_membership_in_the_graph_exits_two_and_names_the_cause",
             "test_summaries_membership_drift.AdriftStage.test_the_check_names_the_graph_file_it_read",
             "test_summaries_membership_drift.AdriftStage.test_the_report_reconciles_its_populations_against_the_committed_summaries",
             "test_summaries_membership_drift.AdriftStage.test_the_subcommand_is_reachable_and_takes_its_flags",
+            "test_summaries_verify.VerifyNamesWhatItMeasuresTest.test_a_term_in_neither_is_reported_as_a_candidate_not_a_fabrication",
         ),
     ),
     Mutation(
@@ -1976,6 +1998,9 @@ MUTATIONS = (
         "DEFAULT_PRECISION = 0.0",
         "every test passed the floor explicitly, so the shipped default was unheld",
         (
+            "test_documented_flags.TheRealDocumentsMatchTheCode.test_every_mention_is_accounted_for_in_exactly_one_class",
+            "test_documented_flags.TheRealDocumentsMatchTheCode.test_no_document_claims_a_flag_or_default_the_code_lacks",
+            "test_documented_flags.TheRunnerReportsWhatItRead.test_the_real_tree_reports_its_counts_and_exits_zero",
             "test_summaries_remap.RemapCliTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
             "test_summaries_remap.RemapTest.test_the_default_precision_floor_drops_a_ballooned_cluster",
             "test_summaries_remap_fallback.RemapFallbackTest.test_a_fallback_refusal_leaves_the_node_routes_verdict_standing",
@@ -2620,6 +2645,7 @@ MUTATIONS = (
         (
             "test_cli_help.SelfParsingStaysHonest.test_every_self_parsing_stage_really_builds_a_parser",
             "test_cli_help.SelfParsingStaysHonest.test_no_stage_outside_the_list_builds_a_parser",
+            "test_documented_flags.TheRealDocumentsMatchTheCode.test_every_stage_module_is_read",
             "test_documented_stages.DocumentedStagesExist.test_every_documented_stage_is_a_real_stage",
             "test_documented_stages.EveryStageIsDocumented.test_every_stage_is_named_by_a_shipped_document",
             "test_ingestion_gaps.TheStageIsWired.test_the_cli_runs_the_stage_and_reports_a_finding_without_failing",
@@ -3239,7 +3265,15 @@ MUTATIONS = (
         "rule satisfied by one of them withholds real configuration facts. This is the "
         "failure that reads as extra safety: a policy redacting everything answers no "
         "deployment question, and the stage reports the same key count either way",
-        ("test_deploy_values.SecretReferences.test_an_ordinary_mapping_is_untouched",),
+        (
+            "test_deploy_values.FourMoreShapes.test_a_bare_store_url_and_name_outside_a_collection_is_left_alone",
+            "test_deploy_values.FourMoreShapes.test_a_collection_whose_members_do_not_all_pair_is_left_alone",
+            "test_deploy_values.FourMoreShapes.test_a_reference_to_something_that_is_not_a_secret_is_left_alone",
+            "test_deploy_values.FourMoreShapes.test_a_registry_of_vaults_naming_no_secrets_is_left_alone",
+            "test_deploy_values.FourMoreShapes.test_a_service_pointing_at_a_vault_keeps_its_own_name",
+            "test_deploy_values.FourMoreShapes.test_a_store_url_alone_or_a_flag_beside_a_name_is_left_alone",
+            "test_deploy_values.SecretReferences.test_an_ordinary_mapping_is_untouched",
+        ),
     ),
     Mutation(
         "flagged terms reported as one class again",
@@ -3598,6 +3632,9 @@ MUTATIONS = (
         "tested, so every assertion about it passes with the default pointing at it. What "
         "ships is the criterion nobody passes an argument for",
         (
+            "test_documented_flags.TheRealDocumentsMatchTheCode.test_every_mention_is_accounted_for_in_exactly_one_class",
+            "test_documented_flags.TheRealDocumentsMatchTheCode.test_no_document_claims_a_flag_or_default_the_code_lacks",
+            "test_documented_flags.TheRunnerReportsWhatItRead.test_the_real_tree_reports_its_counts_and_exits_zero",
             "test_documented_reference_tables.TheDocumentedEnumerationsAgreeWithTheCode.test_below_the_bar_is_unreachable_under_the_shipped_criterion",
             "test_summaries_remap.DocumentedCarryBarIsConditionalTest.test_the_shipped_criterion_is_exact",
             "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
