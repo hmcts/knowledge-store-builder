@@ -40,6 +40,14 @@ Claude Code (maintainers have a licence; consumers never need one):
        are keyed to a community that no longer holds the members they were
        written about. Exit 1 on drift, 2 when the check could not run.
 
+  1a. knowledgestore summaries batches --out-dir DIR [--size 100]
+       Cuts the significant communities with no prose into batch files of
+       {"batch", "out", "digests"} for the authoring agents.
+
+  1b. knowledgestore summaries check-batch <batch.json ...>
+       The authoring brief's mechanical gate over each batch's `out` file:
+       ids, length, sentence count and grounding. Exit 1 on any violation.
+
   5. knowledgestore summaries merge <file.json ...>
        -> knowledge/summaries/communities.json  (committed)
        Validates ids and length bounds, merges over any existing file,
@@ -79,6 +87,13 @@ TOP_FEATURES = 5
 TOP_TICKETS = 8
 MIN_SUMMARY_LEN = 60
 MAX_SUMMARY_LEN = 700
+# Communities per authoring batch, for `summaries batches`. Measured on one large
+# estate: a worker's fixed cost is paid once per batch, so 100 per batch cost
+# 2.8K input tokens per summary against 4.5-4.9K at 50.
+DEFAULT_BATCH_SIZE = 100
+# The keys of a batch file `summaries batches` writes. `merge` recognises the
+# shape so it can name the `out` file it should have been given instead.
+BATCH_FILE_KEYS = frozenset({"batch", "out", "digests"})
 
 # The capped fields, in the order a coverage block records them. Listed rather
 # than derived from a digest's keys: these blocks are committed bytes, so their
@@ -355,17 +370,23 @@ def _write_merged_summaries(
 #   S8707 policy site: check_citations.py - check, citing merge
 #   S8707 policy site: check_chunk.py - check_batches, citing merge
 #   S8707 policy site: build_content_set.py - a write, validated the same way
+#   S8707 policy site: summary_batches.py - _read_batch, citing merge
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]
-) -> tuple[int, list[str]]:
-    """Read each batch into `merged`, returning what was taken and what was refused.
+) -> tuple[int, list[str], list[str]]:
+    """Read each batch into `merged`: what was taken, refused, and misdirected.
 
     Lifted out of `merge` so that function stays readable as the four steps it is -
     read, merge, gate the write, report. The refusals are collected rather than
     raised because a batch of many summaries should not be lost to one bad entry,
     and the caller prints every one.
+
+    A misdirected input is a batch file from `summaries batches` - the digests an
+    agent was given rather than the prose it wrote. Its keys are not community ids,
+    so read as authored output it used to be rejected key by key and the run still
+    wrote the artefact. It is named with the `out` file it points at instead.
     """
-    added, rejected = 0, []
+    added, rejected, misdirected = 0, [], []
     for path in paths:
         # Sonar S8707, and the grounds the register above points at: reading a
         # caller-supplied path is this maintainer CLI's purpose; it runs offline
@@ -375,6 +396,12 @@ def _take_batches(
         # output path it named, and that argument does not transfer to a read
         # whose entire purpose is to open a path the caller chose.
         batch = json.loads(Path(path).read_text(encoding="utf-8"))  # NOSONAR(S8707)
+        if isinstance(batch, dict) and BATCH_FILE_KEYS <= set(batch):
+            misdirected.append(
+                f"{path} is a batch file, not authored summaries - pass its `out` file: "
+                f"{batch['out']}"
+            )
+            continue
         for community_id, summary in batch.items():
             summary = " ".join(str(summary).split())
             if str(community_id) not in known_ids:
@@ -384,7 +411,22 @@ def _take_batches(
             else:
                 merged[str(community_id)] = summary
                 added += 1
-    return added, rejected
+    return added, rejected, misdirected
+
+
+def _refuse_merge(rejected: list[str], misdirected: list[str]) -> int:
+    """Report a merge that writes nothing, and fail it.
+
+    A run that merged nothing used to write the artefact anyway and could exit 0,
+    which reads as success over an empty or wrong input. Writing nothing on a
+    refusal is the rule `drift` follows too: the committed file stays as it was.
+    """
+    for r in rejected:
+        print(f"rejected - {r}")
+    for m in misdirected:
+        print(f"refused - {m}")
+    print(f"nothing was merged, so {config.SUMMARIES_PATH} was not written")
+    return 1
 
 
 def merge(paths: list[str]) -> int:
@@ -393,7 +435,9 @@ def merge(paths: list[str]) -> int:
     coverage = {str(d["id"]): d["coverage"] for d in digests if isinstance(d.get("coverage"), dict)}
     document = io.read_json_dict(config.SUMMARIES_PATH)
     merged: dict[str, str] = io.summaries_body(document)
-    added, rejected = _take_batches(paths, known_ids, merged)
+    added, rejected, misdirected = _take_batches(paths, known_ids, merged)
+    if misdirected or not added:
+        return _refuse_merge(rejected, misdirected)
 
     body = dict(sorted(merged.items(), key=lambda kv: int(kv[0])))
     unchanged = _write_merged_summaries(document, body, coverage)
@@ -2235,13 +2279,73 @@ def evidence_base(digest: dict) -> str | None:
     )
 
 
+def _node_texts(node: object) -> list[str]:
+    """A top node's strings: the dict form's label and path, or the one string."""
+    if isinstance(node, dict):
+        return [str(node.get("label") or ""), str(node.get("source_file") or "")]
+    return [str(node)]
+
+
+def _label_of(feature: object) -> str:
+    """A business feature's label, from either the dict or the string form."""
+    return str((feature.get("label") if isinstance(feature, dict) else feature) or "")
+
+
+def _evidence_texts(digest: dict) -> list[str]:
+    """The digest's evidence as the strings it arrived in, before any splitting.
+
+    `_digest_identifiers` cuts labels into words on whitespace and commas, which
+    is right for a bare name and wrong for a descriptive label: semantic and
+    document nodes carry a phrase, and an identifier inside it arrives with
+    punctuation attached - `; listenPort 3100`, `${RELEASE_LABEL}-web`,
+    `../widget-record-api/image-policy.yaml`. Those never became a whole word, so a
+    summary naming exactly what its digest shows was reported as ungrounded.
+    `_embedded` searches these strings instead. Same fields as the identifier walk.
+    """
+    texts = [str(repo) for repo in digest.get("repositories", [])]
+    texts.append(str(digest.get("label") or ""))
+    for node in digest.get("top_nodes", []):
+        texts += _node_texts(node)
+    texts += [_label_of(feature) for feature in digest.get("business_features", [])]
+    texts += [str(ticket) for ticket in digest.get("tickets", [])]
+    return [text for text in texts if text]
+
+
+def _embedded(cited: str, texts: list[str]) -> bool:
+    """Whether `cited` appears verbatim inside one of the evidence strings.
+
+    Raw text, not normalised: normalising a whole label to letters and digits
+    welds its words together, so `ServiceName` would be grounded by the English
+    "service name" and a token could match across the boundary between two words.
+    The spelling tolerance `_normalise` gives stays in the whole-word comparison,
+    which runs first. Each string is searched on its own, so no match spans two
+    fields.
+
+    Unbounded on purpose, and the cost is stated rather than hidden: a fragment
+    of a longer name is grounded by it (`listenPort` by `listenPortTls`, a
+    truncated `name_s` by `name_secret`). Requiring an identifier boundary either
+    side would flag those, and was measured doing so on real authored batches,
+    but it also moves this check away from the grader the gate was calibrated
+    against. Both are false negatives, which fail in the reassuring direction;
+    tightening is a change to the grounding contract, not to this function.
+    """
+    return any(cited in text for text in texts)
+
+
 def _ungrounded(text: str, digest: dict) -> set[str]:
-    """Identifiers the prose cites that the evidence does not contain."""
+    """Identifiers the prose cites that the evidence does not contain.
+
+    Grounded by either route: a normalised whole word of the evidence, with its
+    spelling variants, or the token verbatim inside an evidence string. `summaries
+    verify` and `summaries check-batch` both call this, so the two cannot disagree
+    about what a digest grounds.
+    """
     evidence = {_normalise(item) for item in _digest_identifiers(digest)}
+    texts = _evidence_texts(digest)
     return {
         cited
         for cited in prose_identifiers(text)
-        if _normalise(cited) and _normalise(cited) not in evidence
+        if _normalise(cited) and _normalise(cited) not in evidence and not _embedded(cited, texts)
     }
 
 
@@ -3092,6 +3196,21 @@ def main(argv: list[str] | None = None) -> int:
             precision=options.precision,
             carry=options.carry,
         )
+    if arguments[:1] == ["batches"]:
+        parser = argparse.ArgumentParser(prog="knowledgestore summaries batches")
+        parser.add_argument("--out-dir", type=Path, required=True)
+        parser.add_argument("--size", type=int, default=DEFAULT_BATCH_SIZE)
+        options = parser.parse_args(arguments[1:])
+        from . import summary_batches
+
+        return summary_batches.write_batches(options.out_dir, options.size)
+    if arguments[:1] == ["check-batch"]:
+        parser = argparse.ArgumentParser(prog="knowledgestore summaries check-batch")
+        parser.add_argument("batch", nargs="+")
+        options = parser.parse_args(arguments[1:])
+        from . import summary_batches
+
+        return summary_batches.check(options.batch)
     print(__doc__)
     return 1
 
