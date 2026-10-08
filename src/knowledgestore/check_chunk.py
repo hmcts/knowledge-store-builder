@@ -49,12 +49,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -149,15 +150,29 @@ def _in(value: object, vocabulary: frozenset) -> bool:
     return isinstance(value, str) and value in vocabulary
 
 
+# The rubric's scores are two-decimal steps 0.10 apart, so a tolerance far below
+# half a step cannot move a score into a neighbouring band, and 1e-9 sits many
+# orders above the ~1e-16 a score carries when a writer computed it rather than
+# typed it. JSON's `0.85` already parses to the same double as the literal; the
+# tolerance is for `0.8500000000000001`, which is the right score.
+SCORE_TOLERANCE = 1e-9
+
+
+def _score_is(score: float, allowed: Iterable[float]) -> bool:
+    return any(
+        math.isclose(score, value, rel_tol=0.0, abs_tol=SCORE_TOLERANCE) for value in allowed
+    )
+
+
 def confidence_ok(record: dict) -> bool:
     score = record.get("confidence_score")
     if not isinstance(score, (int, float)) or isinstance(score, bool):
         return False
     confidence = record.get("confidence")
     if confidence == "EXTRACTED":
-        return score == 1.0
+        return _score_is(score, (1.0,))
     if confidence == "INFERRED":
-        return score in INFERRED_SCORES
+        return _score_is(score, INFERRED_SCORES)
     if confidence == "AMBIGUOUS":
         return 0 < score < 0.55
     # Anything else fails. A rubric without this branch passes an unknown band.
@@ -182,6 +197,85 @@ def _read_chunk(out: Path, where: str) -> tuple[dict | None, Violation | None]:
     return payload, None
 
 
+# One rule each, shared by nodes, edges and hyperedges so the three report a breach
+# of the same rule in the same words.
+
+
+def _contained(
+    record: dict, name: str, where: str, allowed: set[str], found: list[Violation]
+) -> str | None:
+    """SOURCE_FILE: the record's file as compared, or None when the chunk was not given it."""
+    source = _path(record.get("source_file"))
+    if source in allowed:
+        return source
+    found.append(
+        Violation(
+            SOURCE_FILE,
+            where,
+            f"{name} cites {record.get('source_file')!r}, not one of this chunk's files",
+        )
+    )
+    return None
+
+
+def _check_confidence(record: dict, name: str, where: str, found: list[Violation]) -> None:
+    """CONFIDENCE: the band and its score agree with the rubric."""
+    if not confidence_ok(record):
+        found.append(
+            Violation(
+                CONFIDENCE,
+                where,
+                f"{name} confidence {record.get('confidence')!r} "
+                f"score {record.get('confidence_score')!r}",
+            )
+        )
+
+
+def _check_dangling(
+    ends: Iterable[object], name: str, where: str, ids: set[str], found: list[Violation]
+) -> None:
+    """DANGLING: every endpoint or member is a node of this chunk."""
+    for end in ends:
+        if not isinstance(end, str) or end not in ids:
+            found.append(Violation(DANGLING, where, f"{name} {end!r} is not a node of this chunk"))
+
+
+def _check_node_id(
+    nid: object,
+    source_file: object,
+    where: str,
+    suffix: re.Pattern[str],
+    seen: set[tuple[str, str | None]],
+    normalise: Normalise,
+    found: list[Violation],
+) -> None:
+    """ID_FORM, DUP_NODE within one repository, and CHUNK_SUFFIX, for one node id."""
+    if not isinstance(nid, str) or not nid or nid != normalise(nid):
+        canonical = normalise(nid) if isinstance(nid, str) else ""
+        found.append(
+            Violation(ID_FORM, where, f"node id {nid!r} is not its canonical form {canonical!r}")
+        )
+    if not isinstance(nid, str):
+        return
+    key = (nid, repository_of(source_file))
+    if key in seen:
+        found.append(Violation(DUP_NODE, where, f"node id {nid!r} twice in repository {key[1]!r}"))
+    seen.add(key)
+    if suffix.search(nid):
+        found.append(Violation(CHUNK_SUFFIX, where, f"node id {nid!r} ends in this chunk's number"))
+
+
+def _check_node_fields(node: dict, nid: object, where: str, found: list[Violation]) -> None:
+    """FILE_TYPE from the vocabulary, and a label (a SHAPE breach when absent)."""
+    if not _in(node.get("file_type"), FILE_TYPES):
+        found.append(
+            Violation(FILE_TYPE, where, f"node {nid!r} file_type {node.get('file_type')!r}")
+        )
+    label = node.get("label")
+    if not isinstance(label, str) or not label.strip():
+        found.append(Violation(SHAPE, where, f"node {nid!r} has no label"))
+
+
 def _check_nodes(
     nodes: list,
     number: int,
@@ -200,43 +294,13 @@ def _check_nodes(
             found.append(Violation(SHAPE, where, f"a node is not an object: {node!r:.120}"))
             continue
         nid = node.get("id")
-        if not isinstance(nid, str) or not nid or nid != normalise(nid):
-            canonical = normalise(nid) if isinstance(nid, str) else ""
-            found.append(
-                Violation(
-                    ID_FORM, where, f"node id {nid!r} is not its canonical form {canonical!r}"
-                )
-            )
+        _check_node_id(nid, node.get("source_file"), where, suffix, seen, normalise, found)
         if isinstance(nid, str):
-            key = (nid, repository_of(node.get("source_file")))
-            if key in seen:
-                found.append(
-                    Violation(DUP_NODE, where, f"node id {nid!r} twice in repository {key[1]!r}")
-                )
-            seen.add(key)
             ids.add(nid)
-            if suffix.search(nid):
-                found.append(
-                    Violation(CHUNK_SUFFIX, where, f"node id {nid!r} ends in this chunk's number")
-                )
-        if not _in(node.get("file_type"), FILE_TYPES):
-            found.append(
-                Violation(FILE_TYPE, where, f"node {nid!r} file_type {node.get('file_type')!r}")
-            )
-        label = node.get("label")
-        if not isinstance(label, str) or not label.strip():
-            found.append(Violation(SHAPE, where, f"node {nid!r} has no label"))
-        source = _path(node.get("source_file"))
-        if source in allowed:
+        _check_node_fields(node, nid, where, found)
+        source = _contained(node, f"node {nid!r}", where, allowed, found)
+        if source is not None:
             covered.add(source)
-        else:
-            found.append(
-                Violation(
-                    SOURCE_FILE,
-                    where,
-                    f"node {nid!r} cites {node.get('source_file')!r}, not one of this chunk's files",
-                )
-            )
     return ids, covered
 
 
@@ -250,30 +314,11 @@ def _check_edges(
         name = f"edge {edge.get('source')}->{edge.get('target')}"
         if not _in(edge.get("relation"), RELATIONS):
             found.append(Violation(RELATION, where, f"{name} relation {edge.get('relation')!r}"))
-        if not confidence_ok(edge):
-            found.append(
-                Violation(
-                    CONFIDENCE,
-                    where,
-                    f"{name} confidence {edge.get('confidence')!r} "
-                    f"score {edge.get('confidence_score')!r}",
-                )
-            )
-        for end in (edge.get("source"), edge.get("target")):
-            if not isinstance(end, str) or end not in ids:
-                found.append(
-                    Violation(
-                        DANGLING, where, f"{name} endpoint {end!r} is not a node of this chunk"
-                    )
-                )
-        if _path(edge.get("source_file")) not in allowed:
-            found.append(
-                Violation(
-                    SOURCE_FILE,
-                    where,
-                    f"{name} cites {edge.get('source_file')!r}, not one of this chunk's files",
-                )
-            )
+        _check_confidence(edge, name, where, found)
+        _check_dangling(
+            (edge.get("source"), edge.get("target")), f"{name} endpoint", where, ids, found
+        )
+        _contained(edge, name, where, allowed, found)
 
 
 def _check_hyperedge_id(
@@ -308,6 +353,21 @@ def _check_hyperedge_id(
         seen[hid] = number
 
 
+def _members(hyperedge: dict, name: str, where: str, found: list[Violation]) -> list:
+    """HYPEREDGE_ARITY: the members, reported when fewer than the minimum."""
+    members = hyperedge.get("nodes")
+    members = members if isinstance(members, list) else []
+    if len(members) < MIN_HYPEREDGE_ARITY:
+        found.append(
+            Violation(
+                HYPEREDGE_ARITY,
+                where,
+                f"{name} has {len(members)} nodes, needs at least {MIN_HYPEREDGE_ARITY}",
+            )
+        )
+    return members
+
+
 def _check_hyperedges(
     hyperedges: list,
     number: int,
@@ -329,45 +389,12 @@ def _check_hyperedges(
             found.append(Violation(SHAPE, where, "a hyperedge is not an object"))
             continue
         hid = hyperedge.get("id")
+        name = f"hyperedge {hid!r}"
         _check_hyperedge_id(hid, number, where, seen, normalise, found)
-        members = hyperedge.get("nodes")
-        members = members if isinstance(members, list) else []
-        if len(members) < MIN_HYPEREDGE_ARITY:
-            found.append(
-                Violation(
-                    HYPEREDGE_ARITY,
-                    where,
-                    f"hyperedge {hid!r} has {len(members)} nodes, "
-                    f"needs at least {MIN_HYPEREDGE_ARITY}",
-                )
-            )
-        for member in members:
-            if not isinstance(member, str) or member not in ids:
-                found.append(
-                    Violation(
-                        DANGLING,
-                        where,
-                        f"hyperedge {hid!r} member {member!r} is not a node of this chunk",
-                    )
-                )
-        if not confidence_ok(hyperedge):
-            found.append(
-                Violation(
-                    CONFIDENCE,
-                    where,
-                    f"hyperedge {hid!r} confidence {hyperedge.get('confidence')!r} "
-                    f"score {hyperedge.get('confidence_score')!r}",
-                )
-            )
-        if _path(hyperedge.get("source_file")) not in allowed:
-            found.append(
-                Violation(
-                    SOURCE_FILE,
-                    where,
-                    f"hyperedge {hid!r} cites {hyperedge.get('source_file')!r}, "
-                    "not one of this chunk's files",
-                )
-            )
+        members = _members(hyperedge, name, where, found)
+        _check_dangling(members, f"{name} member", where, ids, found)
+        _check_confidence(hyperedge, name, where, found)
+        _contained(hyperedge, name, where, allowed, found)
 
 
 def check_chunk(
@@ -432,7 +459,10 @@ def check_batches(paths: Sequence[Path], normalise: Normalise) -> tuple[list[Vio
     for path in paths:
         where = f"batch {path}"
         try:
-            batch = json.loads(Path(path).read_text(encoding="utf-8"))
+            # NOSONAR(S8707) - reading a path the operator named is the purpose of
+            # --batch. Grounds are stated once in `build_community_summaries.merge`;
+            # this site cites them rather than restating them, so the two cannot drift.
+            batch = json.loads(Path(path).read_text(encoding="utf-8"))  # NOSONAR(S8707)
         except (OSError, ValueError) as error:
             found.append(Violation(PARSE, where, f"unreadable: {error}"))
             continue
@@ -452,7 +482,8 @@ def check_batches(paths: Sequence[Path], normalise: Normalise) -> tuple[list[Vio
                     )
                 )
                 continue
-            violations, counts = check_chunk(*parsed, seen_hyperedges, normalise)
+            number, out, files = parsed
+            violations, counts = check_chunk(number, out, files, seen_hyperedges, normalise)
             found.extend(violations)
             totals["chunks"] += 1
             totals.update(counts)

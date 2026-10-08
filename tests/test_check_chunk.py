@@ -183,6 +183,19 @@ class CheckChunkTest(unittest.TestCase):
         code, stdout = self.check()
         self.assertEqual((code, rules(stdout)), (1, {"RELATION"}), stdout)
 
+    def test_a_rubric_score_carrying_float_noise_passes_and_an_off_rubric_one_does_not(self):
+        # Breaks if scores are compared with exact float equality (the computed
+        # 0.85 below is the right score and fires) or the tolerance widens far
+        # enough to admit 0.9, which is half a rubric step from 0.85.
+        edge = self.batch.payloads[1]["edges"][0]
+        edge.update(confidence="INFERRED", confidence_score=0.8500000000000001)
+        code, stdout = self.check()
+        self.assertEqual((code, rules(stdout)), (0, set()), stdout)
+
+        edge["confidence_score"] = 0.9
+        code, stdout = self.check()
+        self.assertEqual((code, rules(stdout)), (1, {"CONFIDENCE"}), stdout)
+
     def test_the_suffix_rule_fires_on_this_chunks_number_only(self):
         # Breaks if the rule becomes a digit pattern (fires on the form code) or
         # stops comparing against this chunk's own number.
