@@ -470,13 +470,16 @@ deleted code is a legitimate reason for a smaller layer.
 ### Check each semantic chunk before merging
 
 ```bash
+pip install --extra-index-url \
+  https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+  'hmcts-knowledge-store-builder[ast]'          # check-chunk needs graphify; it refuses without it
 knowledgestore check-chunk --self-test          # once per install: proves every rule can fire
 knowledgestore check-chunk --batch batch-07.json
 ```
 
 `check-chunk` is the extraction spec's mechanical gate, shipped once. Give it to
-every extraction agent instead of asking each to write its own: on one large
-rebuild an agent spent 15 of its 24 turns building and iterating that checker.
+every extraction agent instead of asking each to write its own: without it, an
+agent spends most of its turns building and iterating that checker.
 A batch file is `{"chunks": [{"n": 7, "out": "<chunk file>", "files": [...]}]}`,
 the form a dispatcher hands an agent.
 
@@ -495,7 +498,7 @@ One id in two repositories inside one chunk is not a duplicate: the merge keeps
 both. Every rule sets the exit status, a truncated chunk is a `PARSE` violation
 rather than a traceback, and violations print before the refusal of a batch naming
 no chunks. `--batch` takes several files and compares hyperedge ids across all of
-them. It needs graphify, which the `[ast]` extra installs, and refuses without it.
+them.
 
 `--self-test` breaks each rule on a synthetic batch and requires that rule, and no
 other, to fire; seven negative controls must stay clean. Run it after installing,

@@ -360,8 +360,8 @@ costing hundreds.
 
 **Give every agent the shipped gate, and tell it not to write its own.** The spec
 asks each agent to check its output mechanically, and without a shipped checker
-each one writes and iterates its own - measured at 15 of an agent's 24 turns on one
-rebuild, re-read in its context for the rest of the run. Instead, in the prompt:
+each one writes and iterates its own - most of an agent's turns, re-read in its
+context for the rest of the run. Instead, in the prompt:
 
 > Run `knowledgestore check-chunk --batch <your batch file>` and fix what it names.
 > Do not write a checker or a mutation harness of your own. It checks shape only;
