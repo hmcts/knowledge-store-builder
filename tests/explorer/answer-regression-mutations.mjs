@@ -58,6 +58,29 @@ function editBlock(html, id, change) {
   return html.slice(0, tagEnd + 1) + after + html.slice(close);
 }
 
+/** Refuse a page whose rows leave out a column (#338).
+ *
+ * A mutation below edits a row cell by its full-row position. A page that
+ * dropped an empty column writes shorter rows and names the gap under
+ * `droppedColumns` in #config, so the same index lands on the neighbouring
+ * field: the edit then breaks nothing the gate checks, the mutation "survives"
+ * or is caught for the wrong reason, and this file cannot tell which. Refused
+ * here so that day is a loud failure rather than a green run over the wrong
+ * column - read the rows through the page's own `decodeRows` if it comes.
+ * @param {string} html
+ */
+function refuseDroppedColumns(html) {
+  const open = html.indexOf('id="config"');
+  const tagEnd = html.indexOf('>', open);
+  const close = html.indexOf('</script>', tagEnd);
+  if (open < 0 || tagEnd < 0 || close < 0) throw new Error('block #config not found');
+  const dropped = Object.keys(JSON.parse(html.slice(tagEnd + 1, close)).droppedColumns || {});
+  if (dropped.length) {
+    throw new Error(`this page drops column(s) ${dropped.join(', ')}, so a row cell edited `
+      + 'by position would land on the wrong field and prove nothing');
+  }
+}
+
 /** @param {string} pagePath */
 function runGate(pagePath) {
   const r = spawnSync(process.execPath, [runner, '--page', pagePath, '--questions', questions], {
@@ -87,6 +110,7 @@ const mutations = [
     why: 'the canonical miss: 0 of 70,655 joined on a real estate with the build green, '
       + 'both layers present, every count healthy',
     apply: (html) => editBlock(html, 'data', (text) => {
+      refuseDroppedColumns(html);
       const rows = JSON.parse(text);
       if (!rows.some((r) => (r[7] || []).length)) {
         throw new Error('no row carried ticket evidence to begin with');

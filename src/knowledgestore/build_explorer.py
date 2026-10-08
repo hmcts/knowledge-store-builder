@@ -81,11 +81,15 @@ E2E_REPOS = config.E2E_REPOS
 # 2 is the interned data block (#245): a column's values replaced by indices
 # into a per-column table in #dicts. A reader that does not decode it ranks
 # integers as labels.
+# 3 is rows that may omit a column empty in every row (#338), the columns and
+# the value each stood for named under `droppedColumns` in #config. A reader
+# that does not restore them reads every column after the gap as its
+# neighbour's.
 #
 # The formats a READER accepts are `READS_PAGE_FORMATS` in explorer_harness.mjs,
 # which is the only thing that can say what it understands. The page regression
 # checks the two agree about the page this tree builds.
-PAGE_FORMAT = 2
+PAGE_FORMAT = 3
 
 
 PACKAGE = "knowledgestore"
@@ -421,6 +425,10 @@ class Interning:
     table_bytes: int
     reference_bytes: int
     table: tuple
+    # Whether the column's cells are lists. A list column holding one empty
+    # string per row is uninformative, but its cell is `[""]` and not `""`, so
+    # the value a dropped column is restored to would be the wrong shape.
+    listed: bool
     # Rows disagreeing about this column's shape - some holding a list, some a
     # scalar. Nothing was costed, so every byte count above is zero and none of
     # them describes the column: the report says the shapes disagree instead of
@@ -433,7 +441,29 @@ class Interning:
 
     @property
     def interned(self) -> bool:
-        return self.saving > 0
+        return self.saving > 0 and not self.dropped
+
+    @property
+    def dropped(self) -> bool:
+        """Does this column leave the page altogether?
+
+        A column holding one empty value in every row. Exactly one, because the
+        page restores a dropped column from the single value it names: a column
+        mixing `""` and `None` carries no information either, but restoring it
+        to one of them would change the other's rows. And scalar only, for the
+        reason `listed` gives.
+        """
+        return self.uninformative and self.distinct == 1 and not self.listed
+
+    @property
+    def drop_saving(self) -> int:
+        """What leaving the column off saves: its values and one separator each.
+
+        Every row loses the cell and the separator beside it. The column's own
+        entry in the page's layout is not counted here, because it is written
+        once whatever the row count - `layout_bytes` costs it.
+        """
+        return self.field_bytes + self.occurrences * len(ROW_SEPARATOR)
 
     @property
     def uninformative(self) -> bool:
@@ -441,10 +471,8 @@ class Interning:
 
         An all-empty column is dead weight. Interning one is still a small win -
         one digit costs less than a pair of quotes - but no encoding of an empty
-        column beats removing it, and the report says so rather than quietly
-        representing nothing efficiently. Dropping a column renumbers every
-        positional read in the page application, so it is a change to the row's
-        shape and not to its encoding.
+        column beats removing it, so `dropped` takes it off the page and the
+        report says why.
 
         Both guards are load-bearing rather than defensive. An empty table means
         "holds nothing" only for a column that was actually costed: a mixed
@@ -458,8 +486,24 @@ class Interning:
         return not any(value != "" and value is not None for value in self.table)
 
 
+# How every embedded block is written: no space after a comma or a colon. The
+# default `", "` and `": "` spend a byte each on whitespace nobody reads, on every
+# separator of every block (#338).
+SEPARATORS = (",", ":")
+
+
+# The two halves of SEPARATORS as the cost model reads them: what is written
+# between two items, which each cell of a dropped column and each table takes
+# with it, and what is written between a key and its value. Derived rather than
+# restated, so the model cannot be costing one width while the page writes
+# another.
+ROW_SEPARATOR, KEY_SEPARATOR = SEPARATORS
+
+
 def json_text(value: object) -> str:
-    """One value exactly as the data block writes it.
+    """One value exactly as the data block writes it - and the writer of every
+    embedded block that can carry estate text, so the costing and the page share
+    one encoder rather than two that agree.
 
     The same encoder settings as the block itself, because the quantity being
     costed is bytes on the page and nothing else: `ensure_ascii=False` leaves
@@ -469,7 +513,7 @@ def json_text(value: object) -> str:
     a string always closes with a quote first - so per-value text sums to the
     block's own.
     """
-    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+    return json.dumps(value, ensure_ascii=False, separators=SEPARATORS).replace("</", "<\\/")
 
 
 def value_bytes(value: object) -> int:
@@ -535,18 +579,36 @@ def table_bytes(column: int, table: tuple) -> int:
 
     Everything the table adds: the values, the separators between them, the
     brackets around them, the object key naming the column and the separator
-    before it. `json.dumps` writes `", "` and `": "` by default, two bytes each
-    and not one, and a costing that assumed one understated every table by its
-    cardinality - which is the direction that predicts wins that are losses.
-    The separator convention is not transferable between encodings and has to be
-    read off the serialisation in front of you: measured against `__DICTS__`,
-    where the sum of these costs is the block's length exactly, and pinned there
-    by a test rather than argued.
+    before it. The widths are the page's own, `SEPARATORS`: `json.dumps`
+    defaults to `", "` and `": "`, two bytes each, and a costing that assumed
+    one byte against those understated every table by its cardinality - which
+    is the direction that predicts wins that are losses. The separator
+    convention is not transferable between encodings and has to be read off the
+    serialisation in front of you: measured against `__DICTS__`, where these
+    costs and `dicts_frame_bytes` sum to the block's length exactly, and pinned
+    there by a test rather than argued.
     """
     values = sum(value_bytes(value) for value in table)
-    separators = 2 * max(len(table) - 1, 0) + 2  # the `", "` pairs, plus the two brackets
-    keying = len(f'"{column}": ') + 2  # the object key with its `": "`, plus the `", "` before it
+    item = len(ROW_SEPARATOR)
+    separators = item * max(len(table) - 1, 0) + 2  # between the values, plus the two brackets
+    # The key and its colon, and the separator before it.
+    keying = len(f'"{column}"{KEY_SEPARATOR}') + item
     return values + separators + keying
+
+
+def dicts_frame_bytes(interned: int) -> int:
+    """What the #dicts block's own braces add beyond its tables' costs.
+
+    Each table is costed with the separator before it, which is what it adds to a
+    block already holding another table. The first table has no separator before
+    it - the opening brace stands there instead - so with any table interned the
+    frame is the two braces less that one separator, and with none it is the bare
+    `{}`. Under `json.dumps`'s default `", "` the frame came to exactly 0 with a
+    table interned, which is why the cost model once balanced without it: a
+    coincidence of two widths, and compact separators end it.
+    """
+    braces = len(json.dumps({}))
+    return braces - len(ROW_SEPARATOR) if interned else braces
 
 
 def reference_bytes(values: list, table: tuple) -> int:
@@ -587,6 +649,7 @@ def column_interning(entries: list, column: int) -> Interning:
         table_bytes=table_bytes(column, table),
         reference_bytes=reference_bytes(values, table),
         table=table,
+        listed=any(isinstance(row[column], list) for row in entries),
         mixed=mixed,
     )
 
@@ -618,6 +681,78 @@ def interning_plan(entries: list) -> tuple[tuple[Interning, ...], dict[str, list
     return plan, tables
 
 
+def dropped_columns(plan: tuple[Interning, ...]) -> dict[str, object]:
+    """The columns this page leaves off, each with the one value it held.
+
+    Keyed by the column's position in the full row as a string, the same keying
+    as the interning tables, and in column order so the layout serialises the
+    same way on every build. The value is what the page restores in every row,
+    so a reader holds exactly the rows the index built and no read anywhere in
+    the page application needs to know a column was ever absent.
+    """
+    return {str(item.column): item.table[0] for item in plan if item.dropped}
+
+
+# The #config key under which a page names the columns it left off its rows.
+# Absent when nothing was dropped, which is also how every earlier page reads.
+DROPPED_COLUMNS_KEY = "droppedColumns"
+
+
+def config_text(page_config: Mapping[str, object]) -> str:
+    """The #config block exactly as the page writes it."""
+    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS)
+
+
+def layout_bytes(dropped: Mapping[str, object]) -> int:
+    """What naming the dropped columns adds to #config, as the page writes it.
+
+    Measured by serialising rather than counted by hand, through the function
+    that writes the block, so the separators are whatever the block uses. The
+    key is appended to a block that already holds `pageFormat`, so the
+    difference is the same whatever else the block carries. Nothing when nothing
+    was dropped, because the key is then not written at all.
+    """
+    if not dropped:
+        return 0
+    base = {"pageFormat": PAGE_FORMAT}
+    carried = config_text({**base, DROPPED_COLUMNS_KEY: dict(dropped)})
+    return len(carried.encode("utf-8")) - len(config_text(base).encode("utf-8"))
+
+
+def drop_columns(rows: list, dropped: Mapping[str, object]) -> list[list]:
+    """The rows with the dropped columns taken out, highest position first.
+
+    Highest first, because removing a column shifts every one after it: taking
+    them out lowest first would remove the wrong column from the second removal
+    on.
+    """
+    positions = sorted((int(column) for column in dropped), reverse=True)
+    trimmed = []
+    for row in rows:
+        kept = list(row)
+        for position in positions:
+            del kept[position]
+        trimmed.append(kept)
+    return trimmed
+
+
+def restore_columns(rows: list, dropped: Mapping[str, object]) -> list[list]:
+    """The dropped columns put back at their positions, lowest first.
+
+    Lowest first, the mirror of `drop_columns`: each insertion lands at a
+    position counted in the full row, which is only right once every dropped
+    column before it is back.
+    """
+    positions = sorted(int(column) for column in dropped)
+    restored = []
+    for row in rows:
+        full = list(row)
+        for position in positions:
+            full.insert(position, dropped[str(position)])
+        restored.append(full)
+    return restored
+
+
 def encode_rows(entries: list, tables: Mapping[str, list]) -> list[list]:
     """The rows as the page carries them: interned columns replaced by indices.
 
@@ -643,16 +778,21 @@ def encode_rows(entries: list, tables: Mapping[str, list]) -> list[list]:
     return rows
 
 
-def decode_rows(rows: list, tables: Mapping[str, list]) -> list[list]:
-    """Interned columns restored to the values they stood for.
+def decode_rows(
+    rows: list, tables: Mapping[str, list], dropped: Mapping[str, object] | None = None
+) -> list[list]:
+    """Dropped columns put back and interned columns restored to their values.
 
     The independent half of the encoder's own check, and the Python counterpart
     of the page application's `decodeRows`. Written from the format rather than
     from `encode_rows`, because a verifier sharing the encoder's arithmetic
     would agree with it while both were wrong.
+
+    The dropped columns first: the tables are keyed by position in the full row,
+    so they only name the right cells once the row is full again.
     """
     decoded = []
-    for row in rows:
+    for row in restore_columns(rows, dropped or {}):
         restored = list(row)
         for column, table in tables.items():
             cell = restored[int(column)]
@@ -663,7 +803,12 @@ def decode_rows(rows: list, tables: Mapping[str, list]) -> list[list]:
     return decoded
 
 
-def verify_round_trip(entries: list, rows: list, tables: Mapping[str, list]) -> None:
+def verify_round_trip(
+    entries: list,
+    rows: list,
+    tables: Mapping[str, list],
+    dropped: Mapping[str, object] | None = None,
+) -> None:
     """Refuse an encoding that does not decode back to the rows it replaced.
 
     The one check that can tell a right index from a wrong one. Every other gate
@@ -675,7 +820,7 @@ def verify_round_trip(entries: list, rows: list, tables: Mapping[str, list]) -> 
     Whole rows, and equality rather than a count: the failure this catches
     substitutes one value for another and leaves every length the same.
     """
-    decoded = decode_rows(rows, tables)
+    decoded = decode_rows(rows, tables, dropped)
     if decoded == entries:
         return
     differing = next(
@@ -686,7 +831,8 @@ def verify_round_trip(entries: list, rows: list, tables: Mapping[str, list]) -> 
         "the interned data block does not decode back to the rows it was built from, "
         f"so the page would show values from the wrong rows. Rows in: {len(entries)}, "
         f"rows out: {len(decoded)}, first differing row: {differing}. Interned columns: "
-        f"{sorted(int(column) for column in tables)}."
+        f"{sorted(int(column) for column in tables)}, dropped columns: "
+        f"{sorted(int(column) for column in dropped or {})}."
     )
 
 
@@ -704,13 +850,29 @@ def column_line(item: Interning) -> str:
             f"  declined  {item.name:<16}rows disagree about this column's shape "
             "(some hold a list, some a value), so it was not costed"
         )
+    note = "  (empty in every row - carries no information)" if item.uninformative else ""
+    if item.dropped:
+        return (
+            f"  dropped   {item.name:<16}{item.distinct:>9,} distinct of "
+            f"{item.occurrences:>9,} values  saves {item.drop_saving:>12,} bytes{note}"
+        )
     verdict = "interned" if item.interned else "declined"
     effect = "saves" if item.interned else "would cost"
-    note = "  (empty in every row - carries no information)" if item.uninformative else ""
     return (
         f"  {verdict}  {item.name:<16}{item.distinct:>9,} distinct of "
         f"{item.occurrences:>9,} values  {effect} {abs(item.saving):>12,} bytes{note}"
     )
+
+
+def page_saving(item: Interning) -> int:
+    """What this column's verdict takes off the page's rows, or 0 if nothing.
+
+    One expression for the report's sort and its total, so the line an operator
+    reads first and the headline they add it into cannot describe two savings.
+    """
+    if item.dropped:
+        return item.drop_saving
+    return item.saving if item.interned else 0
 
 
 def interning_report(plan: tuple[Interning, ...]) -> str:
@@ -739,27 +901,35 @@ def interning_report(plan: tuple[Interning, ...]) -> str:
     if not plan:
         return ""
     lines = ["Data-block interning, decided per column from this page's own data:"]
-    for item in sorted(plan, key=lambda item: (-item.saving, item.column)):
+    for item in sorted(plan, key=lambda item: (-page_saving(item), -item.saving, item.column)):
         lines.append(column_line(item))
-    saved = sum(item.saving for item in plan if item.interned)
-    tag = dicts_tag_bytes()
-    net = saved - tag
+    saved = sum(page_saving(item) for item in plan)
+    tag = dicts_tag_bytes() + dicts_frame_bytes(sum(1 for item in plan if item.interned))
+    # The dropped columns are named once in #config, and that is page bytes too:
+    # left out, a page dropping one column of a handful of rows is reported as
+    # shrinking by the bytes the layout spent saying so.
+    layout = layout_bytes(dropped_columns(plan))
+    net = saved - tag - layout
     total = sum(item.field_bytes for item in plan)
+    costs = f"the {tag:,} bytes the #dicts block's own script tag and braces add"
+    if layout:
+        costs += f" and the {layout:,} bytes #config spends naming the dropped columns"
     structural = (
         "structural bytes (brackets, commas, row scaffolding) are a floor no encoding "
-        "touches and are excluded from the value counts"
+        "touches and are excluded from the value counts, except that a dropped column "
+        "takes its separators with it"
     )
     if net > 0:
         share = f" ({net * 100 // total}% of them)" if total else ""
         lines.append(
-            f"  net {net:,} bytes off the block's {total:,} value bytes{share}, after the "
-            f"{tag:,} bytes the #dicts block's own script tag adds; {structural}."
+            f"  net {net:,} bytes off the block's {total:,} value bytes{share}, after "
+            f"{costs}; {structural}."
         )
     else:
         lines.append(
             f"  net {abs(net):,} bytes ONTO the page: the columns that won save "
-            f"{saved:,} bytes between them and the #dicts block's own script tag costs "
-            f"{tag:,}, so this page is no smaller interned than plain; {structural}."
+            f"{saved:,} bytes between them against {costs}, so this page is no smaller "
+            f"interned than plain; {structural}."
         )
     return "\n".join(lines) + "\n"
 
@@ -1182,7 +1352,7 @@ def main() -> int:
 
     # Page configuration read by app.js at startup. Set these in config
     # (KSB_TICKET_BROWSE_URL, KSB_BRIEF_REQUEST_URL) per estate.
-    page_config = {
+    page_config: dict[str, object] = {
         # What the page says about its own shape, so a reader that does not
         # understand it can say so instead of ranking indices as labels (#332).
         # First key of the block deliberately: it is the one an operator reading
@@ -1214,11 +1384,16 @@ def main() -> int:
     # refusal path below: a store meeting a size refusal needs to know what the
     # encoding already took off the block before it decides what to carry less of.
     plan, tables = interning_plan(entries)
-    rows = encode_rows(entries, tables)
+    # A column empty in every row leaves the rows entirely, and #config names it with
+    # the value it held so the page restores it before anything reads a row.
+    dropped = dropped_columns(plan)
+    rows = drop_columns(encode_rows(entries, tables), dropped)
     # Before the page is assembled, not after. Every other gate over this page reads
     # the encoded block, so a table in the wrong order would be reported consistently
     # by all of them; this is the only check that reads both sides.
-    verify_round_trip(entries, rows, tables)
+    verify_round_trip(entries, rows, tables, dropped)
+    if dropped:
+        page_config[DROPPED_COLUMNS_KEY] = dropped
     print(interning_report(plan), end="")
     # One mapping rather than a chain of `.replace` calls, so each block's bytes can
     # be counted before any of them is substituted. Insertion order is the order the
@@ -1227,16 +1402,16 @@ def main() -> int:
     blocks = {
         "__TITLE__": config.EXPLORER_TITLE,
         "__SUB__": sub,
-        "__DATA__": json.dumps(rows, ensure_ascii=False).replace("</", "<\\/"),
-        "__DICTS__": json.dumps(tables, ensure_ascii=False).replace("</", "<\\/"),
-        "__EDGES__": json.dumps(edges),
-        "__TITLES__": json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"),
-        "__SUMMARIES__": json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"),
-        "__SYNONYMS__": json.dumps(synonyms, ensure_ascii=False).replace("</", "<\\/"),
-        "__TICKETINFO__": json.dumps(ticket_info, ensure_ascii=False).replace("</", "<\\/"),
-        "__CONFIG__": json.dumps(page_config, ensure_ascii=False),
-        "__TOPICS__": json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"),
-        "__DIVES__": json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"),
+        "__DATA__": json_text(rows),
+        "__DICTS__": json_text(tables),
+        "__EDGES__": json.dumps(edges, separators=SEPARATORS),
+        "__TITLES__": json_text(titles),
+        "__SUMMARIES__": json_text(summaries),
+        "__SYNONYMS__": json_text(synonyms),
+        "__TICKETINFO__": json_text(ticket_info),
+        "__CONFIG__": config_text(page_config),
+        "__TOPICS__": json_text(topics),
+        "__DIVES__": json_text(divesdata),
         "__APP_JS__": app_js,
     }
     breakdown = page_breakdown(TEMPLATE, blocks)

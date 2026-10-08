@@ -51,9 +51,12 @@ export const OPTIONAL_BLOCKS = ['dicts'];
  * happens to have. So the page states its format and the reader states what it
  * reads, and a reader meeting a format not in this list stops.
  *
- * 1 is every page built before data-block interning; 2 is the interned block.
- * Both are here because this loader genuinely reads both - the `#dicts` block is
- * optional above and `decodeRows` is the identity without it.
+ * 1 is every page built before data-block interning; 2 is the interned block;
+ * 3 is rows that may leave out a column empty in every row, named with its value
+ * under `droppedColumns` in `#config` (#338). All three are here because this
+ * loader genuinely reads all three - the `#dicts` block is optional above, an
+ * absent `droppedColumns` drops nothing, and `decodeRows` is the identity
+ * without either.
  *
  * Without this, a format-2 page read by a format-1 library failed on
  * `a.localeCompare is not a function` - a sort over a column that now held
@@ -62,7 +65,7 @@ export const OPTIONAL_BLOCKS = ['dicts'];
  * plausible score instead of a failure. The number the build writes is
  * `PAGE_FORMAT` in build_explorer.py.
  */
-export const READS_PAGE_FORMATS = [1, 2];
+export const READS_PAGE_FORMATS = [1, 2, 3];
 
 /** The format a page declares: its `pageFormat`, or 1 where it declares none.
  *

@@ -503,8 +503,8 @@ try {
 //
 // So this constructs one: the real fixture page with its rows written out plain
 // and the `#dicts` tag removed entirely. Not byte-for-byte what the old build
-// wrote - `JSON.stringify` is compact where `json.dumps` puts a space after
-// every separator - and that is not the property under test. What both
+// wrote - `JSON.stringify` is compact where the builds of that era put a space
+// after every separator - and that is not the property under test. What both
 // fallbacks key on is the block being ABSENT and the rows being plain values,
 // and that is reproduced exactly.
 //
