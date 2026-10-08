@@ -486,14 +486,24 @@ class Interning:
         return not any(value != "" and value is not None for value in self.table)
 
 
-# What `json.dumps` writes between two items of an array, and so what each cell
-# of a dropped column takes off the page beside its value. Named, because the
-# saving has to be costed at the width the page is actually written with.
-ROW_SEPARATOR = ", "
+# How every embedded block is written: no space after a comma or a colon. The
+# default `", "` and `": "` spend a byte each on whitespace nobody reads, on every
+# separator of every block (#338).
+SEPARATORS = (",", ":")
+
+
+# The two halves of SEPARATORS as the cost model reads them: what is written
+# between two items, which each cell of a dropped column and each table takes
+# with it, and what is written between a key and its value. Derived rather than
+# restated, so the model cannot be costing one width while the page writes
+# another.
+ROW_SEPARATOR, KEY_SEPARATOR = SEPARATORS
 
 
 def json_text(value: object) -> str:
-    """One value exactly as the data block writes it.
+    """One value exactly as the data block writes it - and the writer of every
+    embedded block that can carry estate text, so the costing and the page share
+    one encoder rather than two that agree.
 
     The same encoder settings as the block itself, because the quantity being
     costed is bytes on the page and nothing else: `ensure_ascii=False` leaves
@@ -503,7 +513,7 @@ def json_text(value: object) -> str:
     a string always closes with a quote first - so per-value text sums to the
     block's own.
     """
-    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+    return json.dumps(value, ensure_ascii=False, separators=SEPARATORS).replace("</", "<\\/")
 
 
 def value_bytes(value: object) -> int:
@@ -569,18 +579,36 @@ def table_bytes(column: int, table: tuple) -> int:
 
     Everything the table adds: the values, the separators between them, the
     brackets around them, the object key naming the column and the separator
-    before it. `json.dumps` writes `", "` and `": "` by default, two bytes each
-    and not one, and a costing that assumed one understated every table by its
-    cardinality - which is the direction that predicts wins that are losses.
-    The separator convention is not transferable between encodings and has to be
-    read off the serialisation in front of you: measured against `__DICTS__`,
-    where the sum of these costs is the block's length exactly, and pinned there
-    by a test rather than argued.
+    before it. The widths are the page's own, `SEPARATORS`: `json.dumps`
+    defaults to `", "` and `": "`, two bytes each, and a costing that assumed
+    one byte against those understated every table by its cardinality - which
+    is the direction that predicts wins that are losses. The separator
+    convention is not transferable between encodings and has to be read off the
+    serialisation in front of you: measured against `__DICTS__`, where these
+    costs and `dicts_frame_bytes` sum to the block's length exactly, and pinned
+    there by a test rather than argued.
     """
     values = sum(value_bytes(value) for value in table)
-    separators = 2 * max(len(table) - 1, 0) + 2  # the `", "` pairs, plus the two brackets
-    keying = len(f'"{column}": ') + 2  # the object key with its `": "`, plus the `", "` before it
+    item = len(ROW_SEPARATOR)
+    separators = item * max(len(table) - 1, 0) + 2  # between the values, plus the two brackets
+    # The key and its colon, and the separator before it.
+    keying = len(f'"{column}"{KEY_SEPARATOR}') + item
     return values + separators + keying
+
+
+def dicts_frame_bytes(interned: int) -> int:
+    """What the #dicts block's own braces add beyond its tables' costs.
+
+    Each table is costed with the separator before it, which is what it adds to a
+    block already holding another table. The first table has no separator before
+    it - the opening brace stands there instead - so with any table interned the
+    frame is the two braces less that one separator, and with none it is the bare
+    `{}`. Under `json.dumps`'s default `", "` the frame came to exactly 0 with a
+    table interned, which is why the cost model once balanced without it: a
+    coincidence of two widths, and compact separators end it.
+    """
+    braces = len(json.dumps({}))
+    return braces - len(ROW_SEPARATOR) if interned else braces
 
 
 def reference_bytes(values: list, table: tuple) -> int:
@@ -672,7 +700,7 @@ DROPPED_COLUMNS_KEY = "droppedColumns"
 
 def config_text(page_config: Mapping[str, object]) -> str:
     """The #config block exactly as the page writes it."""
-    return json.dumps(page_config, ensure_ascii=False)
+    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS)
 
 
 def layout_bytes(dropped: Mapping[str, object]) -> int:
@@ -876,14 +904,14 @@ def interning_report(plan: tuple[Interning, ...]) -> str:
     for item in sorted(plan, key=lambda item: (-page_saving(item), -item.saving, item.column)):
         lines.append(column_line(item))
     saved = sum(page_saving(item) for item in plan)
-    tag = dicts_tag_bytes()
+    tag = dicts_tag_bytes() + dicts_frame_bytes(sum(1 for item in plan if item.interned))
     # The dropped columns are named once in #config, and that is page bytes too:
     # left out, a page dropping one column of a handful of rows is reported as
     # shrinking by the bytes the layout spent saying so.
     layout = layout_bytes(dropped_columns(plan))
     net = saved - tag - layout
     total = sum(item.field_bytes for item in plan)
-    costs = f"the {tag:,} bytes the #dicts block's own script tag adds"
+    costs = f"the {tag:,} bytes the #dicts block's own script tag and braces add"
     if layout:
         costs += f" and the {layout:,} bytes #config spends naming the dropped columns"
     structural = (
@@ -1374,16 +1402,16 @@ def main() -> int:
     blocks = {
         "__TITLE__": config.EXPLORER_TITLE,
         "__SUB__": sub,
-        "__DATA__": json.dumps(rows, ensure_ascii=False).replace("</", "<\\/"),
-        "__DICTS__": json.dumps(tables, ensure_ascii=False).replace("</", "<\\/"),
-        "__EDGES__": json.dumps(edges),
-        "__TITLES__": json.dumps(titles, ensure_ascii=False).replace("</", "<\\/"),
-        "__SUMMARIES__": json.dumps(summaries, ensure_ascii=False).replace("</", "<\\/"),
-        "__SYNONYMS__": json.dumps(synonyms, ensure_ascii=False).replace("</", "<\\/"),
-        "__TICKETINFO__": json.dumps(ticket_info, ensure_ascii=False).replace("</", "<\\/"),
+        "__DATA__": json_text(rows),
+        "__DICTS__": json_text(tables),
+        "__EDGES__": json.dumps(edges, separators=SEPARATORS),
+        "__TITLES__": json_text(titles),
+        "__SUMMARIES__": json_text(summaries),
+        "__SYNONYMS__": json_text(synonyms),
+        "__TICKETINFO__": json_text(ticket_info),
         "__CONFIG__": config_text(page_config),
-        "__TOPICS__": json.dumps(topics, ensure_ascii=False).replace("</", "<\\/"),
-        "__DIVES__": json.dumps(divesdata, ensure_ascii=False).replace("</", "<\\/"),
+        "__TOPICS__": json_text(topics),
+        "__DIVES__": json_text(divesdata),
         "__APP_JS__": app_js,
     }
     breakdown = page_breakdown(TEMPLATE, blocks)

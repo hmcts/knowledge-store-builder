@@ -49,12 +49,20 @@ from knowledgestore import io as store_io  # noqa: E402
 """What `sample_rows` saves by dropping its empty deployment column, and what
 naming it costs - both counted by hand.
 
-Forty rows each lose `""` and the `", "` beside it: 40 x 4 = 160. #config gains
-`, "droppedColumns": {"9": ""}`: the separator 2, the key 16, `: ` 2 and the
-value 9 - 29 bytes.
+Forty rows each lose `""` and the `,` beside it: 40 x 3 = 120. #config gains
+`,"droppedColumns":{"9":""}`: the separator 1, the key 16, the colon 1 and the
+value 8 - 26 bytes.
 """
-SAMPLE_DROP_SAVING = 160
-SAMPLE_LAYOUT_BYTES = 29
+SAMPLE_DROP_SAVING = 120
+SAMPLE_LAYOUT_BYTES = 26
+
+
+"""What the #dicts block's braces add beyond its tables' own costs, once it holds
+a table: `{}`, less the `,` the first table is charged for and has no need of.
+Each table is costed with the separator before it, because that is what it adds
+to a block already holding another.
+"""
+DICTS_FRAME = len("{}") - len(",")
 
 
 """The #dicts element the page gains, written out by hand.
@@ -189,10 +197,11 @@ class CostModelTest(unittest.TestCase):
         self.assertFalse(item.interned)
         self.assertEqual(item.distinct, 200)
         # Re-derived by hand: 200 x 14 value bytes, a table that repeats all of
-        # them plus 199 two-byte separators, two brackets and the column's key,
-        # and 490 bytes of indices (10 of one digit, 90 of two, 100 of three).
+        # them plus 199 one-byte separators, two brackets, the column's key with
+        # its colon and the separator before it, and 490 bytes of indices (10 of
+        # one digit, 90 of two, 100 of three).
         self.assertEqual(item.field_bytes, 2800)
-        self.assertEqual(item.table_bytes, 2800 + 2 * 199 + 2 + len('"0": ') + 2)
+        self.assertEqual(item.table_bytes, 2800 + 199 + 2 + len('"0":') + 1)
         self.assertEqual(item.reference_bytes, 10 + 90 * 2 + 100 * 3)
         self.assertEqual(item.saving, 2800 - item.table_bytes - 490)
 
@@ -364,13 +373,15 @@ class AwkwardValueTest(unittest.TestCase):
         interned = [item for item in plan if item.interned]
 
         self.assertTrue(interned, "nothing was interned, so this asserts nothing")
-        self.assertEqual(sum(item.table_bytes for item in interned), len(tables.encode("utf-8")))
+        self.assertEqual(
+            sum(item.table_bytes for item in interned) + DICTS_FRAME, len(tables.encode("utf-8"))
+        )
         self.assertEqual(
             sum(item.field_bytes - item.reference_bytes for item in interned),
             len(plain.encode("utf-8")) - len(encoded.encode("utf-8")),
         )
         self.assertEqual(
-            sum(item.saving for item in interned),
+            sum(item.saving for item in interned) - DICTS_FRAME,
             len(plain.encode("utf-8")) - len(encoded.encode("utf-8")) - len(tables.encode("utf-8")),
         )
 
@@ -644,7 +655,7 @@ class InterningReportTest(unittest.TestCase):
 
         No encoding of an empty column beats removing it, and interning one
         quietly represents nothing efficiently. Its line says what was done and
-        what it saved: forty rows of `""` and the `", "` beside each, 40 x 4.
+        what it saved: forty rows of `""` and the `,` beside each, 40 x 3.
         """
         plan, tables = explorer.interning_plan(sample_rows())
         deployment = next(item for item in plan if item.name == "deployment")
@@ -655,7 +666,7 @@ class InterningReportTest(unittest.TestCase):
         self.assertTrue(deployment.dropped)
         self.assertNotIn("9", tables)
         self.assertIn("dropped", line)
-        self.assertIn("saves          160 bytes", line)
+        self.assertIn(f"saves {SAMPLE_DROP_SAVING:>12,} bytes", line)
         self.assertIn("carries no information", line)
 
 
@@ -753,7 +764,9 @@ class InternedPageTest(SettingsIsolated):
         one understated every table by its cardinality. Understating the table
         overstates the saving, which predicts wins that are losses - the one
         direction of error that matters here. The convention is not transferable
-        between encodings, so it is pinned against this encoding's own output.
+        between encodings, so it is pinned against this encoding's own output -
+        and it caught the reverse when the page moved to compact separators
+        (#338): the block shrank and a model still costing `", "` overstated it.
         """
         with tempfile.TemporaryDirectory() as tmp:
             self._store(Path(tmp).resolve())
@@ -762,7 +775,7 @@ class InternedPageTest(SettingsIsolated):
             dropped = self._dropped()
 
         plan, _ = explorer.interning_plan(explorer.decode_rows(rows, tables, dropped))
-        modelled = sum(item.table_bytes for item in plan if item.interned)
+        modelled = sum(item.table_bytes for item in plan if item.interned) + DICTS_FRAME
         self.assertEqual(modelled, len(dicts.encode("utf-8")))
 
     def test_the_modelled_saving_is_the_bytes_the_page_actually_lost(self):
@@ -782,10 +795,13 @@ class InternedPageTest(SettingsIsolated):
 
         decoded = explorer.decode_rows(rows, tables, dropped)
         plan, _ = explorer.interning_plan(decoded)
-        plain = json.dumps(decoded, ensure_ascii=False).replace("</", "<\\/")
+        plain = json.dumps(decoded, ensure_ascii=False, separators=(",", ":"))
+        plain = plain.replace("</", "<\\/")
         actual = len(plain.encode("utf-8")) - len(data.encode("utf-8")) - len(dicts.encode("utf-8"))
-        modelled = sum(item.saving for item in plan if item.interned) + sum(
-            item.drop_saving for item in plan if item.dropped
+        modelled = (
+            sum(item.saving for item in plan if item.interned)
+            + sum(item.drop_saving for item in plan if item.dropped)
+            - DICTS_FRAME
         )
 
         self.assertTrue(dropped, "no column was dropped, so the drop term is unchecked")
@@ -814,12 +830,14 @@ class InternedPageTest(SettingsIsolated):
             declared, config_block = self._config()
 
         dropped = declared.pop(explorer.DROPPED_COLUMNS_KEY)
-        plain = json.dumps(explorer.decode_rows(rows, tables, dropped), ensure_ascii=False)
+        plain = json.dumps(
+            explorer.decode_rows(rows, tables, dropped), ensure_ascii=False, separators=(",", ":")
+        )
         tag_bytes = len(dicts_tag_on(page).encode("utf-8"))
         # What #config spends naming the dropped columns: the block as written,
         # less the same block without the key.
         layout = len(config_block.encode("utf-8")) - len(
-            json.dumps(declared, ensure_ascii=False).encode("utf-8")
+            json.dumps(declared, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         )
         actual = (
             len(plain.replace("</", "<\\/").encode("utf-8"))
@@ -1040,6 +1058,7 @@ class ReportedNumbersTest(unittest.TestCase):
             sum(item.saving for item in plan if item.interned)
             + SAMPLE_DROP_SAVING
             - len(DICTS_TAG.encode("utf-8"))
+            - DICTS_FRAME
             - SAMPLE_LAYOUT_BYTES
         )
         self.assertIn(f"{value_bytes:,} value bytes", report)
@@ -1062,7 +1081,7 @@ class ReportedNumbersTest(unittest.TestCase):
         report = explorer.interning_report(plan)
 
         saved = sum(item.saving for item in plan if item.interned) + SAMPLE_DROP_SAVING
-        expected = saved - len(DICTS_TAG.encode("utf-8")) - SAMPLE_LAYOUT_BYTES
+        expected = saved - len(DICTS_TAG.encode("utf-8")) - DICTS_FRAME - SAMPLE_LAYOUT_BYTES
         net = re.search(r"net ([\d,]+) bytes", report)
         assert net is not None
         self.assertEqual(int(net.group(1).replace(",", "")), expected)
@@ -1105,13 +1124,15 @@ class ReportedNumbersTest(unittest.TestCase):
         that are right.
 
         Twelve rows, hand-costed: column 0 holds `"abc"` throughout, so it saves
-        60 - 14 - 12 = 34. The other string columns hold twelve distinct letters,
-        so none is empty enough to drop, and each loses 36 - 67 - 14: the values
-        cost 36 either way, the table adds 22 of `", "`, 2 brackets and 7 of key,
-        and the indices are ten one-digit and two two-digit. The two integer and
-        two list columns lose too. That is 34 bytes off the values against a
-        53-byte tag, so the page is 19 bytes LARGER interned than plain - and
-        before #333 the report called it a saving with no mention of the tag.
+        60 - 12 - 12 = 36, its table being the value 5, brackets 2, `"0":` 4 and
+        the separator before it 1. The other string columns hold twelve distinct
+        letters, so none is empty enough to drop, and each loses 36 - 54 - 14:
+        the values cost 36 either way, the table adds 11 separators, 2 brackets
+        and 5 of key, and the indices are ten one-digit and two two-digit. The
+        two integer and two list columns lose too. That is 36 bytes off the
+        values against a 53-byte tag and 1 byte of braces, so the page is 18
+        bytes LARGER interned than plain - and before #333 the report called it a
+        saving with no mention of the tag.
         """
         rows = rows_carrying(0, ["abc"] * 12)
         for row, letter in zip(rows, string.ascii_lowercase):
@@ -1121,8 +1142,8 @@ class ReportedNumbersTest(unittest.TestCase):
         report = explorer.interning_report(plan)
 
         self.assertFalse([item.name for item in plan if item.dropped])
-        self.assertIn("net 19 bytes ONTO the page", report)
-        self.assertIn("save 34 bytes between them", report)
+        self.assertIn("net 18 bytes ONTO the page", report)
+        self.assertIn("save 36 bytes between them", report)
         # The saving wording belongs to a page that shrank, and this one grew.
         self.assertNotIn("bytes off the block", report)
 
