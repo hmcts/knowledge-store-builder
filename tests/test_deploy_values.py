@@ -431,11 +431,41 @@ class FourMoreShapes(unittest.TestCase):
             {"sops": {"azure_kv": [{"vaultUrl": self.PH, "name": self.PH, "version": "1"}]}},
         )
 
-    def test_a_name_without_a_store_address_beside_it_is_left_alone(self):
+    def test_a_service_pointing_at_a_vault_keeps_its_own_name(self):
+        """Break it catches: a vault URL beside `name` read as a secret entry anywhere.
+
+        `name` is the most ordinary key in configuration; beside a store address, in
+        a mapping that is not a member of a secret-provider collection, it names the
+        service. Only the `replicas` sibling used to survive.
+        """
+        value = {"keyVaultUri": "https://invented-vault.example", "name": "invented-service"}
+        value["replicas"] = 2
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_bare_store_url_and_name_outside_a_collection_is_left_alone(self):
+        """A deliberate false negative, not an oversight - do not widen it.
+
+        Without the collection context a `{vaultUrl, name}` pair is indistinguishable
+        from a service that mentions a vault. Withholding it would take ordinary
+        configuration, which is as bad as publishing a location.
+        """
+        value = {"vaultUrl": "https://invented-vault.example", "name": "invented-app"}
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_store_url_alone_or_a_flag_beside_a_name_is_left_alone(self):
         value = {
-            "service": {"name": "invented-service", "url": "https://api.example"},
             "alone": {"vaultUrl": "https://invented-vault.example"},
             "flag": {"name": "invented", "vaultEnabled": True},
+            "sources": [{"name": "invented", "url": "https://api.example"}],
+        }
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_collection_whose_members_do_not_all_pair_is_left_alone(self):
+        value = {
+            "kv": [
+                {"vaultUrl": "https://invented-vault.example", "name": "invented-key"},
+                {"name": "invented-other"},
+            ]
         }
         self.assertEqual(self.withheld(value), value)
 
