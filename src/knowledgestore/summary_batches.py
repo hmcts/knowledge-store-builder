@@ -87,7 +87,10 @@ def write_batches(out_dir: Path, size: int) -> int:
         batch = {"batch": number, "out": str(out), "digests": chunk}
         io.write_json(out_dir / f"{BATCH_PREFIX}{number:0{width}d}.json", batch)
     if chunks:
-        (out_dir / "out").mkdir(parents=True, exist_ok=True)
+        # The one write here that does not go through `io.write_json`, so it is
+        # validated by the same guard before it runs.
+        io.checked_write_target(out_dir / "out")
+        (out_dir / "out").mkdir(parents=True, exist_ok=True)  # NOSONAR(S2083) - validated above
     print(
         f"{len(todo)} significant communities without prose -> {len(chunks)} batch(es) "
         f"of up to {size} in {out_dir}"
@@ -111,10 +114,12 @@ def _read_batch(path: str) -> tuple[list[dict], str, dict]:
     if batch is None:
         raise FileNotFoundError(f"no batch file at {path}")
     digests, out = batch["digests"], str(batch["out"])
-    # Sonar S8707: a read of a caller-supplied path, on the grounds recorded at
-    # `build_community_summaries.merge`. Read here rather than through `io` because
-    # the duplicate-id rule needs the object hook.
-    text = Path(out).read_text(encoding="utf-8")  # NOSONAR(S8707)
+    # NOSONAR(S2083, S8707) - reading the `out` path the operator's batch names is
+    # the purpose of check-batch. Grounds are stated once in
+    # `build_community_summaries.merge`; this site cites them rather than restating
+    # them, so the two cannot drift. Read here rather than through `io` because the
+    # duplicate-id rule needs the object hook.
+    text = Path(out).read_text(encoding="utf-8")  # NOSONAR(S2083, S8707)
     authored = json.loads(text, object_pairs_hook=_unique_keys)
     if not isinstance(authored, dict):
         raise TypeError(f"{out} must be one object of id -> summary")
@@ -143,7 +148,7 @@ def _summary_violations(cid: str, summary: object, digest: dict) -> list[str]:
 def check_batch(path: str) -> tuple[list[str], int]:
     """The violations in one batch's authored output, and how many ids it holds."""
     try:
-        digests, out, authored = _read_batch(path)
+        digests, _, authored = _read_batch(path)
         by_id = {str(digest["id"]): digest for digest in digests}
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [f"PARSE {path}: {error}"], 0
