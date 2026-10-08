@@ -147,6 +147,98 @@ def _is_secret_reference(mapping: dict) -> bool:
     return bool(stores) and bool(entries) and len(stores | entries) > 1 and named_outright
 
 
+# Four arrangements the store/entry pairing cannot see, because none of them puts a
+# store key beside an entry key. Each is recognised by what one key says about its
+# own value, still never by a vendor's name, and each is deliberately narrow: the
+# over-correction tests above this file's policy are the specification, and a
+# word as common as `secret` or `name` is never a role on its own.
+#
+# 1. A key that *is* a reference to a secret (`secretRef`, `secretKeyRef`): the
+#    entry is named with no store beside it. A lone entry is withheld here, where
+#    a lone `path` or `key` is not, because those words are ordinary configuration
+#    and this one says what it is. Its whole value goes - the secret's name is
+#    what it holds. `configMapRef` and `secretsEnabled` do not match.
+_SECRET_ENTRY_REFERENCE = re.compile(r"secret(key)?ref$")
+# 2. A key naming a mapping of enciphered entries (`encryptedData`): the field
+#    names are the entries, and they are mapping keys, so they cannot be kept
+#    while the values are replaced. The mapping goes whole. Exact match, so
+#    `encryption` and `encryptedVolume` are untouched.
+_ENCIPHERED_ENTRIES = re.compile(r"encrypteddata")
+# 3. A plural registry of stores (`keyVaults`, `vaults`) whose members each carry a
+#    `secrets` collection: the store is a mapping key, which cannot be kept either,
+#    so the registry goes whole. A registry that lists vaults and names no secrets
+#    in them is a store with no entry, and stays, as it always did.
+_STORE_REGISTRY = re.compile(r"vaults$")
+_ENTRY_COLLECTION = "secrets"
+# 4. A store addressed by URL beside a bare `name`, inside a secret-provider
+#    collection (`sops.azure_kv[]`). Neither half is evidence alone: `vaultUrl` says
+#    where a store is and `name` is the most ordinary key in configuration, so a
+#    service mapping that points at a vault and has a name is not a secret entry
+#    (`{keyVaultUri, name, replicas}` is left whole). What licenses reading `name`
+#    as an entry is the context: a list held under a key that names a store or
+#    secret handling (`kv`, `vault`, `secret` in its name), every member of which
+#    has the same address-and-name shape. A bare `{vaultUrl, name}` mapping outside
+#    such a collection goes unwithheld - a deliberate false negative, traded for
+#    not withholding ordinary configuration. Within the collection the address and
+#    the name are replaced and any other member key (such as a version) is kept.
+_STORE_ADDRESS = re.compile(r"vault.*u(rl|ri)")
+_PROVIDER_COLLECTION = re.compile(r"kv|vault|secret")
+_BARE_ENTRY_NAME = "name"
+
+
+def _normalised(key: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+def _holds_entry_collection(member: object) -> bool:
+    """A registry member (one vault) that carries a `secrets` collection."""
+    return isinstance(member, dict) and any(_normalised(key) == _ENTRY_COLLECTION for key in member)
+
+
+def _names_location_by_shape(key: object, item: object) -> bool:
+    """True when this key, from its own name and value, is one of shapes 1 to 3
+    above and so holds a secret's location outright."""
+    name = _normalised(key)
+    if _SECRET_ENTRY_REFERENCE.search(name) or _ENCIPHERED_ENTRIES.fullmatch(name):
+        return True
+    return bool(
+        _STORE_REGISTRY.search(name)
+        and isinstance(item, dict)
+        and any(_holds_entry_collection(member) for member in item.values())
+    )
+
+
+def _address_and_name(mapping: dict) -> set[object]:
+    """The keys of `mapping` that are a store's URL and the entry name beside it."""
+    addresses = {key for key in mapping if _STORE_ADDRESS.search(_normalised(key))}
+    names = {key for key in mapping if _normalised(key) == _BARE_ENTRY_NAME}
+    return addresses | names if addresses and names else set()
+
+
+def _is_provider_collection(key: object, item: object) -> bool:
+    """A non-empty list under a secret-handling key whose members all pair a store
+    address with a name."""
+    return (
+        bool(_PROVIDER_COLLECTION.search(_normalised(key)))
+        and isinstance(item, list)
+        and bool(item)
+        and all(isinstance(member, dict) and _address_and_name(member) for member in item)
+    )
+
+
+def _withhold_members(members: list) -> list:
+    out = []
+    for member in members:
+        located = _address_and_name(member)
+        out.append(
+            {
+                key: PLACEHOLDER if key in located else withhold_secret_locations(inner)
+                for key, inner in member.items()
+            }
+        )
+    return out
+
+
 def withhold_secret_locations(value: object) -> object:
     """`value` with every secret reference's store and entry replaced.
 
@@ -160,6 +252,12 @@ def withhold_secret_locations(value: object) -> object:
         reference = _is_secret_reference(value)
         withheld: dict[object, object] = {}
         for key, item in value.items():
+            if _is_provider_collection(key, item):
+                withheld[key] = _withhold_members(item)  # type: ignore[arg-type]
+                continue
+            if _names_location_by_shape(key, item):
+                withheld[key] = PLACEHOLDER
+                continue
             store, entry = _effective_roles(key, item)
             withheld[key] = (
                 PLACEHOLDER if reference and (store or entry) else withhold_secret_locations(item)

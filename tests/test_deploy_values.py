@@ -335,6 +335,141 @@ class SecretReferences(unittest.TestCase):
         self.assertEqual(deploy_values.flatten(backwards, 3, 200), expected)
 
 
+class FourMoreShapes(unittest.TestCase):
+    """Shapes that publish a secret's location without a store key beside an entry key.
+
+    Each positive test names the break it catches: the shape being read as ordinary
+    configuration again. Each negative names the opposite break - the recognition
+    widening to configuration that merely resembles it. Expected values are derived
+    by hand and use invented names.
+    """
+
+    PH = deploy_values.PLACEHOLDER
+
+    def withheld(self, value):
+        return deploy_values.withhold_secret_locations(value)
+
+    def test_a_vault_named_as_a_mapping_key_is_withheld(self):
+        self.assertEqual(
+            self.withheld(
+                {
+                    "keyVaults": {
+                        "invented-vault": {
+                            "secrets": [{"name": "invented-entry", "alias": "invented-alias"}]
+                        }
+                    },
+                    "replicas": 2,
+                }
+            ),
+            {"keyVaults": self.PH, "replicas": 2},
+        )
+
+    def test_a_registry_of_vaults_naming_no_secrets_is_left_alone(self):
+        """A store with no entry is not a map of where a credential lives."""
+        for value in (
+            {"keyVaults": {"invented-vault": {"replicas": 2}}},
+            {"vaults": {"invented-vault": {"size": "small"}}},
+        ):
+            self.assertEqual(self.withheld(value), value)
+
+    def test_a_secret_reference_naming_only_an_entry_is_withheld(self):
+        self.assertEqual(
+            self.withheld({"envFrom": [{"secretRef": {"name": "invented-secret"}}]}),
+            {"envFrom": [{"secretRef": self.PH}]},
+        )
+        self.assertEqual(
+            self.withheld(
+                {"env": {"TOKEN": {"secretKeyRef": {"name": "invented-secret", "key": "k"}}}}
+            ),
+            {"env": {"TOKEN": {"secretKeyRef": self.PH}}},
+        )
+
+    def test_a_reference_to_something_that_is_not_a_secret_is_left_alone(self):
+        value = {
+            "envFrom": [{"configMapRef": {"name": "invented-config"}}],
+            "secretsEnabled": True,
+            "secretStoreName": "invented-store",
+        }
+        self.assertEqual(self.withheld(value), value)
+
+    def test_the_field_names_of_encrypted_data_are_withheld(self):
+        self.assertEqual(
+            self.withheld(
+                {
+                    "sealedSecret": {
+                        "enabled": True,
+                        "encryptedData": {"invented-field": "AgBinvented"},
+                    }
+                }
+            ),
+            {"sealedSecret": {"enabled": True, "encryptedData": self.PH}},
+        )
+
+    def test_encryption_settings_are_left_alone(self):
+        value = {
+            "sealedSecret": {"enabled": True},
+            "encryption": {"algorithm": "invented-cipher"},
+            "encryptedVolume": True,
+        }
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_store_url_and_the_name_beside_it_are_withheld(self):
+        self.assertEqual(
+            self.withheld(
+                {
+                    "sops": {
+                        "azure_kv": [
+                            {
+                                "vaultUrl": "https://invented-vault.example",
+                                "name": "invented-key",
+                                "version": "1",
+                            }
+                        ]
+                    }
+                }
+            ),
+            {"sops": {"azure_kv": [{"vaultUrl": self.PH, "name": self.PH, "version": "1"}]}},
+        )
+
+    def test_a_service_pointing_at_a_vault_keeps_its_own_name(self):
+        """Break it catches: a vault URL beside `name` read as a secret entry anywhere.
+
+        `name` is the most ordinary key in configuration; beside a store address, in
+        a mapping that is not a member of a secret-provider collection, it names the
+        service. Only the `replicas` sibling used to survive.
+        """
+        value = {"keyVaultUri": "https://invented-vault.example", "name": "invented-service"}
+        value["replicas"] = 2
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_bare_store_url_and_name_outside_a_collection_is_left_alone(self):
+        """A deliberate false negative, not an oversight - do not widen it.
+
+        Without the collection context a `{vaultUrl, name}` pair is indistinguishable
+        from a service that mentions a vault. Withholding it would take ordinary
+        configuration, which is as bad as publishing a location.
+        """
+        value = {"vaultUrl": "https://invented-vault.example", "name": "invented-app"}
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_store_url_alone_or_a_flag_beside_a_name_is_left_alone(self):
+        value = {
+            "alone": {"vaultUrl": "https://invented-vault.example"},
+            "flag": {"name": "invented", "vaultEnabled": True},
+            "sources": [{"name": "invented", "url": "https://api.example"}],
+        }
+        self.assertEqual(self.withheld(value), value)
+
+    def test_a_collection_whose_members_do_not_all_pair_is_left_alone(self):
+        value = {
+            "kv": [
+                {"vaultUrl": "https://invented-vault.example", "name": "invented-key"},
+                {"name": "invented-other"},
+            ]
+        }
+        self.assertEqual(self.withheld(value), value)
+
+
 class Settings(unittest.TestCase):
     def test_the_stage_is_off_until_a_repository_is_named(self):
         from knowledgestore import config
