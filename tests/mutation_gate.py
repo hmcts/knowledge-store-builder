@@ -386,7 +386,10 @@ MUTATIONS = (
         "",
         "a flagged rate shown without the rotation beside it cannot tell a working check from a vacuous one, and a falling rate reads as an improvement",
         (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_check_that_stopped_discriminating_says_so_loudly_and_keeps_the_exit_code",
             "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_working_check_reports_what_the_rotation_produced_beside_the_real_figure",
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_fewer_than_two_communities_is_inconclusive_not_a_collapse",
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_nothing_grounded_to_begin_with_is_inconclusive",
         ),
     ),
     Mutation(
