@@ -352,11 +352,31 @@ MUTATIONS = (
     Mutation(
         "the estate check runs against a stale graph in silence",
         "build_community_summaries.py",
-        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),\n        end="",\n        file=sys.stderr,\n    )',
-        "    pass",
+        '    return graph_files.stale_note(plain, nodes, "the estate check")',
+        '    return ""',
         "the strongest form of the class: a truthfulness gate reading the wrong artefact passes on the wrong data, and its silence then licenses a claim about something it never looked at",
         (
             "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_the_estate_check_names_the_other_graph",
+        ),
+    ),
+    Mutation(
+        "the estate check reads only the plain graph, so an absent one yields an empty vocabulary",
+        "build_community_summaries.py",
+        "    read = graph_files.graph_to_read(config.GRAPH_PATH)\n",
+        "    read = config.GRAPH_PATH if config.GRAPH_PATH.is_file() else None\n",
+        "on a fresh clone the plain graph is gitignored, so reading only it leaves the estate check with nothing to compare against and no sign that it did nothing",
+        (
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_absent_plain_graph_is_not_called_stale_and_the_archive_is_read",
+        ),
+    ),
+    Mutation(
+        "an empty plain graph is reported as a stale one",
+        "build_community_summaries.py",
+        "    if not nodes and archive.is_file():",
+        "    if False:",
+        "a zero-node graph.json is not out of date, it is empty; calling it stale sends an operator to compare two files when one holds nothing",
+        (
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_empty_plain_graph_says_it_is_empty_and_names_what_was_read",
         ),
     ),
     Mutation(

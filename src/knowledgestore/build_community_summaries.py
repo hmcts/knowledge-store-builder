@@ -2522,6 +2522,41 @@ _SEGMENT_SEPARATORS = re.compile(r"[/@.\-_:]+")
 _PHRASE_SEPARATORS = re.compile(r"[^A-Za-z0-9/@.\-_:]+")
 
 
+def _estate_graph_note(read: Path | None, nodes: list) -> str:
+    """Which graph the estate check read, when that is not the plain `graph.json`.
+
+    Three states, because two of them are not a disagreement:
+
+    - **The plain file is absent.** Normal on a fresh clone, since stores
+      gitignore it. The archive is read and the note says so; it must not call
+      the absent file stale, because a missing file is not an out-of-date one.
+    - **The plain file holds no nodes.** It is read, since the plain file wins
+      when present, and the estate check will therefore find nothing. Saying
+      "stale" would send an operator to compare two files when the problem is
+      that one is empty.
+    - **Both hold graphs that differ.** The genuine disagreement, worded as
+      `graph_files.stale_note` words it for every other stage.
+
+    The decision lives here rather than in `graph_files.disagreement` because
+    only the caller knows which file the run reads. `disagreement` is handed
+    counts and a remedy and cannot tell an absent file from an empty one; its
+    other caller already checks both files exist. In every state the note names
+    the file that was in fact read.
+    """
+    plain = config.GRAPH_PATH
+    archive = graph_files.counterpart(plain)
+    if read is None or archive is None:
+        return ""
+    if read != plain:
+        return f"  {plain.name} is absent; the estate check was built from {read.name}.\n"
+    if not nodes and archive.is_file():
+        return (
+            f"  {plain.name} holds no nodes, so the estate check was built from an empty graph "
+            f"and will find no term in it. {archive.name} was NOT read.\n"
+        )
+    return graph_files.stale_note(plain, nodes, "the estate check")
+
+
 def estate_vocabulary() -> tuple[set[str], set[str]]:
     """Every identifier the graph holds, normalised - the estate's own vocabulary.
 
@@ -2537,9 +2572,14 @@ def estate_vocabulary() -> tuple[set[str], set[str]]:
     Loads the graph, which is why it is opt-in. `status` must stay cheap; this
     stage is already an authoring-time check and can afford it.
     """
-    graph = io.read_json_dict(config.GRAPH_PATH)
+    # The graph this reads is the plain file when it exists and the committed
+    # archive otherwise - the same preference every other reading stage has. It
+    # used to read only the plain file, which is gitignored, so on a fresh clone
+    # the vocabulary came out empty and the estate check quietly did nothing.
+    read = graph_files.graph_to_read(config.GRAPH_PATH)
+    graph = io.read_json_dict(read) if read is not None else {}
     print(
-        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),
+        _estate_graph_note(read, graph.get("nodes", [])),
         end="",
         file=sys.stderr,
     )
