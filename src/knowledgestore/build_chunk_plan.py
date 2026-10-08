@@ -49,8 +49,11 @@ rather than assumed.
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import TextIO
 
 from . import config, content_set, io, store_paths
 
@@ -191,13 +194,20 @@ def uncached_paths() -> set[str]:
     return {line.strip() for line in text.splitlines() if line.strip()}
 
 
-def report(plan: dict[str, list[str]], counted: dict[str, list[str]], chunk_size: int) -> None:
+def report(
+    plan: dict[str, list[str]],
+    counted: dict[str, list[str]],
+    chunk_size: int,
+    destination: str,
+    stream: TextIO,
+) -> None:
     """What was planned, and from what. Every number names the quantity it counts."""
     sizes = sorted(len(files) for files in plan.values())
     print(
-        f"{len(plan):,} chunks over {sum(sizes):,} files -> {config.CHUNK_PLAN_PATH}\n"
+        f"{len(plan):,} chunks over {sum(sizes):,} files -> {destination}\n"
         f"  per chunk: smallest {sizes[0]}, largest {sizes[-1]}, maximum {chunk_size}\n"
         "  detected: " + ", ".join(f"{kind} {len(paths):,}" for kind, paths in counted.items()),
+        file=stream,
         flush=True,
     )
 
@@ -227,8 +237,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--uncached",
         action="store_true",
-        help="plan only files graphify's cache check left to extract; without this the plan "
-        "covers every content file, which is what makes the chunk archive readable",
+        help="plan only files graphify's cache has not seen - not the files a sync changed, "
+        "which `knowledgestore drift` measures. Written to --out or stdout, never over the "
+        "committed plan",
+    )
+    parser.add_argument(
+        "--out",
+        help="where to write the plan (default: graphify-out/.graphify_chunk_plan.json, or "
+        "stdout for --uncached)",
     )
     return parser.parse_args(argv)
 
@@ -268,15 +284,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     stored = store_paths.store_relative_plan(plan)
-    io.write_json(config.CHUNK_PLAN_PATH, stored, indent=2)
+    # A measurement must not rewrite the artefact the chunk archive is keyed on, so
+    # an uncached plan goes where the caller says, or to stdout - never over the
+    # committed plan.
+    to_stdout = arguments.out is None and arguments.uncached
+    stream = sys.stderr if to_stdout else sys.stdout
+    if to_stdout:
+        print(json.dumps(stored, indent=2, ensure_ascii=False), flush=True)
+        destination = "stdout"
+    else:
+        target = Path(arguments.out) if arguments.out else config.CHUNK_PLAN_PATH
+        io.write_json(target, stored, indent=2)
+        destination = str(target)
     sizes = sorted(len(files) for files in plan.values())
-    report(plan, counted, arguments.chunk_size)
+    report(plan, counted, arguments.chunk_size, destination, stream)
     if only is not None:
-        print(f"  restricted to {len(only):,} uncached file(s)", flush=True)
+        print(f"  restricted to {len(only):,} uncached file(s)", file=stream, flush=True)
     print(
         "  Paths are stored relative to the store root. A dispatcher must call "
         "`store_paths.load_plan()`, which resolves them - the extraction spec requires "
         "agents to receive and echo paths verbatim and absolute.",
+        file=stream,
         flush=True,
     )
 
@@ -293,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             "  They are outside the store root, so this plan carries this machine's "
             "layout and will not survive a relocation or a clone. Point graphify at a "
             "corpus inside the store, or do not commit the plan.",
+            file=stream,
             flush=True,
         )
     return 0

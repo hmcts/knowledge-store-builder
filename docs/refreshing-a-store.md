@@ -95,6 +95,45 @@ Then reconcile the number of per-repository graphs against
 `config/repositories.txt` before merging, because a loop that skipped
 repositories still exits zero.
 
+Measure what the sync made stale in the semantic layer before paying to
+re-extract it. Save the provenance and the extraction plan the committed layer
+was extracted from before `sync` and the resync overwrite them:
+
+```bash
+git show HEAD:knowledge/provenance.json > /tmp/provenance-before.json
+git show HEAD:graphify-out/.graphify_chunk_plan.json > /tmp/plan-before.json
+knowledgestore sync
+knowledgestore drift --before /tmp/provenance-before.json --plan /tmp/plan-before.json \
+  --out /tmp/drift.json
+```
+
+**`--plan` is the extraction plan as it stood at the "before" provenance.** Once a
+resync has committed, `HEAD` holds the rewritten plan, so take both files from
+the commit that recorded the "before" provenance instead:
+`git show <before-commit>:graphify-out/.graphify_chunk_plan.json`.
+
+`drift` diffs each repository between its two recorded shas and keeps what the
+chunk plan holds, because stale means extracted and now out of date:
+
+- **changed** and **deleted** — files the plan holds.
+- **new** — added files whose extension the plan already holds, so a delta
+  extracts what a full build would.
+- **a rename** — its old path deleted and its new path new.
+
+A repository whose recorded sha did not move contributes nothing. The report
+prints the stale count, its share of the plan, and the repositories carrying most
+of it. `drift` writes nothing and exits 2 in two cases:
+
+- **A repository's diff fails**, because a partial drift reads as a small one.
+- **The plan holds a file the diff says was added after "before"**, because that
+  is a plan the resync has already rewritten, and measuring against it would call
+  the added files unchanged.
+
+`knowledgestore chunk-plan --uncached` answers a different question: which files graphify's
+cache has not seen. On a store whose chunks were written by anything but
+`merge-chunks`, that is most of the corpus rather than what changed. It writes
+to `--out` or stdout, never over the committed plan.
+
 After clustering, record which partitioner produced the new IDs, then carry
 summaries onto the communities that still hold the same node sets:
 

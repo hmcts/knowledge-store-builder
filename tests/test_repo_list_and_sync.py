@@ -499,6 +499,8 @@ class CliTest(SettingsIsolated):
             [
                 "discover",
                 "sync",
+                # reads the provenance sync just wrote against the one before it
+                "drift",
                 "convert",
                 # produces the AST layer `merge-layers` consumes, and runs after
                 # `convert` because conversion is what makes an Office document

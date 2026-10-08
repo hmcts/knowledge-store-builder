@@ -283,9 +283,24 @@ class TheWrittenPlan(SettingsIsolated):
         detect = json.loads((root / "graphify-out" / ".graphify_detect.json").read_text())
         keep = detect["files"]["document"][:2]
         config.UNCACHED_PATH.write_text("\n".join(keep), encoding="utf-8")
-        self._run("--chunk-size", "3", "--uncached")
-        written = json.loads(config.CHUNK_PLAN_PATH.read_text())
+        out = root / "uncached-plan.json"
+        self._run("--chunk-size", "3", "--uncached", "--out", str(out))
+        written = json.loads(out.read_text())
         self.assertEqual(sum(len(v) for v in written.values()), 2)
+
+    def test_uncached_never_rewrites_the_committed_plan(self):
+        """Breaks if answering "what has the cache not seen" overwrites the plan the
+        chunk archive is keyed on, which then has to be undone with `git checkout`."""
+        root = self._store(documents=6)
+        self._run("--chunk-size", "3")
+        committed = config.CHUNK_PLAN_PATH.read_bytes()
+        detect = json.loads((root / "graphify-out" / ".graphify_detect.json").read_text())
+        config.UNCACHED_PATH.write_text(detect["files"]["document"][0], encoding="utf-8")
+        code, text = self._run("--chunk-size", "3", "--uncached")
+        self.assertEqual(code, 0)
+        self.assertEqual(config.CHUNK_PLAN_PATH.read_bytes(), committed)
+        # Without --out the uncached plan is the whole of stdout, so it can be piped.
+        self.assertEqual(sum(len(v) for v in json.loads(text).values()), 1)
 
     def test_a_code_only_estate_writes_no_plan_and_says_so(self):
         tmp = tempfile.TemporaryDirectory()
