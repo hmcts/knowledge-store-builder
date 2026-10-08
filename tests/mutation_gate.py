@@ -380,6 +380,36 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "verify stops running the rotation self-check",
+        "build_community_summaries.py",
+        "    _report_rotation(rotation_check(checked, prose, digests, {cid for cid, _ in unsupported}))\n",
+        "",
+        "a flagged rate shown without the rotation beside it cannot tell a working check from a vacuous one, and a falling rate reads as an improvement",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_working_check_reports_what_the_rotation_produced_beside_the_real_figure",
+        ),
+    ),
+    Mutation(
+        "the rotation does not wrap the last summary onto the first",
+        "build_community_summaries.py",
+        "ids[(index + 1) % len(ids)]",
+        "ids[min(index + 1, len(ids) - 1)]",
+        "the last community would be compared with its own digest, so one summary always escapes the rotation and the collapse is understated",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_working_check_reports_what_the_rotation_produced_beside_the_real_figure",
+        ),
+    ),
+    Mutation(
+        "the rotation self-check passes whatever the rotated figure is",
+        "build_community_summaries.py",
+        "    elif rotated_grounded <= grounded * ROTATION_COLLAPSE:",
+        "    elif True:",
+        "a self-check that cannot fail reports a vacuous comparison as discriminating, which is the failure it exists to name",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_check_that_stopped_discriminating_says_so_loudly_and_keeps_the_exit_code",
+        ),
+    ),
+    Mutation(
         "upward write paths accepted again",
         "io.py",
         '    if any(part == ".." for part in Path(path).parts):',

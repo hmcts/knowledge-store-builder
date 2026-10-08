@@ -2828,6 +2828,112 @@ def classify_absent(
     return in_history, nowhere
 
 
+# How far the rotated run must pull the grounded share down for the check to count as
+# discriminating: at most this fraction of the summaries grounded as they are may still
+# read as grounded once each is attached to the wrong community. Half, because a
+# working check on real prose lost nearly all of them, so a check that keeps more than
+# half has stopped telling a summary from its neighbour's.
+ROTATION_COLLAPSE = 0.5
+
+
+def rotation_check(
+    ids: list[str], prose: dict[str, str], digests: dict[str, dict], flagged: set[str]
+) -> dict[str, int | str]:
+    """Run the digest comparison again with every summary on the wrong community.
+
+    Each summary is moved onto the next community id in `ids` (the last wraps to
+    the first), so none describes the cluster it is compared with. If the check
+    discriminates, nearly everything that cited an identifier now cites one its
+    new digest does not hold. If a field rename or a digest shape change has made
+    the comparison vacuous, the flagged count stays where it was - and that is
+    what the real figure alone could never show, because a vacuous check reports a
+    falling rate that reads as an improvement.
+
+    Only summaries that cite at least one identifier count: prose citing nothing
+    cannot be flagged under either arrangement, and including it would dilute the
+    collapse into a pass or a failure it did not earn.
+
+    `flagged` is the real run's flagged ids, passed in so the real comparison is not
+    repeated: the rotation costs one extra pass, not two.
+
+    `verdict` is `"discriminates"`, `"vacuous"` or `"cannot-tell"`. The last is
+    for a population the rotation cannot move: fewer than two communities
+    (a rotation is then the identity) or no summary grounded to begin with.
+    """
+    ids = [cid for cid in ids if cid in digests]
+    citing = [cid for cid in ids if prose_identifiers(prose[cid])]
+    result: dict[str, int | str] = {
+        "communities": len(ids),
+        "citing": len(citing),
+        "real_flagged": 0,
+        "rotated_flagged": 0,
+        "verdict": "cannot-tell",
+        "reason": "",
+    }
+    if len(ids) < 2:
+        result["reason"] = (
+            f"{len(ids)} communit{'y' if len(ids) == 1 else 'ies'} with a digest: a rotation "
+            "needs at least two, and with fewer it moves nothing"
+        )
+        return result
+    successor = {cid: ids[(index + 1) % len(ids)] for index, cid in enumerate(ids)}
+    result["real_flagged"] = sum(1 for cid in citing if cid in flagged)
+    result["rotated_flagged"] = sum(
+        1 for cid in citing if _ungrounded(prose[cid], digests[successor[cid]])
+    )
+    grounded = len(citing) - int(result["real_flagged"])
+    rotated_grounded = len(citing) - int(result["rotated_flagged"])
+    if grounded == 0:
+        result["reason"] = (
+            "no summary that cites an identifier is grounded as it stands, so there is "
+            "nothing for a rotation to take away"
+        )
+    elif rotated_grounded <= grounded * ROTATION_COLLAPSE:
+        result["verdict"] = "discriminates"
+    else:
+        result["verdict"] = "vacuous"
+    return result
+
+
+def _percent(part: int, whole: int) -> str:
+    return f"{100 * part / whole:.0f}%" if whole else "0%"
+
+
+def _report_rotation(check: dict[str, int | str]) -> None:
+    """State what the rotation produced beside the real figure, and say if it failed.
+
+    Loud on stderr when the check could not be shown to discriminate, and silent
+    about the exit code on purpose: see `verify`.
+    """
+    citing, real, rotated = (
+        int(check["citing"]),
+        int(check["real_flagged"]),
+        int(check["rotated_flagged"]),
+    )
+    verdict = check["verdict"]
+    if verdict == "cannot-tell":
+        print(
+            f"SELF-CHECK INCONCLUSIVE: {check['reason']}, so this run cannot show that the "
+            "flagged rate above discriminates.",
+            file=sys.stderr,
+        )
+        return
+    figures = (
+        f"Of {citing} summaries that cite an identifier, {real} ({_percent(real, citing)}) are "
+        f"flagged as they stand and {rotated} ({_percent(rotated, citing)}) when each is moved "
+        "onto the next community's digest."
+    )
+    if verdict == "discriminates":
+        print(f"Self-check: {figures} The comparison tells a summary from its neighbour's.")
+        return
+    print(
+        f"SELF-CHECK FAILED: {figures} Summaries attached to the wrong community should be "
+        "flagged far more often, so this check has stopped discriminating and the flagged "
+        "rate above says nothing about the prose. The exit code is unchanged.",
+        file=sys.stderr,
+    )
+
+
 def verify(sample: int | None = None, strict: bool = False, estate: bool = False) -> int:
     """Check authored summaries cite only what their digests contain.
 
@@ -2857,6 +2963,28 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
     fraction of its nodes proves nothing and no longer fails a run; one whose
     digest recorded no coverage keeps the previous meaning and still fails,
     because unknown must not read as excused.
+
+    Every run also rotates each summary onto the next community id in memory and
+    runs the same comparison, so the flagged rate is shown beside what it falls to
+    when no summary describes its own cluster (#388). A check that has stopped
+    discriminating - a field rename, a digest shape change - reports a falling
+    rate that reads as an improvement, and the rate alone cannot say so. Where the
+    flagged count does not rise by enough, the report says `SELF-CHECK FAILED`
+    on stderr; where there is nothing to rotate (fewer than two communities, or no
+    grounded summary to lose) it says `SELF-CHECK INCONCLUSIVE` instead of
+    reporting a collapse that proves nothing.
+
+    **A failed self-check reports loudly and does not change the exit code.** This
+    stage is report-only and, like `status`, never turns drift or a gap into a
+    non-zero exit: those are normal operating conditions, the stage reports and a
+    human decides. `--strict` keeps its existing meaning.
+
+    Cost: one further comparison pass, reusing the real run's result rather than
+    repeating it. Measured over 45,000 synthetic communities of 12 digest nodes
+    each (the real pass took 2.1s, the rotation 2.4s, so the comparison work
+    roughly doubles; the estate-wide check, which loads the graph, is unaffected):
+
+        python3 -c "from knowledgestore import build_community_summaries as s; import time; n=45000; d={str(i):{'label':f'G{i}Service','top_nodes':[{'label':f'Widget{i}Part{j}'} for j in range(12)]} for i in range(n)}; p={str(i):f'G{i}Service wraps Widget{i}Part0 and Widget{i}Part3.' for i in range(n)}; ids=sorted(p,key=lambda k:(len(k),k)); t=time.perf_counter(); f={c for c in ids if s._ungrounded(p[c],d[c])}; a=time.perf_counter(); s.rotation_check(ids,p,d,f); print(a-t, time.perf_counter()-a)"
     """
     loaded = io.read_json(config.SUMMARIES_INPUT_PATH, default=[]) or []
     digests = {str(d["id"]): d for d in loaded if isinstance(d, dict) and "id" in d}
@@ -2905,6 +3033,7 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
     _report_verify(
         (len(checked), len(prose)), unsupported, speculative, orphaned, evidence, absent, classified
     )
+    _report_rotation(rotation_check(checked, prose, digests, {cid for cid, _ in unsupported}))
     _report_provenance_split(checked, unsupported, digests)
     # Under --estate, fail on what is genuinely unbacked rather than on what a
     # 12-node sample failed to mention. Without it, the old behaviour stands -
