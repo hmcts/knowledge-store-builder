@@ -334,8 +334,8 @@ declaration skips exactly the input that is missing from it.
 | Declared but not extracted | The merge will omit a repository the store declares |
 | Extracted but not merged | Only `graph.json.gz` is present, and the documented glob names `graph.json` |
 
-It reports and exits 0 — a tree caught mid-refresh is a normal state. It exits 1
-when it could not run at all (no graphs found, or an unreadable
+`knowledgestore merge-inputs` reports and exits 0 — a tree caught mid-refresh is a
+normal state. It exits 1 when it could not run at all (no graphs found, or an unreadable
 `config/repositories.txt`), and with `--strict` on an undeclared or undated
 input. `status` prints the same lines, capped, and never fails.
 
