@@ -15,8 +15,12 @@ window between "the mapping became wrong" and "anything says so" runs to a day,
 and four branches in one afternoon each needed the legs dispatched by hand to
 find out which entries had gone stale.
 
-This module closes that window with the one signal that is free: **which test ids
-exist now that did not exist in the last state the mapping was verified in.** A
+This module closes that window in two modes, and what each can see is the whole
+difference between them.
+
+**The id comparison** (the default, seconds, runs no test) uses the one signal that
+is free: **which test ids exist now that did not exist in the last state the
+mapping was verified in.** A
 new observer has to be a test, and a test that did not exist cannot have been
 named - so an entry naming a module that gained a test id is suspect by exactly
 the mechanism #293 describes, and an entry naming only modules that gained
@@ -35,10 +39,39 @@ Three boundaries, and they are the whole claim it makes:
   nightly deny-list's half of the problem. A CLEAN verdict here therefore licenses
   one sentence - *no test that arrived since the base can have become an unnamed
   observer* - and not "the mapping is correct".
-- It is **advisory.** Confirming a suspicion costs the seven minutes, and nothing
-  here can do it cheaply, so there is no sound condition on which this could refuse
-  a pull request by itself. `--refuse` exists for a maintainer who decides #293's
-  option 3 is worth the trade; the default reports and names what to run.
+- It reports **suspicion, not staleness.** It cannot know which entries a test
+  observes, so an entry naming a module that gained a test is SUSPECT, and a test
+  arriving in a module no entry names leaves no entry ruled out. One night three
+  merges staled eight entries and the suspect lists named two of them: the other
+  six were staled by tests arriving in modules no entry named yet. `--refuse`
+  exists for a maintainer who wants suspicion to block; the default reports.
+
+**Settling** (`--settle`, a few minutes) answers the question the comparison can
+only infer: for the tests that arrived, which entries do they observe? It runs the
+modules holding the arrivals once unmutated, then once under each entry, through
+the gate's own `each_mutation` - so the recovery record and the restore on a
+signal are the gate's, not a second copy of them. An arrived test that fails under
+an entry and is not in that entry's set is **STALE**: a failure observed, not a
+suspicion, and it fails the job with the `--derive-mapping` command that produces
+the corrected set. What it still cannot see:
+
+- **The `src/` half**, as above. It runs arrived tests only, so a test that was
+  already there and was moved onto a mutated line by a source change is the
+  nightly's to find.
+- **A pre-existing test in an arrived module** that observes an entry not naming
+  it. That is real staleness, and it is not this branch's - so it is not reported
+  here, where it would fail a pull request for a defect it did not bring.
+- **An arrived test that fails with nothing applied.** It fails under every entry
+  too, so nothing about which it observes can be read off it; it is reported as
+  unjudged and the verdict stays SUSPECT.
+- **An arrived module that fails outside any test** under an entry - an import
+  that raised - hides whether its arrivals observe that entry. Also SUSPECT.
+- **Order dependence across modules.** The mapping is derived from a whole-suite
+  run and this runs the arrived modules alone, so a test that only fails after a
+  sibling module ran can differ. Within a module the order is the suite's.
+
+It settles the working tree, which is why `--settle` refuses a `--head` other than
+`HEAD`.
 
 Fail toward the expensive check, for the reason `mapping_trigger` does: a skip
 that should have run looks exactly like a pass. Every uncertainty here - no base,
@@ -48,6 +81,7 @@ a base this clone does not hold, a module that will not parse - ends at
     python3 tests/observer_staleness.py                   # against the last verified main
     python3 tests/observer_staleness.py --base ORIG_HEAD   # against the branch before a merge
     python3 tests/observer_staleness.py --json            # the same, for a caller
+    python3 tests/observer_staleness.py --settle          # run the arrivals under every entry
 """
 
 from __future__ import annotations
@@ -74,6 +108,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CLEAN = "CLEAN"
 SUSPECT = "SUSPECT"
 CANNOT_TELL = "CANNOT_TELL"
+# The fourth, reached only by settling: an arrived test was seen failing under an
+# entry that does not name it. Not a stronger suspicion - an observation.
+STALE = "STALE"
 
 # `unittest`'s own default prefix, which is what decides whether a method is
 # collected and therefore whether it can observe anything. Hard-coded rather than
@@ -113,6 +150,30 @@ class Suspect:
 
 
 @dataclass(frozen=True)
+class Stale:
+    """One entry, and the arrived tests that failed under it without being named.
+
+    Full `module.Class.test` ids, because that is the form the entry's `observers`
+    takes and the form `--derive-mapping` prints - the reader compares the two.
+    """
+
+    entry: str
+    unnamed: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Undecided:
+    """One entry under which an arrived module failed outside any test.
+
+    unittest reports an import that raised as the module alone, and then no test
+    in it ran - so whether the arrivals there observe this entry is unknown, not no.
+    """
+
+    entry: str
+    modules: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Report:
     """The verdict, the sentence that explains it, and what to act on.
 
@@ -127,6 +188,12 @@ class Report:
     reason: str
     suspects: tuple[Suspect, ...] = ()
     unattributed: tuple[str, ...] = ()
+    # The three below are filled only by settling. `unjudged` is arrived tests that
+    # failed with nothing applied, so no run under an entry could say anything
+    # about them.
+    stale: tuple[Stale, ...] = ()
+    undecided: tuple[Undecided, ...] = ()
+    unjudged: tuple[str, ...] = ()
 
 
 def test_ids(source: str) -> frozenset[str]:
@@ -290,6 +357,125 @@ def judge(table: tuple[gate.Mutation, ...], arrived: Arrivals | None, since: str
     )
 
 
+def settled(
+    table: tuple[gate.Mutation, ...],
+    arrived: Arrivals,
+    baseline: tuple[str, ...],
+    observed: dict[str, tuple[str, ...]],
+    since: str,
+) -> Report:
+    """The verdict over what the arrived modules reported, unmutated and per entry.
+
+    `baseline` is what failed with nothing applied, `observed` what failed under each
+    entry, keyed by name. Pure, so the comparison can be read apart from the runs.
+
+    Only the *arrived* ids are compared, not every test the arrived modules hold. A
+    test that was already in such a module and observes an entry not naming it is
+    real staleness, but this branch did not bring it - it is the nightly
+    `--verify-mapping`'s to report, and blaming a pull request for it would fail a
+    branch for a defect that was on `main` before it.
+    """
+    modules = tuple(sorted(arrived))
+    every = tuple(sorted(f"{module}.{test}" for module in modules for test in arrived[module]))
+    broken = set(baseline)
+    unjudged = tuple(
+        identifier
+        for identifier in every
+        if identifier in broken or gate.module_of(identifier) in broken
+    )
+    judged = set(every) - set(unjudged)
+
+    stale: list[Stale] = []
+    undecided: list[Undecided] = []
+    for entry in sorted(table, key=lambda mutation: mutation.name):
+        failed = set(gate.behavioural(observed.get(entry.name, ()))) - broken
+        named = set(entry.observers)
+        unnamed = tuple(sorted(test for test in judged if test in failed and test not in named))
+        if unnamed:
+            stale.append(Stale(entry.name, unnamed))
+        hidden = tuple(module for module in modules if module in failed and module not in named)
+        if hidden:
+            undecided.append(Undecided(entry.name, hidden))
+
+    ran = (
+        f"the {len(every)} test(s) that arrived since {since} were run unmutated and then "
+        f"under each of the {len(table)} entries"
+    )
+    if stale:
+        return Report(
+            STALE,
+            f"{len(stale)} entry(s) are observed by an arrived test they do not name: {ran}, "
+            "and each test listed failed with its entry applied. This is an observation, not a "
+            "suspicion - take each corrected set from the command beside it.",
+            stale=tuple(stale),
+            undecided=tuple(undecided),
+            unjudged=unjudged,
+        )
+    if undecided or unjudged:
+        return Report(
+            SUSPECT,
+            f"{ran}, and no judged arrival observes an entry that does not name it - but "
+            f"{len(unjudged)} arrived test(s) cannot be judged, and {len(undecided)} entry(s) "
+            "broke an arrived module outside any test, so those are not cleared.",
+            undecided=tuple(undecided),
+            unjudged=unjudged,
+        )
+    return Report(
+        CLEAN,
+        f"{ran}, and every arrival that failed under an entry is named by it. Arrived tests "
+        "only: a set can still be stale because `src/` moved an existing test onto a mutated "
+        "line, and the nightly run covers that half.",
+    )
+
+
+def observe_arrivals(
+    table: tuple[gate.Mutation, ...], modules: tuple[str, ...]
+) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
+    """What the arrived modules reported unmutated, and under each entry.
+
+    Through `each_mutation`, the gate's one applier: it writes the recovery record
+    before a file is touched and restores on a signal, so a settle run that is
+    killed is recovered by the next gate run exactly as a sweep would be. The
+    recovery and import-path checks come first for the gate's reasons - a mutation
+    left applied, or a child importing an installed copy, makes every run below
+    conclude about the wrong tree.
+    """
+    if gate.recover() or gate.check_import_path():
+        raise SystemExit(1)
+    observed: dict[str, tuple[str, ...]] = {}
+    # An empty excusal, as every gate mode but `--derive-mapping` enters: the
+    # variable is the run's channel to its children, not a value left in a shell.
+    with gate.excusing_unmapped(()):
+        baseline = gate._run(modules).observers  # noqa: SLF001
+
+        def observe(mutation: gate.Mutation) -> None:
+            observed[mutation.name] = gate._run(modules).observers  # noqa: SLF001
+            print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
+
+        interrupted = gate.each_mutation(table, observe)
+    if interrupted is not None:
+        raise SystemExit(interrupted)
+    return baseline, observed
+
+
+def settle(table: tuple[gate.Mutation, ...], arrived: Arrivals | None, since: str) -> Report:
+    """Settle what the id comparison can only suspect, by running the arrivals.
+
+    Nothing arrived is CLEAN by the comparison already, and runs nothing: unittest
+    reports a run of no tests as a pass, so there would be nothing to read. An
+    arrival set that could not be read stays CANNOT_TELL.
+    """
+    if not arrived:
+        return judge(table, arrived, since)
+    baseline, observed = observe_arrivals(table, tuple(sorted(arrived)))
+    return settled(table, arrived, baseline, observed, since)
+
+
+def deriving(name: str) -> str:
+    """The command that prints an entry's corrected set, quoted as `verifying` does."""
+    return f"python3 tests/mutation_gate.py --derive-mapping --only {shlex.quote(name)}"
+
+
 def source_at(commit: str, path: str, *, run=subprocess.run) -> str | None:
     """One file as of one commit, or None when that commit does not hold it.
 
@@ -421,14 +607,16 @@ def remedies(report: Report) -> tuple[str, ...]:
     """
     if report.verdict == CLEAN:
         return ()
+    commands = [deriving(stale.entry) for stale in report.stale]
+    if report.undecided:
+        commands.append(verifying(undecided.entry for undecided in report.undecided))
     close = {suspect.entry for suspect in report.suspects if suspect.same_class}
     wider = {suspect.entry for suspect in report.suspects} - close
-    commands = []
     if close:
         commands.append(verifying(close))
     if wider:
         commands.append(verifying(wider))
-    if report.unattributed or report.verdict == CANNOT_TELL:
+    if report.unattributed or report.unjudged or report.verdict == CANNOT_TELL:
         commands.append(
             "python3 tests/mutation_gate.py --verify-mapping"
             f"  # the whole table, about {LEG_MINUTES} minutes over the four legs"
@@ -459,6 +647,22 @@ def by_module(report: Report) -> tuple[tuple[str, tuple[str, ...], tuple[Suspect
 def lines(report: Report) -> tuple[str, ...]:
     """The report as text, for a terminal and for the step summary alike."""
     written = [f"Observer staleness: {report.verdict} - {report.reason}"]
+    inline = set()
+    for stale in report.stale:
+        inline.add(deriving(stale.entry))
+        written.append(f"  STALE {stale.entry} - should also name:")
+        written.extend(f"    {test}" for test in stale.unnamed)
+        written.append(f"    $ {deriving(stale.entry)}")
+    for undecided in report.undecided:
+        written.append(
+            f"  UNDECIDED {undecided.entry} - {', '.join(undecided.modules)} failed outside any "
+            "test with it applied, so no arrival there could be judged"
+        )
+    if report.unjudged:
+        written.append(
+            f"  {len(report.unjudged)} arrived test(s) fail with no mutation applied, so they "
+            f"cannot be judged: {trigger.named(report.unjudged)}"
+        )
     for module, arrived, suspects in by_module(report):
         written.append(f"  {module} gained {len(arrived)} test(s): {trigger.named(arrived)}")
         close = [suspect.entry for suspect in suspects if suspect.same_class]
@@ -478,7 +682,7 @@ def lines(report: Report) -> tuple[str, ...]:
             f"  {len(report.unattributed)} test(s) arrived in modules no entry names, so no "
             f"entry can be ruled out: {trigger.named(report.unattributed)}"
         )
-    written.extend(f"  $ {command}" for command in remedies(report))
+    written.extend(f"  $ {command}" for command in remedies(report) if command not in inline)
     return tuple(written)
 
 
@@ -498,6 +702,15 @@ def as_dict(report: Report) -> dict[str, object]:
             for suspect in report.suspects
         ],
         "unattributed": list(report.unattributed),
+        "stale": [
+            {"entry": stale.entry, "unnamed": list(stale.unnamed), "remedy": deriving(stale.entry)}
+            for stale in report.stale
+        ],
+        "undecided": [
+            {"entry": undecided.entry, "modules": list(undecided.modules)}
+            for undecided in report.undecided
+        ],
+        "unjudged": list(report.unjudged),
         "remedies": list(remedies(report)),
     }
 
@@ -528,16 +741,39 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="exit non-zero for anything but CLEAN, for a caller that blocks on it",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--settle",
+        action="store_true",
+        help="run the arrived tests under every entry and fail on a stale one (minutes)",
+    )
+    parsed = parser.parse_args(argv)
+    if parsed.settle and parsed.head != "HEAD":
+        parser.error("--settle runs the working tree, so it compares against HEAD only")
+    return parsed
+
+
+def exit_code(report: Report, *, refuse: bool) -> int:
+    """Non-zero for STALE always, and for anything but CLEAN when asked to refuse.
+
+    STALE blocks by default because it is the one verdict that is an observation:
+    a test was seen failing under an entry that does not name it. SUSPECT and
+    CANNOT_TELL stay advisory - blocking on them is the trade `--refuse` names.
+    """
+    if report.verdict == STALE:
+        return 1
+    return 1 if refuse and report.verdict != CLEAN else 0
 
 
 def main(argv: list[str] | None = None, *, run=subprocess.run, runner=subprocess.run) -> int:
     parsed = _arguments(argv)
     base, since = base_for(parsed.base, runner=runner)
     arrived, why = (None, since) if base is None else what_arrived(base, parsed.head, run=run)
-    report = judge(gate.MUTATIONS, arrived, why or since)
+    if parsed.settle:
+        report = settle(gate.MUTATIONS, arrived, why or since)
+    else:
+        report = judge(gate.MUTATIONS, arrived, why or since)
     announce(report, as_json=parsed.json)
-    return 1 if parsed.refuse and report.verdict != CLEAN else 0
+    return exit_code(report, refuse=parsed.refuse)
 
 
 if __name__ == "__main__":
