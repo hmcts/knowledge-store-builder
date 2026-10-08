@@ -54,6 +54,7 @@ import posixpath
 import statistics
 import sys
 from collections import defaultdict
+from collections.abc import Container, Iterable
 from pathlib import Path
 from typing import TextIO
 
@@ -102,6 +103,24 @@ def group_by_directory(paths: list[str]) -> list[list[str]]:
     return [sorted(by_directory[key]) for key in sorted(by_directory)]
 
 
+def detected_images(detect: dict) -> list[str]:
+    """The files the detect result classifies as images, as it wrote them."""
+    return list((detect.get("files") or {}).get("image") or [])
+
+
+def image_chunks(files: Iterable[str], images: Container[str]) -> tuple[list[list[str]], list[str]]:
+    """(a chunk of its own for each image, sorted; every other file, in the order given).
+
+    The one place a plan decides which files are extracted alone. A full plan and a
+    delta both call it, so a change to the rule reaches both together: an image
+    gets its own chunk because vision needs its own context, and mixing images with
+    documents makes an agent do two jobs in one prompt.
+    """
+    listed = list(files)
+    own = [[path] for path in sorted(path for path in listed if path in images)]
+    return own, [path for path in listed if path not in images]
+
+
 def plan_chunks(
     detect: dict,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
@@ -121,13 +140,8 @@ def plan_chunks(
     if only is not None:
         files = {kind: [f for f in paths if f in only] for kind, paths in files.items()}
 
-    chunks: list[list[str]] = []
-    # An image per chunk: vision needs its own context, and mixing images with
-    # documents makes an agent do two jobs in one prompt.
-    chunks.extend([image] for image in files.get("image", []))
-
-    # Everything except images, which got a chunk each above.
-    grouped = [path for kind, paths in files.items() if kind != "image" for path in paths]
+    images = set(files.get("image", []))
+    chunks, grouped = image_chunks((path for paths in files.values() for path in paths), images)
     chunks.extend(chunk_groups(group_by_directory(grouped), chunk_size))
     return {f"{index + 1:04d}": chunk for index, chunk in enumerate(chunks)}
 
@@ -247,21 +261,17 @@ def pack_delta(
     order, keeps the relationships an agent can find; padding across repositories would
     ask it to relate files that have no relation.
     """
-    chunks: dict[str, list[str]] = {}
-    number = first
-    for image in sorted(f for f in files if f in images):
-        chunks[f"{number:04d}"] = [image]
-        number += 1
+    alone, rest = image_chunks(files, images)
     by_repository: dict[str, list[str]] = defaultdict(list)
-    for path in files:
-        if path not in images:
-            by_repository[drift.repository_of(path)].append(path)
+    for path in rest:
+        by_repository[drift.repository_of(path)].append(path)
+    packed = list(alone)
     for repository in sorted(by_repository):
         ordered = sorted(by_repository[repository], key=lambda p: (posixpath.dirname(p), p))
-        for start in range(0, len(ordered), chunk_size):
-            chunks[f"{number:04d}"] = ordered[start : start + chunk_size]
-            number += 1
-    return chunks
+        packed.extend(
+            ordered[start : start + chunk_size] for start in range(0, len(ordered), chunk_size)
+        )
+    return {f"{first + index:04d}": chunk for index, chunk in enumerate(packed)}
 
 
 def write_batches(plan: dict[str, list[str]], directory: Path, chunk_out: Path) -> int:
@@ -337,7 +347,7 @@ def plan_delta(arguments: argparse.Namespace) -> int:
         )
         return 0
 
-    images = {store_paths.relative(f) for f in (detect.get("files") or {}).get("image") or []}
+    images = {store_paths.relative(f) for f in detected_images(detect)}
     additions = pack_delta(files, arguments.chunk_size, first, images)
     placed = [f for chunk in additions.values() for f in chunk]
     if sorted(placed) != files:
@@ -476,6 +486,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    return write_full_plan(plan, counted, only, arguments)
+
+
+def write_full_plan(
+    plan: dict[str, list[str]],
+    counted: dict[str, list[str]],
+    only: set[str] | None,
+    arguments: argparse.Namespace,
+) -> int:
+    """Write a full or uncached plan, its batches if asked, and say what was written."""
     stored = store_paths.store_relative_plan(plan)
     # A measurement must not rewrite the artefact the chunk archive is keyed on, so
     # an uncached plan goes where the caller says, or to stdout - never over the

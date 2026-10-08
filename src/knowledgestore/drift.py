@@ -111,49 +111,62 @@ def name_status(clone: Path, before: str, after: str) -> tuple[list[tuple[str, s
     return list(zip(fields[0:-1:2], fields[1::2])), ""
 
 
+class Changes:
+    """What the diffs said, accumulated over every repository that moved."""
+
+    def __init__(self, planned: set[str]) -> None:
+        self.planned = planned
+        # Derived from the plan alone, "" included only when the plan holds an
+        # extensionless path: admitting one the plan never held would extract a file
+        # a full build would not.
+        self.admitted = {posixpath.splitext(path)[1] for path in planned}
+        self.new: set[str] = set()
+        self.changed: set[str] = set()
+        self.deleted: set[str] = set()
+        self.premature: list[str] = []
+
+    def add(self, status: str, relative: str) -> None:
+        """Classify one diff record. A rename never arrives: the diff runs --no-renames."""
+        if status == "A":
+            self.added(relative)
+        elif status == "D":
+            self.deleted.add(relative)
+        else:
+            self.changed.add(relative)
+
+    def added(self, relative: str) -> None:
+        # In the plan already: the plan postdates --before, which is refused.
+        if relative in self.planned:
+            self.premature.append(relative)
+        if posixpath.splitext(relative)[1] in self.admitted:
+            self.new.add(relative)
+
+    def drift(self) -> dict[str, list[str]]:
+        changed = self.changed & self.planned
+        deleted = self.deleted & self.planned
+        return {
+            "stale": sorted(self.new | changed | deleted),
+            "new": sorted(self.new),
+            "changed": sorted(changed),
+            "deleted": sorted(deleted),
+        }
+
+
 def measure(
     before: dict[str, str], after: dict[str, str], planned: set[str], repositories: Path
 ) -> tuple[dict[str, list[str]], list[str], dict[str, str], list[str]]:
     """(the drift, the repositories that moved, the ones whose diff failed, and the
     planned files the diff says were added after "before")."""
-    # Derived from the plan alone, "" included only when the plan holds an
-    # extensionless path: admitting one the plan never held would extract a file a
-    # full build would not.
-    admitted = {posixpath.splitext(path)[1] for path in planned}
-    new: set[str] = set()
-    changed: set[str] = set()
-    deleted: set[str] = set()
-    moved: list[str] = []
+    changes = Changes(planned)
+    moved = [name for name in sorted(set(before) & set(after)) if before[name] != after[name]]
     failed: dict[str, str] = {}
-    premature: list[str] = []
-    for name in sorted(set(before) & set(after)):
-        if before[name] == after[name]:
-            continue
-        moved.append(name)
-        changes, error = name_status(repositories / name, before[name], after[name])
+    for name in moved:
+        records, error = name_status(repositories / name, before[name], after[name])
         if error:
             failed[name] = error
-            continue
-        for status, path in changes:
-            relative = store_paths.relative(repositories / name / path)
-            if status == "A":
-                if relative in planned:
-                    premature.append(relative)
-                if posixpath.splitext(path)[1] in admitted:
-                    new.add(relative)
-            elif status == "D":
-                deleted.add(relative)
-            else:
-                changed.add(relative)
-    changed &= planned
-    deleted &= planned
-    result = {
-        "stale": sorted(new | changed | deleted),
-        "new": sorted(new),
-        "changed": sorted(changed),
-        "deleted": sorted(deleted),
-    }
-    return result, moved, failed, sorted(premature)
+        for status, path in records:
+            changes.add(status, store_paths.relative(repositories / name / path))
+    return changes.drift(), moved, failed, sorted(changes.premature)
 
 
 def repository_of(path: str) -> str:

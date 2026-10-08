@@ -12,6 +12,7 @@ import contextlib
 import io as _io
 import json
 import tempfile
+import unittest
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
@@ -291,7 +292,29 @@ class OnePerBatchTest(_Delta):
         self.assertEqual(batch["chunks"][0]["files"], [files[2]])
 
 
-if __name__ == "__main__":
-    import unittest
+class TheImageRuleHasOneHome(unittest.TestCase):
+    """A full plan and a delta must agree on which files are images given a chunk of
+    their own, because whatever that rule becomes has to reach both together."""
 
+    DOCUMENTS = [f"/s/repositories/alpha/docs/{name}.md" for name in ("a", "b", "c")]
+    IMAGES = ["/s/repositories/alpha/docs/x.png", "/s/repositories/beta/y.png"]
+
+    def test_a_full_plan_and_a_delta_give_the_same_files_a_chunk_of_their_own(self):
+        """Breaks if either path stops calling the shared rule. The documents share a
+        directory, so a one-file chunk can only be an image's own."""
+        detect = {"files": {"document": self.DOCUMENTS, "image": self.IMAGES}}
+        full = build_chunk_plan.plan_chunks(detect, chunk_size=22)
+        delta = build_chunk_plan.pack_delta(
+            sorted(self.DOCUMENTS + self.IMAGES),
+            22,
+            1,
+            set(build_chunk_plan.detected_images(detect)),
+        )
+        alone_in_full = sorted(c[0] for c in full.values() if len(c) == 1)
+        alone_in_delta = sorted(c[0] for c in delta.values() if len(c) == 1)
+        self.assertEqual(alone_in_full, self.IMAGES)
+        self.assertEqual(alone_in_delta, alone_in_full)
+
+
+if __name__ == "__main__":
     unittest.main()
