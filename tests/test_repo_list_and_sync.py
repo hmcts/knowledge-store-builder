@@ -558,6 +558,7 @@ class CliTest(SettingsIsolated):
                 "check-corpus",
                 "check-evidence",
                 "check-answers",
+                "check-citations",
             ],
         )
 

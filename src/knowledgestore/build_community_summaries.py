@@ -352,6 +352,7 @@ def _write_merged_summaries(
 #   S8707 policy site: chunk_status.py - log_tokens, citing merge
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
+#   S8707 policy site: check_citations.py - check, citing merge
 #   S8707 policy site: build_content_set.py - a write, validated the same way
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]
@@ -2565,12 +2566,6 @@ def estate_vocabulary() -> tuple[set[str], set[str]]:
     identifiers.discard("")
     segments.discard("")
     return identifiers, {part for part in segments if len(part) >= MIN_SEGMENT_MATCH}
-
-
-def estate_identifiers() -> set[str]:
-    """The whole identifiers only. Kept because a caller wanting the strict set
-    should not have to discard the segments to get it."""
-    return estate_vocabulary()[0]
 
 
 def name_segments(identifier: str) -> set[str]:

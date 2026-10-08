@@ -170,9 +170,12 @@ knowledgestore status --drift                # how far the sources have moved
 knowledgestore summaries verify --sample 200 # is the prose grounded in evidence?
 knowledgestore check-install-docs            # can a reader run your install commands?
 knowledgestore check-evidence                # does committed commit text identify a case?
+knowledgestore check-citations               # does every cited identifier exist in the graph?
 ```
 
-`check-install-docs` and `check-evidence` exit non-zero, so they belong in CI.
+`check-install-docs`, `check-evidence` and `check-citations` exit non-zero, so they belong in CI.
+`check-citations` names the answer file, the citation and the nearest real identifier;
+a `table.column` citation is listed apart and never fails the run.
 `check-evidence` names the ticket, the field and the rule, never the value.
 `status` never fails by design - drift is a condition to read, not a broken
 build.

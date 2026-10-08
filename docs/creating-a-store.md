@@ -540,6 +540,31 @@ provenance, layer coverage, dangling citations, the recorded partitioner and
 whether the page predates a layer it embeds. It always exits zero because drift and missing optional layers
 are conditions to assess, not build failures; read the report.
 
+### Check that answers cite real code
+
+```bash
+knowledgestore check-citations                     # docs/topics and docs/deep-dives
+knowledgestore check-citations docs/answers/ a.md  # or name files and directories
+```
+
+Every backticked identifier in a published answer is looked up in the graph. Call
+arguments are ignored, so `setValue(null)` resolves where the graph holds
+`.setValue()`; a chain such as `ofNullable(...).ifPresent(...)` needs every member
+to resolve. A path resolves when its directories are the trailing directories of a
+real source file. An identifier that does not resolve is printed with the nearest
+real one, and the stage exits 1. It exits 2, having asserted nothing, when there is
+no graph or no answer to read.
+
+A `table.column` citation is a third result. The graph holds code, so a database
+column never resolves and never should. These are counted and named, and do not
+change the exit code; read the list and decide. Generated evidence is never read,
+and fenced code blocks are skipped. A pass shows the cited thing exists, not that
+the claim about it is true.
+
+Stores that wrote their own gate should replace it with this stage rather than
+importing `build_community_summaries._normalise`, which is private. The supported
+name is `knowledgestore.check_citations.normalise`.
+
 ### Know what the command guards refuse
 
 The plugin refuses five command shapes before Claude Code runs them, each a
