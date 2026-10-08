@@ -87,7 +87,13 @@ pythonpath = ["src"]
 # decision and not one to take alongside a new gate. Named narrowly instead,
 # because a gate CI never type-checks is the shape of problem this one exists
 # to prevent - a check reporting green about a file it never read.
-include = ["src", "tests/docs_integrity.py", "tests/test_docs_integrity.py"]
+include = [
+    "src",
+    "tests/docs_integrity.py",
+    "tests/test_docs_integrity.py",
+    "tests/documented_flags.py",
+    "tests/test_documented_flags.py",
+]
 # Stage modules read module-level path constants that tests and configure()
 # rebind, so inferred types are deliberately loose in places.
 typeCheckingMode = "basic"

@@ -1,0 +1,23 @@
+# Flags that belong to pip, git or graphify and are named in prose or a block with
+# no command beside them.
+#
+# `tests/documented_flags.py` checks every `--flag` a shipped document names against
+# the stage it is attributed to. A flag in a command line is attributed by the
+# command (`pip install --upgrade` is pip's, not a stage's), so those need no entry.
+# This list is for the rest: a sentence that says "do not add `--no-cluster`", or a
+# requirements file whose first line is `--extra-index-url`. Without an entry, the
+# gate cannot tell them from a stage flag that does not exist, and reports them.
+#
+# The gate holds this list honest in both directions: an entry that a stage also
+# declares is reported, because it would hide a wrong use of that stage's flag, and
+# an entry no shipped document names is reported as stale.
+#
+# One entry per line: `--flag :: tool`. Blank lines and `#` comments are ignored.
+--extra-index-url :: pip
+--only-binary :: pip
+--hash :: pip
+--emit-index-url :: uv
+--no-cluster :: graphify
+--force :: graphify
+--numstat :: git
+--diff-merges :: git
