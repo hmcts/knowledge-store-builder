@@ -357,9 +357,14 @@ class ExplorerWiringTest(SettingsIsolated):
         # indices cost fewer bytes than the values (#245), so the embedded rows
         # are not the rows the stage counted - and the ticket column of an
         # encoded row is a count of something else. Through the shipped decoder,
-        # because a second one here would be a second chance to be wrong.
+        # because a second one here would be a second chance to be wrong. With
+        # the columns the page dropped put back (#338): an empty column leaves
+        # every row, so position 7 of an embedded row is not the ticket column.
         dicts = page.split('<script id="dicts" type="application/json">')[1].split("</script>")[0]
-        rows = build_explorer.decode_rows(json.loads(block), json.loads(dicts))
+        opening = '<script id="config" type="application/json">'
+        declared = page.split(opening)[1].split("</script>")[0]
+        dropped = json.loads(declared).get(build_explorer.DROPPED_COLUMNS_KEY, {})
+        rows = build_explorer.decode_rows(json.loads(block), json.loads(dicts), dropped)
         self.assertEqual(recorded["explorer.rows_indexed"], len(rows))
         self.assertEqual(recorded["explorer.rows_with_tickets"], sum(1 for r in rows if r[7]))
 

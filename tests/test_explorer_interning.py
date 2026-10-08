@@ -31,7 +31,9 @@ import io
 import json
 import random
 import re
+import shutil
 import string
+import subprocess
 import tempfile
 import unittest
 from collections import Counter
@@ -42,6 +44,17 @@ from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import build_explorer as explorer  # noqa: E402
 from knowledgestore import io as store_io  # noqa: E402
+
+
+"""What `sample_rows` saves by dropping its empty deployment column, and what
+naming it costs - both counted by hand.
+
+Forty rows each lose `""` and the `", "` beside it: 40 x 4 = 160. #config gains
+`, "droppedColumns": {"9": ""}`: the separator 2, the key 16, `: ` 2 and the
+value 9 - 29 bytes.
+"""
+SAMPLE_DROP_SAVING = 160
+SAMPLE_LAYOUT_BYTES = 29
 
 
 """The #dicts element the page gains, written out by hand.
@@ -547,6 +560,45 @@ class RoundTripTest(unittest.TestCase):
 
         self.assertIn("does not decode back", str(raised.exception))
 
+    def test_dropped_columns_come_back_where_they_were(self):
+        """Breaks if dropping or restoring several columns works in the wrong order.
+
+        Columns 2, 3 and 9 empty, and 2 and 3 adjacent: taking them out lowest
+        first removes column 4 as the second removal, and putting them back
+        highest first inserts column 9 past the end of a seven-wide row. Either
+        returns rows of the right length holding values in the wrong columns,
+        which only equality with the rows the index built can see.
+        """
+        rows = sample_rows()
+        for row in rows:
+            row[2] = row[3] = ""
+        plan, tables = explorer.interning_plan(rows)
+        dropped = explorer.dropped_columns(plan)
+        encoded = explorer.drop_columns(explorer.encode_rows(rows, tables), dropped)
+
+        self.assertEqual(dropped, {"2": "", "3": "", "9": ""})
+        self.assertEqual({len(row) for row in encoded}, {7})
+        self.assertEqual(explorer.decode_rows(encoded, tables, dropped), rows)
+        explorer.verify_round_trip(rows, encoded, tables, dropped)
+
+    def test_only_a_column_with_one_scalar_empty_value_is_dropped(self):
+        """Breaks if dropping widens to every column that carries no information.
+
+        The page restores a dropped column from the single value it names. A
+        column mixing `""` and `None` restored to either changes the other's
+        rows, and a list column of `[""]` restored to `""` changes every row's
+        shape. Both are uninformative and neither may leave the page.
+        """
+        mixed = rows_carrying(9, [""] * 6 + [None] * 6)
+        listed = rows_carrying(7, [[""]] * 12)
+        for rows, column in ((mixed, 9), (listed, 7)):
+            with self.subTest(column=column):
+                plan, _ = explorer.interning_plan(rows)
+
+                self.assertTrue(plan[column].uninformative)
+                self.assertFalse(plan[column].dropped)
+                self.assertNotIn(str(column), explorer.dropped_columns(plan))
+
     def test_a_row_column_with_no_name_is_refused(self):
         """Breaks if a column added to the row can go unnamed.
 
@@ -581,25 +633,30 @@ class InterningReportTest(unittest.TestCase):
         for item in plan:
             with self.subTest(column=item.name):
                 line = next(text for text in report.splitlines() if f" {item.name} " in text + " ")
-                self.assertIn("interned" if item.interned else "declined", line)
+                verdict = "interned" if item.interned else "declined"
+                self.assertIn("dropped" if item.dropped else verdict, line)
                 self.assertIn(f"{item.distinct:,} distinct", line)
                 self.assertIn(f"{item.occurrences:,} values", line)
         self.assertEqual(len(explorer.COLUMN_NAMES), len(plan))
 
-    def test_a_column_empty_in_every_row_is_named_as_carrying_no_information(self):
-        """Breaks if the step before the rule is dropped.
+    def test_a_column_empty_in_every_row_is_dropped_and_says_why(self):
+        """Breaks if an empty column is interned, or dropped without a reason given.
 
         No encoding of an empty column beats removing it, and interning one
-        quietly represents nothing efficiently instead of saying so. Dropping a
-        column renumbers every positional read in the page application, so it is
-        a change to the row's shape rather than to its encoding - which is
-        exactly why the operator has to be told rather than have it done.
+        quietly represents nothing efficiently. Its line says what was done and
+        what it saved: forty rows of `""` and the `", "` beside each, 40 x 4.
         """
-        plan, _ = explorer.interning_plan(sample_rows())
+        plan, tables = explorer.interning_plan(sample_rows())
         deployment = next(item for item in plan if item.name == "deployment")
+        line = next(
+            text for text in explorer.interning_report(plan).splitlines() if " deployment " in text
+        )
 
-        self.assertTrue(deployment.uninformative)
-        self.assertIn("carries no information", explorer.interning_report(plan))
+        self.assertTrue(deployment.dropped)
+        self.assertNotIn("9", tables)
+        self.assertIn("dropped", line)
+        self.assertIn("saves          160 bytes", line)
+        self.assertIn("carries no information", line)
 
 
 class InternedPageTest(SettingsIsolated):
@@ -656,6 +713,16 @@ class InternedPageTest(SettingsIsolated):
         dicts = page.split(opening % "dicts")[1].split("</script>")[0]
         return json.loads(data), json.loads(dicts), data, dicts
 
+    def _config(self) -> tuple[dict, str]:
+        """The page's #config block, parsed and as written."""
+        page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+        text = page.split('<script id="config" type="application/json">')[1].split("</script>")[0]
+        return json.loads(text), text
+
+    def _dropped(self) -> dict:
+        """The columns this page left off its rows, as the page itself names them."""
+        return self._config()[0].get(explorer.DROPPED_COLUMNS_KEY, {})
+
     def test_the_page_decodes_to_exactly_the_rows_the_build_built(self):
         """Breaks if the page's rows stop being the rows the index computed.
 
@@ -672,9 +739,11 @@ class InternedPageTest(SettingsIsolated):
                 entries, _ = explorer.build_index(graph, labels, {})
             self._build()
             rows, tables, _, _ = self._blocks()
+            dropped = self._dropped()
 
         self.assertTrue(tables, "no column was interned, so this asserts nothing")
-        self.assertEqual(explorer.decode_rows(rows, tables), entries)
+        self.assertEqual(dropped, {"9": ""}, "the empty deployment column was not dropped")
+        self.assertEqual(explorer.decode_rows(rows, tables, dropped), entries)
 
     def test_the_table_costs_exactly_what_the_page_writes(self):
         """Breaks if the separator convention drifts from the serialisation.
@@ -690,8 +759,9 @@ class InternedPageTest(SettingsIsolated):
             self._store(Path(tmp).resolve())
             self._build()
             rows, tables, _, dicts = self._blocks()
+            dropped = self._dropped()
 
-        plan, _ = explorer.interning_plan(explorer.decode_rows(rows, tables))
+        plan, _ = explorer.interning_plan(explorer.decode_rows(rows, tables, dropped))
         modelled = sum(item.table_bytes for item in plan if item.interned)
         self.assertEqual(modelled, len(dicts.encode("utf-8")))
 
@@ -708,13 +778,18 @@ class InternedPageTest(SettingsIsolated):
             self._store(Path(tmp).resolve())
             self._build()
             rows, tables, data, dicts = self._blocks()
+            dropped = self._dropped()
 
-        decoded = explorer.decode_rows(rows, tables)
+        decoded = explorer.decode_rows(rows, tables, dropped)
         plan, _ = explorer.interning_plan(decoded)
         plain = json.dumps(decoded, ensure_ascii=False).replace("</", "<\\/")
         actual = len(plain.encode("utf-8")) - len(data.encode("utf-8")) - len(dicts.encode("utf-8"))
+        modelled = sum(item.saving for item in plan if item.interned) + sum(
+            item.drop_saving for item in plan if item.dropped
+        )
 
-        self.assertEqual(sum(item.saving for item in plan if item.interned), actual)
+        self.assertTrue(dropped, "no column was dropped, so the drop term is unchecked")
+        self.assertEqual(modelled, actual)
         self.assertGreater(actual, 0)
 
     def test_the_reported_net_is_the_bytes_the_page_actually_lost(self):
@@ -736,14 +811,22 @@ class InternedPageTest(SettingsIsolated):
             stdout = self._build()
             page = config.EXPLORER_PATH.read_text(encoding="utf-8")
             rows, tables, data, dicts = self._blocks()
+            declared, config_block = self._config()
 
-        plain = json.dumps(explorer.decode_rows(rows, tables), ensure_ascii=False)
+        dropped = declared.pop(explorer.DROPPED_COLUMNS_KEY)
+        plain = json.dumps(explorer.decode_rows(rows, tables, dropped), ensure_ascii=False)
         tag_bytes = len(dicts_tag_on(page).encode("utf-8"))
+        # What #config spends naming the dropped columns: the block as written,
+        # less the same block without the key.
+        layout = len(config_block.encode("utf-8")) - len(
+            json.dumps(declared, ensure_ascii=False).encode("utf-8")
+        )
         actual = (
             len(plain.replace("</", "<\\/").encode("utf-8"))
             - len(data.encode("utf-8"))
             - len(dicts.encode("utf-8"))
             - tag_bytes
+            - layout
         )
         net = re.search(r"net ([\d,]+) bytes off", stdout)
 
@@ -763,7 +846,9 @@ class InternedPageTest(SettingsIsolated):
 
         The value as well as the key. `pageFormat: 1` on an interned page is the
         one statement worse than no statement at all: it invites a format-1
-        reader to rank this page's indices as labels and report a score.
+        reader to rank this page's indices as labels and report a score - and
+        `2` on a page that dropped a column invites a format-2 reader to read
+        every column after the gap as its neighbour's.
         """
         with tempfile.TemporaryDirectory() as tmp:
             self._store(Path(tmp).resolve())
@@ -775,7 +860,8 @@ class InternedPageTest(SettingsIsolated):
         declared = json.loads(block.split("</script>")[0])
 
         self.assertTrue(tables, "nothing was interned, so this page is not format 2")
-        self.assertEqual(declared.get("pageFormat"), 2)
+        self.assertIn(explorer.DROPPED_COLUMNS_KEY, declared, "nothing dropped: not format 3")
+        self.assertEqual(declared.get("pageFormat"), 3)
 
     def test_a_build_whose_encoding_is_wrong_stops_instead_of_writing_a_page(self):
         """Breaks if the build stops verifying its encoding before it writes.
@@ -838,6 +924,103 @@ class InternedPageTest(SettingsIsolated):
         self.assertEqual(first, second)
 
 
+class DroppedColumnPageTest(SettingsIsolated):
+    """A column empty in every row leaves the page, and the page reads the same.
+
+    The page application reads a row by position in fifty places, so a row one
+    column shorter than the reader expects does not fail: it shifts every read
+    after the gap onto its neighbour's field, and the page answers every
+    question about the wrong value with the right shape. The only test of that
+    is the reader's own output, so this drives the shipped engine over two real
+    builds of one graph - one dropping the empty columns, one keeping them - and
+    requires every answer to agree.
+    """
+
+    QUESTIONS = (
+        "which repositories implement Widget0003?",
+        "what is impacted if Widget0005 changes?",
+        "why does Widget0002 exist?",
+        "widget",
+        "repo-1",
+    )
+
+    def _store(self, root: Path) -> None:
+        """Twelve nodes with no source file, no community label and no deployment.
+
+        Three empty columns, and two of them sit before columns every answer
+        reads - the kind, the degree, the connections - so a reader that lost
+        track of the gap would misplace those rather than only the last field,
+        where a missing value reads as the empty string it stood for.
+        """
+        config.configure(root=root, MIN_ENTRY_DEGREE=1)
+        nodes = [
+            {
+                "id": f"n{index}",
+                "label": f"Widget{index:04d}",
+                "repo": f"repo-{index % 3}",
+                "community": index % 2,
+                "file_type": "code",
+                "metadata": {},
+            }
+            for index in range(12)
+        ]
+        links = [
+            {"source": f"n{index}", "target": f"n{(index + step) % 12}"}
+            for index in range(12)
+            for step in (1, 2)
+        ]
+        store_io.write_json(config.GRAPH_PATH, {"nodes": nodes, "links": links})
+        store_io.write_json(config.LABELS_PATH, {})
+
+    def _answers(self, page: Path) -> dict:
+        script = Path(__file__).resolve().parent / "explorer" / "page-answers.mjs"
+        completed = subprocess.run(
+            ["node", str(script), str(page), json.dumps(list(self.QUESTIONS))],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return json.loads(completed.stdout)
+
+    def _page(self, root: Path) -> Path:
+        self._store(root)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(explorer.main(), 0)
+        return config.EXPLORER_PATH
+
+    def test_a_page_with_its_empty_columns_dropped_answers_as_one_carrying_them(self):
+        """Breaks if a dropped column moves any read onto its neighbour's field.
+
+        The page carrying the columns is built through the same stage with the
+        drop decision stubbed to drop nothing - everything downstream of that
+        decision is the real build and the real engine. Both widths are asserted
+        first, because two full-width pages agree trivially and two pages that
+        both dropped would compare the drop with itself.
+
+        The rows the engine holds as well as its answers. Restoring the columns in
+        the wrong order was a mutation the answers alone did not see on this
+        graph: the misplaced cells landed on an interned index of 0, which the
+        page renders exactly as the empty string it displaced.
+        """
+        self.assertIsNotNone(shutil.which("node"), "the shipped engine runs under Node")
+        with tempfile.TemporaryDirectory() as tmp:
+            dropped = self._answers(self._page(Path(tmp, "dropped").resolve()))
+            real = explorer.dropped_columns
+            self.addCleanup(setattr, explorer, "dropped_columns", real)
+            explorer.dropped_columns = lambda plan: {}
+            carried = self._answers(self._page(Path(tmp, "carried").resolve()))
+
+        self.assertEqual(carried["rowWidth"], len(explorer.COLUMN_NAMES))
+        self.assertEqual(dropped["rowWidth"], len(explorer.COLUMN_NAMES) - 3)
+        # Not vacuous: every question found the entry it names, in both modes.
+        for answer in carried["answers"]:
+            with self.subTest(question=answer["question"]):
+                self.assertIn("Widget", answer["ask"]["html"] + answer["search"]["html"])
+        self.assertEqual(dropped["rows"], carried["rows"])
+        self.assertEqual(dropped["answers"], carried["answers"])
+
+
 class ReportedNumbersTest(unittest.TestCase):
     """The report's own arithmetic, which an operator is invited to check."""
 
@@ -853,7 +1036,12 @@ class ReportedNumbersTest(unittest.TestCase):
         report = explorer.interning_report(plan)
 
         value_bytes = sum(item.field_bytes for item in plan)
-        net = sum(item.saving for item in plan if item.interned) - len(DICTS_TAG.encode("utf-8"))
+        net = (
+            sum(item.saving for item in plan if item.interned)
+            + SAMPLE_DROP_SAVING
+            - len(DICTS_TAG.encode("utf-8"))
+            - SAMPLE_LAYOUT_BYTES
+        )
         self.assertIn(f"{value_bytes:,} value bytes", report)
         self.assertIn(f"({net * 100 // value_bytes}% of them)", report)
         self.assertIn("structural bytes", report)
@@ -866,15 +1054,19 @@ class ReportedNumbersTest(unittest.TestCase):
         thing start disagreeing. The tag is part of that arithmetic (#333): the
         columns save bytes off the block's values, the block's script element is
         a byte cost the page pays whichever way every column went, and the
-        headline is the difference.
+        headline is the difference. A dropped column adds its own saving and the
+        bytes #config spends naming it (#338), which the report says beside the
+        tag.
         """
         plan, _ = explorer.interning_plan(sample_rows())
         report = explorer.interning_report(plan)
 
-        saved = sum(item.saving for item in plan if item.interned)
+        saved = sum(item.saving for item in plan if item.interned) + SAMPLE_DROP_SAVING
+        expected = saved - len(DICTS_TAG.encode("utf-8")) - SAMPLE_LAYOUT_BYTES
         net = re.search(r"net ([\d,]+) bytes", report)
         assert net is not None
-        self.assertEqual(int(net.group(1).replace(",", "")), saved - len(DICTS_TAG.encode("utf-8")))
+        self.assertEqual(int(net.group(1).replace(",", "")), expected)
+        self.assertIn(f"the {SAMPLE_LAYOUT_BYTES} bytes #config spends naming", report)
 
     def test_the_tag_the_report_subtracts_is_the_one_the_template_writes(self):
         """Breaks if the subtracted cost stops describing the page's own tag.
@@ -913,17 +1105,24 @@ class ReportedNumbersTest(unittest.TestCase):
         that are right.
 
         Twelve rows, hand-costed: column 0 holds `"abc"` throughout, so it saves
-        60 - 14 - 12 = 34; the five string columns left empty each save
-        24 - 11 - 12 = 1; the two integer and two list columns lose. That is 39
-        bytes off the values against a 53-byte tag, so the page is 14 bytes
-        LARGER interned than plain - and before this the report called it a
-        saving of 39 with no mention of the tag at all.
+        60 - 14 - 12 = 34. The other string columns hold twelve distinct letters,
+        so none is empty enough to drop, and each loses 36 - 67 - 14: the values
+        cost 36 either way, the table adds 22 of `", "`, 2 brackets and 7 of key,
+        and the indices are ten one-digit and two two-digit. The two integer and
+        two list columns lose too. That is 34 bytes off the values against a
+        53-byte tag, so the page is 19 bytes LARGER interned than plain - and
+        before #333 the report called it a saving with no mention of the tag.
         """
-        plan, _ = explorer.interning_plan(rows_carrying(0, ["abc"] * 12))
+        rows = rows_carrying(0, ["abc"] * 12)
+        for row, letter in zip(rows, string.ascii_lowercase):
+            for column in (1, 2, 3, 4, 9):
+                row[column] = letter
+        plan, _ = explorer.interning_plan(rows)
         report = explorer.interning_report(plan)
 
-        self.assertIn("net 14 bytes ONTO the page", report)
-        self.assertIn("save 39 bytes between them", report)
+        self.assertFalse([item.name for item in plan if item.dropped])
+        self.assertIn("net 19 bytes ONTO the page", report)
+        self.assertIn("save 34 bytes between them", report)
         # The saving wording belongs to a page that shrank, and this one grew.
         self.assertNotIn("bytes off the block", report)
 

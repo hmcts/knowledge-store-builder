@@ -63,8 +63,26 @@ const TICKET_INFO = JSON.parse(getEl('tickets').textContent || '{}');
  * an absent block parses to, and `decodeRows` is then the identity.
  * @type {Record<string, (string|number)[]>} */
 const DICTS = JSON.parse(getEl('dicts').textContent || '{}');
+/** Page configuration embedded at build time (see build_explorer.py;
+ * override with env vars, e.g. JIRA_BROWSE_URL for other Jira instances).
+ *
+ * `pageFormat` says what shape the page's blocks are in - 1 for a page built
+ * before data-block interning, which carries no marker at all, 2 for the
+ * interned block, 3 for rows that may omit an empty column. Nothing here reads
+ * it, on purpose: a page inlines the app.js that built it, so the engine
+ * running in a browser cannot mismatch its page's format. The reader that CAN
+ * is `explorer_harness.mjs`, and it refuses a format it does not know (#332).
+ *
+ * `droppedColumns`: the columns left off every row, by full-row position, each
+ * with the one value it held (#338); absent when none were. Parsed ahead of the
+ * rows because `decodeRows` restores them.
+ * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string,
+ *         droppedColumns?: Record<string, string|number|null>}} */
+const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 /** @type {Entry[]} */
-const DATA = decodeRows(JSON.parse(getEl('data').textContent || '[]'), DICTS);
+const DATA = decodeRows(
+  JSON.parse(getEl('data').textContent || '[]'), DICTS, CONFIG.droppedColumns || {}
+);
 /** @type {number[]} */
 const EDGE_FLAT = JSON.parse(getEl('edges').textContent || '[]');
 const N = DATA.length;
@@ -119,12 +137,16 @@ const STOP = new Set(
    + ' exist exists existed thing things way ways going want wants').split(' ')
 );
 
-/** Interned columns of #data restored to the values they stood for.
+/** Dropped columns put back and interned columns of #data restored to the
+ * values they stood for.
  *
  * A row is positional and is read by index in fifty places below, so decoding
  * restores it exactly - same length, same order, same types - and nothing
- * downstream can tell an interned page from a plain one. The interning is a
- * wire format for the file, not a shape the engine knows about.
+ * downstream can tell an interned page from a plain one, or one that dropped an
+ * empty column from one that carried it: every read keeps its index.
+ *
+ * Dropped columns first, lowest position first: the tables and each insertion
+ * name full-row positions, right only once every earlier column is back.
  *
  * In place, not into new rows: on the largest pages these rows are the biggest
  * object in the browser, and rebuilding them would hold both copies at once for
@@ -137,11 +159,14 @@ const STOP = new Set(
  *
  * @param {any[][]} rows
  * @param {Record<string, (string|number)[]>} dicts
+ * @param {Record<string, string|number|null>} [dropped]
  * @returns {Entry[]}
  */
-function decodeRows(rows, dicts) {
+function decodeRows(rows, dicts, dropped = {}) {
   const columns = Object.keys(dicts);
+  const restored = Object.keys(dropped).map(Number).sort((a, b) => a - b);
   for (const row of rows) {
+    for (const position of restored) row.splice(position, 0, dropped[String(position)]);
     for (const key of columns) {
       const table = dicts[key];
       const cell = row[Number(key)];
@@ -210,20 +235,6 @@ function ticketDates(info, hasTitle) {
   return ' <span class="tdates">(' + range + source + ')</span>';
 }
 
-/** Page configuration embedded at build time (see build_explorer.py;
- * override with env vars, e.g. JIRA_BROWSE_URL for other Jira instances).
- *
- * `pageFormat` says what shape the page's blocks are in - 1 for a page built
- * before data-block interning, which carries no marker at all, and 2 for the
- * interned block. Nothing here reads it, on purpose: a page inlines the app.js
- * that built it, so the engine running in a browser is always the engine of that
- * page's own format and cannot mismatch. The reader that CAN mismatch is
- * `explorer_harness.mjs`, which pairs an installed app.js with a store's
- * published page, and it refuses there on a format it does not recognise
- * (#332). A second copy of the number here, kept in step by hand, would guard
- * nothing and drift.
- * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string}} */
-const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
 
 /** Topic briefs (GraphRAG phase 3): pre-written narratives composed at
