@@ -760,6 +760,55 @@ clustering, gate the normalisation on a plausible node count, and verify that a
 downstream join still works — a silent format drift produced zero
 step-definition edges once, and nothing else noticed.
 
+### Measuring what a run costs
+
+Plan a run from what the last one measured, never from an estimate.
+
+```bash
+# Headless runs: keep each run's result object.
+claude -p --output-format json "<brief>" > runs/<batch>.json
+knowledgestore cost runs/
+
+# Subagents dispatched from a session: read their transcripts.
+knowledgestore cost ~/.claude/projects/<project>/<session>/subagents/
+```
+
+`cost` writes nothing. It accepts files or directories, reads a `.json` file as
+a headless result and a `.jsonl` or `.output` file as a transcript, and names how
+many files it skipped as neither. If it reads no run at all, it exits 2 rather
+than report a zero.
+
+**A naive sum over a transcript double-counts.** A transcript writes one record
+per content block of an assistant turn, and each record carries the whole turn's
+usage under the same message id. A turn that thinks, writes and calls a tool
+appears three times. One estate's first pass summed every record and read 796M
+input tokens. De-duplicated by message id, the same transcripts read 414M. `cost`
+counts each message id once across every file it reads, and prints the naive
+figure beside it so you can see the gap.
+
+**Input is the sum of three fields, per distinct message:**
+`input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
+`output_tokens` on transcript records is under-reported, because the records
+are written while the turn streams. `cost` reports the largest value per turn as
+a floor ("at least"), never as the output. Transcripts carry no price. For cost
+in money, run headless: each result object carries `usage` and `total_cost_usd`
+for the whole run, and `cost` sums both.
+
+**What the number means.** An agent's cost is the context it re-reads on every
+turn: a base of about 35K tokens before it reads anything, plus everything it
+has read and written so far, re-sent each turn. On the estate measured in
+[#399](https://github.com/hmcts/knowledge-store-builder/issues/399), cache reads
+and cache writes split the money roughly evenly and output was about 10%. So the
+levers are what enters the context and how many turns re-read it. Terser output
+measured negligible. The efficiency work that followed the measurement took
+extraction from about 74K input tokens per file to 21.5K.
+
+**Record an estimate as an estimate.** That estate's runbook planned a full
+re-extraction at "~50M tokens". Measured from the agents' usage records, it
+was about 1.7–2.2 billion, more than 30 times higher, and nothing showed the
+gap until someone measured. Mark any figure in a runbook that was not measured
+as an estimate, and give the date it was last measured.
+
 ## 8. Keeping a store honest
 
 - **Never state a count in prose.** Repository, node and coverage figures are

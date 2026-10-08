@@ -44,6 +44,7 @@ SELF_PARSING = frozenset(
         "extract-ast",
         "gaps",
         "size-cuts",
+        "cost",
     }
 )
 
@@ -184,6 +185,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "gaps": (
         "report_ingestion_gaps",
         "rank what this estate depends on and does not hold (a report, not an action)",
+    ),
+    "cost": (
+        "cost",
+        "report what a run consumed, from result files and transcripts (de-duplicated)",
     ),
     "check-install-docs": (
         "check_install_docs",

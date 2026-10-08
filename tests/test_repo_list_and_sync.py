@@ -558,6 +558,9 @@ class CliTest(SettingsIsolated):
                 # also not part of a build: asks what the estate should ingest
                 # next, from the dependency evidence its clones already carry
                 "gaps",
+                # not part of a build: reads what a run consumed from its usage
+                # records, so the next one is planned on a measurement (#399)
+                "cost",
                 # not part of a build: gates a store runs in CI
                 "check-install-docs",
                 "check-corpus",
