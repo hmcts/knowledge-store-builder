@@ -162,6 +162,18 @@ names a failing repository without losing the others, refuses the pipeline's own
 output as input, and takes the computed content set rather than an exclusion
 list. See *Extract the AST layer* in `docs/creating-a-store.md`.
 
+### The semantic fan-out's chunk gate
+
+```bash
+knowledgestore check-chunk --self-test             # proves every rule can fire
+knowledgestore check-chunk --batch batch-07.json   # each chunk against its own files
+```
+
+Hand `check-chunk` to every extraction agent rather than having each write a
+checker. It exits non-zero on any violation and needs graphify (the `[ast]`
+extra). See *Check each semantic chunk before merging* in
+`docs/creating-a-store.md`.
+
 ### Checks worth running
 
 ```bash

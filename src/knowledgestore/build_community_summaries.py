@@ -353,6 +353,7 @@ def _write_merged_summaries(
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
 #   S8707 policy site: check_citations.py - check, citing merge
+#   S8707 policy site: check_chunk.py - check_batches, citing merge
 #   S8707 policy site: build_content_set.py - a write, validated the same way
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]

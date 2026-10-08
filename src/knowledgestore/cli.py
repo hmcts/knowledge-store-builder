@@ -33,6 +33,7 @@ SELF_PARSING = frozenset(
         "check-corpus",
         "chunk-plan",
         "chunk-status",
+        "check-chunk",
         "content-set",
         "merge-chunks",
         "merge-inputs",
@@ -120,6 +121,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "chunk-status": (
         "chunk_status",
         "report fan-out progress from the extractions on disk, never-launched chunks first",
+    ),
+    "check-chunk": (
+        "check_chunk",
+        "check each fan-out chunk against its own file list (--self-test proves it can fail)",
     ),
     "merge-chunks": (
         "merge_chunks",

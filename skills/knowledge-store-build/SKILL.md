@@ -358,6 +358,22 @@ completed. On a layer that costs tens of millions of tokens to produce, this lin
 is the difference between an interruption costing a handful of chunks and it
 costing hundreds.
 
+**Give every agent the shipped gate, and tell it not to write its own.** The spec
+asks each agent to check its output mechanically, and without a shipped checker
+each one writes and iterates its own - measured at 15 of an agent's 24 turns on one
+rebuild, re-read in its context for the rest of the run. Instead, in the prompt:
+
+> Run `knowledgestore check-chunk --batch <your batch file>` and fix what it names.
+> Do not write a checker or a mutation harness of your own. It checks shape only;
+> grounding your prose in the files is still your job.
+
+Run `knowledgestore check-chunk --self-test` once yourself before dispatching: it
+breaks every rule on a synthetic batch and fails unless each fires alone. The batch
+file an agent receives is `{"chunks": [{"n", "out", "files"}]}` with absolute paths,
+and each chunk is held to its own `files`, never the batch's. One id in two
+repositories within a chunk is not a duplicate, and `contains` is an accepted
+relation. The stage needs graphify, which the `[ast]` extra installs.
+
 **The concurrency ceiling rejects rather than queues.** Dispatch past the
 concurrent-agent limit and the excess is refused, not held - so a chunk can be
 recorded as dispatched and never launched, and it then waits forever because

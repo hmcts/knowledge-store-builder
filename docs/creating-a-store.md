@@ -467,6 +467,40 @@ A run also compares each repository's node count with the last run and reports
 decreases, absences and new repositories. It reports and does not refuse, because
 deleted code is a legitimate reason for a smaller layer.
 
+### Check each semantic chunk before merging
+
+```bash
+knowledgestore check-chunk --self-test          # once per install: proves every rule can fire
+knowledgestore check-chunk --batch batch-07.json
+```
+
+`check-chunk` is the extraction spec's mechanical gate, shipped once. Give it to
+every extraction agent instead of asking each to write its own: on one large
+rebuild an agent spent 15 of its 24 turns building and iterating that checker.
+A batch file is `{"chunks": [{"n": 7, "out": "<chunk file>", "files": [...]}]}`,
+the form a dispatcher hands an agent.
+
+It checks shape, not truth, and holds each chunk to **its own** file list rather
+than the batch's. The rules: the file parses; the top level is `nodes` and `edges`
+lists; `file_type` and edge `relation` come from the spec's vocabularies, with
+`contains` accepted; confidence bands and scores follow the rubric; every node and
+hyperedge id equals its canonical form under graphify's `normalize_id`; no node id repeats
+within one repository; no hyperedge id repeats anywhere in the run; no edge or
+hyperedge names a node the chunk lacks; a hyperedge has at least three members and
+a chunk at most three hyperedges; every `source_file` is one of the chunk's files;
+no id ends in the chunk's own number (`_c0042` in chunk 42 does, the form code
+`_c100` does not); and every file has a node.
+
+One id in two repositories inside one chunk is not a duplicate: the merge keeps
+both. Every rule sets the exit status, a truncated chunk is a `PARSE` violation
+rather than a traceback, and violations print before the refusal of a batch naming
+no chunks. `--batch` takes several files and compares hyperedge ids across all of
+them. It needs graphify, which the `[ast]` extra installs, and refuses without it.
+
+`--self-test` breaks each rule on a synthetic batch and requires that rule, and no
+other, to fire; seven negative controls must stay clean. Run it after installing,
+so the gate an agent trusts is one you have seen fail.
+
 ### Add the retrieval layers
 
 Community summaries give the explorer plain-English descriptions of graph
