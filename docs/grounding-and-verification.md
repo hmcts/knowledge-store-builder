@@ -217,6 +217,15 @@ both count as grounded, while a longer or different name still differs. English
 compound adjectives ("police-to-courtroom") are excluded from identifier
 detection, because flagging them trains readers to ignore the report.
 
+An identifier also counts as grounded when it appears verbatim inside one of the
+digest's strings. Descriptive labels carry identifiers with punctuation attached
+(`; listenPort 3100`, `${RELEASE_LABEL}-web`, `../widget-record-api/policy.yaml`),
+and comparing whole words alone reported those as findings when the digest showed
+them. The match is on raw text, so English words in a label do not ground a
+camelCase name. It is unbounded, so a fragment of a longer name (`name_s` inside
+`name_secret`) counts as grounded: a false negative, stated here rather than
+hidden. `summaries check-batch` applies the same rule before merging.
+
 **What the digest sampled, so absence can mean something.** A digest caps its
 top nodes, business features and tickets, and each one records a `coverage`
 block — `shown`, `unshown` and `total` per capped field, reconciled wherever it

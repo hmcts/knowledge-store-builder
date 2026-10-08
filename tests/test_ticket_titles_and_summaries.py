@@ -110,8 +110,7 @@ class SummariesMergeTest(SettingsIsolated):
             batch = Path(tmp) / "gen.json"
             batch.write_text(json.dumps({"999": "x" * 100, "3": "too short"}), encoding="utf-8")
             code = summaries.merge([str(batch)])
-            # the prose alone: the artefact also carries a metadata block, which is
-            # written whether or not any summary was accepted
+            # nothing was accepted, so nothing is written and no prose can be read
             merged = store_io.read_summaries(config.SUMMARIES_PATH)
         self.assertEqual(code, 1)
         self.assertEqual(merged, {})

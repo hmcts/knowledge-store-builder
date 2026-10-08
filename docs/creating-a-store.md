@@ -512,9 +512,22 @@ following the build skill, then merge and verify it:
 
 ```bash
 knowledgestore summaries extract
-knowledgestore summaries merge <written-01.json> [more.json ...]
+knowledgestore summaries batches --out-dir <empty directory>
+knowledgestore summaries check-batch <batch_01.json> [more.json ...]
+knowledgestore summaries merge <out-01.json> [more.json ...]
 knowledgestore summaries verify --sample 200
 ```
+
+`batches` writes one `{"batch", "out", "digests"}` file per `--size` (default 100)
+significant communities that have no prose. Each authoring agent reads its batch,
+writes `{"<id>": "<summary>"}` to the batch's `out` path, and runs `check-batch`
+on it instead of writing a checker of its own. `check-batch` prints every
+violation and exits 1 on any: an id missing, repeated or not in the batch, a
+summary outside 60–700 characters or 2–4 sentences, or a cited identifier its
+digest does not contain. The length bounds are `merge`'s and the grounding rule
+is `verify`'s, so a batch that passes is one both accept. `merge` takes the `out`
+files; handed a batch file it names the `out` file and refuses, and a run that
+merges nothing writes nothing and exits 1.
 
 The [grounding and verification contract](grounding-and-verification.md)
 governs authored content. A successful merge proves shape and coverage, not

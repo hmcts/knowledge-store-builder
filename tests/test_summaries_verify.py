@@ -189,6 +189,61 @@ class VerifyTest(SettingsIsolated):
         _, output = self.run_verify()
         self.assertNotIn("[unsupported]", output)
 
+    # --- identifiers embedded in descriptive labels ----------------------------
+    #
+    # Semantic and document nodes carry a phrase, not a bare name, and the
+    # identifier sits inside it with punctuation either side. Splitting a label on
+    # whitespace alone left those unreachable, so a summary naming exactly what its
+    # digest shows was flagged. Each test breaks if the evidence goes back to whole
+    # whitespace-separated words.
+
+    def embedded(self, node: str) -> dict:
+        digest = self.digest("1", "Chart values", "svc-charts", [])
+        digest["top_nodes"] = [node]
+        return digest
+
+    def test_a_camel_case_name_after_a_semicolon_is_evidence(self):
+        self.write(
+            [
+                self.embedded(
+                    "widget-ui Helm values (base); wrapper nodejs; listenPort 3100 (values.yaml)"
+                )
+            ],
+            {"1": "Helm values for widget-ui in svc-charts, setting listenPort for the web tier."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("listenPort", output)
+
+    def test_an_upper_snake_name_inside_a_template_expression_is_evidence(self):
+        self.write(
+            [self.embedded("preview values: releaseName ${RELEASE_LABEL}-web (preview.yaml)")],
+            {"1": "Preview chart values in svc-charts, deriving each release from RELEASE_LABEL."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("RELEASE_LABEL", output)
+
+    def test_a_dashed_name_inside_a_relative_path_is_evidence(self):
+        self.write(
+            [
+                self.embedded(
+                    "resource ../widget-record-api/image-policy.yaml (apps/kustomization.yaml)"
+                )
+            ],
+            {"1": "Image automation in svc-charts for the widget-record-api deployment."},
+        )
+        _, output = self.run_verify()
+        self.assertNotIn("widget-record-api", output)
+
+    def test_english_words_in_a_label_do_not_ground_a_camel_case_name(self):
+        # the embedded match reads raw text: breaks if it normalises first, which
+        # welds "listen port" into `listenPort` and grounds a name nobody showed
+        self.write(
+            [self.embedded("widget-ui values; the listen port for the web tier (values.yaml)")],
+            {"1": "Helm values for widget-ui in svc-charts, setting listenPort for the web tier."},
+        )
+        _, output = self.run_verify()
+        self.assertIn("listenPort", output)
+
     def test_kebab_and_camel_spellings_of_one_concept_agree(self):
         # this estate names a schema in kebab-case and its class in CamelCase
         self.write(

@@ -3521,6 +3521,7 @@ MUTATIONS = (
             "test_summaries_remap.RemapWriteGateTest.test_non_ascii_prose_survives_a_remap_as_merge_wrote_it",
             "test_summaries_remap.RemapWriteGateTest.test_the_skipped_write_leaves_the_coverage_merge_recorded",
             "test_summaries_remap_fallback.RemapFallbackTest.test_the_renamed_community_is_carried_onto_its_new_id",
+            "test_summary_batches.MergeRefusesNothingTest.test_a_batch_cut_by_batches_and_authored_merges_through_its_out_file",
             "test_ticket_titles_and_summaries.SummariesMergeTest.test_valid_summary_merges",
         ),
     ),

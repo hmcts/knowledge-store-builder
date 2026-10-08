@@ -829,12 +829,30 @@ each capped field it is showing (`shown`, `unshown`, `total`). A digest showing
 base, and `summaries verify` treats a term missing from the second as a finding
 and a term missing from the first as informational. Then:
 
-1. **Chunk the work.** Sort digests by size (largest first) and split into
-   batches of about 50. Prioritise clusters that involve newly added
-   repositories, then the largest remaining.
+1. **Cut the batches.**
+
+   ```bash
+   knowledgestore summaries batches --out-dir <empty directory>
+   ```
+
+   Writes `batch_NN.json` files of `{"batch", "out", "digests"}` holding only the
+   significant communities that have no prose yet, largest first, with `out` an
+   absolute path for the agent to write to. `--size` (default 100) sets how many
+   go in one batch: a worker's fixed cost is paid once per batch, and on one large
+   estate 100 per batch cost 2.8K input tokens per summary against 4.5–4.9K at 50.
+   A directory holding an earlier run's batches is refused, because a shorter run
+   would leave stale higher-numbered batches beside the new ones.
 2. **Dispatch one subagent per batch, in parallel** — a single message with
-   several agent calls. Give each the digest file path, an output path, and the
-   rules below.
+   several agent calls. Give each its batch file and the rules below, and tell it
+   to use the shipped gate rather than write its own. Without one, about half of
+   each authoring agent's turns went on writing a checker. In the prompt:
+
+   > Run `knowledgestore summaries check-batch <your batch file>` and fix what it
+   > names. Do not write a checker of your own. It checks ids, length, sentence
+   > count and that every identifier you cite appears in your digest; whether the
+   > prose is true of the digest is still your job.
+
+   `check-batch` exits 1 on any violation, or when it checked nothing.
 
    **Wait for every agent to report before merging — not for its output file to
    exist.** An agent writes its JSON, then validates it, and may rewrite it. A
@@ -847,11 +865,13 @@ and a term missing from the first as informational. Then:
 3. **Merge and validate:**
 
    ```bash
-   knowledgestore summaries merge <written-01.json> <written-02.json> ...
+   knowledgestore summaries merge <out-01.json> <out-02.json> ...
    ```
 
-   `merge` rejects unknown cluster ids and out-of-range lengths, and reports
-   what it rejected. It is the guardrail — read its output, and **reconcile the
+   Pass each batch's `out` file, not the batch file: handed a batch file, `merge`
+   names its `out` file and refuses the run. A run that merges nothing writes
+   nothing and exits 1. `merge` rejects unknown cluster ids and out-of-range
+   lengths, and reports what it rejected. It is the guardrail — read its output, and **reconcile the
    count it merged against the count the agents wrote**. "N merged" alone does
    not tell you N was everything; the difference is where the defects hide.
 
@@ -885,8 +905,9 @@ Rules to give each subagent, verbatim in spirit:
   identifiers are built from ordinary English words — `widget-record-created` and
   `no-reason-supplied` are one shape to any check. If a flagged term is English,
   rephrase it; do not assume the check is wrong.
-- Write the output as one JSON object `{"<id>": "<summary>"}` covering every
-  digest id in the batch, and nothing else.
+- Write the output to the batch's `out` path as one JSON object
+  `{"<id>": "<summary>"}` covering every digest id in the batch, and nothing
+  else.
 - **Anything else you write must carry your batch in its name.** A helper script,
   a scratch file, any intermediate output: `scratchpad/gen-<batch>.py`, never a
   bare `scratchpad/gen.py`. You are one of several agents writing to one
