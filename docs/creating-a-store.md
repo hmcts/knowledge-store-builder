@@ -483,8 +483,8 @@ the form a dispatcher hands an agent.
 It checks shape, not truth, and holds each chunk to **its own** file list rather
 than the batch's. The rules: the file parses; the top level is `nodes` and `edges`
 lists; `file_type` and edge `relation` come from the spec's vocabularies, with
-`contains` accepted; confidence bands and scores follow the rubric; every node id
-equals its canonical form under graphify's `normalize_id`; no node id repeats
+`contains` accepted; confidence bands and scores follow the rubric; every node and
+hyperedge id equals its canonical form under graphify's `normalize_id`; no node id repeats
 within one repository; no hyperedge id repeats anywhere in the run; no edge or
 hyperedge names a node the chunk lacks; a hyperedge has at least three members and
 a chunk at most three hyperedges; every `source_file` is one of the chunk's files;

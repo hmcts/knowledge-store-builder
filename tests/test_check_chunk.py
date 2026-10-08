@@ -197,6 +197,14 @@ class CheckChunkTest(unittest.TestCase):
         self.assertEqual((code, rules(stdout)), (1, {"CHUNK_SUFFIX"}), stdout)
         self.assertIn("'thing_c0001'", stdout)
 
+    def test_a_hyperedge_id_is_held_to_canonical_form_like_a_node_id(self):
+        # Breaks if the canonical-form rule reads node ids only: a real layer
+        # carried hyperedge ids spelt as repository paths, and that passed.
+        self.batch.payloads[1]["hyperedges"][0]["id"] = "repo-one/first-group"
+        code, stdout = self.check()
+        self.assertEqual((code, rules(stdout)), (1, {"ID_FORM"}), stdout)
+        self.assertIn("hyperedge id 'repo-one/first-group' is not its canonical form", stdout)
+
     def test_a_hyperedge_id_reused_in_another_batch_file_is_reported(self):
         # Breaks if the seen-hyperedge record is reset per batch file.
         first = self.batch.write("first.json")

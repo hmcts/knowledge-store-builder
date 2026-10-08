@@ -36,8 +36,8 @@ both wrong:
 - **`contains` is an accepted relation** although the extraction spec's vocabulary
   omits it: real layers carry it, and the merge accepts it.
 
-`--self-test` is the gate checked by breaking it: a synthetic batch, one mutation per
-rule asserting that rule fires *and no other*, negative controls that must stay
+`--self-test` is the gate checked by breaking it: a synthetic batch, mutations each
+asserting their rule fires *and no other*, negative controls that must stay
 clean, and a truncated file that must be reported as `PARSE`. A gate that cannot fail
 is worse than none, because it is trusted; this is how a user proves this one can.
 
@@ -276,6 +276,38 @@ def _check_edges(
             )
 
 
+def _check_hyperedge_id(
+    hid: object,
+    number: int,
+    where: str,
+    seen: dict[str, int],
+    normalise: Normalise,
+    found: list[Violation],
+) -> None:
+    """A hyperedge id is held to the same canonical form as a node id, and is unique.
+
+    The canonical-form half was added after a real layer carried hyperedge ids
+    spelt as repository paths, which a node-only rule passed.
+    """
+    if not isinstance(hid, str) or not hid:
+        found.append(Violation(SHAPE, where, f"a hyperedge id is {hid!r}"))
+        return
+    if hid != normalise(hid):
+        found.append(
+            Violation(
+                ID_FORM,
+                where,
+                f"hyperedge id {hid!r} is not its canonical form {normalise(hid)!r}",
+            )
+        )
+    if hid in seen:
+        found.append(
+            Violation(DUP_HYPEREDGE, where, f"hyperedge id {hid!r} is used by chunk {seen[hid]}")
+        )
+    else:
+        seen[hid] = number
+
+
 def _check_hyperedges(
     hyperedges: list,
     number: int,
@@ -283,6 +315,7 @@ def _check_hyperedges(
     ids: set[str],
     allowed: set[str],
     seen: dict[str, int],
+    normalise: Normalise,
     found: list[Violation],
 ) -> None:
     if len(hyperedges) > MAX_HYPEREDGES:
@@ -296,16 +329,7 @@ def _check_hyperedges(
             found.append(Violation(SHAPE, where, "a hyperedge is not an object"))
             continue
         hid = hyperedge.get("id")
-        if not isinstance(hid, str) or not hid:
-            found.append(Violation(SHAPE, where, f"a hyperedge id is {hid!r}"))
-        elif hid in seen:
-            found.append(
-                Violation(
-                    DUP_HYPEREDGE, where, f"hyperedge id {hid!r} is used by chunk {seen[hid]}"
-                )
-            )
-        else:
-            seen[hid] = number
+        _check_hyperedge_id(hid, number, where, seen, normalise, found)
         members = hyperedge.get("nodes")
         members = members if isinstance(members, list) else []
         if len(members) < MIN_HYPEREDGE_ARITY:
@@ -376,7 +400,7 @@ def check_chunk(
     allowed = {path for path in map(_path, files) if path is not None}
     ids, covered = _check_nodes(payload["nodes"], number, where, allowed, normalise, found)
     _check_edges(payload["edges"], where, ids, allowed, found)
-    _check_hyperedges(hyperedges, number, where, ids, allowed, seen_hyperedges, found)
+    _check_hyperedges(hyperedges, number, where, ids, allowed, seen_hyperedges, normalise, found)
     for path in sorted(allowed - covered):
         found.append(Violation(COVERAGE, where, f"no node cites {path}"))
     return found, counts
@@ -569,8 +593,13 @@ MUTATIONS: tuple[tuple[str, str, Mutation], ...] = (
     ),
     (
         ID_FORM,
-        "an id that is not its canonical form",
+        "a node id that is not its canonical form",
         lambda p, f: {**p, 42: _rename(p[42], "alpha", "Alpha")},
+    ),
+    (
+        ID_FORM,
+        "a hyperedge id that is not its canonical form",
+        lambda p, f: _set(p, "hyperedges", 0, id="alpha-repo/trio"),
     ),
     (
         DUP_NODE,
