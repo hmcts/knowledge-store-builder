@@ -3731,6 +3731,32 @@ MUTATIONS = (
             "test_harness_root_spelling.ConfiguredRootHasOneSpelling.test_the_shared_harness_keeps_the_spelling_config_uses",
         ),
     ),
+    Mutation(
+        "acronyms carrying a digit read as names again",
+        "build_community_summaries.py",
+        "if not _DIGIT_WORD_ACRONYM.fullmatch(token)\n",
+        "\n",
+        "the shipped extractor: `S2S` matched the case-change pattern on its "
+        "digit-then-capital, so `summaries verify` and `check-batch` reported a "
+        "service-to-service acronym as an invented class name; a store operator "
+        "measured it as most of the false flags over the summaries that store ships",
+        (
+            "test_summaries_verify.IdentifierExtractionTest.test_acronyms_carrying_a_digit_are_not_identifiers",
+        ),
+    ),
+    Mutation(
+        "the acronym exemption widens to every all-caps token",
+        "build_community_summaries.py",
+        "if not _DIGIT_WORD_ACRONYM.fullmatch(token)\n",
+        "if not token.isupper()\n",
+        "the first version of the fix above, rejected before it shipped: exempting "
+        "any token with no lowercase letter also stops checking form and offence "
+        "codes like `D45A`, and a summary citing a code its digest does not show "
+        "is exactly what the check is for",
+        (
+            "test_summaries_verify.IdentifierExtractionTest.test_codes_carrying_a_digit_are_still_identifiers",
+        ),
+    ),
 )
 
 
