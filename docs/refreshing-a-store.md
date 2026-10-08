@@ -134,6 +134,26 @@ cache has not seen. On a store whose chunks were written by anything but
 `merge-chunks`, that is most of the corpus rather than what changed. It writes
 to `--out` or stdout, never over the committed plan.
 
+Plan the re-extraction from the drift, one chunk per batch:
+
+```bash
+knowledgestore chunk-plan --delta /tmp/drift.json --out /tmp/plan-additions.json \
+  --one-per-batch /tmp/batches
+```
+
+- **Packed per repository**, in directory order, up to `--chunk-size` (default 22)
+  files a chunk. A delta touches a file or two per directory, so the full plan's
+  one-directory rule would pay a worker for every directory.
+- **Numbered after the committed plan's last chunk**, and written to `--out`
+  rather than into the plan. Append the mapping to the plan once the chunks are
+  extracted. Every file lands in exactly one chunk, or nothing is written.
+- **One chunk per batch file**, as `{"chunks": [{"n", "out", "files"}]}` with
+  absolute paths, so no worker carries another chunk's reads in its context.
+  For a trial, point `--chunk-out` at a scratch directory so `out` touches
+  nothing live.
+
+Deleted files are not planned, because there is nothing left to extract.
+
 After clustering, record which partitioner produced the new IDs, then carry
 summaries onto the communities that still hold the same node sets:
 
