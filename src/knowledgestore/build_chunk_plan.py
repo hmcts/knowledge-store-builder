@@ -231,8 +231,14 @@ def next_chunk_number(plan_path: Path) -> int | None:
     return max(numbers) + 1 if numbers else None
 
 
-def pack_delta(files: list[str], chunk_size: int, first: int) -> dict[str, list[str]]:
+def pack_delta(
+    files: list[str], chunk_size: int, first: int, images: set[str] | frozenset[str] = frozenset()
+) -> dict[str, list[str]]:
     """A delta's chunks: one repository at a time, in directory order, filled to `chunk_size`.
+
+    Images first, one chunk each, as the full plan does: vision needs its own context,
+    and a delta must extract what a full build would. `images` comes from the same
+    detect result the full plan reads.
 
     **Not the full plan's one-directory rule, deliberately.** A delta touches a file or
     two per directory, so one directory per chunk pays a worker's fixed cost once per
@@ -241,11 +247,15 @@ def pack_delta(files: list[str], chunk_size: int, first: int) -> dict[str, list[
     order, keeps the relationships an agent can find; padding across repositories would
     ask it to relate files that have no relation.
     """
-    by_repository: dict[str, list[str]] = defaultdict(list)
-    for path in files:
-        by_repository[drift.repository_of(path)].append(path)
     chunks: dict[str, list[str]] = {}
     number = first
+    for image in sorted(f for f in files if f in images):
+        chunks[f"{number:04d}"] = [image]
+        number += 1
+    by_repository: dict[str, list[str]] = defaultdict(list)
+    for path in files:
+        if path not in images:
+            by_repository[drift.repository_of(path)].append(path)
     for repository in sorted(by_repository):
         ordered = sorted(by_repository[repository], key=lambda p: (posixpath.dirname(p), p))
         for start in range(0, len(ordered), chunk_size):
@@ -303,12 +313,32 @@ def plan_delta(arguments: argparse.Namespace) -> int:
             flush=True,
         )
         return 2
+    detect = io.read_json_dict(config.DETECT_PATH)
+    if not detect:
+        # Read as "no images", a missing detect result would pack every image in with
+        # documents, which no full build does.
+        print(
+            f"A delta needs the detection results at {config.DETECT_PATH} for the reason "
+            "the full plan does - to give each image its own chunk - and there are none. "
+            + content_set.DETECT_PRODUCER,
+            file=stream,
+            flush=True,
+        )
+        return 2
     files = delta_files(delta_path)
     if not files:
-        print("The drift holds no new or changed files, so nothing to plan.", file=stream)
+        # Not a failure, and not an empty mapping either: a resync would append that
+        # as a plan that succeeded.
+        print(
+            f"The drift at {delta_path} holds no new or changed files, so there is nothing "
+            "to extract. Nothing written.",
+            file=stream,
+            flush=True,
+        )
         return 0
 
-    additions = pack_delta(files, arguments.chunk_size, first)
+    images = {store_paths.relative(f) for f in (detect.get("files") or {}).get("image") or []}
+    additions = pack_delta(files, arguments.chunk_size, first, images)
     placed = [f for chunk in additions.values() for f in chunk]
     if sorted(placed) != files:
         # Every file in exactly one chunk: a file in two is extracted twice and

@@ -21,11 +21,16 @@ from knowledgestore import build_chunk_plan, config, drift
 
 
 class _Delta(SettingsIsolated):
-    def _store(self, plan: dict[str, list[str]] | None = None) -> Path:
+    def _store(self, plan: dict[str, list[str]] | None = None, images: tuple = ()) -> Path:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name).resolve()
         config.configure(root=str(root))
+        # The detect result is where the full planner learns which files are images,
+        # and a delta reads the same one. Absolute, as graphify writes it.
+        detect = {"files": {"document": [], "image": [str(root / f) for f in images]}}
+        config.DETECT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config.DETECT_PATH.write_text(json.dumps(detect), encoding="utf-8")
         if plan is not None:
             config.CHUNK_PLAN_PATH.parent.mkdir(parents=True, exist_ok=True)
             config.CHUNK_PLAN_PATH.write_text(json.dumps(plan), encoding="utf-8")
@@ -162,6 +167,54 @@ class DeltaTest(_Delta):
         self.assertEqual(
             additions, {"0002": ["repositories/alpha/a.md", "repositories/alpha/b.md"]}
         )
+
+    def test_each_image_in_a_delta_gets_its_own_chunk(self):
+        """Breaks if a delta packs an image in with documents, which the full plan
+        never does: vision needs its own context, and a delta extracts what a full
+        build would."""
+        image = "repositories/alpha/d/x.png"
+        root = self._store({"0001": ["repositories/z/a.md"]}, images=(image,))
+        delta = self._drift(
+            root, [image], ["repositories/alpha/d/y.md", "repositories/alpha/d/z.md"]
+        )
+        code, additions = self._delta(root, delta)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            additions,
+            {"0002": [image], "0003": ["repositories/alpha/d/y.md", "repositories/alpha/d/z.md"]},
+        )
+
+    def test_a_delta_without_a_detect_result_is_refused(self):
+        """Breaks if a missing detect result is read as "no images", which packs every
+        image in with documents and says nothing."""
+        root = self._store({"0001": ["repositories/z/a.md"]})
+        config.DETECT_PATH.unlink()
+        code, additions = self._delta(root, self._drift(root, ["repositories/a/x.png"], []))
+        self.assertEqual(code, 2)
+        self.assertEqual(additions, {}, "a delta was planned without knowing its images")
+
+    def test_a_missing_drift_file_is_refused(self):
+        """Breaks if a mistyped path is read as an empty drift: that exits 0 saying
+        nothing changed, which is the wrong answer to a typo."""
+        root = self._store({"0001": ["repositories/z/a.md"]})
+        out = root / "additions.json"
+        code, text, _ = self._run("--delta", str(root / "no-such-drift.json"), "--out", str(out))
+        self.assertEqual(code, 2)
+        self.assertIn("no-such-drift.json", text)
+        self.assertFalse(out.exists())
+
+    def test_an_empty_delta_says_so_and_writes_nothing(self):
+        """Breaks if an empty delta writes an empty mapping, which a resync would
+        append as a no-op and read as a plan that succeeded. Exit 0: nothing changing
+        is not a failure."""
+        root = self._store({"0001": ["repositories/z/a.md"]})
+        out = root / "additions.json"
+        delta = self._drift(root, [], [], ["repositories/a/gone.md"])
+        code, text, _ = self._run("--delta", str(delta), "--out", str(out))
+        self.assertEqual(code, 0)
+        self.assertIn("no new or changed files", text)
+        self.assertIn("Nothing written", text)
+        self.assertFalse(out.exists(), "an empty mapping was written")
 
 
 class OnePerBatchTest(_Delta):

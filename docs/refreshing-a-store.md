@@ -143,7 +143,8 @@ knowledgestore chunk-plan --delta /tmp/drift.json --out /tmp/plan-additions.json
 
 - **Packed per repository**, in directory order, up to `--chunk-size` (default 22)
   files a chunk. A delta touches a file or two per directory, so the full plan's
-  one-directory rule would pay a worker for every directory.
+  one-directory rule would pay a worker for every directory. Images get a chunk
+  each, as in the full plan, read from the same detect result.
 - **Numbered after the committed plan's last chunk**, and written to `--out`
   rather than into the plan. Append the mapping to the plan once the chunks are
   extracted. Every file lands in exactly one chunk, or nothing is written.
@@ -152,7 +153,8 @@ knowledgestore chunk-plan --delta /tmp/drift.json --out /tmp/plan-additions.json
   For a trial, point `--chunk-out` at a scratch directory so `out` touches
   nothing live.
 
-Deleted files are not planned, because there is nothing left to extract.
+Deleted files are not planned, because there is nothing left to extract. A drift
+with no new or changed files writes nothing and says so.
 
 After clustering, record which partitioner produced the new IDs, then carry
 summaries onto the communities that still hold the same node sets:
