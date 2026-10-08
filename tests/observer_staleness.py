@@ -46,11 +46,17 @@ Three boundaries, and they are the whole claim it makes:
   six were staled by tests arriving in modules no entry named yet. `--refuse`
   exists for a maintainer who wants suspicion to block; the default reports.
 
-**Settling** (`--settle`, a few minutes) answers the question the comparison can
-only infer: for the tests that arrived, which entries do they observe? It runs the
-modules holding the arrivals once unmutated, then once under each entry, through
-the gate's own `each_mutation` - so the recovery record and the restore on a
-signal are the gate's, not a second copy of them. An arrived test that fails under
+**Settling** (`--settle`, bounded by `--budget`) answers the question the
+comparison can only infer: for the tests that arrived, which entries do they
+observe? It runs the arrived test ids - not their whole modules - once unmutated,
+then once under each entry, through the gate's own `each_mutation`, so the
+recovery record and the restore on a signal are the gate's, not a second copy of
+them. The unmutated run is timed per module, and a module whose time multiplied by
+the number of entries does not fit what is left of the budget is not settled: it
+is reported UNSETTLED with its measured and projected cost, and the verdict cannot
+be CLEAN. Without that bound a pull request adding one slow test costs the job the
+number of entries times that test - a branch whose arrivals build trees and spawn
+runs took over half an hour before it was stopped. An arrived test that fails under
 an entry and is not in that entry's set is **STALE**: a failure observed, not a
 suspicion, and it fails the job with the `--derive-mapping` command that produces
 the corrected set. What it still cannot see:
@@ -66,9 +72,10 @@ the corrected set. What it still cannot see:
   unjudged and the verdict stays SUSPECT.
 - **An arrived module that fails outside any test** under an entry - an import
   that raised - hides whether its arrivals observe that entry. Also SUSPECT.
-- **Order dependence across modules.** The mapping is derived from a whole-suite
-  run and this runs the arrived modules alone, so a test that only fails after a
-  sibling module ran can differ. Within a module the order is the suite's.
+- **An arrived module it could not afford.** UNSETTLED, so SUSPECT; the remedy
+  names the budget that would settle it.
+- **Order dependence.** The mapping is derived from a whole-suite run and this runs
+  the arrived tests alone, so a test that only fails after a sibling ran can differ.
 
 It settles the working tree, which is why `--settle` refuses a `--head` other than
 `HEAD`.
@@ -82,17 +89,21 @@ a base this clone does not hold, a module that will not parse - ends at
     python3 tests/observer_staleness.py --base ORIG_HEAD   # against the branch before a merge
     python3 tests/observer_staleness.py --json            # the same, for a caller
     python3 tests/observer_staleness.py --settle          # run the arrivals under every entry
+    python3 tests/observer_staleness.py --settle --budget 20   # allow twenty minutes of it
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import json
+import math
 import os
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -120,6 +131,14 @@ TEST_PREFIX = "test"
 # What `--verify-mapping` costs, named here because the remedy this prints has to
 # be honest about the price of taking it.
 LEG_MINUTES = 7
+
+# What settling may spend on the mutated runs, in minutes. Ten, for two reasons. The
+# one real night it was measured against - 71 arrivals over five modules, which had
+# staled eight entries - settled in 160 seconds, so ten minutes holds nearly four
+# such nights in one pull request. And it stays below the whole-table check it
+# stands in front of, about seven minutes on each of four runners: settling should
+# never cost more than the answer it saves somebody dispatching.
+BUDGET_MINUTES = 10
 
 # Module name to the test ids that arrived in it since the base, as `Class.test`.
 Arrivals = dict[str, tuple[str, ...]]
@@ -174,6 +193,21 @@ class Undecided:
 
 
 @dataclass(frozen=True)
+class Unsettled:
+    """An arrived module settling could not afford, with the numbers that decided it.
+
+    `baseline` is the measured unmutated run of its arrived tests, in seconds, and
+    `projected` that times the number of entries. Both are carried because "too
+    slow" is not actionable and "eight seconds, thirty minutes" is.
+    """
+
+    module: str
+    tests: tuple[str, ...]
+    baseline: float
+    projected: float
+
+
+@dataclass(frozen=True)
 class Report:
     """The verdict, the sentence that explains it, and what to act on.
 
@@ -194,6 +228,10 @@ class Report:
     stale: tuple[Stale, ...] = ()
     undecided: tuple[Undecided, ...] = ()
     unjudged: tuple[str, ...] = ()
+    unsettled: tuple[Unsettled, ...] = ()
+    # The budget a settle run was given, in seconds, so the remedy for an unsettled
+    # module can name one that would have covered it.
+    budget: float = 0.0
 
 
 def test_ids(source: str) -> frozenset[str]:
@@ -363,11 +401,15 @@ def settled(
     baseline: tuple[str, ...],
     observed: dict[str, tuple[str, ...]],
     since: str,
+    unsettled: tuple[Unsettled, ...] = (),
 ) -> Report:
-    """The verdict over what the arrived modules reported, unmutated and per entry.
+    """The verdict over what the arrived tests reported, unmutated and per entry.
 
-    `baseline` is what failed with nothing applied, `observed` what failed under each
-    entry, keyed by name. Pure, so the comparison can be read apart from the runs.
+    `arrived` holds only the modules that were settled; `unsettled` the ones the
+    budget could not cover, which keep the verdict off CLEAN - a question that could
+    not be afforded was not asked, and that is not the same as answered. `baseline`
+    is what failed with nothing applied, `observed` what failed under each entry,
+    keyed by name. Pure, so the comparison can be read apart from the runs.
 
     Only the *arrived* ids are compared, not every test the arrived modules hold. A
     test that was already in such a module and observes an entry not naming it is
@@ -400,6 +442,11 @@ def settled(
     ran = (
         f"the {len(every)} test(s) that arrived since {since} were run unmutated and then "
         f"under each of the {len(table)} entries"
+        + (
+            f", and {len(unsettled)} module(s) holding arrivals did not fit the budget"
+            if unsettled
+            else ""
+        )
     )
     if stale:
         return Report(
@@ -410,15 +457,18 @@ def settled(
             stale=tuple(stale),
             undecided=tuple(undecided),
             unjudged=unjudged,
+            unsettled=unsettled,
         )
-    if undecided or unjudged:
+    if undecided or unjudged or unsettled:
         return Report(
             SUSPECT,
             f"{ran}, and no judged arrival observes an entry that does not name it - but "
-            f"{len(unjudged)} arrived test(s) cannot be judged, and {len(undecided)} entry(s) "
-            "broke an arrived module outside any test, so those are not cleared.",
+            f"{len(unjudged)} arrived test(s) cannot be judged, {len(undecided)} entry(s) "
+            f"broke an arrived module outside any test, and {len(unsettled)} module(s) were "
+            "not settled, so those are not cleared.",
             undecided=tuple(undecided),
             unjudged=unjudged,
+            unsettled=unsettled,
         )
     return Report(
         CLEAN,
@@ -428,10 +478,46 @@ def settled(
     )
 
 
+def affordable(
+    timings: dict[str, float], entries: int, budget: float
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Which modules to settle and which to refuse, cheapest first, within `budget`.
+
+    A module's projected cost is its unmutated time multiplied by the number of
+    entries, because it is run once under each. Cheapest first, so one slow module
+    costs the pull request that module rather than the fast ones queued behind it;
+    tie-broken by name so two runs choose alike. Both halves come back sorted by name.
+    """
+    chosen: list[str] = []
+    refused: list[str] = []
+    spent = 0.0
+    for module in sorted(timings, key=lambda name: (timings[name], name)):
+        projected = timings[module] * entries
+        if spent + projected <= budget:
+            chosen.append(module)
+            spent += projected
+        else:
+            refused.append(module)
+    return tuple(sorted(chosen)), tuple(sorted(refused))
+
+
+def _ids(arrived: Arrivals, modules: Iterable[str]) -> tuple[str, ...]:
+    """The arrived tests of `modules` as `module.Class.test`, which `_run` loads by name."""
+    return tuple(f"{module}.{test}" for module in sorted(modules) for test in arrived[module])
+
+
 def observe_arrivals(
-    table: tuple[gate.Mutation, ...], modules: tuple[str, ...]
-) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
-    """What the arrived modules reported unmutated, and under each entry.
+    table: tuple[gate.Mutation, ...], arrived: Arrivals, budget: float, *, clock=time.monotonic
+) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]], tuple[str, ...], tuple[Unsettled, ...]]:
+    """What the arrived tests reported unmutated and under each entry, within `budget`.
+
+    Returns the unmutated failures, the failures per entry, the modules settled and
+    the ones refused. The arrived ids are run rather than their modules, so a module
+    whose existing tests are slow does not make its one new test expensive.
+
+    Each module's unmutated run is timed separately, because that is the measurement
+    the budget is decided from; the mutated runs then take every settled id in one
+    process. `clock` is the seam, so the decision can be driven without a slow test.
 
     Through `each_mutation`, the gate's one applier: it writes the recovery record
     before a file is touched and restores on a signal, so a settle run that is
@@ -443,32 +529,65 @@ def observe_arrivals(
     if gate.recover() or gate.check_import_path():
         raise SystemExit(1)
     observed: dict[str, tuple[str, ...]] = {}
+    failed_unmutated: list[str] = []
+    timings: dict[str, float] = {}
     # An empty excusal, as every gate mode but `--derive-mapping` enters: the
     # variable is the run's channel to its children, not a value left in a shell.
     with gate.excusing_unmapped(()):
-        baseline = gate._run(modules).observers  # noqa: SLF001
+        for module in sorted(arrived):
+            started = clock()
+            failed_unmutated.extend(gate._run(_ids(arrived, (module,))).observers)  # noqa: SLF001
+            timings[module] = clock() - started
+        chosen, refused = affordable(timings, len(table), budget)
+        unsettled = tuple(
+            Unsettled(
+                module, _ids(arrived, (module,)), timings[module], timings[module] * len(table)
+            )
+            for module in refused
+        )
+        selection = _ids(arrived, chosen)
+        # Never an empty selection: `_run` reads no names as the whole suite.
+        if selection:
 
-        def observe(mutation: gate.Mutation) -> None:
-            observed[mutation.name] = gate._run(modules).observers  # noqa: SLF001
-            print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
+            def observe(mutation: gate.Mutation) -> None:
+                observed[mutation.name] = gate._run(selection).observers  # noqa: SLF001
+                print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
 
-        interrupted = gate.each_mutation(table, observe)
-    if interrupted is not None:
-        raise SystemExit(interrupted)
-    return baseline, observed
+            interrupted = gate.each_mutation(table, observe)
+            if interrupted is not None:
+                raise SystemExit(interrupted)
+    return tuple(failed_unmutated), observed, chosen, unsettled
 
 
-def settle(table: tuple[gate.Mutation, ...], arrived: Arrivals | None, since: str) -> Report:
+def settle(
+    table: tuple[gate.Mutation, ...],
+    arrived: Arrivals | None,
+    since: str,
+    budget: float = BUDGET_MINUTES * 60,
+) -> Report:
     """Settle what the id comparison can only suspect, by running the arrivals.
 
-    Nothing arrived is CLEAN by the comparison already, and runs nothing: unittest
-    reports a run of no tests as a pass, so there would be nothing to read. An
-    arrival set that could not be read stays CANNOT_TELL.
+    `budget` is in seconds and bounds the mutated runs; the unmutated run that
+    measures them is paid once regardless. Nothing arrived is CLEAN by the
+    comparison already, and runs nothing: unittest reports a run of no tests as a
+    pass, so there would be nothing to read. An arrival set that could not be read
+    stays CANNOT_TELL.
     """
     if not arrived:
         return judge(table, arrived, since)
-    baseline, observed = observe_arrivals(table, tuple(sorted(arrived)))
-    return settled(table, arrived, baseline, observed, since)
+    baseline, observed, chosen, unsettled = observe_arrivals(table, arrived, budget)
+    settled_arrivals = {module: arrived[module] for module in chosen}
+    report = settled(table, settled_arrivals, baseline, observed, since, unsettled)
+    return dataclasses.replace(report, budget=budget)
+
+
+def needed_minutes(report: Report) -> int:
+    """A `--budget` that would have settled every module this report could not.
+
+    The budget it ran with plus every refused module's projection, rounded up: an
+    upper bound, because what the settled modules spent is inside the first term.
+    """
+    return math.ceil((report.budget + sum(each.projected for each in report.unsettled)) / 60)
 
 
 def deriving(name: str) -> str:
@@ -616,7 +735,11 @@ def remedies(report: Report) -> tuple[str, ...]:
         commands.append(verifying(close))
     if wider:
         commands.append(verifying(wider))
-    if report.unattributed or report.unjudged or report.verdict == CANNOT_TELL:
+    if report.unsettled:
+        commands.append(
+            f"python3 tests/observer_staleness.py --settle --budget {needed_minutes(report)}"
+        )
+    if report.unattributed or report.unjudged or report.unsettled or report.verdict == CANNOT_TELL:
         commands.append(
             "python3 tests/mutation_gate.py --verify-mapping"
             f"  # the whole table, about {LEG_MINUTES} minutes over the four legs"
@@ -657,6 +780,12 @@ def lines(report: Report) -> tuple[str, ...]:
         written.append(
             f"  UNDECIDED {undecided.entry} - {', '.join(undecided.modules)} failed outside any "
             "test with it applied, so no arrival there could be judged"
+        )
+    for unsettled in report.unsettled:
+        written.append(
+            f"  UNSETTLED {unsettled.module} - {len(unsettled.tests)} arrived test(s) took "
+            f"{unsettled.baseline:.1f}s unmutated, so about {unsettled.projected / 60:.1f} "
+            "minutes under every entry, which did not fit the budget; not asked, so not cleared"
         )
     if report.unjudged:
         written.append(
@@ -711,6 +840,15 @@ def as_dict(report: Report) -> dict[str, object]:
             for undecided in report.undecided
         ],
         "unjudged": list(report.unjudged),
+        "unsettled": [
+            {
+                "module": unsettled.module,
+                "tests": list(unsettled.tests),
+                "baseline_seconds": round(unsettled.baseline, 3),
+                "projected_seconds": round(unsettled.projected, 3),
+            }
+            for unsettled in report.unsettled
+        ],
         "remedies": list(remedies(report)),
     }
 
@@ -746,6 +884,13 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="run the arrived tests under every entry and fail on a stale one (minutes)",
     )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=BUDGET_MINUTES,
+        metavar="MINUTES",
+        help=f"with --settle, the most the mutated runs may cost (default {BUDGET_MINUTES})",
+    )
     parsed = parser.parse_args(argv)
     if parsed.settle and parsed.head != "HEAD":
         parser.error("--settle runs the working tree, so it compares against HEAD only")
@@ -769,7 +914,7 @@ def main(argv: list[str] | None = None, *, run=subprocess.run, runner=subprocess
     base, since = base_for(parsed.base, runner=runner)
     arrived, why = (None, since) if base is None else what_arrived(base, parsed.head, run=run)
     if parsed.settle:
-        report = settle(gate.MUTATIONS, arrived, why or since)
+        report = settle(gate.MUTATIONS, arrived, why or since, parsed.budget * 60)
     else:
         report = judge(gate.MUTATIONS, arrived, why or since)
     announce(report, as_json=parsed.json)

@@ -707,8 +707,8 @@ class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
         )
         os.environ["PYTHONPATH"] = str(self.root / "src")
 
-    def _settle(self, *arrived: str) -> staleness.Report:
-        report = staleness.settle(SETTLED_TABLE, {"test_arrived": arrived}, "the base")
+    def _settle(self, *arrived: str, budget: float = 600.0) -> staleness.Report:
+        report = staleness.settle(SETTLED_TABLE, {"test_arrived": arrived}, "the base", budget)
         # Every check below also holds the tree to what it was: a settle run that
         # left a mutation behind would be a worse defect than any verdict it got wrong.
         self.assertEqual({path: path.read_bytes() for path in self.originals}, self.originals)
@@ -748,7 +748,8 @@ class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
         derives the set in the same change names it, and the entry must come back
         clear - otherwise the job stays red after the fix it asked for. The module
         also holds `Existing.test_reads_third`, which observes `third` unnamed and
-        did not arrive: blaming the branch for it is the over-reach this rules out."""
+        did not arrive: blaming the branch for it - by running or reading the whole
+        module rather than the arrived ids - is the over-reach this rules out."""
         report = self._settle("Arrived.test_reads_second")
 
         self.assertEqual(report.verdict, staleness.CLEAN)
@@ -779,6 +780,32 @@ class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
         self.assertIn("cannot be judged", written)
         self.assertEqual(staleness.exit_code(report, refuse=False), 0)
 
+    def test_a_module_the_budget_cannot_cover_is_unsettled_and_never_clean(self):
+        """Catches the budget never refusing, which is the unbounded job: a pull
+        request adding one slow test costs the number of entries times that test,
+        and one branch's run went past half an hour before it was stopped.
+
+        A budget of nothing cannot cover any module, so the arrival that would
+        settle STALE above - `test_reads_first`, observing an entry that does not
+        name it - must not be run under any entry. It is reported UNSETTLED with its
+        measured and projected cost, and the verdict is SUSPECT: not asked is not
+        clean, and not observed is not stale.
+        """
+        report = self._settle("Arrived.test_reads_first", budget=0.0)
+        written = "\n".join(staleness.lines(report))
+
+        self.assertEqual(report.verdict, staleness.SUSPECT)
+        self.assertEqual(report.stale, ())
+        self.assertEqual([each.module for each in report.unsettled], ["test_arrived"])
+        unsettled = report.unsettled[0]
+        self.assertEqual(unsettled.tests, ("test_arrived.Arrived.test_reads_first",))
+        self.assertGreater(unsettled.baseline, 0.0, "the module was never timed")
+        self.assertAlmostEqual(unsettled.projected, unsettled.baseline * len(SETTLED_TABLE))
+        self.assertIn("UNSETTLED test_arrived", written)
+        self.assertIn("--settle --budget", written)
+        self.assertEqual(staleness.exit_code(report, refuse=False), 0)
+        self.assertEqual(staleness.exit_code(report, refuse=True), 1)
+
     def test_nothing_arrived_settles_without_running_anything(self):
         """Catches settling running the table over an empty selection. `unittest`
         reports a run of no tests as a pass, so nothing here could fail - and an
@@ -794,6 +821,28 @@ class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
         report = staleness.settle(SETTLED_TABLE, None, "git could not diff the range")
 
         self.assertEqual(report.verdict, staleness.CANNOT_TELL)
+
+
+class TheBudgetChoosesCheapestFirstTest(unittest.TestCase):
+    """`affordable`, over hand-derived timings, because a real one is not repeatable."""
+
+    def test_the_cheapest_modules_are_settled_until_the_next_does_not_fit(self):
+        """Catches the choice being made in name order, or stopping at the first
+        refusal of a module the rest could have fitted around. Ten entries and a
+        budget of 16: `c` projects 6, `b` 10 (16 in all, exactly the budget) and `a`
+        15. Cheapest first settles `c` and `b`; name order would settle `a` alone,
+        and a module that fits exactly must be settled rather than refused."""
+        chosen, refused = staleness.affordable({"a": 1.5, "b": 1.0, "c": 0.6}, 10, 16.0)
+
+        self.assertEqual(chosen, ("b", "c"))
+        self.assertEqual(refused, ("a",))
+
+    def test_a_budget_that_covers_everything_refuses_nothing(self):
+        """The control for the check above: a budget that refused when everything
+        fitted would leave every pull request SUSPECT and nothing settled."""
+        chosen, refused = staleness.affordable({"a": 1.5, "b": 1.0}, 10, 1000.0)
+
+        self.assertEqual((chosen, refused), (("a", "b"), ()))
 
 
 @unittest.skipUnless(HAS_YAML, "needs the `deploy` extra (PyYAML)")

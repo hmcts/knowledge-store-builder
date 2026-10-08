@@ -199,8 +199,10 @@ jobs:
   # job, with the `--derive-mapping` command for the corrected set. The id
   # comparison alone reported SUSPECT and stayed green, and its lists named two of
   # the eight entries three merges staled: it cannot know which entries a test in a
-  # module no entry names observes, and running it is how to find out. A few
-  # minutes, because it runs the arrived modules rather than the whole suite.
+  # module no entry names observes, and running it is how to find out. It runs the
+  # arrived test ids rather than the whole suite, within a ten-minute budget: a
+  # module whose unmutated time times the number of entries does not fit is
+  # reported UNSETTLED with its cost, which keeps the verdict off CLEAN.
   #
   # What it still cannot see is the source change that puts an existing test onto
   # a mutated line; the nightly legs own that half. Not a required check, so a red
