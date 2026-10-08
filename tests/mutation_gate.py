@@ -352,11 +352,64 @@ MUTATIONS = (
     Mutation(
         "the estate check runs against a stale graph in silence",
         "build_community_summaries.py",
-        '    print(\n        graph_files.stale_note(config.GRAPH_PATH, graph.get("nodes", []), "the estate check"),\n        end="",\n        file=sys.stderr,\n    )',
-        "    pass",
+        '    return graph_files.stale_note(plain, nodes, "the estate check")',
+        '    return ""',
         "the strongest form of the class: a truthfulness gate reading the wrong artefact passes on the wrong data, and its silence then licenses a claim about something it never looked at",
         (
             "test_summaries_graph_ambiguity.ArtefactWritersNameTheGraphTest.test_the_estate_check_names_the_other_graph",
+        ),
+    ),
+    Mutation(
+        "the estate check reads only the plain graph, so an absent one yields an empty vocabulary",
+        "build_community_summaries.py",
+        "    read = graph_files.graph_to_read(config.GRAPH_PATH)\n",
+        "    read = config.GRAPH_PATH if config.GRAPH_PATH.is_file() else None\n",
+        "on a fresh clone the plain graph is gitignored, so reading only it leaves the estate check with nothing to compare against and no sign that it did nothing",
+        (
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_absent_plain_graph_is_not_called_stale_and_the_archive_is_read",
+        ),
+    ),
+    Mutation(
+        "an empty plain graph is reported as a stale one",
+        "build_community_summaries.py",
+        "    if not nodes and archive.is_file():",
+        "    if False:",
+        "a zero-node graph.json is not out of date, it is empty; calling it stale sends an operator to compare two files when one holds nothing",
+        (
+            "test_summaries_graph_ambiguity.EstateCheckAbsentOrEmptyPlainGraphTest.test_an_empty_plain_graph_says_it_is_empty_and_names_what_was_read",
+        ),
+    ),
+    Mutation(
+        "verify stops running the rotation self-check",
+        "build_community_summaries.py",
+        "    _report_rotation(rotation_check(checked, prose, digests, {cid for cid, _ in unsupported}))\n",
+        "",
+        "a flagged rate shown without the rotation beside it cannot tell a working check from a vacuous one, and a falling rate reads as an improvement",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_check_that_stopped_discriminating_says_so_loudly_and_keeps_the_exit_code",
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_working_check_reports_what_the_rotation_produced_beside_the_real_figure",
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_fewer_than_two_communities_is_inconclusive_not_a_collapse",
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_nothing_grounded_to_begin_with_is_inconclusive",
+        ),
+    ),
+    Mutation(
+        "the rotation does not wrap the last summary onto the first",
+        "build_community_summaries.py",
+        "ids[(index + 1) % len(ids)]",
+        "ids[min(index + 1, len(ids) - 1)]",
+        "the last community would be compared with its own digest, so one summary always escapes the rotation and the collapse is understated",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_working_check_reports_what_the_rotation_produced_beside_the_real_figure",
+        ),
+    ),
+    Mutation(
+        "the rotation self-check passes whatever the rotated figure is",
+        "build_community_summaries.py",
+        "    elif rotated_grounded <= grounded * ROTATION_COLLAPSE:",
+        "    elif True:",
+        "a self-check that cannot fail reports a vacuous comparison as discriminating, which is the failure it exists to name",
+        (
+            "test_summaries_rotation_selfcheck.RotationSelfCheckTest.test_a_check_that_stopped_discriminating_says_so_loudly_and_keeps_the_exit_code",
         ),
     ),
     Mutation(

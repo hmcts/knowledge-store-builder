@@ -247,5 +247,57 @@ class ArtefactWritersNameTheGraphTest(GraphPair, SettingsIsolated):
         self.assertIn("MISMATCH", self._stderr_of(summaries.estate_vocabulary))
 
 
+class EstateCheckAbsentOrEmptyPlainGraphTest(GraphPair, SettingsIsolated):
+    """The estate check on a store whose plain `graph.json` is absent or empty.
+
+    A missing or empty file is not a stale one, and the note used to call both
+    stale and say the check was built from the plain file - which on a fresh clone
+    does not exist, so a correct run read as a suspect one.
+    """
+
+    def _run(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            vocabulary = summaries.estate_vocabulary()
+        return vocabulary, err.getvalue()
+
+    def test_an_absent_plain_graph_is_not_called_stale_and_the_archive_is_read(self):
+        """Breaks if an absent `graph.json` beside a populated archive is reported
+        as a MISMATCH, or if the estate check keeps reading only the plain file and
+        so builds an empty vocabulary while the note claims otherwise."""
+        self.write_gz({"0": ["a"], "1": ["b"]})
+        (identifiers, _), note = self._run()
+        self.assertEqual(
+            note,
+            "  graph.json is absent; the estate check was built from graph.json.gz.\n",
+        )
+        self.assertEqual(identifiers, {"a", "b"})
+
+    def test_an_empty_plain_graph_says_it_is_empty_and_names_what_was_read(self):
+        """Breaks if a zero-node `graph.json` is reported as a disagreement, or if
+        the note names a different file from the one the run read."""
+        config.GRAPH_PATH.write_text(json.dumps(_graph({})), encoding="utf-8")
+        self.write_gz({"0": ["a"], "1": ["b"]})
+        (identifiers, _), note = self._run()
+        self.assertEqual(
+            note,
+            "  graph.json holds no nodes, so the estate check was built from an empty graph "
+            "and will find no term in it. graph.json.gz was NOT read.\n",
+        )
+        self.assertEqual(identifiers, set())
+
+    def test_a_genuine_disagreement_still_reports_the_mismatch(self):
+        """Breaks if the two new states swallow a real disagreement between two
+        populated files."""
+        self.write_plain({"0": ["a"], "1": ["b"]})
+        self.write_gz({"0": ["a"], "1": ["b"], "2": ["c"]})
+        _, note = self._run()
+        self.assertIn(
+            "MISMATCH: graph.json has 2 communities over 2 clustered nodes; "
+            "graph.json.gz has 3 over 3.",
+            note,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
