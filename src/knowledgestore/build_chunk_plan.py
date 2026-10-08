@@ -49,10 +49,16 @@ rather than assumed.
 from __future__ import annotations
 
 import argparse
+import json
+import posixpath
+import statistics
+import sys
 from collections import defaultdict
+from collections.abc import Container, Iterable
 from pathlib import Path
+from typing import TextIO
 
-from . import config, content_set, io, store_paths
+from . import config, content_set, drift, io, store_paths
 
 # graphify's own detect categories. Video is transcribed to a document before this
 # runs, so it is never planned directly.
@@ -97,6 +103,24 @@ def group_by_directory(paths: list[str]) -> list[list[str]]:
     return [sorted(by_directory[key]) for key in sorted(by_directory)]
 
 
+def detected_images(detect: dict) -> list[str]:
+    """The files the detect result classifies as images, as it wrote them."""
+    return list((detect.get("files") or {}).get("image") or [])
+
+
+def image_chunks(files: Iterable[str], images: Container[str]) -> tuple[list[list[str]], list[str]]:
+    """(a chunk of its own for each image, sorted; every other file, in the order given).
+
+    The one place a plan decides which files are extracted alone. A full plan and a
+    delta both call it, so a change to the rule reaches both together: an image
+    gets its own chunk because vision needs its own context, and mixing images with
+    documents makes an agent do two jobs in one prompt.
+    """
+    listed = list(files)
+    own = [[path] for path in sorted(path for path in listed if path in images)]
+    return own, [path for path in listed if path not in images]
+
+
 def plan_chunks(
     detect: dict,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
@@ -116,13 +140,8 @@ def plan_chunks(
     if only is not None:
         files = {kind: [f for f in paths if f in only] for kind, paths in files.items()}
 
-    chunks: list[list[str]] = []
-    # An image per chunk: vision needs its own context, and mixing images with
-    # documents makes an agent do two jobs in one prompt.
-    chunks.extend([image] for image in files.get("image", []))
-
-    # Everything except images, which got a chunk each above.
-    grouped = [path for kind, paths in files.items() if kind != "image" for path in paths]
+    images = set(files.get("image", []))
+    chunks, grouped = image_chunks((path for paths in files.values() for path in paths), images)
     chunks.extend(chunk_groups(group_by_directory(grouped), chunk_size))
     return {f"{index + 1:04d}": chunk for index, chunk in enumerate(chunks)}
 
@@ -191,13 +210,183 @@ def uncached_paths() -> set[str]:
     return {line.strip() for line in text.splitlines() if line.strip()}
 
 
-def report(plan: dict[str, list[str]], counted: dict[str, list[str]], chunk_size: int) -> None:
+def report(
+    plan: dict[str, list[str]],
+    counted: dict[str, list[str]],
+    chunk_size: int,
+    destination: str,
+    stream: TextIO,
+) -> None:
     """What was planned, and from what. Every number names the quantity it counts."""
     sizes = sorted(len(files) for files in plan.values())
     print(
-        f"{len(plan):,} chunks over {sum(sizes):,} files -> {config.CHUNK_PLAN_PATH}\n"
+        f"{len(plan):,} chunks over {sum(sizes):,} files -> {destination}\n"
         f"  per chunk: smallest {sizes[0]}, largest {sizes[-1]}, maximum {chunk_size}\n"
         "  detected: " + ", ".join(f"{kind} {len(paths):,}" for kind, paths in counted.items()),
+        file=stream,
+        flush=True,
+    )
+
+
+def delta_files(path: Path) -> list[str]:
+    """What a resync has to extract: the drift's new and changed files, store-relative.
+
+    Deleted files are not planned - there is nothing left to read.
+    """
+    document = io.read_json_dict(path)
+    files = [*(document.get("new") or []), *(document.get("changed") or [])]
+    return sorted({store_paths.relative(f) for f in files})
+
+
+def next_chunk_number(plan_path: Path) -> int | None:
+    """The number after the plan's last chunk, or None when there is no plan to extend."""
+    plan = io.read_json_dict(plan_path)
+    numbers = [int(key) for key in plan if str(key).isdigit()]
+    return max(numbers) + 1 if numbers else None
+
+
+def pack_delta(
+    files: list[str], chunk_size: int, first: int, images: set[str] | frozenset[str] = frozenset()
+) -> dict[str, list[str]]:
+    """A delta's chunks: one repository at a time, in directory order, filled to `chunk_size`.
+
+    Images first, one chunk each, as the full plan does: vision needs its own context,
+    and a delta must extract what a full build would. `images` comes from the same
+    detect result the full plan reads.
+
+    **Not the full plan's one-directory rule, deliberately.** A delta touches a file or
+    two per directory, so one directory per chunk pays a worker's fixed cost once per
+    directory: measured on one large internal estate, 1,130 chunks for 2,048 files,
+    against 192 packed this way. Keeping a repository's files together, in directory
+    order, keeps the relationships an agent can find; padding across repositories would
+    ask it to relate files that have no relation.
+    """
+    alone, rest = image_chunks(files, images)
+    by_repository: dict[str, list[str]] = defaultdict(list)
+    for path in rest:
+        by_repository[drift.repository_of(path)].append(path)
+    packed = list(alone)
+    for repository in sorted(by_repository):
+        ordered = sorted(by_repository[repository], key=lambda p: (posixpath.dirname(p), p))
+        packed.extend(
+            ordered[start : start + chunk_size] for start in range(0, len(ordered), chunk_size)
+        )
+    return {f"{first + index:04d}": chunk for index, chunk in enumerate(packed)}
+
+
+def write_batches(plan: dict[str, list[str]], directory: Path, chunk_out: Path) -> int:
+    """One batch file per chunk, in the shape the extraction agents and the chunk gate take.
+
+    One chunk per batch because a worker extracting the last of several chunks carries
+    every earlier chunk's reads and writes in its context, and its cost per turn grows
+    with each. Files are absolute, as the extraction spec requires an agent to receive
+    and echo them; `out` is where the chunk's extraction goes, which a trial points away
+    from the live directory so nothing live is touched.
+    """
+    for key in sorted(plan, key=int):
+        batch = {
+            "chunks": [
+                {
+                    "n": int(key),
+                    "out": str(chunk_out / f".graphify_chunk_{key}.json"),
+                    "files": [store_paths.absolute(f) for f in plan[key]],
+                }
+            ]
+        }
+        io.write_json(directory / f"batch_{int(key):04d}.json", batch, indent=1)
+    return len(plan)
+
+
+def emit(stored: dict[str, list[str]], out: str | None) -> str:
+    """Write a plan to `out`, or to stdout when none is named; say where it went."""
+    if out is None:
+        print(json.dumps(stored, indent=2, ensure_ascii=False), flush=True)
+        return "stdout"
+    io.write_json(Path(out), stored, indent=2)
+    return out
+
+
+def plan_delta(arguments: argparse.Namespace) -> int:
+    """`--delta`: the resync's chunks, numbered after the plan's, written beside it."""
+    stream = sys.stdout if arguments.out else sys.stderr
+    delta_path = Path(arguments.delta)
+    if not delta_path.is_file():
+        print(f"No drift at {delta_path}; `knowledgestore drift` writes one.", file=stream)
+        return 2
+    first = next_chunk_number(config.CHUNK_PLAN_PATH)
+    if first is None:
+        # Restarting at 0001 would collide with chunk files already on disk.
+        print(
+            f"No chunk plan at {config.CHUNK_PLAN_PATH} to number the delta after. A delta "
+            "extends the plan the committed layer was extracted from.",
+            file=stream,
+            flush=True,
+        )
+        return 2
+    detect = io.read_json_dict(config.DETECT_PATH)
+    if not detect:
+        # Read as "no images", a missing detect result would pack every image in with
+        # documents, which no full build does.
+        print(
+            f"A delta needs the detection results at {config.DETECT_PATH} for the reason "
+            "the full plan does - to give each image its own chunk - and there are none. "
+            + content_set.DETECT_PRODUCER,
+            file=stream,
+            flush=True,
+        )
+        return 2
+    files = delta_files(delta_path)
+    if not files:
+        # Not a failure, and not an empty mapping either: a resync would append that
+        # as a plan that succeeded.
+        print(
+            f"The drift at {delta_path} holds no new or changed files, so there is nothing "
+            "to extract. Nothing written.",
+            file=stream,
+            flush=True,
+        )
+        return 0
+
+    images = {store_paths.relative(f) for f in detected_images(detect)}
+    additions = pack_delta(files, arguments.chunk_size, first, images)
+    placed = [f for chunk in additions.values() for f in chunk]
+    if sorted(placed) != files:
+        # Every file in exactly one chunk: a file in two is extracted twice and
+        # merged as duplicates; a file in none is silently never re-extracted.
+        print(
+            f"Refusing: {len(placed):,} placements for {len(files):,} files - the delta "
+            "would extract a file twice or not at all. Nothing written.",
+            file=stream,
+            flush=True,
+        )
+        return 2
+
+    # Written beside the plan, never into it: the resync appends it once the chunks
+    # are extracted, so the plan never names an extraction that does not exist.
+    destination = emit(store_paths.store_relative_plan(additions), arguments.out)
+    sizes = [len(chunk) for chunk in additions.values()]
+    keys = list(additions)
+    print(
+        f"{len(files):,} new and changed files -> {len(additions):,} chunks "
+        f"{keys[0]}..{keys[-1]} -> {destination}\n"
+        f"  per chunk: median {statistics.median(sizes):g}, largest {max(sizes)}, "
+        f"maximum {arguments.chunk_size}\n"
+        "  Append these to the plan once the chunks are extracted.",
+        file=stream,
+        flush=True,
+    )
+    if arguments.one_per_batch:
+        batches(additions, arguments, stream)
+    return 0
+
+
+def batches(plan: dict[str, list[str]], arguments: argparse.Namespace, stream: TextIO) -> None:
+    directory = Path(arguments.one_per_batch)
+    chunk_out = Path(arguments.chunk_out) if arguments.chunk_out else config.CHUNK_PLAN_PATH.parent
+    written = write_batches(plan, directory, chunk_out)
+    print(
+        f"  {written:,} one-chunk batch files -> {directory}, extractions to {chunk_out}",
+        file=stream,
         flush=True,
     )
 
@@ -227,8 +416,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--uncached",
         action="store_true",
-        help="plan only files graphify's cache check left to extract; without this the plan "
-        "covers every content file, which is what makes the chunk archive readable",
+        help="plan only files graphify's cache has not seen - not the files a sync changed, "
+        "which `knowledgestore drift` measures. Written to --out or stdout, never over the "
+        "committed plan",
+    )
+    parser.add_argument(
+        "--out",
+        help="where to write the plan (default: graphify-out/.graphify_chunk_plan.json, or "
+        "stdout for --uncached and --delta)",
+    )
+    parser.add_argument(
+        "--delta",
+        help="plan the new and changed files in a `knowledgestore drift` output, packed per "
+        "repository and numbered after the committed plan's last chunk. The mapping goes to "
+        "--out or stdout, for appending to the plan once the chunks are extracted",
+    )
+    parser.add_argument(
+        "--one-per-batch",
+        metavar="DIR",
+        help="also write one batch file per chunk to DIR, in the shape "
+        '{"chunks": [{"n", "out", "files"}]} with absolute file paths',
+    )
+    parser.add_argument(
+        "--chunk-out",
+        metavar="DIR",
+        help="where each batch's `out` points (default: graphify-out/). Point a trial "
+        "elsewhere so nothing live is touched",
     )
     return parser.parse_args(argv)
 
@@ -238,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.chunk_size < 1:
         print("--chunk-size must be at least 1", flush=True)
         return 2
+
+    if arguments.delta and arguments.uncached:
+        print("--delta and --uncached answer different questions; pass one.", flush=True)
+        return 2
+    if arguments.delta:
+        return plan_delta(arguments)
 
     kinds = requested_kinds(arguments.kinds)
     if kinds is None:
@@ -267,18 +486,39 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    return write_full_plan(plan, counted, only, arguments)
+
+
+def write_full_plan(
+    plan: dict[str, list[str]],
+    counted: dict[str, list[str]],
+    only: set[str] | None,
+    arguments: argparse.Namespace,
+) -> int:
+    """Write a full or uncached plan, its batches if asked, and say what was written."""
     stored = store_paths.store_relative_plan(plan)
-    io.write_json(config.CHUNK_PLAN_PATH, stored, indent=2)
+    # A measurement must not rewrite the artefact the chunk archive is keyed on, so
+    # an uncached plan goes where the caller says, or to stdout - never over the
+    # committed plan.
+    to_stdout = arguments.out is None and arguments.uncached
+    stream = sys.stderr if to_stdout else sys.stdout
+    if to_stdout:
+        destination = emit(stored, None)
+    else:
+        destination = emit(stored, arguments.out or str(config.CHUNK_PLAN_PATH))
     sizes = sorted(len(files) for files in plan.values())
-    report(plan, counted, arguments.chunk_size)
+    report(plan, counted, arguments.chunk_size, destination, stream)
     if only is not None:
-        print(f"  restricted to {len(only):,} uncached file(s)", flush=True)
+        print(f"  restricted to {len(only):,} uncached file(s)", file=stream, flush=True)
     print(
         "  Paths are stored relative to the store root. A dispatcher must call "
         "`store_paths.load_plan()`, which resolves them - the extraction spec requires "
         "agents to receive and echo paths verbatim and absolute.",
+        file=stream,
         flush=True,
     )
+    if arguments.one_per_batch:
+        batches(stored, arguments, stream)
 
     # Counted and named, because committing absolute paths is the whole defect this
     # stage exists to remove, and relativising is silent when it cannot be done: a
@@ -293,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
             "  They are outside the store root, so this plan carries this machine's "
             "layout and will not survive a relocation or a clone. Point graphify at a "
             "corpus inside the store, or do not commit the plan.",
+            file=stream,
             flush=True,
         )
     return 0

@@ -23,6 +23,7 @@ from . import config
 SELF_PARSING = frozenset(
     {
         "discover",
+        "drift",
         "export-history",
         "fetch-tickets",
         "summaries",
@@ -81,6 +82,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "list the estate's repositories from GitHub into config/repositories.txt",
     ),
     "sync": ("sync_repositories", "clone or update every configured repository into repositories/"),
+    "drift": (
+        "drift",
+        "measure which extracted files the sync made stale, from the recorded shas",
+    ),
     "convert": (
         "convert_documents",
         "convert Office documents to Markdown so extraction can read them",

@@ -179,6 +179,8 @@ extra). See *Check each semantic chunk before merging* in
 ```bash
 knowledgestore status                        # coverage, citations, page freshness
 knowledgestore status --drift                # how far the sources have moved
+knowledgestore drift --before <provenance> --plan <plan>  # which extracted files a sync made stale
+knowledgestore chunk-plan --delta <drift> --one-per-batch <dir>  # re-extract only those
 knowledgestore summaries verify --sample 200 # is the prose grounded in evidence?
 knowledgestore check-install-docs            # can a reader run your install commands?
 knowledgestore check-evidence                # does committed commit text identify a case?
