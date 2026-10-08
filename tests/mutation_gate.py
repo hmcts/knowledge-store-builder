@@ -2898,6 +2898,10 @@ MUTATIONS = (
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_clean_run_leaves_no_record_behind",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
+            "test_observer_staleness.SettlingReadsWhatTheArrivalsObserveTest.test_an_arrived_observer_the_entry_already_names_is_clean",
+            "test_observer_staleness.SettlingReadsWhatTheArrivalsObserveTest.test_an_arrived_observer_the_entry_does_not_name_is_stale",
+            "test_observer_staleness.SettlingReadsWhatTheArrivalsObserveTest.test_an_arrived_test_failing_before_any_mutation_cannot_be_judged",
+            "test_observer_staleness.SettlingReadsWhatTheArrivalsObserveTest.test_an_arrived_test_that_observes_nothing_is_clean",
         ),
     ),
     Mutation(

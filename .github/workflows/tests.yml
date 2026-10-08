@@ -187,28 +187,32 @@ jobs:
             && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
             || { git status --porcelain=v1 --untracked-files=all; exit 1; }
 
-  # The cheap half of the same question, on the event that creates the problem.
-  # `mapping-decision` below never runs on a pull request, and the two jobs after
-  # it never do either - but a merge of `main` into a branch is *where* an observer
-  # set goes stale, and that happens on the way into a pull request. So the window
-  # between "the mapping became wrong" and "anything says so" was a day, and four
-  # branches in one afternoon each had the four legs dispatched by hand to find out
-  # which entries had moved (#293).
+  # The pull-request half of the same question, on the event that creates the
+  # problem. `mapping-decision` below never runs on a pull request, and the two jobs
+  # after it never do either - but a merge of `main` into a branch is *where* an
+  # observer set goes stale, and that happens on the way into a pull request. So the
+  # window between "the mapping became wrong" and "anything says so" was a day (#293).
   #
-  # This reads test ids either side of the last verified commit and names the
-  # entries whose sets could have gained an observer. Seconds rather than minutes,
-  # because it runs no test and applies no mutation - which is also the limit of
-  # what it can claim: it sees arrivals, not the source changes that put an
-  # existing test onto a mutated line. The nightly deny-list still owns that half.
+  # `--settle` reads which test ids arrived since the last verified commit, then runs
+  # the modules holding them once unmutated and once under each entry. An arrived
+  # test that fails under an entry that does not name it is STALE and fails this
+  # job, with the `--derive-mapping` command for the corrected set. The id
+  # comparison alone reported SUSPECT and stayed green, and its lists named two of
+  # the eight entries three merges staled: it cannot know which entries a test in a
+  # module no entry names observes, and running it is how to find out. It runs the
+  # arrived test ids rather than the whole suite, within a ten-minute budget: a
+  # module whose unmutated time times the number of entries does not fit is
+  # reported UNSETTLED with its cost, which keeps the verdict off CLEAN.
   #
-  # Advisory, and that is a decision rather than an omission. Confirming a
-  # suspicion costs the whole-suite run per entry, so there is no condition here on
-  # which a refusal would be sound - `--refuse` is in the script for a maintainer
-  # who decides otherwise. Not a required check, so it cannot deadlock a pull
-  # request.
+  # What it still cannot see is the source change that puts an existing test onto
+  # a mutated line; the nightly legs own that half. Not a required check, so a red
+  # here blocks nothing by itself - it is a verdict to act on.
   #
-  # No `pip install` step: the script imports the standard library, the table and
-  # `mapping_trigger`, and nothing from the package.
+  # The steps before the last are the `tests` job's, step for step, the discipline
+  # the `mapping` legs follow and `test_observer_staleness` holds this job to. The
+  # mapping is derived with the package and the pinned extras installed; without
+  # them a test that needs an extra skips, fails under no entry, and settles CLEAN
+  # over an observer it never ran.
   observer-staleness:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -221,18 +225,42 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The comparison reaches back to the last verified commit, which is older
-          # than any default depth once a few pull requests have landed.
-          fetch-depth: 0
+          fetch-depth: 0 # hatch-vcs derives the version from tags at install
 
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Name the observer sets this branch's merges may have staled
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
+      - name: Install the package
+        run: pip install -e . # NOSONAR
+
+      - name: Unit tests, default install
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Install the optional extras
+        run: |
+          pip install --only-binary :all: 'PyYAML==6.0.3'
+          # graphify too, and not only for the deployments stage. Without it 20
+          # tests skip silently - every check that reads graphify's own dispatch
+          # table or its ignore helpers - so "with extras" was green over a fifth
+          # of its own suite never running. Found by the mutation gate below,
+          # which reported a symlink-exclusion mutation as surviving in CI while
+          # the same mutation was caught locally.
+          pip install --only-binary :all: 'graphifyy==0.9.80'
+
+      - name: Settle which observer sets this branch's merges have staled
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tests/observer_staleness.py
+        run: python3 tests/observer_staleness.py --settle
 
   # The same mapping check, in slices, because it applies every entry against the
   # whole suite: 1683 seconds in one job, and long enough that nobody dispatches

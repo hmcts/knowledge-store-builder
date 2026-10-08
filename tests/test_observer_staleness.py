@@ -47,6 +47,15 @@ import mapping_trigger as trigger
 import mutation_gate as gate
 import observer_staleness as staleness
 
+try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
+    import yaml
+
+    HAS_YAML = True
+except ImportError:  # pragma: no cover - the default-install CI job takes this path
+    HAS_YAML = False
+
+WORKFLOW = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "tests.yml"
+
 ALPHA = '''\
 """A module with two classes that share a method name."""
 
@@ -569,6 +578,306 @@ class TheParseHasNoHiddenBlindSpotTest(unittest.TestCase):
                             if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef)
                         )
         return False
+
+
+# The purpose-built tree the settle checks run over. Each test reads one source file
+# and fails while that file is mutated, so which entries a test observes is fixed by
+# construction and readable here rather than derived by the code under test.
+SETTLED_SOURCES = {"first.py": "FIRST", "second.py": "SECOND", "third.py": "THIRD"}
+
+READS = """
+import unittest
+from pathlib import Path
+
+PACKAGE = Path(__file__).resolve().parent.parent / "src" / "knowledgestore"
+
+
+def holds(module, value):
+    return value in (PACKAGE / module).read_text(encoding="utf-8")
+"""
+
+# Present at the base: observes `third`, which does not name it.
+EXISTING_MODULE = (
+    READS
+    + """
+
+class Old(unittest.TestCase):
+    def test_reads_first(self):
+        self.assertTrue(holds("first.py", "FIRST"))
+
+    def test_reads_third(self):
+        self.assertTrue(holds("third.py", "THIRD"))
+"""
+)
+
+# The module a branch brought tests into. `Existing` was there before the branch,
+# and observes `third` without being named by it - staleness the branch did not
+# cause, so settling must not blame the branch for it.
+ARRIVED_MODULE = (
+    READS
+    + """
+
+class Existing(unittest.TestCase):
+    def test_reads_third(self):
+        self.assertTrue(holds("third.py", "THIRD"))
+
+
+class Arrived(unittest.TestCase):
+    def test_reads_first(self):
+        self.assertTrue(holds("first.py", "FIRST"))
+
+    def test_reads_second(self):
+        self.assertTrue(holds("second.py", "SECOND"))
+
+    def test_reads_nothing(self):
+        self.assertTrue(True)
+
+    def test_fails_already(self):
+        self.fail("broken before any mutation is applied")
+"""
+)
+
+SETTLED_TABLE = (
+    gate.Mutation(
+        "the first value is lost",
+        "first.py",
+        "FIRST",
+        "MUTATED",
+        "a purpose-built target",
+        ("test_old.Old.test_reads_first",),
+    ),
+    gate.Mutation(
+        "the second value is lost",
+        "second.py",
+        "SECOND",
+        "MUTATED",
+        "a purpose-built target",
+        ("test_arrived.Arrived.test_reads_second",),
+    ),
+    gate.Mutation(
+        "the third value is lost",
+        "third.py",
+        "THIRD",
+        "MUTATED",
+        "a purpose-built target",
+        ("test_old.Old.test_reads_third",),
+    ),
+)
+
+
+class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
+    """`--settle`, over a real tree with real mutations and real suite runs.
+
+    The id comparison can only say an entry *might* have gained an observer, and
+    for a test arriving in a module no entry names it cannot even say which. These
+    checks hold the step that answers it: every entry applied through the gate's
+    own `each_mutation`, the arrived modules run in a child process, and the verdict
+    read off which arrived tests failed. The table and the arrivals are forged; the
+    mutation, the run and the restore are the gate's own.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        # Resolved, because the gate compares a child's import path against its own
+        # `SRC`, and macOS hands out temporary directories behind a symlink.
+        self.root = Path(temporary.name).resolve()
+        package = self.root / "src" / "knowledgestore"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        for module, value in SETTLED_SOURCES.items():
+            (package / module).write_text(f'VALUE = "{value}"\n', encoding="utf-8")
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_old.py").write_text(EXISTING_MODULE, encoding="utf-8")
+        (self.root / "tests" / "test_arrived.py").write_text(ARRIVED_MODULE, encoding="utf-8")
+        self.originals = {path: path.read_bytes() for path in package.iterdir()}
+
+        for name in ("ROOT", "SRC", "RECOVERY_PATH"):
+            self.addCleanup(setattr, gate, name, getattr(gate, name))
+        gate.ROOT = self.root
+        gate.SRC = package
+        gate.RECOVERY_PATH = self.root / "sidecar"
+        previous = os.environ.get("PYTHONPATH")
+        self.addCleanup(
+            lambda: (
+                os.environ.__setitem__("PYTHONPATH", previous)
+                if previous is not None
+                else os.environ.pop("PYTHONPATH", None)
+            )
+        )
+        os.environ["PYTHONPATH"] = str(self.root / "src")
+
+    def _settle(self, *arrived: str, budget: float = 600.0) -> staleness.Report:
+        report = staleness.settle(SETTLED_TABLE, {"test_arrived": arrived}, "the base", budget)
+        # Every check below also holds the tree to what it was: a settle run that
+        # left a mutation behind would be a worse defect than any verdict it got wrong.
+        self.assertEqual({path: path.read_bytes() for path in self.originals}, self.originals)
+        self.assertFalse(gate.RECOVERY_PATH.exists(), "a recovery record was left behind")
+        return report
+
+    def test_an_arrived_observer_the_entry_does_not_name_is_stale(self):
+        """Catches settling losing the arrival it exists for: a test arriving that
+        fails under an entry's mutation and is not in its set is that set going
+        stale, and must fail the job by name rather than be reported as a suspicion.
+
+        The same run carries its own control. `test_reads_second` arrives too and
+        observes `second`, which names it; `Existing.test_reads_third` sits in the
+        same module, observes `third` and is not named by it. Exactly one entry may
+        come back stale, so a comparison that blamed every failing test, or none,
+        cannot pass here.
+        """
+        report = self._settle("Arrived.test_reads_first", "Arrived.test_reads_second")
+        written = "\n".join(staleness.lines(report))
+
+        self.assertEqual(report.verdict, staleness.STALE)
+        self.assertEqual(
+            [(stale.entry, stale.unnamed) for stale in report.stale],
+            [("the first value is lost", ("test_arrived.Arrived.test_reads_first",))],
+        )
+        self.assertIn("test_arrived.Arrived.test_reads_first", written)
+        self.assertIn(
+            "python3 tests/mutation_gate.py --derive-mapping --only 'the first value is lost'",
+            written,
+        )
+        self.assertNotIn("the second value is lost", written)
+        self.assertNotIn("the third value is lost", written)
+        self.assertEqual(staleness.exit_code(report, refuse=False), 1)
+
+    def test_an_arrived_observer_the_entry_already_names_is_clean(self):
+        """Catches settling flagging its own remedy. A branch that adds a test and
+        derives the set in the same change names it, and the entry must come back
+        clear - otherwise the job stays red after the fix it asked for. The module
+        also holds `Existing.test_reads_third`, which observes `third` unnamed and
+        did not arrive: blaming the branch for it - by running or reading the whole
+        module rather than the arrived ids - is the over-reach this rules out."""
+        report = self._settle("Arrived.test_reads_second")
+
+        self.assertEqual(report.verdict, staleness.CLEAN)
+        self.assertEqual(report.stale, ())
+        self.assertEqual(staleness.exit_code(report, refuse=False), 0)
+
+    def test_an_arrived_test_that_observes_nothing_is_clean(self):
+        """Catches settling treating arrival as observation - a test that fails under
+        no mutation is no entry's observer, and the id comparison's suspicion over it
+        must resolve to CLEAN rather than survive as a red job."""
+        report = self._settle("Arrived.test_reads_nothing")
+
+        self.assertEqual(report.verdict, staleness.CLEAN)
+        self.assertEqual(report.stale, ())
+
+    def test_an_arrived_test_failing_before_any_mutation_cannot_be_judged(self):
+        """Catches a baseline failure being read as an observation. A test that fails
+        with nothing applied fails under every entry too, so without the baseline it
+        would be named as an unnamed observer of the whole table. It has to be
+        reported as unjudgeable instead - a suspicion, never a verdict about entries."""
+        report = self._settle("Arrived.test_fails_already")
+        written = "\n".join(staleness.lines(report))
+
+        self.assertEqual(report.verdict, staleness.SUSPECT)
+        self.assertEqual(report.stale, ())
+        self.assertEqual(report.unjudged, ("test_arrived.Arrived.test_fails_already",))
+        self.assertIn("test_arrived.Arrived.test_fails_already", written)
+        self.assertIn("cannot be judged", written)
+        self.assertEqual(staleness.exit_code(report, refuse=False), 0)
+
+    def test_a_module_the_budget_cannot_cover_is_unsettled_and_never_clean(self):
+        """Catches the budget never refusing, which is the unbounded job: a pull
+        request adding one slow test costs the number of entries times that test,
+        and one branch's run went past half an hour before it was stopped.
+
+        A budget of nothing cannot cover any module, so the arrival that would
+        settle STALE above - `test_reads_first`, observing an entry that does not
+        name it - must not be run under any entry. It is reported UNSETTLED with its
+        measured and projected cost, and the verdict is SUSPECT: not asked is not
+        clean, and not observed is not stale.
+        """
+        report = self._settle("Arrived.test_reads_first", budget=0.0)
+        written = "\n".join(staleness.lines(report))
+
+        self.assertEqual(report.verdict, staleness.SUSPECT)
+        self.assertEqual(report.stale, ())
+        self.assertEqual([each.module for each in report.unsettled], ["test_arrived"])
+        unsettled = report.unsettled[0]
+        self.assertEqual(unsettled.tests, ("test_arrived.Arrived.test_reads_first",))
+        self.assertGreater(unsettled.baseline, 0.0, "the module was never timed")
+        self.assertAlmostEqual(unsettled.projected, unsettled.baseline * len(SETTLED_TABLE))
+        self.assertIn("UNSETTLED test_arrived", written)
+        self.assertIn("--settle --budget", written)
+        self.assertEqual(staleness.exit_code(report, refuse=False), 0)
+        self.assertEqual(staleness.exit_code(report, refuse=True), 1)
+
+    def test_nothing_arrived_settles_without_running_anything(self):
+        """Catches settling running the table over an empty selection. `unittest`
+        reports a run of no tests as a pass, so nothing here could fail - and an
+        empty arrival set is CLEAN by the id comparison already."""
+        report = staleness.settle(SETTLED_TABLE, {}, "the base")
+
+        self.assertEqual(report.verdict, staleness.CLEAN)
+        self.assertFalse(gate.RECOVERY_PATH.exists())
+
+    def test_an_arrival_set_that_could_not_be_read_still_cannot_tell(self):
+        """Catches settling turning the third state into a verdict: no arrivals read
+        is not no arrivals, and must stay CANNOT_TELL."""
+        report = staleness.settle(SETTLED_TABLE, None, "git could not diff the range")
+
+        self.assertEqual(report.verdict, staleness.CANNOT_TELL)
+
+
+class TheBudgetChoosesCheapestFirstTest(unittest.TestCase):
+    """`affordable`, over hand-derived timings, because a real one is not repeatable."""
+
+    def test_the_cheapest_modules_are_settled_until_the_next_does_not_fit(self):
+        """Catches the choice being made in name order, or stopping at the first
+        refusal of a module the rest could have fitted around. Ten entries and a
+        budget of 16: `c` projects 6, `b` 10 (16 in all, exactly the budget) and `a`
+        15. Cheapest first settles `c` and `b`; name order would settle `a` alone,
+        and a module that fits exactly must be settled rather than refused."""
+        chosen, refused = staleness.affordable({"a": 1.5, "b": 1.0, "c": 0.6}, 10, 16.0)
+
+        self.assertEqual(chosen, ("b", "c"))
+        self.assertEqual(refused, ("a",))
+
+    def test_a_budget_that_covers_everything_refuses_nothing(self):
+        """The control for the check above: a budget that refused when everything
+        fitted would leave every pull request SUSPECT and nothing settled."""
+        chosen, refused = staleness.affordable({"a": 1.5, "b": 1.0}, 10, 1000.0)
+
+        self.assertEqual((chosen, refused), (("a", "b"), ()))
+
+
+@unittest.skipUnless(HAS_YAML, "needs the `deploy` extra (PyYAML)")
+class TheWorkflowSettlesOnAPullRequestTest(unittest.TestCase):
+    """The job that runs `--settle`, held to the environment the mapping is derived in."""
+
+    def setUp(self) -> None:
+        self.workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        self.job = self.workflow["jobs"]["observer-staleness"]
+
+    def test_the_job_settles_in_the_environment_the_tests_job_builds(self):
+        """Catches settling running where the arrived tests cannot observe anything.
+        Without the package and the pinned extras installed, a test that needs one
+        skips - and a skipped test fails under no mutation, so every entry it
+        observes comes back CLEAN. A prefix of the `tests` job's steps rather than a
+        hand-picked subset, the discipline `test_mutation_gate_shards` holds the
+        `mapping` job to, and it has to reach the extras or the equality is vacuous."""
+        steps = self.job["steps"]
+        environment = steps[: len(steps) - 1]
+
+        self.assertEqual(environment, self.workflow["jobs"]["tests"]["steps"][: len(environment)])
+        self.assertTrue(
+            any("graphifyy" in str(step.get("run", "")) for step in environment),
+            "the job settles without the extras the mapping is derived with",
+        )
+        self.assertIn("--settle", str(steps[-1]["run"]))
+        self.assertIn("observer_staleness.py", str(steps[-1]["run"]))
+
+    def test_the_job_runs_on_pull_requests_and_nothing_skips_the_workflow(self):
+        """Catches the job leaving the event where staleness is created, and the
+        workflow gaining a `paths-ignore` - the `tests` check is required, and a
+        workflow skipped by one never reports it, which deadlocks the pull request."""
+        self.assertEqual(self.job["if"], "github.event_name == 'pull_request'")
+        # `self.workflow[True]`, because YAML reads a bare `on:` key as the boolean.
+        self.assertNotIn("paths-ignore", str(self.workflow[True]))
 
 
 if __name__ == "__main__":

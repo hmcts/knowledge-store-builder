@@ -105,20 +105,33 @@ node tests/explorer/answer-graph-mode.mjs
 **After merging `main` into a branch, ask what the merge may have staled:**
 
 ```bash
-python3 tests/observer_staleness.py --base ORIG_HEAD
+python3 tests/observer_staleness.py --base ORIG_HEAD            # seconds: suspects
+python3 tests/observer_staleness.py --base ORIG_HEAD --settle   # minutes: verdicts
 ```
 
 A merge is how a correct entry in the mutation table comes to *under-describe*
 what protects it: a test arrives that observes the same defect, the entry does
-not name it, and nothing about the entry changed. Nothing else in the
-pull-request path notices — the fast gate runs only the modules an entry names,
-so an unnamed observer is by construction not run, and `--verify-mapping`, which
-does notice, costs a whole-suite run per entry and runs nightly. This names the
-suspect entries in seconds and prints the `--only` command that settles them.
+not name it, and nothing about the entry changed. The fast gate runs only the
+modules an entry names, so an unnamed observer is by construction not run, and
+`--verify-mapping`, which does notice, costs a whole-suite run per entry.
 
-It reads test ids, so it reports **arrivals only**. A set also goes stale when
-`src/` puts an existing test onto a mutated line with no test touched; the
-nightly run owns that half, and a `CLEAN` here does not claim otherwise.
+The first command reads test ids. It names suspect entries in seconds, but it
+cannot say which entries a test in a **brand-new module** observes, because no
+entry names that module — and that is where most staleness arrives. One night
+staled eight entries and its suspect lists named two.
+
+`--settle` answers the question instead of inferring it: it runs only the
+arrived tests under every entry's mutation, and an arrived test that fails
+without being named is **STALE**, which fails the run. The pull-request
+`observer-staleness` job runs it. It is bounded by `--budget` (minutes): each
+arrived module is timed once unmutated, the cheapest are settled first, and a
+module that would not fit is reported **UNSETTLED** with its projected cost —
+the verdict is then SUSPECT, not CLEAN. Its limit: the projection uses unmutated
+timings, so a mutation that makes a test hang is not bounded.
+
+Both read arrivals only. A set also goes stale when `src/` puts an existing test
+onto a mutated line with no test touched; the nightly run owns that half, and a
+`CLEAN` from either does not claim otherwise.
 
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked
 with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
