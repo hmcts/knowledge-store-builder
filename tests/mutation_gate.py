@@ -1261,6 +1261,7 @@ MUTATIONS = (
             "test_chunk_status.ChunkStatusTest.test_a_well_formed_file_with_no_nodes_key_is_not_done",
             "test_chunk_status.ChunkStatusTest.test_an_unusable_chunk_file_is_not_counted_as_done",
             "test_chunk_status.ChunkStatusTest.test_the_plan_is_not_mistaken_for_an_extraction",
+            "test_headless_workers.ExtractTests.test_a_missing_output_is_not_done_and_a_written_one_lands_where_chunk_status_counts_it",
         ),
     ),
     Mutation(
@@ -3779,9 +3780,7 @@ MUTATIONS = (
         "an API error (a rate limit, an expired login) fails every worker that follows "
         "it; without the stop a wave spends a run per remaining chunk learning that "
         "and bills for every one of them",
-        (
-            "test_headless_workers.WaveTests.test_api_error_stops_the_wave",
-        ),
+        ("test_headless_workers.WaveTests.test_api_error_stops_the_wave",),
     ),
     Mutation(
         "repair rounds are not resumed",
@@ -3804,9 +3803,7 @@ MUTATIONS = (
         "the permission rules name only Read and Edit, so a Bash tool is denied "
         "anyway, but the narrow tool list is what keeps the per-turn context small and "
         "is the second layer behind the rules; widening it is invisible in a run",
-        (
-            "test_headless_workers.PermissionTests.test_command_argv_is_exact",
-        ),
+        ("test_headless_workers.PermissionTests.test_command_argv_is_exact",),
     ),
     Mutation(
         "complete chunks are re-run",
