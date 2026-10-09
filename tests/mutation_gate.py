@@ -3054,6 +3054,7 @@ MUTATIONS = (
             "test_deploy_values.StripTemplateDollarDialect.test_an_interpolation_spanning_lines_is_stripped_whole",
             "test_deploy_values.StripTemplateDollarDialect.test_both_dialects_withhold_the_same_name_identically",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+            "test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",
         ),
     ),
     Mutation(
@@ -3815,6 +3816,7 @@ MUTATIONS = (
         "gate had passed",
         (
             "test_headless_workers.ExtractTests.test_a_rerun_skips_the_complete_chunk_without_spawning",
+            "test_headless_workers.ExtractTests.test_a_skipped_chunk_is_not_masked",
             "test_headless_workers.OutcomeTests.test_complete_job_is_skipped_without_spawning",
         ),
     ),
