@@ -458,7 +458,9 @@ def _select_chunks(plan: dict[str, list[str]], wanted: str | None) -> dict[str, 
     by_number = {int(k): k for k in plan if k.isdigit()}
     chosen: dict[str, list[str]] = {}
     for token in (t.strip() for t in wanted.split(",") if t.strip()):
-        key = token if token in plan else by_number.get(int(token)) if token.isdigit() else None
+        key = token if token in plan else None
+        if key is None and token.isdigit():
+            key = by_number.get(int(token))
         if key is None:
             raise UsageError(f"chunk {token} is not in the plan")
         chosen[key] = plan[key]
