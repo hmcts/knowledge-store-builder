@@ -69,6 +69,26 @@ class IdentifierExtractionTest(SettingsIsolated):
         text = "This service records data. API responses use HTTP and RAML schemas."
         self.assertEqual(summaries.prose_identifiers(text), set())
 
+    def test_acronyms_carrying_a_digit_are_not_identifiers(self):
+        # `S2S` matched the case-change pattern on its digit-then-capital and was
+        # reported as an invented class name. Its digit stands for a word
+        # (service-to-service), so it is an acronym, which the rule excludes.
+        text = "Calls use S2S tokens, B2B feeds and B4B checks."
+        self.assertEqual(summaries.prose_identifiers(text), set())
+        self.assertEqual(summaries._ungrounded(text, {"label": "Unrelated"}), set())
+
+    def test_mixed_case_names_carrying_a_digit_are_still_identifiers(self):
+        # the boundary the acronym exemption must not cross: one lowercase
+        # letter makes it a name, and a name the digest lacks is a finding
+        found = summaries.prose_identifiers("S3Bucket feeds Http2Client.")
+        self.assertEqual(found, {"S3Bucket", "Http2Client"})
+
+    def test_codes_carrying_a_digit_are_still_identifiers(self):
+        # the other boundary: an all-caps code is a claim a digest can
+        # contradict, so only the digit-as-a-word acronym shape is exempt
+        found = summaries.prose_identifiers("Issues form D45A and code E1BRC.")
+        self.assertEqual(found, {"D45A", "E1BRC"})
+
 
 class VerifyTest(SettingsIsolated):
     def setUp(self):

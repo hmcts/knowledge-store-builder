@@ -1912,6 +1912,13 @@ _FILE = re.compile(
     r"\b[\w.-]+\.(?:java|ts|js|py|json|yaml|yml|xml|raml|csv|feature|sql|html|tsx)\b"
 )
 _TICKET = re.compile(r"\b[A-Z]{2,}-\d+\b")
+# `_CAMEL` reads a digit followed by a capital as a case change, so an acronym
+# whose digit stands for a word - `S2S` service-to-service, `B2B`, `B4B` - matched
+# it and was reported as an invented class name. Only that shape is exempt: one
+# letter, a 2 or a 4, one letter. Wider exemptions were measured and rejected -
+# "no lowercase letter" also waves through form and offence codes like `D45A`,
+# which are claims a digest can contradict.
+_DIGIT_WORD_ACRONYM = re.compile(r"[A-Z][24][A-Z]")
 # Words that mark a claim the author had no evidence for. A factual description
 # layer should contain almost none.
 _SPECULATION = re.compile(
@@ -1924,8 +1931,11 @@ _SPECULATION = re.compile(
 def prose_identifiers(text: str) -> set[str]:
     """Tokens in `text` shaped like a claim about code."""
     found: set[str] = set()
-    for pattern in (_FILE, _TICKET, _CAMEL, _SNAKE):
+    for pattern in (_FILE, _TICKET, _SNAKE):
         found.update(pattern.findall(text))
+    found.update(
+        token for token in _CAMEL.findall(text) if not _DIGIT_WORD_ACRONYM.fullmatch(token)
+    )
     for token in _DASHED.findall(text):
         if not (set(token.split("-")) & _PROSE_JOINERS):
             found.add(token)
