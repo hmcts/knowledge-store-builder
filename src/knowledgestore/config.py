@@ -356,6 +356,58 @@ DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
 }
 SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 
+# --- secret values masked out of files a headless worker reads -------------
+# `workers extract` gives each worker a masked copy of its chunk's text files, so
+# a literal credential committed in source never reaches the model or the session
+# transcript - see `secret_mask.py` for what that achieves and what it does not.
+# These are the value-shape rules; the key-name rule (`password: ...`) is code.
+# A rule with a capturing group masks its first group and keeps the rest of the
+# match as context; one without masks the whole match. Rule names are what the
+# run counts under. Add your estate's shapes with KSB_SECRET_PATTERNS, a JSON
+# object merged over these:
+#
+#   KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'
+DEFAULT_SECRET_PATTERNS: dict[str, str] = {
+    "authorization-header": (
+        r"(?i)\bauthorization[\"']?[ \t]*[:=][ \t]*[\"']?(?:bearer|basic)[ \t]+"
+        r"([A-Za-z0-9._~+/-]+=*)"
+    ),
+    "aws-access-key-id": r"\bAKIA[0-9A-Z]{16}\b",
+    # Long flags with `=` or a space; `-p` only attached to its value and only
+    # after a mysql client, because `-p` elsewhere is a port or `mkdir -p`.
+    "cli-secret-flag": (
+        r"(?:(?<![\w-])--(?:password|passwd|token|api-key|client-secret|secret)(?![\w-])"
+        r"(?:=|[ \t]+)|\bmysql(?:dump|admin)?\b[^\n]*?[ \t]-p)"
+        r"(\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'-][^\s\"']*)"
+    ),
+    "connection-string-key": r"(?i)\b(?:AccountKey|SharedAccessKey)=([^;\s\"']+)",
+    # A `Password=` pair inside an ADO.NET or JDBC-style connection string, which
+    # a `;` or the string's opening quote comes before. The key naming the string
+    # is often `DefaultConnection`, which names no secret.
+    "connection-string-credential": (
+        r"(?i)(?<=[;\"'])[ \t]*(?:password|pwd)[ \t]*=[ \t]*([^;\"'\r\n]+)"
+    ),
+    "feature-flag-sdk-key": (
+        r"(?i)\bsdk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+    ),
+    "github-token": r"\bgh[pousr]_[A-Za-z0-9]{36,}\b",
+    "jwt": r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+    "pem-private-key": (
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----([\s\S]*?)"
+        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+    ),
+    "sas-signature": r"[?&]sig=([^&\s\"'<>]+)",
+    # A digit is required: real keys carry them, and `sk-learn-...` does not.
+    "sk-key": r"\b[sr]k(?:-|_live_|_test_)(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{12,}",
+    "slack-webhook": r"hooks\.slack\.com/services/([A-Za-z0-9/_-]+)",
+    "sonarqube-token": r"\bsq[apu]_[0-9a-f]{40}\b",
+    "sops-encrypted": r"ENC\[[^\]\n]*\]",
+    "sql-credential": r"(?i)\b(?:identified[ \t]+by|password)[ \t]+'([^'\n]*)'",
+    # The user may be empty, as in `redis://:password@host`.
+    "url-credential": r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@'\"]*:([^/\s@'\"]+)@",
+}
+SECRET_PATTERNS = _env_pattern_map("KSB_SECRET_PATTERNS", DEFAULT_SECRET_PATTERNS)
+
 # --- explorer page -------------------------------------------------------
 EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
 # Where "request a topic brief" links point. Empty disables the link.

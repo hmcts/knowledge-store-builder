@@ -9,8 +9,19 @@ itself once the worker exits and resumes the session with the findings.
 The core is spawning, permissions, repair rounds, wave control and reporting.
 The `extract` and `summaries` sub-commands build `Job`s on top of it:
 
-    knowledgestore workers extract   [--plan PATH] [--chunks ID[,ID...]] ...
+    knowledgestore workers extract   [--plan PATH] [--chunks ID[,ID...]] [--raw-reads] ...
     knowledgestore workers summaries --batches DIR ...
+
+An extraction worker reads masked copies by default. Its chunk's files are
+source an estate committed, and some estates commit real credentials in them;
+whatever a worker reads reaches the model's context and the transcript on disk.
+So before a chunk runs, each text file is copied through `secret_mask.mask` and
+the worker is granted `Read` on the copy and never on the original. A worker
+that can read only the masked copy cannot leak a value it never saw. It cites
+the real path, which the prompt maps for it. A file that does not decode as
+UTF-8 text cannot be masked and is read raw, and the report counts it.
+`--raw-reads` turns this off. Masking is pattern-based, so it reduces exposure
+rather than guaranteeing none - see `secret_mask` for what it cannot see.
 """
 
 from __future__ import annotations
@@ -29,7 +40,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from . import check_chunk, config, cost, io, store_paths, summary_batches
+from . import check_chunk, config, cost, io, secret_mask, store_paths, summary_batches
 
 PACKAGE = "knowledgestore"
 
@@ -60,6 +71,27 @@ Runner = Callable[[list[str], Path, float], subprocess.CompletedProcess]
 
 
 @dataclass(frozen=True)
+class Masking:
+    """What masking did for one chunk, as the report states it."""
+
+    values: int = 0  # secret values replaced, summed over the chunk's files
+    files: int = 0  # text files the worker reads as masked copies
+    unmasked: int = 0  # files that are not UTF-8 text, read raw
+
+    def describe(self) -> str:
+        return f"masked={self.values} in {self.files} files, unmasked={self.unmasked}"
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """What a job reads and is told, settled only once it is about to run."""
+
+    prompt: str
+    reads: tuple[str, ...]
+    masking: Masking
+
+
+@dataclass(frozen=True)
 class Job:
     key: str  # chunk id or batch number as a string; the sort key for reports
     prompt: str
@@ -67,6 +99,9 @@ class Job:
     out: Path  # the one path the worker may write
     complete: Callable[[], bool]  # already done? checked before spawning
     gate: Callable[[], list[str]]  # violations in `out` now; [] means pass
+    # Replaces `prompt` and `reads` after the skip check, so a complete job costs
+    # nothing; `reads` is then only what the unsafe-path check reads first.
+    prepare: Callable[[], Prepared] | None = None
 
 
 @dataclass
@@ -77,6 +112,7 @@ class Report:
     violations: list[str] = field(default_factory=list)
     denials: int = 0  # permission denials summed over the job's runs
     results: list[Path] = field(default_factory=list)
+    masking: Masking | None = None  # None when the job reads its files raw
 
 
 def permission_rules(reads: Sequence[str], out: Path) -> list[str] | None:
@@ -168,6 +204,19 @@ def _record(report: Report, runs: Path, kind: str, proc, parsed: dict | None) ->
     report.results.append(path)
 
 
+def _prepared(job: Job, report: Report, rules: list[str]) -> tuple[str, list[str] | None]:
+    """The prompt and rules the worker runs with, after the job's preparation.
+
+    Preparation is where a chunk's files are masked: the worker is then granted
+    the masked copies, so the rules are rebuilt from what preparation returned.
+    """
+    if job.prepare is None:
+        return job.prompt, rules
+    prepared = job.prepare()
+    report.masking = prepared.masking
+    return prepared.prompt, permission_rules(prepared.reads, job.out)
+
+
 def run_job(
     job: Job,
     *,
@@ -187,12 +236,15 @@ def run_job(
     if job.complete():
         report.outcome = Outcome.SKIPPED
         return report
+    prompt, rules = _prepared(job, report, rules)
+    if rules is None:
+        report.outcome = Outcome.UNSAFE_PATH
+        return report
 
     work = runs / "work" / f"{kind}-{job.key}"
     io.checked_write_target(work)
     work.mkdir(parents=True, exist_ok=True)
 
-    prompt = job.prompt
     resume: str | None = None
     for _ in range(repair_rounds + 1):
         report.rounds += 1
@@ -286,15 +338,27 @@ def report_lines(reports: Sequence[Report], results_dir: Path, not_started: int 
     for report in sorted(reports, key=lambda r: r.key):
         if report.outcome is Outcome.SKIPPED:
             continue
-        lines.append(
+        line = (
             f"{report.outcome.value} {report.key}: rounds={report.rounds} denials={report.denials}"
         )
+        if report.masking is not None:
+            line += " " + report.masking.describe()
+        lines.append(line)
         lines += [f"    {v}" for v in report.violations[:5]]
     counts = Counter(r.outcome for r in reports)
     parts = [f"{o.value} {counts[o]}" for o in Outcome if counts[o]]
     if not_started:
         parts.append(f"not started {not_started}")
-    lines.append("summary: " + (", ".join(parts) or "nothing to do"))
+    summary = "summary: " + (", ".join(parts) or "nothing to do")
+    maskings = [r.masking for r in reports if r.masking is not None]
+    if maskings:
+        total = Masking(
+            sum(m.values for m in maskings),
+            sum(m.files for m in maskings),
+            sum(m.unmasked for m in maskings),
+        )
+        summary += "; " + total.describe()
+    lines.append(summary)
     runs, inp, out, spent = _usage_totals(reports)
     lines.append(f"usage: runs={runs} input={inp} output={out} cost_usd={spent:.4f}")
     lines.append(f"results: {results_dir} (knowledgestore cost {results_dir} re-reads them)")
@@ -369,13 +433,76 @@ def _out_name(key: str) -> str:
     return f".graphify_chunk_{key}.json"
 
 
+MASKED_READS_NOTE = """
+Where to read each file. The library copied each text file of this chunk with \
+its secret values replaced by `[masked]`, and you may Read only the path on the \
+left. Cite the path on the right, exactly as written, in every `source_file`: it \
+is the real file.
+
+{mapping}
+
+A value shown as `[masked]` was removed by the library. It must never be \
+guessed, reconstructed or described: record that the key exists and nothing \
+about its value.
+"""
+
+
+def _text_of(path: str) -> str | None:
+    """The file as UTF-8 text, or None when it is not text this can mask."""
+    try:
+        # Sonar S8707 (and S2083): the grounds are in `build_community_summaries.merge`
+        # - the chunk plan names these files and the operator chose the plan.
+        data = Path(path).read_bytes()  # NOSONAR(S2083, S8707)
+    except OSError:
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    # A NUL decodes as UTF-8 and never occurs in source text: a binary file.
+    return None if "\x00" in text else text
+
+
+def mask_files(files: Sequence[str], directory: Path) -> tuple[tuple[str, ...], Masking]:
+    """Write a masked copy of each text file into `directory`; what to read instead.
+
+    A copy is named `<NN>-<basename>`, numbered in plan order so two files with
+    one name cannot collide, and keeping the extension so graphify's file typing
+    still applies. A file that is not UTF-8 text is read raw.
+    """
+    reads: list[str] = []
+    counts: Counter[str] = Counter()
+    copies = unmasked = 0
+    width = max(2, len(str(len(files))))
+    for number, path in enumerate(files, 1):
+        text = _text_of(path)
+        if text is None:
+            reads.append(path)
+            unmasked += 1
+            continue
+        copy = directory / f"{number:0{width}d}-{Path(path).name}"
+        io.checked_write_target(copy)
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        masked = secret_mask.mask(text, counts).encode("utf-8")
+        copy.write_bytes(masked)  # NOSONAR(S2083, S8707) - validated by checked_write_target
+        reads.append(str(copy))
+        copies += 1
+    return tuple(reads), Masking(sum(counts.values()), copies, unmasked)
+
+
+def _mapping(reads: Sequence[str], files: Sequence[str]) -> str:
+    return "\n".join(f"read {read}  →  cite as {real}" for read, real in zip(reads, files))
+
+
 def extract_jobs(
     plan: dict[str, list[str]],
     directory: Path,
     normalise: Callable[[str], str],
     template: str,
     total: int,
+    masked: Path | None = None,
 ) -> list[Job]:
+    """One job per chunk. With `masked`, each reads masked copies written under it."""
     addendum = _asset("extraction_worker_prompt.md")
     jobs = []
     for key in sorted(plan):
@@ -392,7 +519,16 @@ def extract_jobs(
             return _output_parses(out) and not gate()
 
         prompt = fill_prompt(template, files, key, total, out) + "\n" + addendum
-        jobs.append(Job(key, prompt, files, out, complete, gate))
+        prepare: Callable[[], Prepared] | None = None
+        if masked is not None:
+
+            def masked_reads(key=key, files=files, prompt=prompt, into=masked) -> Prepared:
+                reads, masking = mask_files(files, into / key)
+                note = MASKED_READS_NOTE.format(mapping=_mapping(reads, files))
+                return Prepared(prompt + note, reads, masking)
+
+            prepare = masked_reads
+        jobs.append(Job(key, prompt, files, out, complete, gate, prepare))
     return jobs
 
 
@@ -445,6 +581,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     extract = sub.add_parser("extract", help="one worker per chunk of the chunk plan")
     extract.add_argument("--plan", type=Path, help=f"default: {config.CHUNK_PLAN_PATH.name}")
     extract.add_argument("--chunks", help="only these chunk ids, comma separated")
+    extract.add_argument(
+        "--raw-reads",
+        action="store_true",
+        help="grant Read on the original files instead of masked copies; every secret "
+        "value committed in them reaches the model and the session transcript",
+    )
     common(extract)
     summaries = sub.add_parser("summaries", help="one worker per summary batch")
     summaries.add_argument("--batches", type=Path, required=True, help="directory of batch files")
@@ -486,7 +628,10 @@ def _extract_setup(arguments: argparse.Namespace) -> tuple[list[Job], Path]:
     directory = config.CHUNK_PLAN_PATH.parent.absolute()
     template = extraction_spec_prompt()
     runs = arguments.runs or directory / ".workers"
-    return extract_jobs(plan, directory, normalize_id, template, len(whole)), runs
+    # Absolute, because a permission rule must be: a relative `--runs` would
+    # otherwise refuse every chunk as an unsafe path.
+    masked = None if arguments.raw_reads else (runs / "masked").absolute()
+    return extract_jobs(plan, directory, normalize_id, template, len(whole), masked), runs
 
 
 def _summaries_setup(arguments: argparse.Namespace) -> tuple[list[Job], Path]:
@@ -528,7 +673,10 @@ def main(argv: list[str] | None = None, run: Runner | None = None) -> int:
 
 __all__ = [
     "Job",
+    "MASKED_READS_NOTE",
+    "Masking",
     "Outcome",
+    "Prepared",
     "Report",
     "RULE_UNSAFE",
     "SYSTEM_PROMPT",
@@ -537,6 +685,7 @@ __all__ = [
     "exit_code",
     "extract_jobs",
     "main",
+    "mask_files",
     "parse_args",
     "parse_result",
     "permission_rules",

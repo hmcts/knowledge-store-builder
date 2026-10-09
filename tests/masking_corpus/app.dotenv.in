@@ -1,0 +1,13 @@
+# Local settings for the orders service
+APP_ENV=production
+DB_HOST=db.example
+DB_USER=orders
+DB_PASSWORD=@@S:dotenv_db_password@@
+DB_PASS=@@S:dotenv_db_pass@@
+export AWS_ACCESS_KEY_ID=@@S:dotenv_aws_id@@
+AWS_SECRET_ACCESS_KEY="@@S:dotenv_aws_secret@@"
+JWT_SECRET='@@S:dotenv_jwt_secret@@'
+REDIS_URL=redis://:@@S:dotenv_redis_password@@@cache.example:6379/0
+SLACK_WEBHOOK=https://hooks.slack.com/services/@@S:dotenv_slack_path@@
+PAYMENT_TOKEN=${PAYMENT_TOKEN}
+FEATURE_X=true

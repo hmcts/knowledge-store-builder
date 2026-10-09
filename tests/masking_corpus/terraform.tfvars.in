@@ -1,0 +1,9 @@
+location       = "uksouth"
+environment    = "prod"
+admin_username = "ordersadmin"
+admin_password = "@@S:tfvars_admin_password@@"
+api_token      = "@@S:tfvars_api_token@@"
+tags = {
+  owner       = "orders-team"
+  cost_centre = "1234"
+}

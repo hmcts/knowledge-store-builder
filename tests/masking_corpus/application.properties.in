@@ -1,0 +1,9 @@
+spring.application.name=orders
+spring.datasource.url=jdbc:postgresql://db.example:5432/orders
+spring.datasource.username=orders
+spring.datasource.password=@@S:props_ds_password@@
+spring.mail.password = @@S:props_mail_password@@
+app.jwt.secret: @@S:props_jwt_secret@@
+app.api.key=${API_KEY}
+server.ssl.key-store-password=@@S:props_keystore_password@@
+logging.level.root=INFO

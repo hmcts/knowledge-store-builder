@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <connectionStrings>
+    <add name="Orders" connectionString="Server=db.example;Database=orders;User Id=orders;Password=@@S:webconfig_conn_password@@;" providerName="System.Data.SqlClient" />
+  </connectionStrings>
+  <appSettings>
+    <add key="Environment" value="Production" />
+    <add key="ApiPassword" value="@@S:webconfig_api_password@@" />
+    <add key="StorageAccessKey" value="#{StorageAccessKey}#" />
+    <add key="SmtpToken" value="@@S:webconfig_smtp_token@@" />
+  </appSettings>
+  <system.net>
+    <mailSettings>
+      <smtp from="noreply@orders.example">
+        <network host="smtp.example" port="587" userName="orders" password="@@S:webconfig_smtp_password@@" />
+      </smtp>
+    </mailSettings>
+  </system.net>
+</configuration>
