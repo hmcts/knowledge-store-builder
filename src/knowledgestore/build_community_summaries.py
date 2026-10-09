@@ -371,6 +371,8 @@ def _write_merged_summaries(
 #   S8707 policy site: check_chunk.py - check_batches, citing merge
 #   S8707 policy site: build_content_set.py - a write, validated the same way
 #   S8707 policy site: summary_batches.py - _read_batch, citing merge
+#   S8707 policy site: headless_workers.py - _text_of, citing merge; its masked
+#     copies are written through checked_write_target
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]
 ) -> tuple[int, list[str], list[str]]:

@@ -3,7 +3,7 @@
 
 You are running as a headless worker. These instructions come from the library that started you and apply on top of the extraction prompt above.
 
-What you can do: you have the Read and Write tools and nothing else. You may read only the files listed above and write only the output path named above. Every other call is denied without asking, and a denied call returns nothing, so do not retry it.
+What you can do: you have the Read and Write tools and nothing else. You may read only the files you were given - where the library names a path to read each one from, that path - and write only the output path named above. Every other call is denied without asking, and a denied call returns nothing, so do not retry it.
 
 Write each chunk to disk IMMEDIATELY after producing it. Do NOT accumulate
 results in your context and write at the end.

@@ -448,6 +448,52 @@ settings and no MCP servers, so nothing in a store or an estate document can rea
 a tool the worker was not given. The worker prompt carries the data-not-instruction
 rule above; the permissions are what enforce it.
 
+**Masked reads, by default.** Whatever a worker reads reaches the model and the
+session transcript on disk, and an estate's source can hold committed credentials.
+So before a chunk runs, `workers extract` copies each of its text files to
+`<runs>/masked/<chunk id>/<NN>-<name>` with secret values replaced by `[masked]`,
+and grants the worker `Read` on the copy, never on the original. The prompt maps
+each copy to its real path, and the worker cites the real one, so the gate and the
+graph are unchanged. Keys are kept: `password: [masked]` still says the service
+takes a password. Each worker's line and the summary report
+`masked=<values> in <files> files, unmasked=<n>`. A file that is not UTF-8 text
+(an image, a PDF) cannot be masked, so it is read raw and counted in `unmasked`.
+A complete chunk is skipped before anything is copied.
+
+What is masked:
+
+- The value of an assignment whose key ends in a secret word - password, secret,
+  token, api key, access key, private key, client secret, credentials, connection
+  string, account key, sas, auth - in YAML, JSON, `.env`, properties, HCL and INI
+  shapes.
+- Values with a secret's own shape wherever they appear: private-key blocks, SAS
+  `sig=`, `AccountKey=` and `SharedAccessKey=`, `Authorization: Bearer|Basic`, a
+  URL's password, JWTs, AWS access key ids, GitHub, SonarQube and `sk-` style
+  tokens, Slack webhook paths, `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]`
+  values, SQL `IDENTIFIED BY '...'` and `PASSWORD '...'`, and the values of
+  password and token flags on a command line.
+
+Not masked, because each points at a secret rather than holding it: `${VAR}`,
+`$(VAR)`, `$VAR`, `{{ ... }}`, Key Vault and secret-store references, and keys
+such as `secretKeyRef`; nor empty values, booleans, `null` or plain numbers under
+a secret-named key; nor, in code, a type annotation, a call, or an argument or
+parameter (`connect(token=token)`), so the source stays readable.
+
+**The limit.** Masking is pattern-based. A secret in a shape no rule recognises,
+under a key no rule names, reaches the worker unmasked. It reduces exposure; it
+does not guarantee none. Add your estate's shapes with `KSB_SECRET_PATTERNS`, a
+JSON object of rule name to regex merged over the shipped rules - a rule with a
+capturing group masks that group, one without masks its whole match:
+
+```bash
+export KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'
+```
+
+`--raw-reads` turns masking off and grants `Read` on the originals. It costs
+exactly what masking prevents: every secret value committed in the chunk's files
+reaches the model and the session transcript. Use it only where the estate is
+known to hold none.
+
 **The gate.** After a worker exits, `workers extract` runs the shipped chunk gate
 on its output and, on violations, resumes the same session with the findings, up to
 `--repair-rounds` times (default 2).

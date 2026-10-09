@@ -3831,6 +3831,45 @@ MUTATIONS = (
             "test_headless_workers.PermissionTests.test_unsafe_characters_and_relative_paths_are_refused",
         ),
     ),
+    Mutation(
+        "workers read the raw file again",
+        "headless_workers.py",
+        "reads.append(str(copy))",
+        "reads.append(path)",
+        "the masked copy is still written, so the run looks as it should, but the "
+        "worker is granted the original and reads every secret value committed in it "
+        "into the model's context and the session transcript - the exposure masking "
+        "exists to prevent, and nothing in the report would change",
+        (
+            "test_headless_workers.ExtractTests.test_a_file_that_is_not_text_is_read_raw_and_counted_unmasked",
+            "test_headless_workers.ExtractTests.test_a_worker_reads_a_masked_copy_and_cites_the_real_path",
+        ),
+    ),
+    Mutation(
+        "a key-name secret is not masked",
+        "secret_mask.py",
+        "    text = _apply_key_names(text, tally)\n",
+        "",
+        "a literal `password: ...` in a config file is the commonest shape of a "
+        "committed credential and matches none of the value shapes, so without the "
+        "key-name rule it reaches the worker whole",
+        (
+            "test_headless_workers.ExtractTests.test_a_worker_reads_a_masked_copy_and_cites_the_real_path",
+            "test_secret_mask.Determinism.test_masking_masked_text_finds_nothing_more",
+            "test_secret_mask.Determinism.test_no_counts_argument_is_accepted",
+            "test_secret_mask.KeyNameRules.test_each_format_masks_the_value_and_keeps_the_key",
+        ),
+    ),
+    Mutation(
+        "a reference is masked as if it were a secret",
+        "secret_mask.py",
+        "if not value or value == MASK or _is_reference(value):",
+        "if not value or value == MASK:",
+        "`password: ${DB_PASSWORD}` names where a service reads its secret, which is "
+        "architecture the extraction should record; masking it removes that fact, "
+        "protects nothing, and inflates the masked count the operator reads",
+        ("test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",),
+    ),
 )
 
 
