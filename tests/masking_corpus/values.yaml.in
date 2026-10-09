@@ -1,0 +1,35 @@
+# Helm values for the orders service.
+replicaCount: 2
+image:
+  repository: registry.example/orders
+  tag: "1.4.2"
+service:
+  port: 8080
+database:
+  host: db.example
+  user: orders
+  password: @@S:helm_db_password@@
+  passwordSecretRef: orders-db
+  url: "postgres://orders:@@S:helm_url_password@@@db.example:5432/orders"
+redis:
+  auth:
+    password: "{{ .Values.global.redisPassword }}"
+  existingSecret: redis-auth
+storage:
+  connectionString: "DefaultEndpointsProtocol=https;AccountName=orders;AccountKey=@@S:helm_account_key@@;EndpointSuffix=core.example"
+api:
+  clientId: orders-client
+  clientSecret: '@@S:helm_client_secret@@'
+  tokenTtl: 300
+featureFlags:
+  sdkKey: @@S:helm_sdk_key@@
+extraEnv:
+  - name: SMTP_PASSWORD
+    value: @@S:helm_smtp_password@@
+  - name: LOG_LEVEL
+    value: info
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: orders-jwt
+        key: secret

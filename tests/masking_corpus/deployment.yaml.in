@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  labels:
+    app: orders
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: orders
+          image: registry.example/orders:1.4.2
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod
+            - name: DB_PASSWORD
+              value: "@@S:deploy_db_password@@"
+            - name: STRIPE_API_KEY
+              value: @@S:deploy_api_key@@
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ci-tokens
+                  key: github
+            - name: CACHE_AUTH
+              value: ${CACHE_AUTH}
+          args: ["--port", "8080"]
+          ports:
+            - containerPort: 8080

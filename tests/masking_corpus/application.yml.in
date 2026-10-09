@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://db.example:5432/orders
+    username: orders
+    password: @@S:spring_ds_password@@
+  security:
+    oauth2:
+      client:
+        registration:
+          orders:
+            client-id: orders-client
+            client-secret: "@@S:spring_client_secret@@"
+            scope: openid,profile
+app:
+  jwt-secret: |
+    @@S:spring_jwt_line@@
+  cache:
+    ttl: 600

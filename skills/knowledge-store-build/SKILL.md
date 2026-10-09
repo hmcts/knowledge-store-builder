@@ -462,28 +462,52 @@ A complete chunk is skipped before anything is copied.
 
 What is masked:
 
-- The value of an assignment whose key ends in a secret word - password, secret,
-  token, api key, access key, private key, client secret, credentials, connection
-  string, account key, sas, auth - in YAML, JSON, `.env`, properties, HCL and INI
-  shapes.
+- The value of an assignment whose key ends in a secret word - password, pass,
+  passphrase, secret, token, api key, access key, private key, client secret,
+  credentials, connection string, account key, sas, auth - in YAML, JSON, `.env`,
+  properties, HCL and INI shapes.
+- The same keys in other syntax: an XML attribute or element named for a secret;
+  the `value` beside a `name` or `key` naming one, as in a Kubernetes `env:`
+  item, a .NET `<add key=... value=...>` or a Helm `set` block; a Terraform
+  variable's `default` when the variable is named for one; the lines of a YAML
+  block scalar (`password: |`); an unquoted value in a one-line YAML flow
+  mapping; and every value under a Kubernetes Secret's `data:` or `stringData:`,
+  whatever its key.
 - Values with a secret's own shape wherever they appear: private-key blocks, SAS
-  `sig=`, `AccountKey=` and `SharedAccessKey=`, `Authorization: Bearer|Basic`, a
-  URL's password, JWTs, AWS access key ids, GitHub, SonarQube and `sk-` style
-  tokens, Slack webhook paths, `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]`
-  values, SQL `IDENTIFIED BY '...'` and `PASSWORD '...'`, and the values of
-  password and token flags on a command line.
+  `sig=`, `AccountKey=` and `SharedAccessKey=`, `Password=` inside a connection
+  string, `Authorization: Bearer|Basic`, a URL's password, JWTs, AWS access key
+  ids, GitHub, SonarQube and `sk-` style tokens, Slack webhook paths,
+  `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]` values, SQL
+  `IDENTIFIED BY '...'` and `PASSWORD '...'`, and the values of password and
+  token flags on a command line.
+
+Only the secret changes: line endings, indentation and every other byte of the
+file are kept, so a CRLF file stays CRLF.
 
 Not masked, because each points at a secret rather than holding it: `${VAR}`,
-`$(VAR)`, `$VAR`, `{{ ... }}`, Key Vault and secret-store references, and keys
-such as `secretKeyRef`; nor empty values, booleans, `null` or plain numbers under
-a secret-named key; nor, in code, a type annotation, a call, or an argument or
-parameter (`connect(token=token)`), so the source stays readable.
+`$(VAR)`, `$VAR`, `{{ ... }}`, `#{Var}`, Key Vault and secret-store references,
+and keys such as `secretKeyRef` and a chart's `existingSecret`; nor empty values,
+booleans, `null` or plain numbers under a secret-named key; nor, in code, a type
+annotation, a call, an argument or parameter (`connect(token=token)`), or a name
+assigned to a member (`self.token = token`), so the source stays readable.
 
-**The limit.** Masking is pattern-based. A secret in a shape no rule recognises,
-under a key no rule names, reaches the worker unmasked. It reduces exposure; it
-does not guarantee none. Add your estate's shapes with `KSB_SECRET_PATTERNS`, a
-JSON object of rule name to regex merged over the shipped rules - a rule with a
-capturing group masks that group, one without masks its whole match:
+**The limit.** Masking is pattern-based. It reduces exposure; it does not
+guarantee none. These still reach the worker unmasked, and each is pinned by a
+test that fails once it is masked:
+
+- a literal compared or passed in code: `if pw == "example-secret":`
+- a value under a key that names no secret word, or in prose:
+  `signing-key: example-secret`
+- a value whose name is in another column: a SQL `INSERT` naming
+  `client_secret` in its column list
+- the lines a value continues onto: the next line of a properties value ending
+  in a backslash
+- a value in an XML CDATA section:
+  `<password><![CDATA[example-secret]]></password>`
+
+Add your estate's shapes with `KSB_SECRET_PATTERNS`, a JSON object of rule name
+to regex merged over the shipped rules - a rule with a capturing group masks that
+group, one without masks its whole match:
 
 ```bash
 export KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'

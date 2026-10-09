@@ -1,0 +1,13 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=db.example;Database=orders;User Id=orders;Password=@@S:appsettings_conn_password@@;MultipleActiveResultSets=true"
+  },
+  "Jwt": {
+    "Issuer": "https://orders.example",
+    "Secret": "@@S:appsettings_jwt_secret@@",
+    "ExpiryMinutes": 60
+  },
+  "Smtp": { "Host": "smtp.example", "Password": "@@S:appsettings_smtp_password@@" },
+  "KeyVault": { "Uri": "https://orders-kv.vault.example/" },
+  "Logging": { "LogLevel": { "Default": "Information" } }
+}

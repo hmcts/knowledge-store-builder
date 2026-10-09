@@ -1,0 +1,12 @@
+[database]
+host = db.example
+port = 5432
+user = orders
+password = @@S:ini_db_password@@
+
+[smtp]
+server = smtp.example
+auth_token = @@S:ini_auth_token@@
+
+[paths]
+data = /var/lib/orders

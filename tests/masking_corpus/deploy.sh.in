@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+helm upgrade --install orders ./charts/orders \
+  --set database.host=db.example \
+  --set database.password=@@S:sh_helm_password@@ \
+  --namespace orders
+mysql -u orders -p@@S:sh_mysql_password@@ orders < schema.sql
+curl -H "Authorization: Bearer @@S:sh_bearer@@" https://api.example/deploy
+docker login registry.example --username ci --password @@S:sh_registry_password@@
+az storage blob upload --account-key "$STORAGE_KEY" --file build.zip
+export GITHUB_TOKEN=@@S:sh_github_token@@

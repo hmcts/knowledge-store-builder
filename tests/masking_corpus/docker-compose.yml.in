@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: @@S:compose_pg_password@@
+      POSTGRES_DB: orders
+  app:
+    build: .
+    environment:
+      - DB_PASSWORD=@@S:compose_app_password@@
+      - DB_HOST=db
+      - API_TOKEN=${API_TOKEN}
+    ports:
+      - "8080:8080"
+    command: ["./wait-for", "db:5432", "--", "java", "-jar", "app.jar"]

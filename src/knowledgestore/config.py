@@ -381,6 +381,12 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
         r"(\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'-][^\s\"']*)"
     ),
     "connection-string-key": r"(?i)\b(?:AccountKey|SharedAccessKey)=([^;\s\"']+)",
+    # A `Password=` pair inside an ADO.NET or JDBC-style connection string, which
+    # a `;` or the string's opening quote comes before. The key naming the string
+    # is often `DefaultConnection`, which names no secret.
+    "connection-string-credential": (
+        r"(?i)(?<=[;\"'])[ \t]*(?:password|pwd)[ \t]*=[ \t]*([^;\"'\r\n]+)"
+    ),
     "feature-flag-sdk-key": (
         r"(?i)\bsdk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
     ),
@@ -397,7 +403,8 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
     "sonarqube-token": r"\bsq[apu]_[0-9a-f]{40}\b",
     "sops-encrypted": r"ENC\[[^\]\n]*\]",
     "sql-credential": r"(?i)\b(?:identified[ \t]+by|password)[ \t]+'([^'\n]*)'",
-    "url-credential": r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@'\"]+:([^/\s@'\"]+)@",
+    # The user may be empty, as in `redis://:password@host`.
+    "url-credential": r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@'\"]*:([^/\s@'\"]+)@",
 }
 SECRET_PATTERNS = _env_pattern_map("KSB_SECRET_PATTERNS", DEFAULT_SECRET_PATTERNS)
 

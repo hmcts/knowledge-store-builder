@@ -1,0 +1,5 @@
+-- V3: application roles
+CREATE ROLE orders_app WITH LOGIN PASSWORD '@@S:sql_role_password@@';
+CREATE USER reporting IDENTIFIED BY '@@S:sql_user_password@@';
+INSERT INTO settings (name, value) VALUES ('smtp_host', 'smtp.example');
+GRANT SELECT ON orders TO reporting;

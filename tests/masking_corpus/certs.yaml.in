@@ -1,0 +1,8 @@
+tls:
+  certificate: |
+    -----BEGIN CERTIFICATE-----
+    MIIBfakeCertificateBody
+    -----END CERTIFICATE-----
+  signing: |
+    @@K:pem_head@@@@S:pem_body@@@@K:pem_tail@@
+  issuer: orders-ca

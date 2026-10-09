@@ -3865,12 +3865,67 @@ MUTATIONS = (
     Mutation(
         "a reference is masked as if it were a secret",
         "secret_mask.py",
-        "if not value or value == MASK or _is_reference(value):",
-        "if not value or value == MASK:",
+        "if not value or MASK in value or _is_reference(value):",
+        "if not value or MASK in value:",
         "`password: ${DB_PASSWORD}` names where a service reads its secret, which is "
         "architecture the extraction should record; masking it removes that fact, "
         "protects nothing, and inflates the masked count the operator reads",
         ("test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",),
+    ),
+    Mutation(
+        "a Kubernetes env item's value is not masked",
+        "secret_mask.py",
+        "        if _VALUE_KEY in fields and _pair_names_a_secret(names):",
+        "        if False:",
+        "`- name: DB_PASSWORD` with `value:` on the next line is how most deployments "
+        "hand a container its secrets, and the key on the value's own line names "
+        "nothing, so without the pairing every literal in an `env:` list reaches the "
+        "worker whole",
+        (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_secret_mask.KubernetesEnvLists.test_the_value_of_an_item_named_for_a_secret_is_masked",
+            "test_secret_mask.LineEndingsPreserved.test_crlf_survives_masking_byte_for_byte",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "an XML appSetting's value is not masked",
+        "secret_mask.py",
+        "        if not (_names_a_secret(key) or (paired and key.lower() == _VALUE_KEY)):",
+        "        if not _names_a_secret(key):",
+        '`<add key="DbPassword" value="..."/>` is the .NET configuration shape, and '
+        "the attribute holding the secret is called `value`; reading attributes one at "
+        "a time masks only those named for a secret and passes this one through",
+        (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_secret_mask.XmlConfig.test_an_xml_secret_is_masked_and_its_markup_kept",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a CRLF file loses its carriage returns",
+        "secret_mask.py",
+        '    return "\\n".join(line + "\\r" * original.endswith("\\r") for line, original in zip(lines, raw))',
+        '    return "\\n".join(lines)',
+        "the by-line walks read each line without its `\\r`; rejoining without it turns "
+        "every CRLF file a worker reads into an LF one, so the masked copy differs from "
+        "the original on every line rather than only at its secrets",
+        (
+            "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
+            "test_secret_mask.LineEndingsPreserved.test_crlf_survives_masking_byte_for_byte",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a repair round re-grants the original files",
+        "headless_workers.py",
+        '        resume = parsed.get("session_id")\n',
+        '        resume = parsed.get("session_id")\n'
+        "        rules = permission_rules(job.reads, job.out) or rules\n",
+        "the gate failing round 1 is ordinary, and a resumed session rebuilt from the "
+        "job's own reads is granted the originals: the worker that was kept from every "
+        "secret in round 1 is handed them in round 2, and the report still says masked",
+        ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
     ),
 )
 

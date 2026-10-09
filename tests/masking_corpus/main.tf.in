@@ -1,0 +1,31 @@
+variable "db_password" {
+  description = "Administrator password for the orders database"
+  type        = string
+  default     = "@@S:tf_default_password@@"
+  sensitive   = true
+}
+
+variable "location" {
+  type    = string
+  default = "uksouth"
+}
+
+resource "helm_release" "orders" {
+  name  = "orders"
+  chart = "./charts/orders"
+
+  set {
+    name  = "database.password"
+    value = "@@S:tf_helm_password@@"
+  }
+
+  set {
+    name  = "replicaCount"
+    value = "2"
+  }
+
+  set_sensitive {
+    name  = "api.token"
+    value = var.api_token
+  }
+}

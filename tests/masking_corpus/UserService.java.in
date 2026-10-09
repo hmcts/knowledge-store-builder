@@ -1,0 +1,26 @@
+package example.orders;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class UserService {
+    private static final String PASSWORD_FIELD = "password";
+    private final String password;
+    private final TokenStore tokenStore;
+    private final Map<String, String> tokens = new HashMap<>();
+
+    public UserService(String password, TokenStore tokenStore) {
+        this.password = password;
+        this.tokenStore = tokenStore;
+    }
+
+    public boolean login(String user, String password) {
+        String token = tokenStore.issue(user);
+        Map<String, Object> claims = Map.of("user", user, "token", token);
+        return check(password, this.password) && claims != null;
+    }
+
+    String secret() {
+        return System.getenv("APP_SECRET");
+    }
+}
