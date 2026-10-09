@@ -1,0 +1,10 @@
+import os
+
+from accounts.models import User
+
+
+def seed():
+    User.objects.create_user(
+        username="reporting",
+        password="@@S:py_seed_password@@")
+    User.objects.create_user(username="viewer", password=os.environ["VIEWER_PASSWORD"])

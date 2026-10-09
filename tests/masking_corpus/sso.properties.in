@@ -1,0 +1,6 @@
+sso.issuer=https://sso.example/am/oauth2
+sso.pin.key=@@S:props_pin_key@@
+sso.keyFile=/etc/sso/signing.pem
+jwtKey=@@S:props_jwt_key@@
+spring.datasource.url=jdbc:postgresql://db.example:5432/orders
+storage.connection=BlobEndpoint=https://acct.blob.example/;SharedAccessSignature=sv=2022-11-02&sig=@@S:props_sas_sig@@;FileEndpoint=https://acct.file.example/

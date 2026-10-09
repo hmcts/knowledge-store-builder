@@ -50,7 +50,6 @@ class KeyNameRules(SettingsIsolated):
         ("db.password=fake-pw\n", "db.password=[masked]\n"),
         ("export AUTH_TOKEN='fake-tk'\n", "export AUTH_TOKEN='[masked]'\n"),
         ("storage_account_key: fake-sk\n", "storage_account_key: [masked]\n"),
-        ("connectionString: fake-cs\n", "connectionString: [masked]\n"),
         ("credentials = fake-cr\n", "credentials = [masked]\n"),
         ("SAS=fake-sas\n", "SAS=[masked]\n"),
         ("basic_auth: fake-au\n", "basic_auth: [masked]\n"),
@@ -155,7 +154,7 @@ class ValueShapeRules(SettingsIsolated):
     CASES = [
         (
             f"{PEM_HEAD}\nMIIBfake\nAAAA\n{PEM_TAIL}\n",
-            f"{PEM_HEAD}{M}{PEM_TAIL}\n",
+            f"{PEM_HEAD}\n{M}\n{M}\n{PEM_TAIL}\n",
             "pem-private-key",
         ),
         (
@@ -390,9 +389,10 @@ class XmlConfig(SettingsIsolated):
             "  <server>\n    <apiToken>\n      [masked]\n    </apiToken>\n",
         ),
         (f'<db password="{PW}" user="app"/>', '<db password="[masked]" user="app"/>'),
+        # The connection string's own `Password=` is the secret, not the whole string.
         (
-            f'<add name="Main" connectionString="Server=db;Key={PW}" providerName="Sql" />',
-            '<add name="Main" connectionString="[masked]" providerName="Sql" />',
+            f'<add name="Main" connectionString="Server=db;Password={PW}" providerName="Sql" />',
+            '<add name="Main" connectionString="Server=db;Password=[masked]" providerName="Sql" />',
         ),
     ]
 
@@ -609,6 +609,338 @@ class LineEndingsPreserved(SettingsIsolated):
         unchanged_and_uncounted(self, "user: app\r\npassword: ${DB_PASSWORD}\r\n\r\n")
 
 
+# Credential shapes, assembled from parts: a hex secret, two UUIDs, a base64 key,
+# a bare webhook token and a short base64 PIN key.
+HEX = "0f1e2d3c" + "4b5a6978" * 15
+UUID = "3f2a9c1e" + "-4b7d-8a6f-2e5d-7c9b1a0f3e4d"
+UUID2 = "9d8c7b6a" + "-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+B64 = "Qk1yZ9xW" + "4vU8tS2rP6oN1mL5kJ3hG7fD0cB+" * 3 + "Ab1Cd2Ef3Gh4Ij=="
+HOOK = "T0FAKE0" + "/B0FAKE0/" + "Fake0Hook9Path0x"
+PIN = "Rk9vYmFy" + "MTIzNDU2"
+
+
+class CredentialLookingKeys(SettingsIsolated):
+    """`key` and `webhook`, and a secret word inside a key, hold a value that
+    looks like a credential.
+
+    Break: a signing key, an instrumentation key or a webhook token reaching the
+    worker because its key ends in `key` or `webhook` - words the rule did not
+    count - or names its secret word before another word, as `secret_key_base`.
+    """
+
+    CASES = [
+        (f"secret_key_base: {HEX}\n", "secret_key_base: [masked]\n"),
+        (f"app:\n  secret_key_base: {HEX}\n", "app:\n  secret_key_base: [masked]\n"),
+        (f"APP_INSIGHTS_KEY: {UUID}\n", "APP_INSIGHTS_KEY: [masked]\n"),
+        (f"monitoring:\n  APPINSIGHTS_KEY: {UUID}\n", "monitoring:\n  APPINSIGHTS_KEY: [masked]\n"),
+        (f"JWT_KEY: {B64}\n", "JWT_KEY: [masked]\n"),
+        (f"jwtKey={B64}\n", "jwtKey=[masked]\n"),
+        (
+            f"AUTH_PROVIDER_SERVICE_SERVER_JWT_KEY: {B64}\n",
+            "AUTH_PROVIDER_SERVICE_SERVER_JWT_KEY: [masked]\n",
+        ),
+        (f"slack-webhook: {HOOK}\n", "slack-webhook: [masked]\n"),
+        (f"NOTIFY_API_KEY_LIVE: livekey-{UUID}-{UUID2}\n", "NOTIFY_API_KEY_LIVE: [masked]\n"),
+        (f"sso.pin.key={PIN}\n", "sso.pin.key=[masked]\n"),
+        # A secret word fused onto the end of a segment counts as the word.
+        (f"MASTERKEY={HEX}\n", "MASTERKEY=[masked]\n"),
+    ]
+
+    UNCHANGED = [
+        # A key's value that is a name, a file, a path or too short to be a key.
+        "  secretKeyRef:\n    name: app\n    key: password\n",
+        "key: app.yaml\n",
+        "keyFile: /etc/x.pem\n",
+        "primaryKey: id\n",
+        "KEY_VAULT_NAME: my-vault\n",
+        "sortKey: createdAtTimestamp\n",
+        "cacheKey: user-profile-cache-v2\n",
+        "signingKey: https://keys.example/jwks.json\n",
+        "webhook: release-notes\n",
+        "webhook_url: https://ci.example/hooks/build\n",
+        # A key whose last word says it names, refers to or configures a secret.
+        f"secretName: {HEX}\n",
+        f"secret_ref: {HEX}\n",
+        f"passwordPolicy: {HEX}\n",
+        "token_enabled: true\n",
+        # Words that end in `key` and are not about keys.
+        f"monkey: {HEX}\n",
+        f"turkey: {HEX}\n",
+        f"hockey: {HEX}\n",
+        f"donkey: {HEX}\n",
+        f"whiskey: {HEX}\n",
+    ]
+
+    def test_a_credential_under_a_key_or_webhook_is_masked(self):
+        for text, want in self.CASES:
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_a_name_path_or_short_value_under_a_key_is_unchanged(self):
+        for text in self.UNCHANGED:
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+
+class FusedSecretWords(SettingsIsolated):
+    """A key segment ending in a secret word is named for a secret.
+
+    Break: `DEFAULTPASSWORD=...` reaching the worker because the word boundary
+    the rule split keys at is not there - the secret word is fused to another.
+    """
+
+    CASES = [
+        ("PIN_DEFAULTPASSWORD=fake-pw\n", "PIN_DEFAULTPASSWORD=[masked]\n"),
+        ("  - PIN_DEFAULTPASSWORD=fake-pw\n", "  - PIN_DEFAULTPASSWORD=[masked]\n"),
+        ("DEFAULTPASSWORD=fake-pw\n", "DEFAULTPASSWORD=[masked]\n"),
+        ("adminpassword: fake-pw\n", "adminpassword: [masked]\n"),
+        ("APITOKEN=fake-tk\n", "APITOKEN=[masked]\n"),
+    ]
+
+    UNCHANGED = [
+        "passwordless: magic-link\n",
+        "tokenizer: wordpiece\n",
+        "keyboard: uk-extended\n",
+        "monkey: banana\n",
+        # `pass` and `auth` fused are other words: a bypass, a protocol.
+        "bypass: fake-pw\n",
+        "oauth: provider-one\n",
+    ]
+
+    def test_a_fused_secret_word_masks_the_value(self):
+        for text, want in self.CASES:
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_a_word_that_merely_contains_a_secret_word_is_unchanged(self):
+        for text in self.UNCHANGED:
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+
+class PointersAreNotSecrets(SettingsIsolated):
+    """A plain URL or a Terraform reference under a secret key points elsewhere.
+
+    Break: an endpoint under an `auth` key, or `var.admin_password`, masked as a
+    credential - the worker loses which service and which variable are wired
+    in, and the operator reads a masked count inflated by things that are not
+    secrets.
+    """
+
+    UNCHANGED = [
+        "S2S_AUTH: http://service-auth-provider:4502\n",
+        "token_url: https://login.example/oauth2/token\n",
+        "jdbc_connection_string: jdbc:postgresql://db:5432/app\n",
+        "vm_admin_password = var.admin_password\n",
+        "password = local.db_password\n",
+        "admin_password = module.db.admin_password\n",
+        "client_secret = data.vault_secret.app.value\n",
+        "password = each.value\n",
+        "password = random_password.db.result\n",
+        # The same pointers in the syntax that names the key on another line.
+        "env:\n  - name: S2S_AUTH\n    value: http://service-auth-provider:4502\n",
+        "env:\n  - name: DB_PASSWORD\n    value: var.admin_password\n",
+    ]
+
+    CASES = [
+        # A URL's own credential and a secret in its query are still masked.
+        (
+            "S2S_AUTH: http://app:fake-pw@auth.example:4502\n",
+            "S2S_AUTH: http://app:[masked]@auth.example:4502\n",
+            "url-credential",
+        ),
+        (
+            "S2S_AUTH: https://auth.example/cb?token=fake-tk\n",
+            "S2S_AUTH: https://auth.example/cb?token=[masked]\n",
+            "key-name",
+        ),
+        # Dotted, but not a Terraform reference.
+        ("password = varx.admin\n", "password = [masked]\n", "key-name"),
+        ("password: var-admin-pw\n", "password: [masked]\n", "key-name"),
+    ]
+
+    def test_a_url_or_terraform_reference_is_unchanged(self):
+        for text in self.UNCHANGED:
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+    def test_what_is_not_a_pointer_is_still_masked(self):
+        for text, want, rule in self.CASES:
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({rule: 1}))
+
+
+class ConnectionStrings(SettingsIsolated):
+    """A connection string is masked where it holds a credential, not whole.
+
+    Break: the server, database and options of every connection string
+    withheld from the worker - or, the other way, its password, account key,
+    URL password or SAS signature left in it once the whole-value rule is gone.
+    """
+
+    CASES = [
+        (
+            "ConnectionString: Server=db;User Id=app;Password=fake-pw;Pooling=true\n",
+            "ConnectionString: Server=db;User Id=app;Password=[masked];Pooling=true\n",
+            "connection-string-credential",
+        ),
+        (
+            "storage_connection_string: DefaultEndpointsProtocol=https;AccountName=a;"
+            "AccountKey=fakeKey==;EndpointSuffix=core.example\n",
+            "storage_connection_string: DefaultEndpointsProtocol=https;AccountName=a;"
+            "AccountKey=[masked];EndpointSuffix=core.example\n",
+            "connection-string-key",
+        ),
+        (
+            "DB_CONNECTION_STRING=postgres://app:fake-pw@db.example:5432/app\n",
+            "DB_CONNECTION_STRING=postgres://app:[masked]@db.example:5432/app\n",
+            "url-credential",
+        ),
+        (
+            "blobConnectionString: BlobEndpoint=https://a.blob.example/;"
+            "SharedAccessSignature=sv=2022-11-02&sig=fakeSig%3D;FileEndpoint=f\n",
+            "blobConnectionString: BlobEndpoint=https://a.blob.example/;"
+            "SharedAccessSignature=sv=2022-11-02&sig=[masked];FileEndpoint=f\n",
+            "sas-signature",
+        ),
+    ]
+
+    UNCHANGED = [
+        "connectionString: Server=db;Database=app\n",
+        "connectionString: fake-cs\n",
+    ]
+
+    def test_only_the_credential_inside_a_connection_string_is_masked(self):
+        for text, want, rule in self.CASES:
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({rule: 1}))
+
+    def test_a_connection_string_holding_no_credential_is_unchanged(self):
+        for text in self.UNCHANGED:
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+
+class LiteralsInsideCode(SettingsIsolated):
+    """Under a secret key, a literal passed to a call is masked; the call stays.
+
+    Break: `DB_PASSWORD = base64encode("...")` reaching the worker because the
+    value as a whole reads as code - or the call, its references or its
+    punctuation changed when only the literal should.
+    """
+
+    LITERAL = "FakeLiteral" + "0123456789"
+
+    def test_a_literal_in_a_call_is_masked_and_the_call_kept(self):
+        for text, want in (
+            (
+                f'DB_PASSWORD = base64encode("{self.LITERAL}")\n',
+                'DB_PASSWORD = base64encode("[masked]")\n',
+            ),
+            (
+                f'vm_admin_password = coalesce(var.p, "{self.LITERAL}")\n',
+                'vm_admin_password = coalesce(var.p, "[masked]")\n',
+            ),
+            (
+                f"  token = sha256('{self.LITERAL}'),\n",
+                "  token = sha256('[masked]'),\n",
+            ),
+        ):
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_a_lookup_name_or_interpolation_in_a_call_is_unchanged(self):
+        for text in (
+            'password = os.environ["DB_PASSWORD"]\n',
+            'password = config.get("db.password")\n',
+            'password = get_secret("app-db")\n',
+            'vm_admin_password = coalesce(var.p, "${var.fallback}")\n',
+            f'description = base64encode("{self.LITERAL}")\n',
+        ):
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+
+class OnlyTheValueChanges(SettingsIsolated):
+    """A quoted value followed by a closer loses the value and nothing else.
+
+    Break: `rawPassword = '...');` masked to `rawPassword = [masked];`, eating
+    the closing quote and bracket, so the worker reads code that no longer
+    parses and is not the code in the file.
+    """
+
+    CASES = [
+        ("rawPassword = 'FakePass0123456789abcd');\n", "rawPassword = '[masked]');\n"),
+        ("rawPassword = 'FakePass0123456789abcd'),\n", "rawPassword = '[masked]'),\n"),
+        ('rawPassword = "FakePass0123456789abcd"),\n', 'rawPassword = "[masked]"),\n'),
+        ('rawPassword = "FakePass0123456789abcd"]\n', 'rawPassword = "[masked]"]\n'),
+        ("rawPassword = 'FakePass0123456789abcd'}\n", "rawPassword = '[masked]'}\n"),
+    ]
+
+    def test_the_closers_after_a_masked_literal_survive(self):
+        for text, want in self.CASES:
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"key-name": 1}))
+
+
+class EscapedSasSignatures(SettingsIsolated):
+    """A SAS URL written with `&amp;` still loses its signature.
+
+    Break: a signed URL pasted into markdown or HTML, where `&` is `&amp;`,
+    reaching the worker whole because `sig=` follows a `;` and not a `&`.
+    """
+
+    def test_the_signature_after_an_html_entity_is_masked_and_the_rest_kept(self):
+        got, counts = masked(
+            "see https://acct.blob.example/c/b?sv=2020-10-02&amp;sig=AbCdFake%3D&amp;se=2030 now"
+        )
+        self.assertEqual(
+            got, "see https://acct.blob.example/c/b?sv=2020-10-02&amp;sig=[masked]&amp;se=2030 now"
+        )
+        self.assertEqual(counts, Counter({"sas-signature": 1}))
+
+    def test_a_word_ending_in_sig_is_not_a_signature(self):
+        unchanged_and_uncounted(self, "the layout&amp;design=round\n")
+
+
+class PemBlocksKeepTheirLines(SettingsIsolated):
+    """A private-key block is masked line by line, so every line after it keeps
+    its number.
+
+    Break: the block collapsed onto one line, so a worker citing a line of the
+    masked copy below it points at the wrong line of the real file.
+    """
+
+    def test_each_line_of_the_block_is_masked_and_every_line_ending_kept(self):
+        for text, want in (
+            (
+                f"key: |\r\n  {PEM_HEAD}\r\n  MIIBfake\r\n\r\n  AAAA\r\n  {PEM_TAIL}\r\nnext: 1\r\n",
+                f"key: |\r\n  {PEM_HEAD}\r\n  {M}\r\n\r\n  {M}\r\n  {PEM_TAIL}\r\nnext: 1\r\n",
+            ),
+            (
+                f'"{PEM_HEAD}\\nMIIBfake\\n{PEM_TAIL}\\n"',
+                f'"{PEM_HEAD}{M}{PEM_TAIL}\\n"',
+            ),
+        ):
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(got.count("\n"), text.count("\n"))
+                self.assertEqual(counts, Counter({"pem-private-key": 1}))
+
+
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "knowledge-store-build" / "SKILL.md"
 
 
@@ -638,7 +970,18 @@ class DocumentedLimits(SettingsIsolated):
         ("a literal compared or passed in code", 'if pw == "example-secret":\n'),
         (
             "a value under a key that names no secret word, or in prose",
-            "signing-key: example-secret\nthe admin password is example-secret\n",
+            "signing-cert: example-secret\nthe admin password is example-secret\n",
+        ),
+        (
+            "a value that does not look like a credential, under a key whose secret word is "
+            "`key`, `webhook`, or followed by another word",
+            "signing-key: example-secret\nalert-webhook: example-secret\n"
+            "secret_key_base: example-secret\n",
+        ),
+        ("a secret in a URL's path, under any key", "auth: https://hooks.example/example-secret\n"),
+        (
+            "a literal in a call that reads like a name",
+            'password = get("DB_PASSWORD", "example-secret")\n',
         ),
         (
             "a value whose name is in another column",

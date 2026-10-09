@@ -464,8 +464,16 @@ What is masked:
 
 - The value of an assignment whose key ends in a secret word - password, pass,
   passphrase, secret, token, api key, access key, private key, client secret,
-  credentials, connection string, account key, sas, auth - in YAML, JSON, `.env`,
-  properties, HCL and INI shapes.
+  credentials, account key, sas, auth - or in one fused onto another word
+  (`DEFAULTPASSWORD`), in YAML, JSON, `.env`, properties, HCL and INI shapes.
+- Under a key naming `key` or `webhook`, or a secret word with another word
+  after it (`secret_key_base`), the value only when it looks like a credential:
+  one token of sixteen or more key characters, not a URL, path or dotted name,
+  and hex, a UUID, base64, or letters and digits mixed. `JWT_KEY: <base64>`
+  goes; `key: password`, `keyFile: /etc/x.pem` and `KEY_VAULT_NAME: my-vault`
+  stay.
+- In code under a secret-named key, the literal and nothing around it:
+  `base64encode("...")` keeps the call, and `'...');` keeps its `);`.
 - The same keys in other syntax: an XML attribute or element named for a secret;
   the `value` beside a `name` or `key` naming one, as in a Kubernetes `env:`
   item, a .NET `<add key=... value=...>` or a Helm `set` block; a Terraform
@@ -473,8 +481,9 @@ What is masked:
   block scalar (`password: |`); an unquoted value in a one-line YAML flow
   mapping; and every value under a Kubernetes Secret's `data:` or `stringData:`,
   whatever its key.
-- Values with a secret's own shape wherever they appear: private-key blocks, SAS
-  `sig=`, `AccountKey=` and `SharedAccessKey=`, `Password=` inside a connection
+- Values with a secret's own shape wherever they appear: private-key blocks
+  (line by line, so line numbers below them hold), SAS `sig=` (also after an
+  escaped `&amp;`), `AccountKey=` and `SharedAccessKey=`, `Password=` inside a connection
   string, `Authorization: Bearer|Basic`, a URL's password, JWTs, AWS access key
   ids, GitHub, SonarQube and `sk-` style tokens, Slack webhook paths,
   `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]` values, SQL
@@ -489,7 +498,14 @@ Not masked, because each points at a secret rather than holding it: `${VAR}`,
 and keys such as `secretKeyRef` and a chart's `existingSecret`; nor empty values,
 booleans, `null` or plain numbers under a secret-named key; nor, in code, a type
 annotation, a call, an argument or parameter (`connect(token=token)`), or a name
-assigned to a member (`self.token = token`), so the source stays readable.
+assigned to a member (`self.token = token`), so the source stays readable; nor a
+literal in a call naming what is looked up (`os.environ["DB_PASSWORD"]`).
+
+Not masked under any key, because each says where something is: a URL with no
+password in it (a secret-named query parameter still goes) and a Terraform
+reference (`var.x`, `module.a.b`, `random_password.db.result`). A connection
+string is not masked whole: its `Password=`, `AccountKey=`, URL password and
+`sig=` go, and the server and database stay.
 
 **The limit.** Masking is pattern-based. It reduces exposure; it does not
 guarantee none. These still reach the worker unmasked, and each is pinned by a
@@ -497,7 +513,11 @@ test that fails once it is masked:
 
 - a literal compared or passed in code: `if pw == "example-secret":`
 - a value under a key that names no secret word, or in prose:
-  `signing-key: example-secret`
+  `signing-cert: example-secret`
+- a value that does not look like a credential, under a key whose secret word
+  is `key`, `webhook`, or followed by another word: `signing-key: example-secret`
+- a secret in a URL's path, under any key: `auth: https://hooks.example/example-secret`
+- a literal in a call that reads like a name: `get("DB_PASSWORD", "example-secret")`
 - a value whose name is in another column: a SQL `INSERT` naming
   `client_secret` in its column list
 - the lines a value continues onto: the next line of a properties value ending

@@ -28,6 +28,15 @@ SURVIVES = {
         "Server=db.example;Database=orders;User Id=orders;",
     ),
     "certs.yaml": ("MIIBfakeCertificateBody", secret_corpus.KEPT["pem_head"], "issuer: orders-ca"),
+    "chart-values.yaml": (
+        "S2S_AUTH: http://service-auth-provider:4502",
+        "KEY_VAULT_NAME: reporting-vault",
+        "cacheKey: user-profile-cache-v2",
+        "secretName: web-secrets",
+        "webhook_url: https://ci.example/hooks/build",
+        "jdbc_connection_string: jdbc:postgresql://db.example:5432/reporting",
+        "key: password",
+    ),
     "client.py": (
         "self.password = password",
         "self.token = token",
@@ -40,7 +49,14 @@ SURVIVES = {
     "docker-compose.yml": ("API_TOKEN=${API_TOKEN}", "POSTGRES_USER: orders"),
     "main.tf": ('default = "uksouth"', "value = var.api_token", 'value = "2"'),
     "secret.yaml": ("name: orders-db", "type: Opaque"),
+    "seed_users.py": ('password="[masked]")', 'password=os.environ["VIEWER_PASSWORD"]'),
     "settings.ini": ("host = db.example", "data = /var/lib/orders"),
+    "sso.properties": (
+        "sso.keyFile=/etc/sso/signing.pem",
+        "spring.datasource.url=jdbc:postgresql://db.example:5432/orders",
+        "sig=[masked];FileEndpoint=https://acct.file.example/",
+    ),
+    "storage.md": ("&amp;sig=[masked]&amp;se=2030-01-01",),
     "terraform.tfvars": ('admin_username = "ordersadmin"', 'owner       = "orders-team"'),
     "UserService.java": (
         "this.password = password;",
@@ -48,6 +64,14 @@ SURVIVES = {
         'System.getenv("APP_SECRET")',
     ),
     "V3__roles.sql": ("VALUES ('smtp_host', 'smtp.example')",),
+    "vm.tf": (
+        "vm_admin_password = var.admin_password",
+        "db_password    = random_password.db.result",
+        "client_secret  = data.vault_secret.app.value",
+        'base64encode("[masked]")',
+        'coalesce(var.admin_password, "[masked]")',
+        'lookup(var.tokens, "API_TOKEN")',
+    ),
     "values.yaml": (
         'password: "{{ .Values.global.redisPassword }}"',
         "passwordSecretRef: orders-db",
@@ -85,6 +109,18 @@ class CorpusProperties(SettingsIsolated):
                         self.assertIn(kept.replace("\n", newline), got)
                     # Every byte outside the planted spans, line endings included.
                     self.assertEqual(got, want)
+
+    def test_masking_keeps_every_line_of_every_file(self):
+        # Break: a value masked across lines - a private-key block collapsed onto
+        # one - so a worker citing a line below it in the masked copy cites the
+        # wrong line of the real file.
+        for name, template in secret_corpus.corpus():
+            for ending, newline in LINE_ENDINGS.items():
+                with self.subTest(file=name, ending=ending):
+                    source = secret_corpus.render(template, masked=False).replace("\n", newline)
+                    got = secret_mask.mask(source)
+                    self.assertEqual(got.count(newline), source.count(newline))
+                    self.assertEqual(got.count("\n"), source.count("\n"))
 
     def test_source_code_is_not_masked_at_all(self):
         # Break: masking that reads code as config, so a worker extracting a

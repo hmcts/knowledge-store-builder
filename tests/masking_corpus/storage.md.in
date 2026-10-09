@@ -1,0 +1,7 @@
+# Uploading a report
+
+The portal hands out a signed link like this one:
+
+<a href="https://acct.blob.example/reports/r.csv?sv=2020-10-02&amp;sig=@@S:md_sas_sig@@&amp;se=2030-01-01">download</a>
+
+It expires after a day.
