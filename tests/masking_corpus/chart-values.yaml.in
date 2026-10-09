@@ -1,0 +1,23 @@
+# Helm values for the reporting service.
+java:
+  environment:
+    S2S_AUTH: http://service-auth-provider:4502
+    KEY_VAULT_NAME: reporting-vault
+    APP_INSIGHTS_KEY: @@S:chart_insights_key@@
+    NOTIFY_API_KEY_LIVE: @@S:chart_notify_key@@
+    JWT_KEY: @@S:chart_jwt_key@@
+    PIN_DEFAULTPASSWORD: @@S:chart_default_password@@
+monitoring:
+  APPINSIGHTS_KEY: @@S:chart_appinsights_key@@
+web:
+  secret_key_base: @@S:chart_secret_key_base@@
+  cacheKey: user-profile-cache-v2
+  secretName: web-secrets
+alerts:
+  slack-webhook: @@S:chart_slack_token@@
+  webhook_url: https://ci.example/hooks/build
+database:
+  jdbc_connection_string: jdbc:postgresql://db.example:5432/reporting
+  secretKeyRef:
+    name: reporting-db
+    key: password

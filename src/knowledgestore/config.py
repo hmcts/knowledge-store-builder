@@ -396,7 +396,9 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
         r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----([\s\S]*?)"
         r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
     ),
-    "sas-signature": r"[?&]sig=([^&\s\"'<>]+)",
+    # After `?` or `&`, or the `;` of an HTML-escaped `&amp;`; the value stops at the
+    # next parameter, escaped or not.
+    "sas-signature": r"[?&;]sig=([^&;\s\"'<>]+)",
     # A digit is required: real keys carry them, and `sk-learn-...` does not.
     "sk-key": r"\b[sr]k(?:-|_live_|_test_)(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{12,}",
     "slack-webhook": r"hooks\.slack\.com/services/([A-Za-z0-9/_-]+)",

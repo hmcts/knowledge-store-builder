@@ -1,0 +1,10 @@
+# Uploading a report
+
+The portal hands out a signed link like this one:
+
+<a href="https://acct.blob.example/reports/r.csv?sv=2020-10-02&amp;sig=@@S:md_sas_sig@@&amp;se=2030-01-01">download</a>
+
+It expires after a day. After sign-in the browser lands on
+`https://reports.example/#access_token=@@S:md_access_token@@&token_type=bearer`,
+and the API takes `<a href="https://api.example/r?format=csv&amp;api_key=@@S:md_api_key@@">`.
+It expires after a day.

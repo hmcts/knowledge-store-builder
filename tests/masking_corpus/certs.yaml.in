@@ -4,5 +4,8 @@ tls:
     MIIBfakeCertificateBody
     -----END CERTIFICATE-----
   signing: |
-    @@K:pem_head@@@@S:pem_body@@@@K:pem_tail@@
+    @@K:pem_head@@
+    @@S:pem_line_one@@
+    @@S:pem_line_two@@
+    @@K:pem_tail@@
   issuer: orders-ca

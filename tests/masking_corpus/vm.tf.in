@@ -1,0 +1,13 @@
+resource "azurerm_linux_virtual_machine" "app" {
+  name              = "app-vm"
+  admin_username    = "appadmin"
+  vm_admin_password = var.admin_password
+}
+
+locals {
+  db_password    = random_password.db.result
+  client_secret  = data.vault_secret.app.value
+  DB_PASSWORD    = base64encode("@@S:tf_encoded_password@@")
+  admin_password = coalesce(var.admin_password, "@@S:tf_fallback_password@@")
+  api_token      = lookup(var.tokens, "API_TOKEN")
+}
