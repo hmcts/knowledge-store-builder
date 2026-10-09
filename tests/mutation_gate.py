@@ -3054,7 +3054,12 @@ MUTATIONS = (
             "test_deploy_values.StripTemplateDollarDialect.test_an_interpolation_spanning_lines_is_stripped_whole",
             "test_deploy_values.StripTemplateDollarDialect.test_both_dialects_withhold_the_same_name_identically",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+            "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
+            "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
             "test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",
+            "test_secret_mask.XmlConfig.test_xml_holding_no_secret_is_unchanged",
+            "test_secret_mask.YamlBlockScalars.test_a_block_under_a_key_naming_no_secret_or_holding_a_reference_is_unchanged",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
         ),
     ),
     Mutation(
@@ -3768,6 +3773,7 @@ MUTATIONS = (
         "recorded on #396; treating the exit as success would report an unextracted "
         "chunk as finished and let the merge proceed without it",
         (
+            "test_headless_workers.ExtractTests.test_a_chunk_of_files_that_cannot_be_masked_still_runs_on_the_raw_files",
             "test_headless_workers.ExtractTests.test_a_missing_output_is_not_done_and_a_written_one_lands_where_chunk_status_counts_it",
             "test_headless_workers.OutcomeTests.test_clean_exit_without_output_is_no_output",
             "test_headless_workers.OutcomeTests.test_unparseable_output_is_no_output",
@@ -3792,6 +3798,7 @@ MUTATIONS = (
         "worker that has not read the chunk, so it cannot fix them and the round costs "
         "a full extraction again",
         (
+            "test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",
             "test_headless_workers.OutcomeTests.test_gate_fail_then_pass_resumes_the_session",
             "test_headless_workers.PermissionTests.test_command_argv_is_exact",
         ),
@@ -3844,7 +3851,11 @@ MUTATIONS = (
         "exists to prevent, and nothing in the report would change",
         (
             "test_headless_workers.ExtractTests.test_a_file_that_is_not_text_is_read_raw_and_counted_unmasked",
+            "test_headless_workers.ExtractTests.test_a_path_with_a_space_is_masked_granted_and_mapped",
+            "test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",
             "test_headless_workers.ExtractTests.test_a_worker_reads_a_masked_copy_and_cites_the_real_path",
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_headless_workers.ExtractTests.test_two_files_with_one_name_get_their_own_copies_and_their_own_citations",
         ),
     ),
     Mutation(
@@ -3856,10 +3867,16 @@ MUTATIONS = (
         "committed credential and matches none of the value shapes, so without the "
         "key-name rule it reaches the worker whole",
         (
+            "test_headless_workers.ExtractTests.test_a_path_with_a_space_is_masked_granted_and_mapped",
+            "test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",
             "test_headless_workers.ExtractTests.test_a_worker_reads_a_masked_copy_and_cites_the_real_path",
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_headless_workers.ExtractTests.test_two_files_with_one_name_get_their_own_copies_and_their_own_citations",
             "test_secret_mask.Determinism.test_masking_masked_text_finds_nothing_more",
             "test_secret_mask.Determinism.test_no_counts_argument_is_accepted",
             "test_secret_mask.KeyNameRules.test_each_format_masks_the_value_and_keeps_the_key",
+            "test_secret_mask.LineEndingsPreserved.test_crlf_survives_masking_byte_for_byte",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
         ),
     ),
     Mutation(
@@ -3870,7 +3887,15 @@ MUTATIONS = (
         "`password: ${DB_PASSWORD}` names where a service reads its secret, which is "
         "architecture the extraction should record; masking it removes that fact, "
         "protects nothing, and inflates the masked count the operator reads",
-        ("test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",),
+        (
+            "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
+            "test_secret_mask.KubernetesSecretManifests.test_a_config_map_and_a_templated_secret_are_unchanged",
+            "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
+            "test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",
+            "test_secret_mask.XmlConfig.test_xml_holding_no_secret_is_unchanged",
+            "test_secret_mask.YamlBlockScalars.test_a_block_under_a_key_naming_no_secret_or_holding_a_reference_is_unchanged",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
     ),
     Mutation(
         "a Kubernetes env item's value is not masked",
