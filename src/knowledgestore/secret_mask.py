@@ -99,11 +99,24 @@ _INLINE_ASSIGNMENT = re.compile(
 _CODE_END = frozenset(",;)}]")
 # A type annotation in front of a value: `password: str` is a declaration, and in
 # `password: str = "..."` only the part after `=` is a value.
-_ANNOTATION = re.compile(
-    r"(?P<head>(?:str|bytes|int|bool|float|string|number|SecretStr|SecretBytes"
-    r"|Optional\[[^\]\n]*\])(?:[ \t]*\|[ \t]*None)?[ \t]*(?:=(?!=)[ \t]*|$))(?P<rest>.*)",
-    re.DOTALL,
+# Two patterns rather than one, each simple enough to read: the type, then what
+# may follow it - an `=` before a default, or nothing at all.
+_ANNOTATION_TYPE = re.compile(
+    r"(?:str|bytes|int|bool|float|string|number|SecretStr|SecretBytes|Optional\[[^\]\n]*\])"
+    r"(?:[ \t]*\|[ \t]*None)?"
 )
+_ANNOTATION_TAIL = re.compile(r"[ \t]*(?:=(?!=)[ \t]*|$)")
+
+
+def _annotation_length(value: str) -> int:
+    """How much of `value` is a type annotation and its `=`, or 0 when it is none."""
+    annotation = _ANNOTATION_TYPE.match(value)
+    if not annotation:
+        return 0
+    tail = _ANNOTATION_TAIL.match(value, annotation.end())
+    return tail.end() if tail else 0
+
+
 _ALNUM = re.compile(r"[A-Za-z0-9]")
 
 # Values that are not secrets whatever key they sit under. `|` and `>` open a
@@ -196,10 +209,10 @@ def _key_value(match: re.Match[str], counts: Counter[str]) -> str:
     if ended_as_code and (match.re is _INLINE_ASSIGNMENT or match.group("quote")):
         return whole
     start = match.start("value") - match.start()
-    annotated = _ANNOTATION.fullmatch(value)
-    if annotated:
-        start += len(annotated.group("head"))
-        value = annotated.group("rest")
+    head = _annotation_length(value)
+    if head:
+        start += head
+        value = value[head:]
     if not value or (value[0] not in "\"'" and _CODE_EXPRESSION.match(value)):
         return whole
     masked = _masked_value(value, literals=True)

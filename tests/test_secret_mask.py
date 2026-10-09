@@ -246,7 +246,9 @@ class Determinism(SettingsIsolated):
 
     def test_the_same_input_twice_is_byte_identical(self):
         # Break: rule order taken from an unordered collection.
-        self.assertEqual(secret_mask.mask(self.TEXT), secret_mask.mask(self.TEXT))
+        first = secret_mask.mask(self.TEXT)
+        second = secret_mask.mask(self.TEXT)
+        self.assertEqual(first, second)
 
     def test_masking_masked_text_finds_nothing_more(self):
         # Break: `[masked]` itself read as a value - a re-run would count again.

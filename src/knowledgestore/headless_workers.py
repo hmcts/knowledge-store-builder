@@ -204,6 +204,19 @@ def _record(report: Report, runs: Path, kind: str, proc, parsed: dict | None) ->
     report.results.append(path)
 
 
+def _prepared(job: Job, report: Report, rules: list[str]) -> tuple[str, list[str] | None]:
+    """The prompt and rules the worker runs with, after the job's preparation.
+
+    Preparation is where a chunk's files are masked: the worker is then granted
+    the masked copies, so the rules are rebuilt from what preparation returned.
+    """
+    if job.prepare is None:
+        return job.prompt, rules
+    prepared = job.prepare()
+    report.masking = prepared.masking
+    return prepared.prompt, permission_rules(prepared.reads, job.out)
+
+
 def run_job(
     job: Job,
     *,
@@ -223,15 +236,10 @@ def run_job(
     if job.complete():
         report.outcome = Outcome.SKIPPED
         return report
-    prompt = job.prompt
-    if job.prepare is not None:
-        prepared = job.prepare()
-        report.masking = prepared.masking
-        prompt = prepared.prompt
-        rules = permission_rules(prepared.reads, job.out)
-        if rules is None:
-            report.outcome = Outcome.UNSAFE_PATH
-            return report
+    prompt, rules = _prepared(job, report, rules)
+    if rules is None:
+        report.outcome = Outcome.UNSAFE_PATH
+        return report
 
     work = runs / "work" / f"{kind}-{job.key}"
     io.checked_write_target(work)
