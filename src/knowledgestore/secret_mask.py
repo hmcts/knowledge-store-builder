@@ -320,7 +320,12 @@ _TOKEN_CHARACTERS = re.compile(r"[\w+/=.~:-]+")
 _LETTER = re.compile(r"[A-Za-z]")
 _DIGIT = re.compile(r"\d")
 # A name made of words: `user-profile-cache-v2`, `createdAtTimestamp`, `DB_HOST`.
-_NAME_SEGMENT = re.compile(r"[A-Za-z][a-z]*(?:[A-Z][a-z]+)*\d*|[A-Z]+\d*|\d+")
+# Three shapes, each its own pattern: a camel or capitalised word, an acronym, a number.
+_NAME_SEGMENTS = (
+    re.compile(r"[A-Za-z][a-z]*(?:[A-Z][a-z]+)*\d*"),
+    re.compile(r"[A-Z]+\d*"),
+    re.compile(r"\d+"),
+)
 _SEGMENT_SEPARATOR = re.compile(r"[-_]")
 _CREDENTIAL_LENGTH = 16
 
@@ -345,7 +350,11 @@ def _points_elsewhere(value: str) -> bool:
 
 
 def _is_name(value: str) -> bool:
-    return all(_NAME_SEGMENT.fullmatch(part) for part in _SEGMENT_SEPARATOR.split(value))
+    return all(_is_name_segment(part) for part in _SEGMENT_SEPARATOR.split(value))
+
+
+def _is_name_segment(part: str) -> bool:
+    return any(shape.fullmatch(part) for shape in _NAME_SEGMENTS)
 
 
 def _has_secret_shape(value: str) -> bool:
@@ -529,8 +538,9 @@ def _masked_query(value: str, counts: Counter[str]) -> str | None:
     query = url.find("?")
     if query < 0:
         return None
-    tail = _INLINE_ASSIGNMENT.sub(lambda match: _key_value(match, counts), url[query:])
-    if tail == url[query:]:
+    original = url[query:]
+    tail = _INLINE_ASSIGNMENT.sub(lambda match: _key_value(match, counts), original)
+    if tail == original:
         return None
     quote = value[: (len(value) - len(url)) // 2]
     return quote + url[:query] + tail + quote
