@@ -530,6 +530,9 @@ class CliTest(SettingsIsolated):
                 # extraction the plan dispatched and before the merge reads it (#394)
                 "check-chunk",
                 "merge-chunks",
+                # the headless route through extraction and summary authoring,
+                # listed beside the stages whose artefacts it produces and gates (#396)
+                "workers",
                 # before the layers are merged, because a content cut decides
                 # what the merge is given - and it reads the per-repository
                 # layer as extracted, which is the only place that layer can

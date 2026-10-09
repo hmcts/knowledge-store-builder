@@ -37,6 +37,7 @@ SELF_PARSING = frozenset(
         "check-chunk",
         "content-set",
         "merge-chunks",
+        "workers",
         "merge-inputs",
         "merge-layers",
         "record-clustering",
@@ -135,6 +136,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "merge-chunks": (
         "merge_chunks",
         "merge per-chunk semantic extractions without fusing unrelated entities",
+    ),
+    "workers": (
+        "headless_workers",
+        "run extraction or summary authoring as headless claude workers, one per chunk or batch",
     ),
     "size-cuts": (
         "size_cuts",

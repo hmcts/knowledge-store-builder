@@ -6,15 +6,22 @@ rules: `Read` on the files it was given, `Edit` on its one output path, and
 everything else denied without prompting. The library applies the shipped gate
 itself once the worker exits and resumes the session with the findings.
 
-This module is the core: spawning, permissions, repair rounds, wave control and
-reporting. The `extract` and `summaries` sub-commands build `Job`s on top of it.
+The core is spawning, permissions, repair rounds, wave control and reporting.
+The `extract` and `summaries` sub-commands build `Job`s on top of it:
+
+    knowledgestore workers extract   [--plan PATH] [--chunks ID[,ID...]] ...
+    knowledgestore workers summaries --batches DIR ...
 """
 
 from __future__ import annotations
 
+import argparse
+import importlib.metadata
+import importlib.resources
 import json
 import re
 import subprocess
+import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -22,7 +29,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from . import cost, io
+from . import check_chunk, config, cost, io, store_paths, summary_batches
+
+PACKAGE = "knowledgestore"
 
 SYSTEM_PROMPT = (
     "You are a worker for a knowledge store. Use only the tools you have; "
@@ -292,6 +301,229 @@ def report_lines(reports: Sequence[Report], results_dir: Path, not_started: int 
     return lines
 
 
+# --- the sub-commands -----------------------------------------------------
+
+_SPEC_PARTS = ("skills", "claude", "references", "extraction-spec.md")
+_SPEC_HEADING = "# graphify reference"
+_FENCED = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
+_PLACEHOLDER = re.compile(r"^(FILE_LIST|CHUNK_PATH)$|\b(CHUNK_NUM|TOTAL_CHUNKS|DEEP_MODE)\b", re.M)
+CROSS_CHUNK_NOTE = (
+    "cross-chunk hyperedge ids are checked by merge-chunks / check-chunk over the wave, "
+    "not per worker"
+)
+
+
+class UsageError(Exception):
+    """A refusal that ends the run with exit 1 and this message."""
+
+
+def _asset(name: str) -> str:
+    return (importlib.resources.files(PACKAGE) / "assets" / name).read_text(encoding="utf-8")
+
+
+def extraction_spec_prompt() -> str:
+    """graphify's own extraction prompt block, which owns the schema.
+
+    Never replaced by a prompt this library wrote: if the spec or its block is
+    gone, the schema has moved and the right answer is to say so.
+    """
+    spec = importlib.resources.files("graphify")
+    for part in _SPEC_PARTS:
+        spec = spec / part
+    try:
+        version = importlib.metadata.version("graphifyy")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+    where = f"{spec} (graphify {version})"
+    try:
+        text = spec.read_text(encoding="utf-8")
+    except OSError as error:
+        raise UsageError(f"workers extract needs graphify's extraction spec at {where}") from error
+    start = text.find(_SPEC_HEADING)
+    block = _FENCED.search(text, start) if start >= 0 else None
+    if block is None:
+        raise UsageError(f"no fenced prompt block after {_SPEC_HEADING!r} in {where}")
+    return block.group(1)
+
+
+def fill_prompt(template: str, files: Sequence[str], number: str, total: int, out: Path) -> str:
+    """Substitute the spec's placeholders in one pass.
+
+    One pass, so a path that happens to contain a placeholder's name is not
+    substituted again. `FILE_LIST` and `CHUNK_PATH` are replaced only where the
+    spec uses them as a whole line: elsewhere they sit inside the schema's
+    `<FILE_LIST path verbatim>` and must stay as the words they are.
+    """
+    values = {
+        "FILE_LIST": "\n".join(files),
+        "CHUNK_PATH": str(out),
+        "CHUNK_NUM": number,
+        "TOTAL_CHUNKS": str(total),
+        "DEEP_MODE": "DEEP_MODE=false",
+    }
+    return _PLACEHOLDER.sub(lambda m: values[m.group(1) or m.group(2)], template)
+
+
+def _out_name(key: str) -> str:
+    # The name `chunk-status` and `merge-chunks` read, as `chunk-plan` writes it.
+    return f".graphify_chunk_{key}.json"
+
+
+def extract_jobs(
+    plan: dict[str, list[str]],
+    directory: Path,
+    normalise: Callable[[str], str],
+    template: str,
+    total: int,
+) -> list[Job]:
+    addendum = _asset("extraction_worker_prompt.md")
+    jobs = []
+    for key in sorted(plan):
+        files = tuple(plan[key])
+        out = directory / _out_name(key)
+
+        def gate(key=key, files=files, out=out) -> list[str]:
+            # A fresh dict per chunk: a hyperedge id reused by another chunk is
+            # `check-chunk --batch`'s job over the whole wave, not a worker's.
+            found, _ = check_chunk.check_chunk(int(key), out, files, {}, normalise)
+            return [str(v) for v in found]
+
+        def complete(out=out, gate=gate) -> bool:
+            return _output_parses(out) and not gate()
+
+        prompt = fill_prompt(template, files, key, total, out) + "\n" + addendum
+        jobs.append(Job(key, prompt, files, out, complete, gate))
+    return jobs
+
+
+def summary_jobs(batch_files: Sequence[Path]) -> list[Job]:
+    template = _asset("summary_worker_prompt.md")
+    jobs = []
+    for path in batch_files:
+        batch = io.read_json_dict(path)
+        out = Path(str(batch["out"]))
+        # The number as the file spells it, zero-padded, so keys sort in batch order.
+        key = path.stem.removeprefix(summary_batches.BATCH_PREFIX)
+        prompt = (
+            template.replace("{batch}", key)
+            .replace("{batch_file}", str(path))
+            .replace("{out}", str(out))
+        )
+
+        def gate(path=path) -> list[str]:
+            return summary_batches.check_batch(str(path))[0]
+
+        def complete(out=out, gate=gate) -> bool:
+            return out.is_file() and not gate()
+
+        jobs.append(Job(key, prompt, (str(path),), out, complete, gate))
+    return jobs
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore workers",
+        description="Run extraction or summary authoring as headless claude workers, one "
+        "per chunk or batch, each limited to Read on its inputs and Write on its output, "
+        "with the shipped gate applied after it finishes.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--runs", type=Path, help="work and result files (default depends on stage)")
+        p.add_argument("--parallel", type=int, default=3, help="workers at once (default 3)")
+        p.add_argument("--model", default="sonnet", help="model name (default sonnet)")
+        p.add_argument(
+            "--repair-rounds",
+            type=int,
+            default=2,
+            help="times to send the gate's findings back to the same session (default 2)",
+        )
+        p.add_argument("--timeout", type=float, default=30, help="minutes per run (default 30)")
+        p.add_argument("--claude", default="claude", help="the claude executable (default claude)")
+
+    extract = sub.add_parser("extract", help="one worker per chunk of the chunk plan")
+    extract.add_argument("--plan", type=Path, help=f"default: {config.CHUNK_PLAN_PATH.name}")
+    extract.add_argument("--chunks", help="only these chunk ids, comma separated")
+    common(extract)
+    summaries = sub.add_parser("summaries", help="one worker per summary batch")
+    summaries.add_argument("--batches", type=Path, required=True, help="directory of batch files")
+    common(summaries)
+    return parser.parse_args(argv)
+
+
+def _select_chunks(plan: dict[str, list[str]], wanted: str | None) -> dict[str, list[str]]:
+    if not wanted:
+        return plan
+    by_number = {int(k): k for k in plan if k.isdigit()}
+    chosen: dict[str, list[str]] = {}
+    for token in (t.strip() for t in wanted.split(",") if t.strip()):
+        key = token if token in plan else by_number.get(int(token)) if token.isdigit() else None
+        if key is None:
+            raise UsageError(f"chunk {token} is not in the plan")
+        chosen[key] = plan[key]
+    return chosen
+
+
+def _extract_setup(arguments: argparse.Namespace) -> tuple[list[Job], Path]:
+    try:
+        from graphify.ids import normalize_id
+    except ImportError as error:
+        raise UsageError(
+            "workers extract compares every id with graphify's own normalize_id, and graphify "
+            "is not installed. Install it with `pip install 'hmcts-knowledge-store-builder[ast]'` "
+            "and re-run."
+        ) from error
+    plan_path = arguments.plan or config.CHUNK_PLAN_PATH
+    if not plan_path.is_file():
+        raise UsageError(f"no chunk plan at {plan_path}: run knowledgestore chunk-plan first")
+    whole = store_paths.load_plan(plan_path)
+    plan = _select_chunks(whole, arguments.chunks)
+    if any(not key.isdigit() for key in plan):
+        raise UsageError(f"chunk ids in {plan_path} must be numbers")
+    directory = config.CHUNK_PLAN_PATH.parent.absolute()
+    template = extraction_spec_prompt()
+    runs = arguments.runs or directory / ".workers"
+    return extract_jobs(plan, directory, normalize_id, template, len(whole)), runs
+
+
+def _summaries_setup(arguments: argparse.Namespace) -> tuple[list[Job], Path]:
+    if not arguments.batches.is_dir():
+        raise UsageError(f"no batch directory at {arguments.batches}: run summaries batches first")
+    found = sorted(arguments.batches.glob(f"{summary_batches.BATCH_PREFIX}*.json"))
+    if not found:
+        raise UsageError(f"no {summary_batches.BATCH_PREFIX}*.json files in {arguments.batches}")
+    return summary_jobs([p.absolute() for p in found]), arguments.runs or arguments.batches / "runs"
+
+
+def main(argv: list[str] | None = None, run: Runner | None = None) -> int:
+    arguments = parse_args(argv)
+    try:
+        if arguments.command == "extract":
+            jobs, runs = _extract_setup(arguments)
+        else:
+            jobs, runs = _summaries_setup(arguments)
+    except UsageError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    reports, not_started = run_wave(
+        jobs,
+        parallel=arguments.parallel,
+        runs=runs,
+        kind=arguments.command,
+        model=arguments.model,
+        repair_rounds=arguments.repair_rounds,
+        timeout=arguments.timeout * 60,
+        claude_bin=arguments.claude,
+        run=run or default_runner,
+    )
+    for line in report_lines(reports, runs / "results", not_started):
+        print(line)
+    if arguments.command == "extract":
+        print(CROSS_CHUNK_NOTE)
+    return exit_code(reports)
+
+
 __all__ = [
     "Job",
     "Outcome",
@@ -301,9 +533,13 @@ __all__ = [
     "claude_command",
     "default_runner",
     "exit_code",
+    "extract_jobs",
+    "main",
+    "parse_args",
     "parse_result",
     "permission_rules",
     "report_lines",
     "run_job",
     "run_wave",
+    "summary_jobs",
 ]
