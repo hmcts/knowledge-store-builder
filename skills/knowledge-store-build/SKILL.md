@@ -488,7 +488,10 @@ What is masked:
   ids, GitHub, SonarQube and `sk-` style tokens, Slack webhook paths,
   `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]` values, SQL
   `IDENTIFIED BY '...'` and `PASSWORD '...'`, and the values of password and
-  token flags on a command line.
+  token flags on a command line, and the value of a URL query or fragment
+  parameter named exactly for a secret (`?token=`, `#access_token=`,
+  `&amp;api_key=`; `code` and `key` only when the value looks like a
+  credential), wherever the URL sits.
 
 Only the secret changes: line endings, indentation and every other byte of the
 file are kept, so a CRLF file stays CRLF.

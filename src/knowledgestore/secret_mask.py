@@ -21,7 +21,12 @@ the same input give the same bytes:
    one masks the whole match. Shapes run first so a count names the most
    specific rule, and a value a shape has already masked part of is left as the
    shape left it. A value over several lines - a private-key block - is masked
-   line by line, so every line after it keeps its number.
+   line by line, so every line after it keeps its number. One shape is built
+   in rather than a setting, because it reads a name before it decides:
+   `url-query-secret`, the value of a URL query or fragment parameter named
+   exactly for a secret (`?token=`, `#access_token=`, `&amp;api_key=`, and
+   `code` or `key` only when the value looks like a credential), wherever the
+   URL sits.
 2. **Key names**: an assignment - `key: value`, `key = value`, `"key": "value"`,
    `KEY=value`, `key => value` - whose key ends in a secret word (password,
    pass, passphrase, secret, token, api key, access key, private key, client
@@ -102,6 +107,7 @@ from . import config, deploy_values
 
 MASK = "[masked]"
 KEY_NAME_RULE = "key-name"
+URL_QUERY_RULE = "url-query-secret"
 
 # Compiled once per rule set and keyed on the rules themselves, as `sensitive`
 # does: `configure()` runs after import, so a pattern captured at import would
@@ -440,6 +446,38 @@ def _masked_line(line: str) -> str:
         return line
     lead = len(line) - len(line.lstrip(" \t"))
     return line[:lead] + MASK + line[len(line.rstrip(" \t\r")) :]
+
+
+# A URL query or fragment parameter: its separator, name and value. Found in two
+# steps - any parameter here, then its name read against the secret names - so
+# each pattern stays small and linear.
+_QUERY_PARAMETER = re.compile(r"(?:[?&#]|&amp;)(?P<name>[A-Za-z_]+)=(?P<value>[^&#\s\"'<>)]+)")
+_QUERY_TOKEN_NAME = re.compile(r"(?i)(?:(?:access|refresh|id)_)?token")
+_QUERY_SECRET_NAME = re.compile(r"(?i)api_?key|(?:client_)?secret|passw(?:or)?d|pwd|auth|signature")
+# Names that are as often an ordinary parameter - `?code=200`, `?key=name`.
+_QUERY_GUARDED_NAME = re.compile(r"(?i)code|key")
+
+
+def _is_query_secret(name: str, value: str) -> bool:
+    named = _QUERY_TOKEN_NAME.fullmatch(name) or _QUERY_SECRET_NAME.fullmatch(name)
+    guarded = _QUERY_GUARDED_NAME.fullmatch(name) is not None
+    return _looks_like_credential(value) if guarded else named is not None
+
+
+def _apply_query_secrets(text: str, counts: Counter[str]) -> str:
+    """Each secret-named URL parameter's value masked; the URL around it kept."""
+
+    def replace(match: re.Match[str]) -> str:
+        whole = match.group(0)
+        masked = None
+        if _is_query_secret(match.group("name"), match.group("value")):
+            masked = _masked_value(match.group("value"))
+        if masked is None:
+            return whole
+        counts[URL_QUERY_RULE] += 1
+        return whole[: match.start("value") - match.start()] + masked
+
+    return _QUERY_PARAMETER.sub(replace, text)
 
 
 def _reads_as_code(match: re.Match[str], value: str) -> bool:
@@ -946,6 +984,7 @@ def mask(text: str, counts: Counter[str] | None = None) -> str:
     tally: Counter[str] = Counter()
     for rule, pattern in rules():
         text = _apply(text, rule, pattern, tally)
+    text = _apply_query_secrets(text, tally)
     text = _apply_key_names(text, tally)
     text = _apply_structures(text, tally)
     if counts is not None:
@@ -953,4 +992,4 @@ def mask(text: str, counts: Counter[str] | None = None) -> str:
     return text
 
 
-__all__ = ["KEY_NAME_RULE", "MASK", "mask", "rules"]
+__all__ = ["KEY_NAME_RULE", "MASK", "URL_QUERY_RULE", "mask", "rules"]

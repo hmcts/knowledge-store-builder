@@ -4036,6 +4036,34 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a secret in a URL query is not masked",
+        "secret_mask.py",
+        "    text = _apply_query_secrets(text, tally)\n",
+        "",
+        "`CALLBACK: https://.../cb?token=...` reached the worker whole: the key-name rule "
+        "read the line as one assignment under a key naming no secret and never reached "
+        "the parameter inside the URL",
+        (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_secret_mask.UrlQuerySecrets.test_a_secret_parameter_is_masked_and_the_rest_of_the_url_kept",
+            "test_secret_mask.UrlQuerySecrets.test_a_signature_is_counted_once_by_its_own_rule",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "the credential guard dropped for code and key query parameters",
+        "secret_mask.py",
+        "    return _looks_like_credential(value) if guarded else named is not None",
+        "    return guarded or named is not None",
+        "`code` and `key` are ordinary query names as often as secret ones - `?code=200`, "
+        "`?key=name` - so masking every value under them withholds status codes and "
+        "lookups from the worker and inflates the masked count",
+        (
+            "test_secret_mask.UrlQuerySecrets.test_an_ordinary_parameter_or_a_name_like_a_secret_is_unchanged",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
         "a Kubernetes env item's value is not masked",
         "secret_mask.py",
         "        if _VALUE_KEY in fields and kind:",

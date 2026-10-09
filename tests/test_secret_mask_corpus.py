@@ -55,8 +55,10 @@ SURVIVES = {
         "sso.keyFile=/etc/sso/signing.pem",
         "spring.datasource.url=jdbc:postgresql://db.example:5432/orders",
         "sig=[masked];FileEndpoint=https://acct.file.example/",
+        "?token=[masked]&next=/home",
+        "health?code=200&page=2",
     ),
-    "storage.md": ("&amp;sig=[masked]&amp;se=2030-01-01",),
+    "storage.md": ("&amp;sig=[masked]&amp;se=2030-01-01", "&token_type=bearer"),
     "terraform.tfvars": ('admin_username = "ordersadmin"', 'owner       = "orders-team"'),
     "UserService.java": (
         "this.password = password;",

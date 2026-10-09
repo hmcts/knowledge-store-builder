@@ -67,7 +67,6 @@ class KeyNameRules(SettingsIsolated):
         ("    this.password = fake-pw;\n", "    this.password = [masked];\n"),
         # An annotated default: the type is kept and the literal goes.
         ('    password: str = "fake-pw"\n', '    password: str = "[masked]"\n'),
-        ("/login?token=fake-tk&page=2", "/login?token=[masked]&page=2"),
         # A shell line continuation is not part of the value.
         ("  --set db.password=fake-pw \\\n", "  --set db.password=[masked] \\\n"),
         (
@@ -588,7 +587,6 @@ class LineEndingsPreserved(SettingsIsolated):
         (f"DB_PASSWORD={PW}\r\n", "DB_PASSWORD=[masked]\r\n"),
         (f'  "password": "{PW}",\r\n', '  "password": "[masked]",\r\n'),
         (f"password: {PW} # old\r\n", "password: [masked] # old\r\n"),
-        (f"/x?token={PW}\r\n", "/x?token=[masked]\r\n"),
         (
             f"env:\r\n  - name: DB_PASSWORD\r\n    value: {PW}\r\n",
             "env:\r\n  - name: DB_PASSWORD\r\n    value: [masked]\r\n",
@@ -754,8 +752,8 @@ class PointersAreNotSecrets(SettingsIsolated):
             "url-credential",
         ),
         (
-            "S2S_AUTH: https://auth.example/cb?token=fake-tk\n",
-            "S2S_AUTH: https://auth.example/cb?token=[masked]\n",
+            "S2S_AUTH: https://auth.example/cb?db_token=fake-tk\n",
+            "S2S_AUTH: https://auth.example/cb?db_token=[masked]\n",
             "key-name",
         ),
         # Dotted, but not a Terraform reference.
@@ -913,6 +911,59 @@ class EscapedSasSignatures(SettingsIsolated):
 
     def test_a_word_ending_in_sig_is_not_a_signature(self):
         unchanged_and_uncounted(self, "the layout&amp;design=round\n")
+
+
+class UrlQuerySecrets(SettingsIsolated):
+    """A query or fragment parameter named for a secret loses its value, wherever
+    the URL sits.
+
+    Break: `CALLBACK: https://.../cb?token=...` reaching the worker because the
+    key-name rule read the whole line as one assignment under a key naming no
+    secret, and never reached the parameter inside it.
+    """
+
+    TOKEN = "abcDEF" + "0123456789"
+
+    def test_a_secret_parameter_is_masked_and_the_rest_of_the_url_kept(self):
+        for text, want in (
+            (
+                f"CALLBACK: https://x.example/cb?token={self.TOKEN}&next=1\n",
+                "CALLBACK: https://x.example/cb?token=[masked]&next=1\n",
+            ),
+            (
+                f"see https://x.example/app#access_token={self.TOKEN}&token_type=bearer\n",
+                "see https://x.example/app#access_token=[masked]&token_type=bearer\n",
+            ),
+            (
+                f'<a href="https://x.example/r?page=2&amp;api_key={self.TOKEN}&amp;n=1">\n',
+                '<a href="https://x.example/r?page=2&amp;api_key=[masked]&amp;n=1">\n',
+            ),
+            ("/login?Token=fake-tk&page=2", "/login?Token=[masked]&page=2"),
+            (f"/x?CLIENT_SECRET={self.TOKEN}\r\n", "/x?CLIENT_SECRET=[masked]\r\n"),
+            (f"go(https://x.example/?code={self.TOKEN})", "go(https://x.example/?code=[masked])"),
+            (f"https://x.example/?key={self.TOKEN}'", "https://x.example/?key=[masked]'"),
+        ):
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"url-query-secret": 1}))
+
+    def test_an_ordinary_parameter_or_a_name_like_a_secret_is_unchanged(self):
+        for text in (
+            "https://x.example/cb?token_type=bearer\n",
+            "https://x.example/list?page=2&sort=asc\n",
+            "https://x.example/nlp?tokenizer=wordpiece\n",
+            "https://x.example/status?code=200\n",
+            "https://x.example/lookup?key=name\n",
+            "https://x.example/cb?token=${CALLBACK_TOKEN}\n",
+        ):
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+    def test_a_signature_is_counted_once_by_its_own_rule(self):
+        got, counts = masked("https://a.example/c?sv=2022&sig=fakeSig%3D&token=fake-tk\n")
+        self.assertEqual(got, "https://a.example/c?sv=2022&sig=[masked]&token=[masked]\n")
+        self.assertEqual(counts, Counter({"sas-signature": 1, "url-query-secret": 1}))
 
 
 class PemBlocksKeepTheirLines(SettingsIsolated):
