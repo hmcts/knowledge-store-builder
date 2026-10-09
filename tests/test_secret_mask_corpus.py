@@ -36,6 +36,8 @@ SURVIVES = {
         "webhook_url: https://ci.example/hooks/build",
         "jdbc_connection_string: jdbc:postgresql://db.example:5432/reporting",
         "key: password",
+        ";IngestionEndpoint=https://region.in.applicationinsights.azure.com/",
+        "AccountKey=__STORAGE_KEY__;",
     ),
     "client.py": (
         "self.password = password",
@@ -47,6 +49,12 @@ SURVIVES = {
     "deploy.sh": ('--account-key "$STORAGE_KEY"', "--set database.host=db.example \\"),
     "deployment.yaml": ("value: prod", "secretKeyRef:", "value: ${CACHE_AUTH}"),
     "docker-compose.yml": ("API_TOKEN=${API_TOKEN}", "POSTGRES_USER: orders"),
+    "jenkins-values.yaml": (
+        "                      id: sonar-token\n                      description: Sonar token",
+        '                      password: "${REGISTRY_PASSWORD}"',
+        '                - "GROUP:Overall/Administer:platform-admins"',
+        "                    value: https://sonar.example",
+    ),
     "main.tf": ('default = "uksouth"', "value = var.api_token", 'value = "2"'),
     "secret.yaml": ("name: orders-db", "type: Opaque"),
     "seed_users.py": ('password="[masked]")', 'password=os.environ["VIEWER_PASSWORD"]'),

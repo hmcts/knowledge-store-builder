@@ -1,0 +1,38 @@
+# Helm values for the Jenkins controller, with its configuration as code.
+controller:
+  adminUser: admin
+  adminPassword: @@S:jenkins_admin_password@@
+  JCasC:
+    configScripts:
+      credentials: |
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - string:
+                      id: sonar-token
+                      description: Sonar token
+                      scope: GLOBAL
+                      secret: @@S:jenkins_sonar_secret@@
+                  - usernamePassword:
+                      id: registry-login
+                      description: Registry login
+                      scope: GLOBAL
+                      username: ci-bot
+                      password: "${REGISTRY_PASSWORD}"
+      auth: |
+        jenkins:
+          authorizationStrategy:
+            globalMatrix:
+              permissions:
+                - "GROUP:Overall/Administer:platform-admins"
+                - "GROUP:Overall/Read:authenticated"
+      env: |
+        jenkins:
+          globalNodeProperties:
+            - envVars:
+                env:
+                  - key: SONAR_URL
+                    value: https://sonar.example
+                  - key: GITHUB_TOKEN
+                    value: @@S:jenkins_github_env@@

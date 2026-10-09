@@ -4066,6 +4066,70 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an instrumentation key is not masked",
+        "config.py",
+        '        r"|InstrumentationKey=(?P<guarded>[^;\\s\\"\']+))"\n',
+        '        r")"\n',
+        "an Application Insights connection string under `APPINSIGHTS_CONNECTION_STRING` "
+        "reached the worker with its key: the key names no secret word any more, and no "
+        "connection-string shape knew the `InstrumentationKey=` field",
+        (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_secret_mask.InstrumentationKeys.test_the_instrumentation_key_is_masked_and_the_endpoint_kept",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a guarded shape group is masked whatever its value",
+        "secret_mask.py",
+        "        if group == guarded and not _looks_like_credential(whole[start:end]):",
+        "        if False:",
+        "`InstrumentationKey=your-instrumentation-key` in a template is a word, not a key; "
+        "masking every value of the field withholds the template's shape and inflates the "
+        "masked count",
+        (
+            "test_secret_mask.InstrumentationKeys.test_a_placeholder_or_a_word_in_the_key_field_is_unchanged",
+        ),
+    ),
+    Mutation(
+        "a template placeholder is masked as a secret",
+        "secret_mask.py",
+        "    if any(placeholder.fullmatch(value) for placeholder in _PLACEHOLDERS):",
+        "    if False:",
+        "`AccountKey=<storage-account-key>` and `__STORAGE_KEY__` stand for a value a "
+        "pipeline substitutes; masking them protects nothing and hides which field the "
+        "template fills",
+        (
+            "test_secret_mask.InstrumentationKeys.test_an_account_key_placeholder_is_unchanged",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a structured block scalar is masked wholesale",
+        "secret_mask.py",
+        "    if kind != _MANIFEST and _is_structured(content):",
+        "    if False:",
+        "Jenkins configuration-as-code embedded under `credentials: |` or `auth: |` became "
+        "a column of `[masked]`: credential ids, scopes and role-matrix entries withheld "
+        "when only the secrets inside the block are secret",
+        (
+            "test_secret_mask.DocumentedLimits.test_each_documented_limit_still_reaches_the_worker",
+            "test_secret_mask.StructuredBlockScalars.test_embedded_configuration_holding_no_secret_is_unchanged",
+            "test_secret_mask.StructuredBlockScalars.test_the_body_is_read_as_a_file_of_its_own",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a base64 blob is read as an assignment",
+        "secret_mask.py",
+        '    re.compile(r"[A-Za-z_][\\w.-]*[ \\t]*=(?!=)[ \\t]*\\S"),',
+        '    re.compile(r"[A-Za-z_][\\w.-]*[ \\t]*=[ \\t]*\\S"),',
+        "a base64 secret ending in `==` reads as `name=value` to a loose assignment test, "
+        "so the block holding it would be treated as configuration, masked by rules that "
+        "find nothing in it, and reach the worker whole",
+        ("test_secret_mask.StructuredBlockScalars.test_an_opaque_body_is_still_masked_whole",),
+    ),
+    Mutation(
         "a Kubernetes env item's value is not masked",
         "secret_mask.py",
         "        if _VALUE_KEY in fields and kind:",
