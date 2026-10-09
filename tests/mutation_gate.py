@@ -1261,6 +1261,7 @@ MUTATIONS = (
             "test_chunk_status.ChunkStatusTest.test_a_well_formed_file_with_no_nodes_key_is_not_done",
             "test_chunk_status.ChunkStatusTest.test_an_unusable_chunk_file_is_not_counted_as_done",
             "test_chunk_status.ChunkStatusTest.test_the_plan_is_not_mistaken_for_an_extraction",
+            "test_headless_workers.ExtractTests.test_a_missing_output_is_not_done_and_a_written_one_lands_where_chunk_status_counts_it",
         ),
     ),
     Mutation(
@@ -3755,6 +3756,79 @@ MUTATIONS = (
         "is exactly what the check is for",
         (
             "test_summaries_verify.IdentifierExtractionTest.test_codes_carrying_a_digit_are_still_identifiers",
+        ),
+    ),
+    Mutation(
+        "a clean exit with no output reads as done",
+        "headless_workers.py",
+        "if not _output_parses(job.out):",
+        "if False:",
+        "a worker denied a read exits 0 having written nothing, which is the failure "
+        "recorded on #396; treating the exit as success would report an unextracted "
+        "chunk as finished and let the merge proceed without it",
+        (
+            "test_headless_workers.ExtractTests.test_a_missing_output_is_not_done_and_a_written_one_lands_where_chunk_status_counts_it",
+            "test_headless_workers.OutcomeTests.test_clean_exit_without_output_is_no_output",
+            "test_headless_workers.OutcomeTests.test_unparseable_output_is_no_output",
+        ),
+    ),
+    Mutation(
+        "the wave keeps launching after an API error",
+        "headless_workers.py",
+        "stopped = True",
+        "stopped = False",
+        "an API error (a rate limit, an expired login) fails every worker that follows "
+        "it; without the stop a wave spends a run per remaining chunk learning that "
+        "and bills for every one of them",
+        ("test_headless_workers.WaveTests.test_api_error_stops_the_wave",),
+    ),
+    Mutation(
+        "repair rounds are not resumed",
+        "headless_workers.py",
+        'argv += ["--resume", resume]',
+        "pass",
+        "a repair round that starts a fresh session sends the gate's findings to a "
+        "worker that has not read the chunk, so it cannot fix them and the round costs "
+        "a full extraction again",
+        (
+            "test_headless_workers.OutcomeTests.test_gate_fail_then_pass_resumes_the_session",
+            "test_headless_workers.PermissionTests.test_command_argv_is_exact",
+        ),
+    ),
+    Mutation(
+        "a worker may run commands",
+        "headless_workers.py",
+        '"Read,Write",',
+        '"Read,Write,Bash",',
+        "the permission rules name only Read and Edit, so a Bash tool is denied "
+        "anyway, but the narrow tool list is what keeps the per-turn context small and "
+        "is the second layer behind the rules; widening it is invisible in a run",
+        ("test_headless_workers.PermissionTests.test_command_argv_is_exact",),
+    ),
+    Mutation(
+        "complete chunks are re-run",
+        "headless_workers.py",
+        "if job.complete():",
+        "if False:",
+        "re-running the stage after a partial wave spawns a worker for every chunk "
+        "again, paying for work already on disk and overwriting extractions the "
+        "gate had passed",
+        (
+            "test_headless_workers.ExtractTests.test_a_rerun_skips_the_complete_chunk_without_spawning",
+            "test_headless_workers.OutcomeTests.test_complete_job_is_skipped_without_spawning",
+        ),
+    ),
+    Mutation(
+        "an unsafe path runs under a widened rule",
+        "headless_workers.py",
+        'if any(RULE_UNSAFE.search(p) or not p.startswith("/") for p in paths):',
+        'if any(not p.startswith("/") for p in paths):',
+        "a path holding a glob character is a pattern, not a file, so the rule built "
+        "from it grants every file it matches; the chunk must be refused rather than "
+        "run under permission wider than the one the worker was meant to have",
+        (
+            "test_headless_workers.OutcomeTests.test_unsafe_path_is_refused_not_run",
+            "test_headless_workers.PermissionTests.test_unsafe_characters_and_relative_paths_are_refused",
         ),
     ),
 )

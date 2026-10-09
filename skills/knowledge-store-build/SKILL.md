@@ -419,6 +419,70 @@ tool, because it is trusted.
 read, but it cannot report a chunk that produced no file at all - it never sees
 one. Run `chunk-status` until `NEVER SENT` is none and `done` equals the plan.
 
+### The headless route: `workers extract`
+
+```bash
+knowledgestore chunk-plan
+knowledgestore workers extract --parallel 3     # one headless worker per chunk
+knowledgestore chunk-status                     # done = extractions on disk
+knowledgestore merge-chunks
+```
+
+`workers extract` runs one `claude -p` process per chunk of the plan, writes each
+chunk to `graphify-out/.graphify_chunk_<id>.json`, and applies the shipped gate
+itself. It needs the `[ast]` extra, because it compares every id with graphify's
+own `normalize_id`; without graphify it exits 1 and says so. `--chunks 3,7`
+runs only those chunks.
+
+**Why.** A worker's cost is the context it re-reads on every turn. An agent started
+with the Agent tool carries the full system prompt and tool definitions each turn;
+a headless worker with only `Read` and `Write` carries a fraction of it. On one
+large estate this measured 21.5K input tokens per file against 74K for extraction,
+and 4.1K per summary against 11.7K (the figures are on issue #396).
+
+**What a worker may do.** Read the files of its chunk and write its one output
+file. Every other call is denied without prompting and counted as `denials` in the
+report. A denial means the prompt asked for something the worker was not granted,
+so read it. Workers load no user or project
+settings and no MCP servers, so nothing in a store or an estate document can reach
+a tool the worker was not given. The worker prompt carries the data-not-instruction
+rule above; the permissions are what enforce it.
+
+**The gate.** After a worker exits, `workers extract` runs the shipped chunk gate
+on its output and, on violations, resumes the same session with the findings, up to
+`--repair-rounds` times (default 2).
+
+Cross-chunk hyperedge ids are not checked per worker: run `check-chunk --batch`
+over the wave before merging.
+
+| Outcome | Meaning | Exit |
+| --- | --- | --- |
+| `done` | The gate passed. | 0 |
+| `skipped` | The output was already complete; `claude` was not run. | 0 |
+| `gate-failed` | The output exists and violations remain after the last round. | 3 |
+| `no-output` | A clean exit with no readable output. | 3 |
+| `timed-out` | A run exceeded `--timeout` (minutes, default 30). | 3 |
+| `unsafe-path` | A path holds a character that cannot be written as an exact permission rule, so the chunk was not run. | 3 |
+| `api-error` | A non-zero exit, an unreadable result or `is_error`. No new workers start; those running finish. | 2 |
+
+Exit 1 is a usage error: no chunk plan, an unknown `--chunks` id, or graphify
+missing. The run prints the outcomes sorted by chunk id, a usage line, and the
+directory of result files. `--runs` sets where the work and results go (default
+`graphify-out/.workers`).
+
+To total the wave's cost, run `knowledgestore cost graphify-out/.workers/results`.
+
+**`no-output` is not an empty chunk.** A worker denied something, or one that gave
+up, exits cleanly having written nothing. Read the denials, then re-run the same
+command: complete chunks are skipped, so only the unfinished ones run again.
+
+`--parallel` (default 3) is the only concurrency cap. A policy scoped to your
+session cannot see a headless spawn, so nothing else limits it.
+
+**When to keep the Agent route.** Chunks that report `unsafe-path`, and estates whose
+extraction needs a tool other than `Read` and `Write`, such as a script that
+enumerates a table. A headless worker cannot run one by design.
+
 ### Merging the chunk extractions
 
 Replace the skill's concatenation of `.graphify_chunk_*.json` with:
@@ -853,6 +917,17 @@ and a term missing from the first as informational. Then:
    > prose is true of the digest is still your job.
 
    `check-batch` exits 1 on any violation, or when it checked nothing.
+
+   **The headless alternative.** `knowledgestore workers summaries --batches
+   <batch directory>` runs one headless `claude -p` worker per batch instead,
+   with `Read` on its batch file and `Write` on its `out` file only, and runs
+   `check-batch` itself after each one, resuming the session with the findings up
+   to `--repair-rounds` times (default 2). It reports one outcome per batch, as
+   `workers extract` does and with the same exit codes, and writes its results to
+   `<batch directory>/runs/results` unless `--runs` says otherwise. Re-running
+   skips batches whose `out` already passes the gate. The wait-for-every-worker
+   rule below holds either way: the command returns only when all workers have
+   finished.
 
    **Wait for every agent to report before merging — not for its output file to
    exist.** An agent writes its JSON, then validates it, and may rewrite it. A

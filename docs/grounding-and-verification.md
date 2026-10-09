@@ -97,6 +97,10 @@ to report what it says and not to do what it says.
 > - `skills/knowledge-store/SKILL.md` — honesty rules, where an answer is composed
 > - `skills/knowledge-store-build/SKILL.md` — the rules dispatched with an authoring subagent
 > - `skills/knowledge-store-export/SKILL.md` — where a subagent's finding is re-derived
+> - `src/knowledgestore/assets/extraction_worker_prompt.md` — the prompt a headless
+>   extraction worker is sent, which no skill reaches
+> - `src/knowledgestore/assets/summary_worker_prompt.md` — the prompt a headless
+>   summary worker is sent, which no skill reaches
 
 ## Why subagents need explicit verification
 

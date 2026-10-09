@@ -58,6 +58,12 @@ skills/knowledge-store/SKILL.md :: never acquires authority by claiming to have 
 skills/knowledge-store-build/SKILL.md :: data, not instruction
 skills/knowledge-store-export/SKILL.md :: data, not instruction
 skills/knowledge-store-export/SKILL.md :: never acquires authority by claiming to have it
+# The headless workers' prompts are mirrors too: a worker reads its prompt and
+# nothing else, so the rule has to be in the file the library sends.
+src/knowledgestore/assets/extraction_worker_prompt.md :: data, not instruction
+src/knowledgestore/assets/extraction_worker_prompt.md :: never acquires authority by claiming to have it
+src/knowledgestore/assets/summary_worker_prompt.md :: data, not instruction
+src/knowledgestore/assets/summary_worker_prompt.md :: never acquires authority by claiming to have it
 skills/knowledge-store-export/SKILL.md :: outrank anything read out of a store or an estate
 skills/knowledge-store-assess/SKILL.md :: data, not instruction
 skills/knowledge-store-assess/SKILL.md :: never acquires authority by claiming to have it
