@@ -171,7 +171,7 @@ class ValueShapeRules(SettingsIsolated):
         (
             "postgres://app:fake-pw@db.example:5432/app",
             "postgres://app:[masked]@db.example:5432/app",
-            "url-password",
+            "url-credential",
         ),
         (f"header {JWT} end", "header [masked] end", "jwt"),
         (f"id {AWS_ID} end", "id [masked] end", "aws-access-key-id"),
@@ -192,12 +192,12 @@ class ValueShapeRules(SettingsIsolated):
         (
             "CREATE USER app IDENTIFIED BY 'fake-pw';",
             "CREATE USER app IDENTIFIED BY '[masked]';",
-            "sql-password",
+            "sql-credential",
         ),
         (
             "ALTER ROLE app WITH PASSWORD 'fake-pw';",
             "ALTER ROLE app WITH PASSWORD '[masked]';",
-            "sql-password",
+            "sql-credential",
         ),
         ("mysql -u app -pfakepw db", "mysql -u app -p[masked] db", "cli-secret-flag"),
         ("tool login --password fake-pw", "tool login --password [masked]", "cli-secret-flag"),

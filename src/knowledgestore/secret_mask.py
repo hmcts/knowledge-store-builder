@@ -121,7 +121,8 @@ _ALNUM = re.compile(r"[A-Za-z0-9]")
 
 # Values that are not secrets whatever key they sit under. `|` and `>` open a
 # YAML block scalar, whose lines this rule cannot see.
-_LITERAL = re.compile(r"(?i)true|false|null|none|nil|yes|no|~|-?\d+(?:\.\d+)?|[|>][-+0-9]*")
+_LITERAL_WORDS = frozenset({"true", "false", "null", "none", "nil", "yes", "no", "~"})
+_NUMBER_OR_BLOCK = re.compile(r"-?\d+(?:\.\d+)?|[|>][-+0-9]*")
 # Interpolation `deploy_values.strip_template` does not cover: bare `$VAR`,
 # `$(command)`, and `%VAR%`.
 _BARE_VARIABLE = re.compile(r"\$[A-Za-z_]\w*|\$\([^)\n]*\)|%[A-Za-z_]\w*%")
@@ -162,7 +163,7 @@ def _not_a_secret(value: str, literals: bool) -> bool:
     # A secret has letters or digits in it; `(` opening a multi-line value does not.
     if not _ALNUM.search(value):
         return True
-    return literals and bool(_LITERAL.fullmatch(value))
+    return literals and (value.lower() in _LITERAL_WORDS or bool(_NUMBER_OR_BLOCK.fullmatch(value)))
 
 
 def _masked_value(value: str, literals: bool = False) -> str | None:

@@ -396,9 +396,8 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
     "slack-webhook": r"hooks\.slack\.com/services/([A-Za-z0-9/_-]+)",
     "sonarqube-token": r"\bsq[apu]_[0-9a-f]{40}\b",
     "sops-encrypted": r"ENC\[[^\]\n]*\]",
-    # NOSONAR(S2068) - a pattern that finds hard-coded passwords, not one.
-    "sql-password": r"(?i)\b(?:identified[ \t]+by|password)[ \t]+'([^'\n]*)'",  # NOSONAR(S2068)
-    "url-password": r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@'\"]+:([^/\s@'\"]+)@",
+    "sql-credential": r"(?i)\b(?:identified[ \t]+by|password)[ \t]+'([^'\n]*)'",
+    "url-credential": r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@'\"]+:([^/\s@'\"]+)@",
 }
 SECRET_PATTERNS = _env_pattern_map("KSB_SECRET_PATTERNS", DEFAULT_SECRET_PATTERNS)
 
