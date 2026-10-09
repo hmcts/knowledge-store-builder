@@ -362,15 +362,18 @@ def _xml_element(match: re.Match[str], counts: Counter[str]) -> str:
 # JSON object, an HCL block. Its fields are a key and a separator, then a quoted
 # value or one that ends at a `,`, `;`, `}`, a comment or the end of its line.
 _BRACE_GROUP = re.compile(r"\{(?:\$\{[^{}\r\n]*\}|[^{}])*\}")
-_GROUP_KEY = re.compile(
-    r"(?<![\w.$-])(?P<quote>[\"']?)(?P<key>[\w.-]+)(?P=quote)[ \t]*(?P<separator>[:=])(?!=)[ \t]*"
-)
+# A key is found in two steps, each linear: the name, then what must follow it.
+# One pattern holding both backtracked through every shorter name on a miss.
+_GROUP_KEY_NAME = re.compile(r"(?<![\w.$-])(?P<quote>[\"']?)(?P<key>[\w.-]+)")
+_GROUP_KEY_TAIL = re.compile(r"[ \t]*(?P<separator>[:=])(?!=)[ \t]*")
 _QUOTED_VALUE = re.compile(_QUOTED)
 _GROUP_VALUE_END = re.compile(r"[ \t\r]*(?:[,;}#]|$)", re.MULTILINE)
-_GROUP_PLAIN_VALUE = re.compile(r"[^\s,;{}\"'][^\r\n,;{}]*?(?=[ \t\r]*(?:[,;}#]|$))", re.MULTILINE)
+# Runs to the first `,` `;` `}` `#` or line end, and ends on a non-space.
+_GROUP_PLAIN_VALUE = re.compile(r"[^\s,;{}\"'](?:[^\r\n,;{}#]*[^\s,;{}#])?")
 # The rest of a line holding a YAML flow mapping as its whole value. Anything else
 # around the braces - `=`, a call, a `;` - is code, whose unquoted values are names.
-_FLOW_PREFIX = re.compile(r"[ \t]*(?:-[ \t]+|[\"']?[\w.-]+[\"']?:[ \t]+)?")
+_FLOW_LIST_PREFIX = re.compile(r"[ \t]*(?:-[ \t]+)?")
+_FLOW_KEY_PREFIX = re.compile(r"[ \t]*[\"']?[\w.-]+[\"']?:[ \t]+")
 _FLOW_SUFFIX = re.compile(r"[ \t]*(?:#[^\r\n]*)?\r?(?=\n|\Z)")
 # A Terraform variable block, whose name is a label in front of its braces.
 _HCL_VARIABLE = re.compile(r"[ \t]*variable[ \t]+\"(?P<label>[^\"\r\n]+)\"[ \t]*")
@@ -387,29 +390,49 @@ def _group_value(group: str, position: int) -> re.Match[str] | None:
 def _group_fields(group: str) -> list[_Field]:
     """Each field of a brace group, read left to right so a value is never a key."""
     fields: list[_Field] = []
-    key = _GROUP_KEY.search(group)
-    while key:
-        value = _group_value(group, key.end())
-        position = value.end() if value else key.end()
+    position = 0
+    while (key := _next_group_key(group, position)) is not None:
+        name, quoted, tail = key
+        value = _group_value(group, tail.end())
+        position = value.end() if value else tail.end()
         if value:
             fields.append(
                 _Field(
-                    key.group("key"),
-                    bool(key.group("quote")),
-                    key.group("separator"),
+                    name,
+                    quoted,
+                    tail.group("separator"),
                     value.group(0),
                     value.start(),
                     value.end(),
                 )
             )
-        key = _GROUP_KEY.search(group, position)
     return fields
+
+
+def _next_group_key(group: str, position: int) -> tuple[str, bool, re.Match[str]] | None:
+    """The next key at or after `position`: its name, whether it was quoted, and
+    the separator after it.
+
+    An opening quote with no closing one is not part of the key: the name after
+    it is read as an unquoted key, as a single pattern would have read it.
+    """
+    for name in _GROUP_KEY_NAME.finditer(group, position):
+        after = name.end()
+        quote = name.group("quote")
+        closed = bool(quote) and group.startswith(quote, after)
+        tail = _GROUP_KEY_TAIL.match(group, after + len(quote) if closed else after)
+        if tail:
+            return name.group("key"), closed, tail
+    return None
 
 
 def _is_flow_line(text: str, line_start: int, start: int, end: int) -> bool:
     return (
         "\n" not in text[start:end]
-        and _FLOW_PREFIX.fullmatch(text, line_start, start) is not None
+        and (
+            _FLOW_LIST_PREFIX.fullmatch(text, line_start, start) is not None
+            or _FLOW_KEY_PREFIX.fullmatch(text, line_start, start) is not None
+        )
         and _FLOW_SUFFIX.match(text, end) is not None
     )
 
