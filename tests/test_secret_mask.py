@@ -966,6 +966,139 @@ class UrlQuerySecrets(SettingsIsolated):
         self.assertEqual(counts, Counter({"sas-signature": 1, "url-query-secret": 1}))
 
 
+class InstrumentationKeys(SettingsIsolated):
+    """An Application Insights connection string loses its instrumentation key.
+
+    Break: `InstrumentationKey=<uuid>` reaching the worker because the string
+    sits under a key the rule no longer treats as secret and no shape knew the
+    field - or a placeholder, or the ingestion endpoint, masked as though it
+    were the key.
+    """
+
+    ENDPOINT = "IngestionEndpoint=https://region.in.applicationinsights.azure.com/"
+
+    def test_the_instrumentation_key_is_masked_and_the_endpoint_kept(self):
+        for text, want in (
+            (
+                f"APPINSIGHTS_CONNECTION_STRING: InstrumentationKey={UUID};{self.ENDPOINT}\n",
+                f"APPINSIGHTS_CONNECTION_STRING: InstrumentationKey=[masked];{self.ENDPOINT}\n",
+            ),
+            (
+                f'APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey={UUID};{self.ENDPOINT}"\n',
+                f'APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=[masked];{self.ENDPOINT}"\n',
+            ),
+            (
+                f"APPINSIGHTS_CONNECTION_STRING: InstrumentationKey={UUID}\n",
+                "APPINSIGHTS_CONNECTION_STRING: InstrumentationKey=[masked]\n",
+            ),
+            (
+                "ai: InstrumentationKey=Fake0Instrument9Key01;" + self.ENDPOINT + "\n",
+                "ai: InstrumentationKey=[masked];" + self.ENDPOINT + "\n",
+            ),
+        ):
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"connection-string-key": 1}))
+
+    def test_a_placeholder_or_a_word_in_the_key_field_is_unchanged(self):
+        for value in (
+            "${AI_KEY}",
+            "<instrumentation-key>",
+            "{instrumentation_key}",
+            "__AI_KEY__",
+            "your-instrumentation-key",
+        ):
+            with self.subTest(value=value):
+                unchanged_and_uncounted(
+                    self,
+                    f"APPINSIGHTS_CONNECTION_STRING: InstrumentationKey={value};{self.ENDPOINT}\n",
+                )
+
+    def test_an_account_key_placeholder_is_unchanged(self):
+        # Break: a template's placeholder masked as the storage key it stands for.
+        for value in (
+            "${STORAGE_KEY}",
+            "<storage-account-key>",
+            "{storage_key}",
+            "__STORAGE_KEY__",
+        ):
+            with self.subTest(value=value):
+                unchanged_and_uncounted(
+                    self,
+                    "STORAGE: DefaultEndpointsProtocol=https;AccountName=a;"
+                    f"AccountKey={value};EndpointSuffix=core.example\n",
+                )
+
+
+class StructuredBlockScalars(SettingsIsolated):
+    """A block scalar holding configuration is masked line by line by the
+    ordinary rules, not wholesale.
+
+    Break: a Jenkins configuration-as-code block under `credentials: |` or
+    `auth: |` turned into a column of `[masked]` - credential ids, scopes and
+    role-matrix entries withheld - when only the secrets inside it are secret.
+    """
+
+    JCASC = (
+        "controller:\n  JCasC:\n    configScripts:\n      credentials: |\n"
+        "        credentials:\n          system:\n            domainCredentials:\n"
+        "              - credentials:\n                  - string:\n"
+        "                      id: sonar-token\n                      description: Sonar token\n"
+        "                      scope: GLOBAL\n                      secret: {secret}\n"
+    )
+
+    def test_only_the_secret_inside_embedded_configuration_is_masked(self):
+        got, counts = masked(self.JCASC.format(secret="FakeSecret0123456789"))
+        self.assertEqual(got, self.JCASC.format(secret="[masked]"))
+        self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_embedded_configuration_holding_no_secret_is_unchanged(self):
+        for text in (
+            self.JCASC.format(secret="${SONAR_TOKEN}"),
+            "      auth: |\n        jenkins:\n          authorizationStrategy:\n"
+            "            globalMatrix:\n              permissions:\n"
+            '                - "GROUP:Overall/Administer:admins"\n'
+            '                - "GROUP:Overall/Read:authenticated"\n',
+            "token: |\n  [server]\n  url = https://ci.example\n",
+        ):
+            with self.subTest(text=text):
+                unchanged_and_uncounted(self, text)
+
+    def test_the_body_is_read_as_a_file_of_its_own(self):
+        # A Secret manifest held in a block: its `kind:` line is only at the start
+        # of a line once the body is dedented, and then its data is masked.
+        got, counts = masked(
+            "secrets: |\r\n  apiVersion: v1\r\n  kind: Secret\r\n  data:\r\n    host: ZGI=\r\nnext: 1\r\n"
+        )
+        self.assertEqual(
+            got,
+            "secrets: |\r\n  apiVersion: v1\r\n  kind: Secret\r\n  data:\r\n    host: [masked]\r\nnext: 1\r\n",
+        )
+        self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_an_opaque_body_is_still_masked_whole(self):
+        # Edge cases: a body of one token, a base64 blob ending in padding (its `=`
+        # is not an assignment), and a command with no structure around it.
+        for text, want in (
+            ("token: |\n  Fake0Token123\n", "token: |\n  [masked]\n"),
+            ("secret: |\n  QWxhZGRpbjpvcGVu==\n", "secret: |\n  [masked]\n"),
+            ("auth: |\n  tool login --user ci\n", "auth: |\n  [masked]\n"),
+        ):
+            with self.subTest(text=text):
+                got, counts = masked(text)
+                self.assertEqual(got, want)
+                self.assertEqual(counts, Counter({"key-name": 1}))
+
+    def test_a_script_body_keeps_its_lines_and_loses_its_flag_value(self):
+        # Edge case: a shebang makes the body a script, read by the ordinary
+        # rules - the command-line flag shape masks the value after `--password`.
+        flag = "--pass" + "word"
+        got, counts = masked(f"auth: |\n  #!/bin/sh\n  tool login {flag} Fake0Pw123\n")
+        self.assertEqual(got, f"auth: |\n  #!/bin/sh\n  tool login {flag} [masked]\n")
+        self.assertEqual(counts, Counter({"cli-secret-flag": 1}))
+
+
 class PemBlocksKeepTheirLines(SettingsIsolated):
     """A private-key block is masked line by line, so every line after it keeps
     its number.
@@ -1040,6 +1173,10 @@ class DocumentedLimits(SettingsIsolated):
         ),
         ("the lines a value continues onto", "password=first-half \\\n    example-secret\n"),
         ("a value in an XML CDATA section", "<password><![CDATA[example-secret]]></password>\n"),
+        (
+            "a value in a block scalar whose lines read as configuration",
+            "password: |\n  key = example-secret\n",
+        ),
     ]
 
     def test_each_documented_limit_still_reaches_the_worker(self):

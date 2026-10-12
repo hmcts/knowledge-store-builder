@@ -478,12 +478,16 @@ What is masked:
   the `value` beside a `name` or `key` naming one, as in a Kubernetes `env:`
   item, a .NET `<add key=... value=...>` or a Helm `set` block; a Terraform
   variable's `default` when the variable is named for one; the lines of a YAML
-  block scalar (`password: |`); an unquoted value in a one-line YAML flow
+  block scalar holding one value (`password: |`), while a block holding
+  configuration or a script - a Jenkins configuration-as-code block under
+  `credentials: |` - is masked as a file of its own, so only its secrets go; an
+  unquoted value in a one-line YAML flow
   mapping; and every value under a Kubernetes Secret's `data:` or `stringData:`,
   whatever its key.
 - Values with a secret's own shape wherever they appear: private-key blocks
   (line by line, so line numbers below them hold), SAS `sig=` (also after an
-  escaped `&amp;`), `AccountKey=` and `SharedAccessKey=`, `Password=` inside a connection
+  escaped `&amp;`), `AccountKey=`, `SharedAccessKey=` and a credential-looking
+  `InstrumentationKey=`, `Password=` inside a connection
   string, `Authorization: Bearer|Basic`, a URL's password, JWTs, AWS access key
   ids, GitHub, SonarQube and `sk-` style tokens, Slack webhook paths,
   `sdk-<uuid>` feature-flag keys, SOPS `ENC[...]` values, SQL
@@ -497,7 +501,8 @@ Only the secret changes: line endings, indentation and every other byte of the
 file are kept, so a CRLF file stays CRLF.
 
 Not masked, because each points at a secret rather than holding it: `${VAR}`,
-`$(VAR)`, `$VAR`, `{{ ... }}`, `#{Var}`, Key Vault and secret-store references,
+`$(VAR)`, `$VAR`, `{{ ... }}`, `#{Var}`, template placeholders (`<storage-key>`,
+`{key}`, `__STORAGE_KEY__`), Key Vault and secret-store references,
 and keys such as `secretKeyRef` and a chart's `existingSecret`; nor empty values,
 booleans, `null` or plain numbers under a secret-named key; nor, in code, a type
 annotation, a call, an argument or parameter (`connect(token=token)`), or a name
@@ -527,10 +532,13 @@ test that fails once it is masked:
   in a backslash
 - a value in an XML CDATA section:
   `<password><![CDATA[example-secret]]></password>`
+- a value in a block scalar whose lines read as configuration: `key = example-secret`
+  as the body of a `password` block
 
 Add your estate's shapes with `KSB_SECRET_PATTERNS`, a JSON object of rule name
-to regex merged over the shipped rules - a rule with a capturing group masks that
-group, one without masks its whole match:
+to regex merged over the shipped rules - a rule with capturing groups masks the
+first that matched, one without masks its whole match, and a group named
+`guarded` is masked only when its value looks like a credential:
 
 ```bash
 export KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'

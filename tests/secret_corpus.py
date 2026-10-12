@@ -37,6 +37,7 @@ _SHAPED = {
     "chart_secret_key_base": "0f1e2d3c" + "4b5a6978" * 15,
     "chart_slack_token": "T0FAKE0" + "/B0FAKE0/" + "Fake0Hook9Path0x",
     "props_pin_key": "Rk9vYmFy" + "MTIzNDU2",
+    "chart_ai_instrumentation_key": "7e6d5c4b" + "-3a2f-4e1d-8c0b-9a8f7e6d5c4b",
 }
 KEPT = {
     "pem_head": "-----BEGIN " + "RSA PRIVATE" + " KEY-----",

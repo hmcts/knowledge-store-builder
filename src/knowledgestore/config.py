@@ -361,8 +361,9 @@ SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIV
 # a literal credential committed in source never reaches the model or the session
 # transcript - see `secret_mask.py` for what that achieves and what it does not.
 # These are the value-shape rules; the key-name rule (`password: ...`) is code.
-# A rule with a capturing group masks its first group and keeps the rest of the
-# match as context; one without masks the whole match. Rule names are what the
+# A rule with capturing groups masks the first group that took part in the match
+# and keeps the rest as context; one without masks the whole match. A group named
+# `guarded` is masked only when its value looks like a credential. Rule names are what the
 # run counts under. Add your estate's shapes with KSB_SECRET_PATTERNS, a JSON
 # object merged over these:
 #
@@ -380,7 +381,12 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
         r"(?:=|[ \t]+)|\bmysql(?:dump|admin)?\b[^\n]*?[ \t]-p)"
         r"(\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'-][^\s\"']*)"
     ),
-    "connection-string-key": r"(?i)\b(?:AccountKey|SharedAccessKey)=([^;\s\"']+)",
+    # An instrumentation key's field holds a word as often as a key, so its group is
+    # `guarded`: masked only when the value looks like a credential.
+    "connection-string-key": (
+        r"(?i)\b(?:(?:AccountKey|SharedAccessKey)=([^;\s\"']+)"
+        r"|InstrumentationKey=(?P<guarded>[^;\s\"']+))"
+    ),
     # A `Password=` pair inside an ADO.NET or JDBC-style connection string, which
     # a `;` or the string's opening quote comes before. The key naming the string
     # is often `DefaultConnection`, which names no secret.

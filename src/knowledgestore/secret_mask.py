@@ -16,9 +16,10 @@ the same input give the same bytes:
    `AccountKey=` or a `Password=` in a connection string, an `Authorization`
    header, a URL's password, a JWT, and the token formats of several common
    services. They are settings (`config.SECRET_PATTERNS`), so an estate adds its
-   own shapes with `KSB_SECRET_PATTERNS`. A rule with a capturing group masks
-   its first group and keeps the rest of the match as context; a rule without
-   one masks the whole match. Shapes run first so a count names the most
+   own shapes with `KSB_SECRET_PATTERNS`. A rule with capturing groups masks the
+   first group that took part in the match and keeps the rest as context; a
+   rule without one masks the whole match. A group named `guarded` is masked
+   only when its value looks like a credential, as `InstrumentationKey=` is. Shapes run first so a count names the most
    specific rule, and a value a shape has already masked part of is left as the
    shape left it. A value over several lines - a private-key block - is masked
    line by line, so every line after it keeps its number. One shape is built
@@ -47,15 +48,18 @@ the same input give the same bytes:
    the `value` beside a `name` or `key` naming one - a Kubernetes `env:` item,
    a .NET `<add key=... value=...>`, a Helm `set` block; a Terraform variable's
    `default` when the variable is named for one; the lines of a YAML block
-   scalar (`password: |`); an unquoted value in a one-line YAML flow mapping
+   scalar holding one value (`password: |` over a token, a PEM block or a
+   blob) - a block holding configuration or a script, where a line is a key,
+   an assignment, a list entry, a bracket or a shebang, is instead masked as a
+   file of its own, dedented, so only the secrets in it go; an unquoted value in a one-line YAML flow mapping
    (`{password: x, user: y}`); and every value under a Kubernetes Secret's
    `data:` or `stringData:`, whatever its key, because the manifest's kind says
    all of it is secret.
 
 A value that only *points at* a secret is left alone, because which variable or
 store a service reads is architecture worth extracting: `${VAR}`, `$(VAR)`,
-`$VAR`, `{{ ... }}`, `#{Var}`, Key Vault and secret-store references, and keys
-such as `secretKeyRef` and a chart's `existingSecret`. So are empty values,
+`$VAR`, `{{ ... }}`, `#{Var}`, a template placeholder (`<storage-key>`, `{key}`,
+`__STORAGE_KEY__`), Key Vault and secret-store references, and keys such as `secretKeyRef` and a chart's `existingSecret`. So are empty values,
 booleans, `null` and plain numbers. Code is left readable: a type annotation
 (`password: str`), a call or subscript (`os.environ[...]`), an unquoted value
 that a `,`, `;` or closing bracket ends mid-line - a parameter, an argument, an
@@ -94,6 +98,8 @@ so fixing one means changing this list and its copy in the build skill:
   in a backslash
 - a value in an XML CDATA section:
   `<password><![CDATA[example-secret]]></password>`
+- a value in a block scalar whose lines read as configuration: `key = example-secret`
+  as the body of a `password` block
 """
 
 from __future__ import annotations
@@ -276,8 +282,19 @@ def _secret_kind(key: str) -> str | None:
     return _GUARDED if strong or weak else None
 
 
+# A template's placeholder standing in for a value: `<storage-key>`, `{key}`,
+# `__STORAGE_KEY__`. Each is a whole value; a secret is never written so.
+_PLACEHOLDERS = (
+    re.compile(r"<[^<>\s]+>"),
+    re.compile(r"\{[^{}\s]+\}"),
+    re.compile(r"__[A-Za-z0-9]\w*__"),
+)
+
+
 def _is_reference(value: str) -> bool:
     """A value that says where a secret is held rather than holding it."""
+    if any(placeholder.fullmatch(value) for placeholder in _PLACEHOLDERS):
+        return True
     stripped = deploy_values.strip_template(value).replace(deploy_values.PLACEHOLDER, "")
     # Only punctuation left between the references, as in `${A}-${B}`.
     if not _ALNUM.search(_BARE_VARIABLE.sub("", stripped)):
@@ -427,12 +444,26 @@ def rules() -> tuple[tuple[str, re.Pattern[str]], ...]:
     return _COMPILED[key]
 
 
+# A shape rule's group by this name is masked only when it looks like a credential:
+# the field is right, but the value is as often a word.
+GUARDED_GROUP = "guarded"
+
+
+def _first_group(match: re.Match[str]) -> int:
+    """The first capturing group that took part in the match, or 0 for the whole."""
+    return next((i for i, group in enumerate(match.groups(), 1) if group is not None), 0)
+
+
 def _apply(text: str, rule: str, pattern: re.Pattern[str], counts: Counter[str]) -> str:
+    guarded = pattern.groupindex.get(GUARDED_GROUP)
+
     def replace(match: re.Match[str]) -> str:
         whole = match.group(0)
-        group = 1 if pattern.groups and match.group(1) is not None else 0
+        group = _first_group(match)
         start, end = match.start(group) - match.start(), match.end(group) - match.start()
         masked = _masked_value(whole[start:end])
+        if group == guarded and not _looks_like_credential(whole[start:end]):
+            masked = None
         if masked is None:
             return whole
         counts[rule] += 1
@@ -846,18 +877,58 @@ def _block_end(lines: list[str], start: int, column: int) -> int:
     return end
 
 
-def _mask_block(lines: list[str], start: int, column: int, kind: str) -> int:
-    """Mask each line of the block scalar opening at `start`, keeping its indentation.
+# A body line saying a block holds configuration or code rather than one opaque
+# value: a YAML key or list entry, a `key = value` line, a JSON or INI bracket, or
+# a script's shebang. A base64 blob's padding is not an assignment: `=` must be
+# followed by a value, and `==` is not.
+_STRUCTURED_LINES = (
+    re.compile(r"[\"']?[\w.-]+[\"']?[ \t]*:(?:[ \t]|$)"),
+    re.compile(r"-(?:[ \t]|$)"),
+    re.compile(r"[A-Za-z_][\w.-]*[ \t]*=(?!=)[ \t]*\S"),
+    re.compile(r"[{\[]"),
+    re.compile(r"#!"),
+)
 
-    A line already holding `[masked]` is left alone: a shape rule got there first,
-    and the lines a shape leaves either side of it - a key's armour - are not secret.
-    """
+
+def _is_structured(content: list[str]) -> bool:
+    """At least one line of a block's body is a key, an assignment, a list entry,
+    a bracket or a shebang: the body is a file of its own, not one value."""
+    return any(shape.match(line) for line in content for shape in _STRUCTURED_LINES)
+
+
+def _mask_structured(lines: list[str], start: int, end: int) -> int:
+    """Mask a structured block's body as a file of its own: dedented, masked by every
+    rule, and put back at its indentation, so only the secrets in it go."""
+    body = lines[start:end]
+    depth = min(_indent(line) for line in body if not _is_blank(line))
+    tally: Counter[str] = Counter()
+    masked = mask("\n".join(line[depth:] for line in body), tally).split("\n")
+    for index, line in enumerate(masked, start):
+        if not _is_blank(lines[index]):
+            lines[index] = lines[index][:depth] + line
+    return sum(tally.values())
+
+
+def _mask_block(lines: list[str], start: int, column: int, kind: str) -> int:
+    """Mask the block scalar opening at `start`: as a file of its own when it holds
+    structure, otherwise each of its lines, keeping its indentation."""
     end = _block_end(lines, start, column)
     content = [line.strip(" \t") for line in lines[start:end] if not _is_blank(line)]
+    if kind != _MANIFEST and _is_structured(content):
+        return _mask_structured(lines, start, end)
     # A credential wrapped over lines is one token; anything else reads as text.
     joined = ("" if kind == _GUARDED else " ").join(content)
     if _not_a_secret(joined, literals=True) or not _admits(kind, joined):
         return 0
+    return _mask_lines(lines, start, end)
+
+
+def _mask_lines(lines: list[str], start: int, end: int) -> int:
+    """Each line of an opaque block masked, keeping its indentation.
+
+    A line already holding `[masked]` is left alone: a shape rule got there first,
+    and the lines a shape leaves either side of it - a key's armour - are not secret.
+    """
     masked = 0
     for index in range(start, end):
         line = lines[index]
@@ -1002,4 +1073,4 @@ def mask(text: str, counts: Counter[str] | None = None) -> str:
     return text
 
 
-__all__ = ["KEY_NAME_RULE", "MASK", "URL_QUERY_RULE", "mask", "rules"]
+__all__ = ["GUARDED_GROUP", "KEY_NAME_RULE", "MASK", "URL_QUERY_RULE", "mask", "rules"]

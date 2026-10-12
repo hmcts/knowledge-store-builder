@@ -7,6 +7,8 @@ java:
     NOTIFY_API_KEY_LIVE: @@S:chart_notify_key@@
     JWT_KEY: @@S:chart_jwt_key@@
     PIN_DEFAULTPASSWORD: @@S:chart_default_password@@
+    APPINSIGHTS_CONNECTION_STRING: InstrumentationKey=@@S:chart_ai_instrumentation_key@@;IngestionEndpoint=https://region.in.applicationinsights.azure.com/
+    STORAGE: DefaultEndpointsProtocol=https;AccountName=reports;AccountKey=__STORAGE_KEY__;EndpointSuffix=core.example
 monitoring:
   APPINSIGHTS_KEY: @@S:chart_appinsights_key@@
 web:

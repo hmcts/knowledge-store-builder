@@ -3054,10 +3054,12 @@ MUTATIONS = (
             "test_deploy_values.StripTemplateDollarDialect.test_an_interpolation_spanning_lines_is_stripped_whole",
             "test_deploy_values.StripTemplateDollarDialect.test_both_dialects_withhold_the_same_name_identically",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+            "test_secret_mask.InstrumentationKeys.test_an_account_key_placeholder_is_unchanged",
             "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
             "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
             "test_secret_mask.LiteralsInsideCode.test_a_lookup_name_or_interpolation_in_a_call_is_unchanged",
             "test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",
+            "test_secret_mask.StructuredBlockScalars.test_embedded_configuration_holding_no_secret_is_unchanged",
             "test_secret_mask.UrlQuerySecrets.test_an_ordinary_parameter_or_a_name_like_a_secret_is_unchanged",
             "test_secret_mask.XmlConfig.test_xml_holding_no_secret_is_unchanged",
             "test_secret_mask.YamlBlockScalars.test_a_block_under_a_key_naming_no_secret_or_holding_a_reference_is_unchanged",
@@ -3882,6 +3884,7 @@ MUTATIONS = (
             "test_secret_mask.LiteralsInsideCode.test_a_literal_in_a_call_is_masked_and_the_call_kept",
             "test_secret_mask.OnlyTheValueChanges.test_the_closers_after_a_masked_literal_survive",
             "test_secret_mask.PointersAreNotSecrets.test_what_is_not_a_pointer_is_still_masked",
+            "test_secret_mask.StructuredBlockScalars.test_only_the_secret_inside_embedded_configuration_is_masked",
             "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
         ),
     ),
@@ -3894,11 +3897,13 @@ MUTATIONS = (
         "architecture the extraction should record; masking it removes that fact, "
         "protects nothing, and inflates the masked count the operator reads",
         (
+            "test_secret_mask.InstrumentationKeys.test_an_account_key_placeholder_is_unchanged",
             "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
             "test_secret_mask.KubernetesSecretManifests.test_a_config_map_and_a_templated_secret_are_unchanged",
             "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
             "test_secret_mask.LiteralsInsideCode.test_a_lookup_name_or_interpolation_in_a_call_is_unchanged",
             "test_secret_mask.ReferencesAreNotSecrets.test_references_and_non_secrets_are_unchanged",
+            "test_secret_mask.StructuredBlockScalars.test_embedded_configuration_holding_no_secret_is_unchanged",
             "test_secret_mask.UrlQuerySecrets.test_an_ordinary_parameter_or_a_name_like_a_secret_is_unchanged",
             "test_secret_mask.XmlConfig.test_xml_holding_no_secret_is_unchanged",
             "test_secret_mask.YamlBlockScalars.test_a_block_under_a_key_naming_no_secret_or_holding_a_reference_is_unchanged",
@@ -3915,6 +3920,7 @@ MUTATIONS = (
         "word without asking whether the value looks like a credential masks the names "
         "and paths a worker needs, and inflates the masked count the operator reads",
         (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
             "test_secret_mask.CredentialLookingKeys.test_a_name_path_or_short_value_under_a_key_is_unchanged",
             "test_secret_mask.DocumentedLimits.test_each_documented_limit_still_reaches_the_worker",
             "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
@@ -4065,6 +4071,70 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "an instrumentation key is not masked",
+        "config.py",
+        '        r"|InstrumentationKey=(?P<guarded>[^;\\s\\"\']+))"\n',
+        '        r")"\n',
+        "an Application Insights connection string under `APPINSIGHTS_CONNECTION_STRING` "
+        "reached the worker with its key: the key names no secret word any more, and no "
+        "connection-string shape knew the `InstrumentationKey=` field",
+        (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
+            "test_secret_mask.InstrumentationKeys.test_the_instrumentation_key_is_masked_and_the_endpoint_kept",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a guarded shape group is masked whatever its value",
+        "secret_mask.py",
+        "        if group == guarded and not _looks_like_credential(whole[start:end]):",
+        "        if False:",
+        "`InstrumentationKey=your-instrumentation-key` in a template is a word, not a key; "
+        "masking every value of the field withholds the template's shape and inflates the "
+        "masked count",
+        (
+            "test_secret_mask.InstrumentationKeys.test_a_placeholder_or_a_word_in_the_key_field_is_unchanged",
+        ),
+    ),
+    Mutation(
+        "a template placeholder is masked as a secret",
+        "secret_mask.py",
+        "    if any(placeholder.fullmatch(value) for placeholder in _PLACEHOLDERS):",
+        "    if False:",
+        "`AccountKey=<storage-account-key>` and `__STORAGE_KEY__` stand for a value a "
+        "pipeline substitutes; masking them protects nothing and hides which field the "
+        "template fills",
+        (
+            "test_secret_mask.InstrumentationKeys.test_an_account_key_placeholder_is_unchanged",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a structured block scalar is masked wholesale",
+        "secret_mask.py",
+        "    if kind != _MANIFEST and _is_structured(content):",
+        "    if False:",
+        "Jenkins configuration-as-code embedded under `credentials: |` or `auth: |` became "
+        "a column of `[masked]`: credential ids, scopes and role-matrix entries withheld "
+        "when only the secrets inside the block are secret",
+        (
+            "test_secret_mask.DocumentedLimits.test_each_documented_limit_still_reaches_the_worker",
+            "test_secret_mask.StructuredBlockScalars.test_embedded_configuration_holding_no_secret_is_unchanged",
+            "test_secret_mask.StructuredBlockScalars.test_the_body_is_read_as_a_file_of_its_own",
+            "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
+        ),
+    ),
+    Mutation(
+        "a base64 blob is read as an assignment",
+        "secret_mask.py",
+        '    re.compile(r"[A-Za-z_][\\w.-]*[ \\t]*=(?!=)[ \\t]*\\S"),',
+        '    re.compile(r"[A-Za-z_][\\w.-]*[ \\t]*=[ \\t]*\\S"),',
+        "a base64 secret ending in `==` reads as `name=value` to a loose assignment test, "
+        "so the block holding it would be treated as configuration, masked by rules that "
+        "find nothing in it, and reach the worker whole",
+        ("test_secret_mask.StructuredBlockScalars.test_an_opaque_body_is_still_masked_whole",),
+    ),
+    Mutation(
         "a Kubernetes env item's value is not masked",
         "secret_mask.py",
         "        if _VALUE_KEY in fields and kind:",
@@ -4106,6 +4176,7 @@ MUTATIONS = (
             "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
             "test_secret_mask.LineEndingsPreserved.test_crlf_survives_masking_byte_for_byte",
             "test_secret_mask.PemBlocksKeepTheirLines.test_each_line_of_the_block_is_masked_and_every_line_ending_kept",
+            "test_secret_mask.StructuredBlockScalars.test_the_body_is_read_as_a_file_of_its_own",
             "test_secret_mask.UrlQuerySecrets.test_a_secret_parameter_is_masked_and_the_rest_of_the_url_kept",
             "test_secret_mask_corpus.CorpusProperties.test_masking_keeps_every_line_of_every_file",
             "test_secret_mask_corpus.CorpusProperties.test_no_planted_value_survives_and_nothing_else_changes",
