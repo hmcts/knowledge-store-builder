@@ -2846,6 +2846,18 @@ MUTATIONS = (
     # the whole string back. `test_a_mutation_of_this_gate_cannot_rewrite_its_own_table`
     # fails if either happens.
     Mutation(
+        "a named test that stopped observing reads as caught",
+        "tests/mutation_gate.py",
+        "        elif len(observed) " + "< len(mutation.observers):",
+        "        elif False:",
+        "the sweep already knows which named tests failed; reading any one of them as "
+        "the entry holding let a test #406 stopped failing pass every pull request and "
+        "turn the nightly `--verify-mapping` red for days after the merge",
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_that_stopped_observing_fails_the_sweep_beside_one_that_did",
+        ),
+    ),
+    Mutation(
         "a termination signal stops unwinding the restore",
         "tests/mutation_gate.py",
         "    previous = [(number, signal.signal(number, handle)) "
@@ -4861,16 +4873,35 @@ def sweep(mutations: Sequence[Mutation]) -> int:
     """Apply each entry and check that the tests it names failed. The gate proper."""
     check_mapping(mutations)
     survived: list[Mutation] = []
+    silent: list[str] = []
 
     def observe(mutation: Mutation) -> None:
         observed = run_observers(mutation.observers)
         print(f"  {'caught ' if observed else 'SURVIVED'}  {mutation.name}")
         if not observed:
             survived.append(mutation)
+        elif len(observed) < len(mutation.observers):
+            quiet = sorted(set(mutation.observers) - set(observed))
+            silent.append(f"{mutation.name}: {', '.join(quiet)} is named and did not fail")
 
     interrupted = each_mutation(mutations, observe)
     if interrupted is not None:
         return interrupted
+    return _sweep_verdict(mutations, survived, silent)
+
+
+def _sweep_verdict(
+    mutations: Sequence[Mutation], survived: list[Mutation], silent: list[str]
+) -> int:
+    """Report what `sweep` saw. A named test that did not fail fails the run as well.
+
+    `run_observers` already returns which named tests failed, so this costs nothing:
+    an entry still caught by one name while another has stopped observing it used
+    to print `caught` here and go red only in the nightly `--verify-mapping`, after
+    the merge. That half of the mapping check needs no whole-suite run, so it runs
+    on every pull request. The other half - a test that fails and is not named -
+    does, and stays with `--verify-mapping` and `observer_staleness.py`.
+    """
 
     print(f"\n{len(mutations) - len(survived)} of {len(mutations)} mutations caught.")
     for mutation in survived:
@@ -4890,7 +4921,18 @@ def sweep(mutations: Sequence[Mutation]) -> int:
             "relative PYTHONPATH.",
             file=sys.stderr,
         )
-    return 1 if survived else 0
+    for entry in silent:
+        print(f"  NAMED, DID NOT FAIL: {entry}", file=sys.stderr)
+    if silent:
+        print(
+            "\nThe entry is still caught, but it claims protection from a test that no "
+            "longer gives it, so the mapping overstates what guards that behaviour. If the "
+            "test changed on purpose, take the set from `--derive-mapping --only` on the "
+            "entry rather than editing by hand; if it did not, the test has lost what it "
+            "was checking.",
+            file=sys.stderr,
+        )
+    return 1 if survived or silent else 0
 
 
 def derive_mapping(mutations: Sequence[Mutation]) -> int:

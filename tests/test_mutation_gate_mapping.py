@@ -523,6 +523,30 @@ class MutationGateMappingTest(unittest.TestCase):
         self.assertIn("1 of 1 mutations caught", printed)
         self.assertEqual((root / "source" / "target.py").read_text(encoding="utf-8"), ORIGINAL)
 
+    def test_a_named_test_that_stopped_observing_fails_the_sweep_beside_one_that_did(self):
+        """Catches the sweep reading "any named test failed" as the whole entry holding.
+
+        `test_watcher` observes the mutation and `test_noisy`'s quiet test does not, so
+        the entry is caught and also claims protection one of its names does not give.
+        The ordinary sweep runs both modules and so already knows which named tests
+        failed; before this check it printed `caught` and discarded the rest, and the
+        only run that reads the difference is `--verify-mapping`, nightly, after the
+        merge - which is how a test #406 stopped failing kept the nightly red for days
+        while every pull request passed. Drop the comparison and this returns 0.
+        """
+        self._tree(noisy=True)
+
+        printed, reported = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(reported):
+            code = gate.sweep((self._entry(WATCHES, QUIET_IN_A_NOISY_MODULE),))
+
+        self.assertEqual(
+            code, 1, f"a named test that did not fail was let through: {printed.getvalue()}"
+        )
+        self.assertIn("1 of 1 mutations caught", printed.getvalue())
+        self.assertIn(f"{QUIET_IN_A_NOISY_MODULE} is named and did not fail", reported.getvalue())
+        self.assertIn("--derive-mapping --only", reported.getvalue())
+
     def test_a_module_that_fails_for_a_reason_the_entry_does_not_name_is_not_caught(self):
         """Catches the catch criterion reading the module's verdict rather than the
         tests the entry names - the defect this granularity exists for.
