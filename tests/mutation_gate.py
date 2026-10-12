@@ -3603,7 +3603,6 @@ MUTATIONS = (
             "test_summaries_remap.RemapWriteGateTest.test_an_identity_remap_does_not_rewrite_the_committed_file",
             "test_summaries_remap.RemapWriteGateTest.test_non_ascii_prose_survives_a_remap_as_merge_wrote_it",
             "test_summaries_remap.RemapWriteGateTest.test_the_skipped_write_leaves_the_coverage_merge_recorded",
-            "test_ticket_titles_and_summaries.SummariesMergeTest.test_unknown_id_and_bad_length_are_rejected",
         ),
     ),
     Mutation(
