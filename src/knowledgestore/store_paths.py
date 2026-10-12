@@ -125,7 +125,9 @@ def load_plan(path: str | Path | None = None) -> dict[str, list[str]]:
     Callers get what they always got. The on-disk format is free to be relative.
     """
     p = Path(path) if path else config.CHUNK_PLAN_PATH
-    plan = json.loads(p.read_text(encoding="utf-8"))
+    # Sonar S8707, on the grounds stated in `build_community_summaries.merge`:
+    # `workers extract --plan` names the plan to read, and reading it is the flag's purpose.
+    plan = json.loads(p.read_text(encoding="utf-8"))  # NOSONAR(S8707)
     return {k: [absolute(f) for f in v] for k, v in plan.items()}
 
 
