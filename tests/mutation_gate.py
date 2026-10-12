@@ -3920,6 +3920,7 @@ MUTATIONS = (
         "word without asking whether the value looks like a credential masks the names "
         "and paths a worker needs, and inflates the masked count the operator reads",
         (
+            "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
             "test_secret_mask.CredentialLookingKeys.test_a_name_path_or_short_value_under_a_key_is_unchanged",
             "test_secret_mask.DocumentedLimits.test_each_documented_limit_still_reaches_the_worker",
             "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
