@@ -447,3 +447,40 @@ jobs:
           DECISION: ${{ needs.mapping-decision.outputs.run }}
           RESULT: ${{ needs.mapping.result }}
         run: python3 tests/mapping_summary.py
+
+  # Tells someone. A red scheduled run used to be found by whoever next opened the
+  # Actions tab - four episodes in one month sat red for one to five nights each -
+  # so a red night now opens one issue, or comments on the one already open, with
+  # the failed jobs, the entries the mapping legs disagreed about and the command
+  # that re-derives each; a green night closes it. It never re-derives anything
+  # itself: a named test that stopped failing may have lost what it was checking,
+  # and only a reader can tell. The decision is `tests/nightly_alarm.py`, driven by
+  # `test_nightly_alarm.py`, which also holds this job to needing every other job.
+  #
+  # Schedule only: a pull request already reports to its author, and a push to
+  # main is followed by the next scheduled run within a day.
+  nightly-alarm:
+    needs: [tests, observer-staleness, mapping-decision, mapping, mapping-summary]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The failed legs' logs, for the `WRONG MAPPING` lines.
+      actions: read
+      # Opening, commenting on and closing the one alarm issue.
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # No `pip install`: the module imports the standard library only. Through the
+      # environment rather than interpolated into the script, which is the
+      # script-injection shape the analysers read.
+      - name: Open, update or close the nightly alarm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: python3 tests/nightly_alarm.py
