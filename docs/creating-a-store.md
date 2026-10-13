@@ -294,6 +294,11 @@ graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
 
+The loop produces each clone's `graph.json`, which is what `merge-graphs` reads.
+It does not produce the AST layer `merge-layers` reads. `knowledgestore extract-ast`
+writes that (`graphify-out/.graphify_ast.json`) and is the supported route to it;
+see [Extract the AST layer](#extract-the-ast-layer).
+
 **Do not add `--no-cluster` to that extraction**, however wasteful clustering a
 repository looks when the merge is about to discard its communities. That much is
 true, and the conclusion drawn from it is still wrong: the clustering path is also
