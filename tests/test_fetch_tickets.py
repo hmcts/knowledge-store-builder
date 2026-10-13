@@ -19,6 +19,7 @@ from collections import Counter
 import tempfile
 import unittest
 import urllib.parse
+import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -71,11 +72,25 @@ class FakeTracker:
             status, retry_after = queued if isinstance(queued, tuple) else (queued, None)
             return fetch_tickets.Response(status, "", retry_after)
         found = [
-            {"key": key, "fields": self.issues[key]}
-            for key in requested_keys(url)
+            {
+                "expand": "operations,versionedRepresentations,editmeta,changelog",
+                "id": str(10000 + number),
+                "self": f"{BASE}/rest/api/2/issue/{10000 + number}",
+                "key": key,
+                "fields": self.issues[key],
+            }
+            for number, key in enumerate(requested_keys(url))
             if key in self.issues
         ]
-        return fetch_tickets.Response(200, json.dumps({"issues": found}))
+        # The Data Center search envelope: paging counters beside the issues.
+        body = {
+            "expand": "schema,names",
+            "startAt": 0,
+            "maxResults": len(requested_keys(url)),
+            "total": len(found),
+            "issues": found,
+        }
+        return fetch_tickets.Response(200, json.dumps(body))
 
     @property
     def keys_requested(self) -> list[str]:
@@ -613,6 +628,86 @@ class DeterminismTest(FetchTicketsTestCase):
             self._run_stage(FakeTracker({"AAA-1": fields_for("First")}))
             order = list(self._cache())
         self.assertEqual(order, ["AAA-1", "AAA-9"])
+
+
+class WireContractTest(FetchTicketsTestCase):
+    """The request this stage sends is the Jira Data Center/Server contract.
+
+    The request is the artefact: a different path, verb or auth scheme would
+    still parse the same fake responses, so only an assertion on what was sent
+    can notice the stage drifting off the one flavour it speaks.
+    """
+
+    def test_search_is_a_bearer_authenticated_get_on_the_v2_search_path(self):
+        """Catches the search moving off `/rest/api/2/search` (for example to
+        Cloud's `/rest/api/3/search/jql`), losing its JQL, key projection or page
+        size, or the credential leaving the Bearer scheme (for example to Basic).
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1", "AAA-2"])
+            tracker = FakeTracker({"AAA-1": fields_for("First"), "AAA-2": fields_for("Second")})
+            code, _ = self._run_stage(tracker)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(len(tracker.urls), 1)
+            parts = urllib.parse.urlsplit(tracker.urls[0])
+            self.assertEqual(parts.path, "/jira/rest/api/2/search")
+            query = urllib.parse.parse_qs(parts.query)
+            self.assertEqual(sorted(query), ["fields", "jql", "maxResults"])
+            self.assertEqual(query["jql"], ["key in (AAA-1,AAA-2)"])
+            self.assertEqual(
+                query["fields"],
+                ["summary,issuetype,status,resolution,created,resolutiondate,parent"],
+            )
+            self.assertEqual(query["maxResults"], ["2"])
+            self.assertEqual(tracker.headers[0]["Authorization"], f"Bearer {TOKEN}")
+            self.assertEqual(tracker.headers[0]["Accept"], "application/json")
+            self.assertEqual(self._cache()["AAA-1"]["summary"], "First")
+
+    def test_the_real_boundary_sends_a_get(self):
+        """Catches `open_url` changing the verb (for example to POST with a JQL
+        body), which the `opener` seam cannot see because it sits above it.
+
+        Stubs `urllib.request.urlopen`, the true network edge, and drives the
+        stage through its default opener.
+        """
+        sent: list[urllib.request.Request] = []
+
+        class Reply:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"startAt": 0, "maxResults": 1, "total": 0, "issues": []}
+                ).encode()
+
+        def urlopen(request, timeout=None):
+            sent.append(request)
+            return Reply()
+
+        real = urllib.request.urlopen
+        urllib.request.urlopen = urlopen
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                self._store(tmp, ["AAA-1"])
+                out = StringIO()
+                with redirect_stdout(out), redirect_stderr(out):
+                    code = fetch_tickets.main([], sleep=lambda _s: None, today=TODAY)
+        finally:
+            urllib.request.urlopen = real
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].get_method(), "GET")
+        self.assertIsNone(sent[0].data)
+        self.assertEqual(urllib.parse.urlsplit(sent[0].full_url).path, "/jira/rest/api/2/search")
+        self.assertEqual(sent[0].get_header("Authorization"), f"Bearer {TOKEN}")
 
 
 class CredentialTest(FetchTicketsTestCase):
