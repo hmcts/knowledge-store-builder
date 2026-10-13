@@ -22,14 +22,21 @@ from knowledgestore import build_chunk_plan, config, drift
 
 
 class _Delta(SettingsIsolated):
-    def _store(self, plan: dict[str, list[str]] | None = None, images: tuple = ()) -> Path:
+    def _store(
+        self, plan: dict[str, list[str]] | None = None, images: tuple = (), documents: tuple = ()
+    ) -> Path:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name).resolve()
         config.configure(root=str(root))
         # The detect result is where the full planner learns which files are images,
         # and a delta reads the same one. Absolute, as graphify writes it.
-        detect = {"files": {"document": [], "image": [str(root / f) for f in images]}}
+        detect = {
+            "files": {
+                "document": [str(root / f) for f in documents],
+                "image": [str(root / f) for f in images],
+            }
+        }
         config.DETECT_PATH.parent.mkdir(parents=True, exist_ok=True)
         config.DETECT_PATH.write_text(json.dumps(detect), encoding="utf-8")
         if plan is not None:
@@ -185,6 +192,51 @@ class DeltaTest(_Delta):
             {"0002": [image], "0003": ["repositories/alpha/d/y.md", "repositories/alpha/d/z.md"]},
         )
 
+    GALLERY = tuple(f"repositories/alpha/snapshots/s{i}.png" for i in range(4))
+
+    def test_a_delta_packs_an_image_whose_directory_is_a_gallery(self):
+        """Breaks if a delta classifies galleries from its own files: it touches one
+        screenshot of four, sees one image, and gives it a worker of its own that a
+        full build of the same directory would not."""
+        root = self._store({"0001": ["repositories/z/a.md"]}, images=self.GALLERY)
+        touched = [self.GALLERY[1], "repositories/alpha/d/y.md"]
+        code, additions = self._delta(root, self._drift(root, [], touched))
+        self.assertEqual(code, 0)
+        self.assertEqual(additions, {"0002": sorted(touched)})
+
+    def test_a_delta_keeps_an_own_chunk_for_an_image_outside_a_gallery(self):
+        """Breaks if a delta packs every image: a diagram beside prose keeps the vision
+        context the full plan gives it."""
+        diagram = "repositories/alpha/docs/arch.png"
+        prose = ("repositories/alpha/docs/a.md", "repositories/alpha/docs/b.md")
+        root = self._store(
+            {"0001": ["repositories/z/a.md"]}, images=(diagram, *self.GALLERY), documents=prose
+        )
+        touched = [diagram, prose[0], self.GALLERY[0]]
+        code, additions = self._delta(root, self._drift(root, touched, []))
+        self.assertEqual(code, 0)
+        self.assertEqual(additions, {"0002": [diagram], "0003": [prose[0], self.GALLERY[0]]})
+        placed = sorted(f for chunk in additions.values() for f in chunk)
+        self.assertEqual(placed, sorted(touched), "every file in exactly one chunk")
+
+    def test_a_delta_keeps_an_exports_figures_in_their_own_chunks(self):
+        """Breaks if a delta checks the export's page against the working directory
+        rather than the store: a delta's paths are store-relative, so the figure
+        folder would read as a gallery and lose the vision pass a full build gives
+        it."""
+        folder = "repositories/alpha/docs/report_files"
+        figures = tuple(f"{folder}/image{i:03d}.png" for i in range(4))
+        root = self._store(
+            {"0001": ["repositories/z/a.md"]},
+            images=figures,
+            documents=("repositories/alpha/docs/report.html",),
+        )
+        (root / folder).mkdir(parents=True)
+        (root / "repositories/alpha/docs/report.html").write_text("x", encoding="utf-8")
+        code, additions = self._delta(root, self._drift(root, list(figures[:2]), []))
+        self.assertEqual(code, 0)
+        self.assertEqual(additions, {"0002": [figures[0]], "0003": [figures[1]]})
+
     def test_a_delta_without_a_detect_result_is_refused(self):
         """Breaks if a missing detect result is read as "no images", which packs every
         image in with documents and says nothing."""
@@ -298,17 +350,20 @@ class TheImageRuleHasOneHome(unittest.TestCase):
 
     DOCUMENTS = [f"/s/repositories/alpha/docs/{name}.md" for name in ("a", "b", "c")]
     IMAGES = ["/s/repositories/alpha/docs/x.png", "/s/repositories/beta/y.png"]
+    GALLERY = [f"/s/repositories/alpha/shots/s{i}.png" for i in range(3)]
 
     def test_a_full_plan_and_a_delta_give_the_same_files_a_chunk_of_their_own(self):
         """Breaks if either path stops calling the shared rule. The documents share a
-        directory, so a one-file chunk can only be an image's own."""
-        detect = {"files": {"document": self.DOCUMENTS, "image": self.IMAGES}}
+        directory, so a one-file chunk can only be an image's own; the gallery's
+        images are packed by both."""
+        detect = {"files": {"document": self.DOCUMENTS, "image": self.IMAGES + self.GALLERY}}
         full = build_chunk_plan.plan_chunks(detect, chunk_size=22)
         delta = build_chunk_plan.pack_delta(
-            sorted(self.DOCUMENTS + self.IMAGES),
+            sorted(self.DOCUMENTS + self.IMAGES + self.GALLERY),
             22,
             1,
             set(build_chunk_plan.detected_images(detect)),
+            build_chunk_plan.image_galleries(detect),
         )
         alone_in_full = sorted(c[0] for c in full.values() if len(c) == 1)
         alone_in_delta = sorted(c[0] for c in delta.values() if len(c) == 1)

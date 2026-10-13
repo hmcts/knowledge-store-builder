@@ -144,7 +144,11 @@ knowledgestore chunk-plan --delta /tmp/drift.json --out /tmp/plan-additions.json
 - **Packed per repository**, in directory order, up to `--chunk-size` (default 22)
   files a chunk. A delta touches a file or two per directory, so the full plan's
   one-directory rule would pay a worker for every directory. Images get a chunk
-  each, as in the full plan, read from the same detect result.
+  each, as in the full plan - except in an image gallery, a directory holding at
+  least three images that make up at least half its files and is not a document
+  export's figure folder, whose images pack like any other file. Which directories
+  are galleries is read from the whole detect result, so a delta decides it as a
+  full build would.
 - **Numbered after the committed plan's last chunk**, and written to `--out`
   rather than into the plan. Append the mapping to the plan once the chunks are
   extracted. Every file lands in exactly one chunk, or nothing is written.

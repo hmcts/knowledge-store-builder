@@ -39,8 +39,10 @@ dispatcher absolute paths from a file that commits none.
 
 Chunk boundaries are not arbitrary. Files from one directory are extracted
 together because cross-file relationships are what the semantic layer exists to
-find, and an agent cannot relate two files it never saw together. Images get a
-chunk each, because vision needs its own context.
+find, and an agent cannot relate two files it never saw together. An image gets a
+chunk of its own, because vision needs its own context - unless its directory is an
+image gallery (screenshots, icons), which packs with its files as ordinary content;
+see `image_galleries`.
 
 Neither choice is free, and the plan records the sizes so the trade is visible
 rather than assumed.
@@ -53,8 +55,8 @@ import json
 import posixpath
 import statistics
 import sys
-from collections import defaultdict
-from collections.abc import Container, Iterable
+from collections import Counter, defaultdict
+from collections.abc import Callable, Container, Iterable
 from pathlib import Path
 from typing import TextIO
 
@@ -83,6 +85,16 @@ CONTENT_KINDS = ("document", "paper", "image")
 # know.
 DEFAULT_CHUNK_SIZE = 22
 
+# An image gallery: a directory whose images are packed with its files rather than
+# given a chunk each. See `image_galleries` for why each condition is there.
+GALLERY_MIN_IMAGES = 3
+GALLERY_MIN_SHARE = 0.5
+
+# A word processor's "save as web page" writes `<stem>.htm` or `<stem>.html` and keeps
+# the document's figures in a sibling folder named with one of these suffixes.
+EXPORT_FOLDER_SUFFIXES = (".fld", "_files")
+EXPORT_PAGE_SUFFIXES = (".htm", ".html")
+
 
 def content_files(detect: dict, kinds: tuple[str, ...] = CONTENT_KINDS) -> dict[str, list[str]]:
     """Detected files per content kind, sorted so a plan is reproducible."""
@@ -108,17 +120,97 @@ def detected_images(detect: dict) -> list[str]:
     return list((detect.get("files") or {}).get("image") or [])
 
 
-def image_chunks(files: Iterable[str], images: Container[str]) -> tuple[list[list[str]], list[str]]:
-    """(a chunk of its own for each image, sorted; every other file, in the order given).
+def is_export_companion(directory: str) -> bool:
+    """Whether `directory` is the folder a document export keeps its figures in.
+
+    A word processor's "save as web page" writes `<stem>.htm` or `<stem>.html` and puts
+    the document's figures - real diagrams - in `<stem>.fld` or `<stem>_files` beside
+    it. That is a structural signal about where the folder came from, read from the
+    folder's name and its sibling, not a guess about what the images show from what
+    they are called.
+
+    **The sibling page is looked for on disk, not in the detect result.** graphify's
+    detect lists `.html` as a document but has no entry for `.htm` (its
+    `DOC_EXTENSIONS`), so the detect result can never show the page of an export
+    saved as `.htm`, and an ignore rule (`.gitignore`, `.graphifyignore`) can drop an
+    `.html` one. The clones are on
+    disk whenever a plan is written - the detect result was taken from them - so the
+    filesystem answers both suffixes the same way, for a full plan and a delta alike.
+    A store-relative directory is resolved against the store root first.
+
+    The stem is compared literally, as a string. Real export stems carry spaces, dots
+    and a bracketed copy number such as `(1)`, which an unescaped regex reads as a
+    group; a square bracket is a character class to a glob.
+    """
+    folder = Path(store_paths.absolute(directory))
+    for suffix in EXPORT_FOLDER_SUFFIXES:
+        stem = folder.name.removesuffix(suffix)
+        if stem and stem != folder.name:
+            if any((folder.parent / (stem + page)).is_file() for page in EXPORT_PAGE_SUFFIXES):
+                return True
+    return False
+
+
+def image_galleries(detect: dict, form: Callable[[str], str] = str) -> frozenset[str]:
+    """The directories whose images are packed with their files, not given a chunk each.
+
+    A directory is an image gallery when all three hold:
+
+    - it holds at least `GALLERY_MIN_IMAGES` detected images. Two images beside each
+      other are a pair of diagrams as often as anything else;
+    - images are at least `GALLERY_MIN_SHARE` of its detected files, of every kind.
+      Three figures in a folder of prose are that prose's figures;
+    - it is not a document export's figure folder (`is_export_companion`). Measured
+      on one large internal estate, the first two conditions alone also packed an
+      export's real diagrams; with this one they packed none of them, while still
+      removing most screenshot and icon chunks.
+
+    **Counted from the whole detect result, never from the files being planned.** A
+    delta plans a file or two per directory; counting only those would classify the
+    same directory differently from a full build, and a delta must extract what a
+    full build would. Each file is counted in its immediate parent only.
+
+    `form` maps a detected path to the form the planned files take - store-relative
+    for a delta - so the directories returned match theirs.
+    """
+    detected: Counter[str] = Counter()
+    images: Counter[str] = Counter()
+    for kind, paths in sorted((detect.get("files") or {}).items()):
+        for path in paths or []:
+            directory = posixpath.dirname(form(path))
+            detected[directory] += 1
+            if kind == "image":
+                images[directory] += 1
+    return frozenset(
+        directory
+        for directory in sorted(images)
+        if images[directory] >= GALLERY_MIN_IMAGES
+        and images[directory] >= GALLERY_MIN_SHARE * detected[directory]
+        and not is_export_companion(directory)
+    )
+
+
+def image_chunks(
+    files: Iterable[str], images: Container[str], galleries: Container[str]
+) -> tuple[list[list[str]], list[str]]:
+    """(a chunk of its own for each image outside a gallery, sorted; every other file,
+    in the order given).
 
     The one place a plan decides which files are extracted alone. A full plan and a
     delta both call it, so a change to the rule reaches both together: an image
     gets its own chunk because vision needs its own context, and mixing images with
-    documents makes an agent do two jobs in one prompt.
+    documents makes an agent do two jobs in one prompt. An image whose immediate
+    parent is one of `galleries` (`image_galleries`) is an ordinary file instead: a
+    vision pass per screenshot describes near-identical images and pays a worker for
+    each.
     """
     listed = list(files)
-    own = [[path] for path in sorted(path for path in listed if path in images)]
-    return own, [path for path in listed if path not in images]
+
+    def alone(path: str) -> bool:
+        return path in images and posixpath.dirname(path) not in galleries
+
+    own = [[path] for path in sorted(path for path in listed if alone(path))]
+    return own, [path for path in listed if not alone(path)]
 
 
 def plan_chunks(
@@ -141,7 +233,10 @@ def plan_chunks(
         files = {kind: [f for f in paths if f in only] for kind, paths in files.items()}
 
     images = set(files.get("image", []))
-    chunks, grouped = image_chunks((path for paths in files.values() for path in paths), images)
+    galleries = image_galleries(detect)
+    chunks, grouped = image_chunks(
+        (path for paths in files.values() for path in paths), images, galleries
+    )
     chunks.extend(chunk_groups(group_by_directory(grouped), chunk_size))
     return {f"{index + 1:04d}": chunk for index, chunk in enumerate(chunks)}
 
@@ -246,13 +341,19 @@ def next_chunk_number(plan_path: Path) -> int | None:
 
 
 def pack_delta(
-    files: list[str], chunk_size: int, first: int, images: set[str] | frozenset[str] = frozenset()
+    files: list[str],
+    chunk_size: int,
+    first: int,
+    images: set[str] | frozenset[str] = frozenset(),
+    galleries: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
     """A delta's chunks: one repository at a time, in directory order, filled to `chunk_size`.
 
-    Images first, one chunk each, as the full plan does: vision needs its own context,
-    and a delta must extract what a full build would. `images` comes from the same
-    detect result the full plan reads.
+    Images first, one chunk each, as the full plan does - except an image in an image
+    gallery, which packs with its repository like any other file. Vision needs its own
+    context, and a delta must extract what a full build would. `images` and `galleries`
+    come from the same detect result the full plan reads, never from the delta's own
+    files, which would see one screenshot of a gallery and call it a lone diagram.
 
     **Not the full plan's one-directory rule, deliberately.** A delta touches a file or
     two per directory, so one directory per chunk pays a worker's fixed cost once per
@@ -261,7 +362,7 @@ def pack_delta(
     order, keeps the relationships an agent can find; padding across repositories would
     ask it to relate files that have no relation.
     """
-    alone, rest = image_chunks(files, images)
+    alone, rest = image_chunks(files, images, galleries)
     by_repository: dict[str, list[str]] = defaultdict(list)
     for path in rest:
         by_repository[drift.repository_of(path)].append(path)
@@ -348,7 +449,8 @@ def plan_delta(arguments: argparse.Namespace) -> int:
         return 0
 
     images = {store_paths.relative(f) for f in detected_images(detect)}
-    additions = pack_delta(files, arguments.chunk_size, first, images)
+    galleries = image_galleries(detect, store_paths.relative)
+    additions = pack_delta(files, arguments.chunk_size, first, images, galleries)
     placed = [f for chunk in additions.values() for f in chunk]
     if sorted(placed) != files:
         # Every file in exactly one chunk: a file in two is extracted twice and
