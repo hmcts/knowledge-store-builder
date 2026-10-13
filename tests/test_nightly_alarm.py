@@ -151,7 +151,7 @@ class NightlyAlarmTest(unittest.TestCase):
 
         self._run(RED, tracker)
 
-        self.assertEqual([7], [n for n, i in tracker.issues.items() if i["open"]])
+        self.assertEqual([n for n, i in tracker.issues.items() if i["open"]], [7])
         self.assertEqual(len(tracker.issues[7]["comments"]), 1)
         self.assertIn(
             "the summaries metadata block read as a community", tracker.issues[7]["comments"][0]
