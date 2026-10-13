@@ -154,6 +154,186 @@ class PlanningTest(unittest.TestCase):
         self.assertEqual(build_chunk_plan.plan_chunks({"files": {"code": ["/s/a.py"]}}), {})
 
 
+def _alone(plan: dict[str, list[str]]) -> list[str]:
+    """The files the plan gave a chunk of their own."""
+    return sorted(chunk[0] for chunk in plan.values() if len(chunk) == 1)
+
+
+def _image_chunks(plan: dict[str, list[str]], detect: dict) -> list[list[str]]:
+    """The chunks holding any of the detected images, in plan order."""
+    images = set(detect["files"]["image"])
+    return [chunk for chunk in plan.values() if images.intersection(chunk)]
+
+
+def _each_alone(detect: dict) -> list[list[str]]:
+    return [[image] for image in sorted(detect["files"]["image"])]
+
+
+class ImageGalleryTest(unittest.TestCase):
+    """An image keeps its own chunk unless its directory is an image gallery.
+
+    Vision needs its own context for a diagram, where the vision pass is the point. A
+    directory of screenshots or icons pays a worker per image for one-line nodes, so
+    such a directory packs with its files as ordinary content. A gallery holds at least
+    three images, images are at least half its detected files, and it is not the folder
+    a document export keeps its figures in.
+    """
+
+    def _tree(self) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name).resolve()
+
+    def test_a_lone_diagram_and_a_pair_in_a_docs_folder_keep_their_own_chunks(self):
+        """Breaks if the gallery rule reaches a diagram beside prose: a docs folder's
+        architecture drawing loses the vision context it is extracted for."""
+        docs = [f"/s/repositories/a/docs/{n}.md" for n in ("one", "two", "three")]
+        pair = [f"/s/repositories/a/design/{n}.md" for n in ("one", "two")]
+        images = [
+            "/s/repositories/a/docs/arch.png",
+            "/s/repositories/a/design/flow.png",
+            "/s/repositories/a/design/states.png",
+        ]
+        plan = build_chunk_plan.plan_chunks(
+            {"files": {"document": docs + pair, "image": images}}, chunk_size=22
+        )
+        self.assertEqual(_alone(plan), sorted(images))
+        self.assertEqual(
+            sorted(plan.values()), sorted([[i] for i in images] + [pair, sorted(docs)])
+        )
+
+    def test_a_gallery_packs_with_its_directorys_files(self):
+        """Breaks if a gallery still gets one chunk per image, paying a worker per
+        screenshot for nodes that say each is a test fixture."""
+        shots = [f"/s/repositories/a/snapshots/s{i}.png" for i in range(4)]
+        readme = "/s/repositories/a/snapshots/README.md"
+        plan = build_chunk_plan.plan_chunks(
+            {"files": {"document": [readme], "image": shots}}, chunk_size=22
+        )
+        self.assertEqual(list(plan.values()), [sorted([readme, *shots])])
+
+    def test_three_images_in_an_all_image_directory_are_a_gallery(self):
+        """Breaks if the minimum drifts above three, or `at least` becomes `more than`."""
+        icons = [f"/s/repositories/a/icons/i{i}.svg" for i in range(3)]
+        plan = build_chunk_plan.plan_chunks({"files": {"image": icons}}, chunk_size=22)
+        self.assertEqual(list(plan.values()), [icons])
+
+    def test_two_images_in_an_all_image_directory_keep_their_own_chunks(self):
+        """Breaks if the count condition is lost: two images are a pair of diagrams
+        as often as a gallery, and share alone would pack them."""
+        pair = ["/s/repositories/a/img/one.png", "/s/repositories/a/img/two.png"]
+        plan = build_chunk_plan.plan_chunks({"files": {"image": pair}}, chunk_size=22)
+        self.assertEqual(sorted(plan.values()), [[pair[0]], [pair[1]]])
+
+    def test_three_images_outnumbered_by_files_keep_their_own_chunks(self):
+        """Breaks if the share condition is lost: three diagrams in a folder of prose
+        are figures for that prose, not a gallery."""
+        images = [f"/s/repositories/a/guide/fig{i}.png" for i in range(3)]
+        prose = [f"/s/repositories/a/guide/p{i}.md" for i in range(4)]
+        plan = build_chunk_plan.plan_chunks(
+            {"files": {"document": prose, "image": images}}, chunk_size=22
+        )
+        self.assertEqual(_alone(plan), images)
+
+    def test_images_at_exactly_half_the_directory_are_a_gallery(self):
+        """Breaks if `at least half` becomes `more than half`. The share counts files
+        of every detected kind, code included, not only the kinds being planned."""
+        images = [f"/s/repositories/a/ui/s{i}.png" for i in range(3)]
+        code = [f"/s/repositories/a/ui/c{i}.ts" for i in range(3)]
+        plan = build_chunk_plan.plan_chunks(
+            {"files": {"code": code, "image": images}}, chunk_size=22
+        )
+        self.assertEqual(list(plan.values()), [images])
+        plan = build_chunk_plan.plan_chunks(
+            {"files": {"code": [*code, "/s/repositories/a/ui/c9.ts"], "image": images}},
+            chunk_size=22,
+        )
+        self.assertEqual(_alone(plan), images, "three of seven is under half")
+
+    def _export(self, root: Path, folder: str, page: str | None, extra=()) -> dict:
+        """A folder of figures, beside `page` when one is named."""
+        directory = root / "repositories" / "a" / "docs"
+        (directory / folder).mkdir(parents=True)
+        figures = [str(directory / folder / f"image{i:03d}.png") for i in range(4)]
+        for path in figures:
+            Path(path).write_bytes(b"png")
+        documents = []
+        for name in [page, *extra] if page else list(extra):
+            (directory / name).write_text("x", encoding="utf-8")
+            documents.append(str(directory / name))
+        return {"files": {"document": documents, "image": figures}}
+
+    def test_a_document_exports_figure_folder_keeps_one_chunk_per_image(self):
+        """Breaks if the export exclusion is lost: a word processor's web-page export
+        keeps the document's real diagrams in `<stem>.fld` or `<stem>_files`, and a
+        count rule alone packs them as a gallery."""
+        for folder, page in (("report.fld", "report.htm"), ("report_files", "report.html")):
+            with self.subTest(folder=folder):
+                detect = self._export(self._tree(), folder, page)
+                plan = build_chunk_plan.plan_chunks(detect, chunk_size=22)
+                self.assertEqual(_image_chunks(plan, detect), _each_alone(detect))
+
+    def test_an_export_stem_with_spaces_a_dot_and_brackets_is_matched_literally(self):
+        """Breaks if the stem is matched as a pattern rather than as a string. Real
+        export stems carry spaces, dots and a bracketed copy number: to an unescaped
+        regex `(1)` is a group matching `1`, and to a glob `[draft]` is a character
+        class matching one letter. Either way the page is never found and the folder
+        silently stops being excluded. Each stem has a same-stem `.docx` beside it, as
+        an export does."""
+        stems = ("Service design notes v2.1 v0_3 (1)", "Release plan v0_3 [draft] (1)")
+        for stem, folder in [(s, s + suffix) for s in stems for suffix in ("_files", ".fld")]:
+            with self.subTest(folder=folder):
+                detect = self._export(self._tree(), folder, f"{stem}.html", extra=(f"{stem}.docx",))
+                plan = build_chunk_plan.plan_chunks(detect, chunk_size=22)
+                self.assertEqual(_image_chunks(plan, detect), _each_alone(detect))
+
+    def test_an_export_shaped_folder_without_its_page_is_a_gallery(self):
+        """Breaks if the exclusion reads the folder name alone: it is the sibling page
+        that says the folder came from an export, not the suffix."""
+        for folder in ("report.fld", "report_files"):
+            with self.subTest(folder=folder):
+                detect = self._export(self._tree(), folder, None, extra=("other.html",))
+                plan = build_chunk_plan.plan_chunks(detect, chunk_size=22)
+                figures = sorted(detect["files"]["image"])
+                self.assertEqual(
+                    sorted(plan.values()), sorted([detect["files"]["document"], figures])
+                )
+
+    def test_an_uncached_plan_classifies_galleries_from_the_whole_detect_result(self):
+        """Breaks if the census counts only the planned files: an uncached plan of one
+        gallery image and its README would see one image of two and give it a chunk
+        of its own, which the full plan of the same directory does not."""
+        shots = [f"/s/repositories/a/snapshots/s{i}.png" for i in range(4)]
+        readme = "/s/repositories/a/snapshots/README.md"
+        detect = {"files": {"document": [readme], "image": shots}}
+        plan = build_chunk_plan.plan_chunks(detect, chunk_size=22, only={readme, shots[2]})
+        self.assertEqual(list(plan.values()), [sorted([readme, shots[2]])])
+
+    def test_every_file_lands_in_exactly_one_chunk(self):
+        """Breaks if moving gallery images out of their own chunks drops them, or
+        places them both alone and with their directory."""
+        detect = {
+            "files": {
+                "document": [
+                    "/s/repositories/a/docs/one.md",
+                    "/s/repositories/a/docs/two.md",
+                    "/s/repositories/a/snapshots/README.md",
+                    *[f"/s/repositories/a/guide/p{i}.md" for i in range(4)],
+                ],
+                "image": [
+                    "/s/repositories/a/docs/arch.png",
+                    *[f"/s/repositories/a/snapshots/s{i}.png" for i in range(9)],
+                    *[f"/s/repositories/a/guide/f{i}.png" for i in range(3)],
+                ],
+            }
+        }
+        sent = sorted(p for paths in detect["files"].values() for p in paths)
+        plan = build_chunk_plan.plan_chunks(detect, chunk_size=4)
+        planned = sorted(p for chunk in plan.values() for p in chunk)
+        self.assertEqual(planned, sent)
+        self.assertEqual(len(_alone(plan)), 4, "the diagram and three guide figures")
+
+
 class KindsAreAnOperatorChoice(unittest.TestCase):
     """graphify classifies YAML and Terraform as `code`, and on an infrastructure
     estate that is where the semantically interesting content lives.

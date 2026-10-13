@@ -1305,6 +1305,92 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "image gallery needs no minimum count",
+        "build_chunk_plan.py",
+        "        if images[directory] >= GALLERY_MIN_IMAGES\n",
+        "        if True\n",
+        "two images in an all-image directory are a pair of diagrams as often as a "
+        "gallery, and without the count the share alone packs them in with ordinary "
+        "files, so each loses the vision pass it is extracted for",
+        (
+            "test_chunk_plan.ImageGalleryTest.test_a_lone_diagram_and_a_pair_in_a_docs_folder_keep_their_own_chunks",
+            "test_chunk_plan.ImageGalleryTest.test_two_images_in_an_all_image_directory_keep_their_own_chunks",
+            "test_chunk_plan.PlanningTest.test_each_image_gets_its_own_chunk",
+            "test_chunk_plan_delta.DeltaTest.test_each_image_in_a_delta_gets_its_own_chunk",
+            "test_chunk_plan_delta.TheImageRuleHasOneHome.test_a_full_plan_and_a_delta_give_the_same_files_a_chunk_of_their_own",
+        ),
+    ),
+    Mutation(
+        "image gallery needs no majority of images",
+        "build_chunk_plan.py",
+        "        and images[directory] >= GALLERY_MIN_SHARE * detected[directory]\n",
+        "        and True\n",
+        "three figures in a folder of prose are that prose's diagrams, and without "
+        "the share they are packed as a gallery and extracted without their own "
+        "vision context",
+        (
+            "test_chunk_plan.ImageGalleryTest.test_every_file_lands_in_exactly_one_chunk",
+            "test_chunk_plan.ImageGalleryTest.test_images_at_exactly_half_the_directory_are_a_gallery",
+            "test_chunk_plan.ImageGalleryTest.test_three_images_outnumbered_by_files_keep_their_own_chunks",
+        ),
+    ),
+    Mutation(
+        "document export figure folder packed as a gallery",
+        "build_chunk_plan.py",
+        "        and not is_export_companion(directory)\n",
+        "        and True\n",
+        "a word processor's web-page export keeps a document's real diagrams in "
+        "`<stem>_files` or `<stem>.fld`, which is all images; a count and share rule "
+        "alone packs them, the one population the rule exists to keep apart",
+        (
+            "test_chunk_plan.ImageGalleryTest.test_a_document_exports_figure_folder_keeps_one_chunk_per_image",
+            "test_chunk_plan.ImageGalleryTest.test_an_export_stem_with_spaces_a_dot_and_brackets_is_matched_literally",
+            "test_chunk_plan_delta.DeltaTest.test_a_delta_keeps_an_exports_figures_in_their_own_chunks",
+        ),
+    ),
+    Mutation(
+        "document export stem matched as a pattern",
+        "build_chunk_plan.py",
+        "            if any((folder.parent / (stem + page)).is_file() for page in EXPORT_PAGE_SUFFIXES):",
+        "            if folder.parent.is_dir() and any(__import__('re').fullmatch(stem + "
+        "r'\\.html?', p.name) for p in folder.parent.iterdir()):",
+        "real export stems carry dots and bracketed copy numbers, which are pattern "
+        "syntax; an unescaped match never finds the page, so the export's diagrams "
+        "silently read as a gallery and are packed",
+        (
+            "test_chunk_plan.ImageGalleryTest.test_an_export_stem_with_spaces_a_dot_and_brackets_is_matched_literally",
+        ),
+    ),
+    Mutation(
+        "full plan counts galleries from the planned files",
+        "build_chunk_plan.py",
+        "    galleries = image_galleries(detect)\n",
+        '    galleries = image_galleries({"files": files})\n',
+        "an uncached plan holds a file or two per directory, so counting only those "
+        "calls a gallery's screenshot a lone diagram and plans it differently from "
+        "the full build of the same directory",
+        (
+            "test_chunk_plan.ImageGalleryTest.test_an_uncached_plan_classifies_galleries_from_the_whole_detect_result",
+            "test_chunk_plan.ImageGalleryTest.test_images_at_exactly_half_the_directory_are_a_gallery",
+        ),
+    ),
+    Mutation(
+        "delta counts galleries from its own files",
+        "build_chunk_plan.py",
+        "    galleries = image_galleries(detect, store_paths.relative)\n",
+        "    galleries = image_galleries(\n"
+        '        {"files": {"image": [f for f in files if f in images], '
+        '"other": [f for f in files if f not in images]}}\n'
+        "    )\n",
+        "a delta touches one screenshot of a gallery, sees one image, and pays a "
+        "worker for it that a full build would not, so it stops extracting what a "
+        "full build would",
+        (
+            "test_chunk_plan_delta.DeltaTest.test_a_delta_keeps_an_own_chunk_for_an_image_outside_a_gallery",
+            "test_chunk_plan_delta.DeltaTest.test_a_delta_packs_an_image_whose_directory_is_a_gallery",
+        ),
+    ),
+    Mutation(
         "noise figure claimed from a tree nobody measured",
         "build_content_set.py",
         '    if not tree:\n        return {"measured": False}',
