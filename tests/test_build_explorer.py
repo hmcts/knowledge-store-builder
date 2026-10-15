@@ -212,6 +212,22 @@ class NodeTicketsTest(SettingsIsolated):
         intent = {"repo-a": {"src/a.ts": {"tickets": {"DD-1": 3, "DD-2": 1}}}}
         self.assertEqual(explorer.node_tickets(node("a", "X"), "code", intent), ["DD-1", "DD-2"])
 
+    def test_proposed_tickets_stay_off_a_code_node(self):
+        """Catches a node's list widened to the file's `proposed` tickets (#425).
+
+        The list is what the page calls "what changed here", and the graph is of
+        the default branch: a ticket found only on a branch never changed this
+        code, so carrying it would publish a proposal as the code's history."""
+        intent = {
+            "repo-a": {
+                "src/a.ts": {"tickets": {"DD-1": 3}, "proposed": {"DD-5": 2}},
+                "src/b.ts": {"tickets": {}, "proposed": {"DD-5": 1}},
+            }
+        }
+        self.assertEqual(explorer.node_tickets(node("a", "X"), "code", intent), ["DD-1"])
+        branch_only = node("b", "Y", source_file="src/b.ts")
+        self.assertEqual(explorer.node_tickets(branch_only, "code", intent), [])
+
 
 class EntryConnectionsTest(SettingsIsolated):
     def test_orders_by_degree_dedupes_labels_and_caps(self):

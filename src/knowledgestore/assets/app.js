@@ -38,7 +38,11 @@
  * `t` and `x` come from the tracker rather than the commits: the ticket's own
  * title, and an opening extract of its description. Both are absent for a ticket
  * the tracker has never been asked about, or one it reported as absent.
+ * `proposed` is true when no landed work names the ticket - it was found only on
+ * a branch - and `branches` names up to five branches its branch-only commits
+ * sat on. A landed ticket can carry `branches` too, without `proposed`.
  * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string, c?: string[],
+ *            proposed?: boolean, branches?: string[],
  *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
 
@@ -76,8 +80,12 @@ const DICTS = JSON.parse(getEl('dicts').textContent || '{}');
  * `droppedColumns`: the columns left off every row, by full-row position, each
  * with the one value it held (#338); absent when none were. Parsed ahead of the
  * rows because `decodeRows` restores them.
+ *
+ * `branchLimit`: how many branches the intent stage keeps on a ticket record, so
+ * a list that reached it can say it may be incomplete. Absent on a page built
+ * before it was written, which then never claims that.
  * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string,
- *         droppedColumns?: Record<string, string|number|null>}} */
+ *         droppedColumns?: Record<string, string|number|null>, branchLimit?: number}} */
 const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 /** @type {Entry[]} */
 const DATA = decodeRows(
@@ -236,6 +244,34 @@ function ticketDates(info, hasTitle) {
 }
 
 const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
+/** The intent stage's cap on a record's `branches` - see CONFIG. */
+const BRANCH_LIMIT = CONFIG.branchLimit || 0;
+
+/** "proposed on branch X" for a ticket no landed work names, and '' otherwise.
+ *
+ * The knowledge-store skill's wording, so this page and an agent reading the
+ * same store say the same thing about the same ticket. Keyed on `proposed`, not
+ * on `branches`: a ticket that landed can still have had branch-only commits,
+ * and calling it a proposal would be the reverse of the defect this prevents.
+ * @param {TicketInfo|undefined} info @returns {string} */
+function proposedLabel(info) {
+  if (!info?.proposed) return '';
+  const branches = info.branches || [];
+  if (!branches.length) return 'proposed on a branch';
+  // The stage keeps the first few branches in name order and drops the rest
+  // silently, so a list at the cap may be the whole story or only its start.
+  const capped = BRANCH_LIMIT > 0 && branches.length >= BRANCH_LIMIT;
+  return 'proposed on ' + (branches.length === 1 ? 'branch ' : 'branches ') + branches.join(', ')
+    + (capped ? ' and possibly others' : '');
+}
+
+/** The label as markup, after a ticket id. Branch names are repository data, so
+ * they are escaped like any other embedded text.
+ * @param {string} t */
+function proposedTag(t) {
+  const label = proposedLabel(TICKET_INFO[t]);
+  return label ? ' <em class="tprop">' + esc(label) + '</em>' : '';
+}
 
 /** Topic briefs (GraphRAG phase 3): pre-written narratives composed at
  * build time from graph evidence, keyed by slug with matching keywords.
@@ -286,11 +322,29 @@ function clipWords(text, limit) {
   return (cut > 0 ? head.slice(0, cut) : head).trimEnd() + '…';
 }
 
-/** @param {string} t */
-function ticketChip(t) {
+/** A ticket id as a chip, its description in the tooltip.
+ *
+ * `beside` is for a chip strip drawn under ticket rows that already name the
+ * branches: there the chip carries only a short "proposed", and the full label
+ * moves into the tooltip, so five branch names are not drawn twice. Not nothing,
+ * because the strip holds more tickets than the rows do - a row is drawn only for
+ * a ticket with a description, and only up to a cap.
+ *
+ * Reached only through the two one-argument wrappers below, because chips are
+ * drawn with `map`, which would pass its index here as `beside`.
+ * @param {string} t @param {boolean} beside */
+function chipMarkup(t, beside) {
   const detail = ticketDetail(t);
-  return '<span title="' + (detail ? esc(detail) : 'no description found') + '">' + ticketLink(t) + '</span>';
+  const label = proposedLabel(TICKET_INFO[t]);
+  const title = (detail || 'no description found') + (beside && label ? ' — ' + label : '');
+  return '<span title="' + esc(title) + '">' + ticketLink(t)
+    + (beside && label ? ' <em class="tprop">proposed</em>' : proposedTag(t)) + '</span>';
 }
+
+/** @param {string} t */
+const ticketChip = (t) => chipMarkup(t, false);
+/** @param {string} t */
+const besideChip = (t) => chipMarkup(t, true);
 
 /** Inline ticket rows - id, business description, dates - for answers where
  * the detail should be readable without hovering.
@@ -301,7 +355,8 @@ function ticketRows(tickets, max) {
   for (const t of tickets) {
     const detail = ticketDetail(t);
     if (!detail) continue;
-    html += '<div class="trow"><span class="tid">' + ticketLink(t) + '</span> ' + esc(detail)
+    html += '<div class="trow"><span class="tid">' + ticketLink(t) + '</span>' + proposedTag(t)
+      + ' ' + esc(detail)
       + ticketDates(TICKET_INFO[t], Boolean(TICKET_INFO[t]?.t || TITLES[t])) + '</div>';
     if (++shown === max) break;
   }
@@ -924,7 +979,7 @@ function ticketEvidenceHtml(matches, terms) {
   return '<h2>What the commits say about these words</h2>'
     + matches
       .map((m) => '<div class="trow"><span class="tid">' + ticketLink(m.id) + '</span>'
-        + ticketReach(m.id) + matchingEvidence(m.id, terms) + '</div>')
+        + proposedTag(m.id) + ticketReach(m.id) + matchingEvidence(m.id, terms) + '</div>')
       .join('');
 }
 
@@ -956,9 +1011,16 @@ function vTicket(id) {
   const descriptions = (info?.d || []).filter((x) => normText(x) !== detailKey);
   const shown = hits.slice(0, 30).filter((i) => DATA[i][4] !== 'ticket');
   out.innerHTML =
-    answer('<b>' + ticketLink(id) + '</b>' + (detail ? ' — “' + esc(detail) + '”' : '')
+    answer('<b>' + ticketLink(id) + '</b>' + proposedTag(id) + (detail ? ' — “' + esc(detail) + '”' : '')
       + ' touches <b>' + hits.length + '</b> graph entries across <b>' + repos.length + '</b> repositories.'
       + ticketMetaLine(info, Boolean(info?.t || TITLES[id])))
+    // What the label means, once, where the ticket is the whole answer. A squash
+    // merge can land a branch's work without its commits, so this says what was
+    // not confirmed rather than that the work is absent.
+    + (info?.proposed
+      ? '<div class="trow"><span class="tid">proposed</span> Found on a branch, and its work is'
+        + ' not confirmed on the default branch. Check the code before saying what it does.</div>'
+      : '')
     + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
     + commentRows(info?.c, [])
     + evidenceRows(LABEL_DESCRIPTION, descriptions)
@@ -1096,7 +1158,7 @@ function vWhy(seeds) {
         : '')
     + (topT.length
         ? '<h2>What changed here, per the commit history</h2>' + ticketRows(topT, 8)
-          + '<div class="chips">' + topT.map(ticketChip).join('') + '</div>'
+          + '<div class="chips">' + topT.map(besideChip).join('') + '</div>'
         : '')
     + techDetails(card(e), 1);
 }
@@ -1161,7 +1223,7 @@ function vCluster(ranked) {
     + featureCards(reached.keys(), 4)
     + (topT.length
         ? '<h2>What changed here, per the commit history</h2>' + ticketRows(topT, 5)
-          + '<div class="chips">' + topT.map(ticketChip).join('') + '</div>'
+          + '<div class="chips">' + topT.map(besideChip).join('') + '</div>'
         : '')
     + techDetails(tech,
         shownSeeds.length + grouped.reduce((n, g) => n + Math.min(g[1].length, 10), 0));
@@ -1421,7 +1483,7 @@ run();
 /** @type {any} */ (globalThis).__explorerApi = {
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
   matchTopic, matchDive, runAsk, runSearch, q, out, meta,
-  ticketEvidence, unevidencedTerms, extraSubjects,
+  ticketEvidence, unevidencedTerms, extraSubjects, proposedLabel,
   // The data block's decoder, so its behaviour can be asserted directly rather
   // than only through whether the page happens to answer a question.
   decodeRows,

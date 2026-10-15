@@ -172,6 +172,14 @@ Generated Graphify output is an index over the underlying material. It must
 not be treated as more authoritative than the source files from which it
 was produced.
 
+A ticket listed under `proposed` in the intent index
+(`knowledge/intent/file-tickets.json.gz`) was found on a branch, and that work
+is not confirmed on the default branch. Say it is proposed on branch X, naming
+the branch from the ticket's `branches` in `ticket-descriptions.json.gz`, and
+check the checked-out code before saying anything about what the code does. A
+squash merge can land a branch's work without its commits, so a proposed
+ticket is not evidence that the code lacks the change either.
+
 ## Included repositories
 
 {repository_list}

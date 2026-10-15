@@ -2458,6 +2458,8 @@ MUTATIONS = (
         (
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_fell_to_zero_is_a_warning_not_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_merely_fell_stays_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_metric_that_was_zero_and_is_not_reads_as_recovery",
@@ -2490,6 +2492,8 @@ MUTATIONS = (
         "nothing - a mechanism that reads green and measures nothing, which is the class "
         "this gate exists for",
         (
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
         ),
     ),
@@ -2708,6 +2712,7 @@ MUTATIONS = (
         "read as a smaller estate; nothing but its predecessor contradicts it",
         (
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
     ),
@@ -4546,6 +4551,220 @@ MUTATIONS = (
         ("test_answers.SplittingASession.test_the_question_hash_ignores_surrounding_whitespace",),
     ),
     Mutation(
+        "a squash-merged branch file reads as unlanded",
+        "export_git_history.py",
+        '            if file["path"] in landed_paths:',
+        "            if False:",
+        "a squash merge lands a branch's work without its commits, so the branch's files "
+        "read as proposals though their content is on the default branch",
+        ("test_export_git_history.ReachTest.test_a_squash_merged_branch_file_is_marked_landed",),
+    ),
+    Mutation(
+        "the empty blob matches unrelated work as landed",
+        "export_git_history.py",
+        "            if blob not in (_NULL_BLOB, EMPTY_BLOB):",
+        "            if blob != _NULL_BLOB:",
+        "every empty file shares one blob, so an empty file on any branch read as landed",
+        (
+            "test_export_git_history.ReachTest.test_an_empty_file_never_counts_as_landed",
+            "test_export_git_history.ReachTest.test_raw_writes_drops_deletions_and_the_empty_blob",
+        ),
+    ),
+    Mutation(
+        "reach is read from the remote default instead of the configured branch",
+        "export_git_history.py",
+        '        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):',
+        "        for ref in ():",
+        "a repository whose origin/HEAD names a ticket branch classed that branch's "
+        "proposals as landed and the real default's work as proposed",
+        (
+            "test_export_git_history.ExportRepositoryEndToEndTest.test_export_repository_produces_dataset_files",
+            "test_export_git_history.ReachTest.test_a_branch_that_exists_only_locally_still_resolves",
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+        ),
+    ),
+    Mutation(
+        "a release line reached only by a tag reads as a proposal",
+        "export_git_history.py",
+        "    elif sha in reach.tagged:",
+        "    elif False:",
+        "shipped work on a release line that never merged back was published as a proposed change",
+        (
+            "test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",
+            "test_export_git_history.ReachTest.test_with_nothing_to_resolve_untagged_commits_are_branch_and_tagged_ones_stay_tag",
+        ),
+    ),
+    Mutation(
+        "a branch commit is recorded without the branch it was found on",
+        "export_git_history.py",
+        '        record["ref"] = branch_name(source.strip())',
+        "        pass",
+        "an agent could not say which branch held a proposal",
+        (
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+            "test_export_git_history.ReachTest.test_squashed_branch_commits_are_branch_and_name_their_branch",
+        ),
+    ),
+    Mutation(
+        "a branch-only commit is linked as landed work",
+        "build_intent_index.py",
+        '            entry["tickets" if file_landed else "proposed"][ticket] += 1',
+        '            entry["tickets"][ticket] += 1',
+        "an operator found an unmerged branch's ticket stated as what a file implements",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+            "test_build_intent_index.ProposedLinksTest.test_proposed_values_are_counts_never_branch_names",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "a branch file whose content landed is published as proposed",
+        "build_intent_index.py",
+        '        file_landed = is_landed or changed.get("landed")',
+        "        file_landed = is_landed",
+        "squash-merged work, whose commits are on no default-branch path, read as a proposal",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "a ticket landed through a branch file is still flagged as only proposed",
+        "build_intent_index.py",
+        '            descriptions[ticket]["landed"] = True',
+        "            pass",
+        "a squash-merged ticket's record said it had never landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+        ),
+    ),
+    Mutation(
+        "a ticket landed on a file is also listed as proposed there",
+        "build_intent_index.py",
+        '        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
+        '        proposed = dict(data["proposed"])',
+        "one ticket on one file read as both implemented and only proposed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+        ),
+    ),
+    Mutation(
+        "history without reach reads as branch-only",
+        "build_intent_index.py",
+        '    return commit.get("reach", "default") != "branch"',
+        '    return commit.get("reach", "branch") != "branch"',
+        "a store that had not re-exported would have seen every link move to proposed",
+        (
+            "test_build_intent_index.ApplyCommitTest.test_body_contributes_at_most_three_tickets",
+            "test_build_intent_index.ApplyCommitTest.test_body_ticket_is_indexed_when_the_subject_names_none",
+            "test_build_intent_index.ApplyCommitTest.test_subject_ticket_is_not_diluted_by_body_tickets",
+            "test_build_intent_index.ApplyCommitTest.test_ticketed_commit_updates_files_and_descriptions",
+            "test_build_intent_index.AutomatedAuthorTest.test_human_noreply_github_address_is_kept",
+            "test_build_intent_index.AutomatedAuthorTest.test_human_prose_naming_a_bot_is_kept",
+            "test_build_intent_index.ConfigurableAutomationTest.test_emptying_the_list_leaves_only_the_bot_convention",
+            "test_build_intent_index.ConfigurableAutomationTest.test_narrowing_the_list_keeps_that_person",
+            "test_build_intent_index.ConfigurableAutomationTest.test_the_list_is_read_when_called_not_when_imported",
+            "test_build_intent_index.IndexRepositoryTest.test_end_to_end_over_ndjson",
+            "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
+            "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "proposed links are published although the store opted out",
+        "build_intent_index.py",
+        '    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"',
+        "    omit_proposed = False",
+        "KSB_PROPOSED_LINKS=omit had no effect",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_out_branch_only_material_entirely",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "a ticket that landed somewhere is flagged as only proposed",
+        "build_intent_index.py",
+        '    if not info["landed"]:',
+        "    if True:",
+        "a shipped ticket would read as never landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+        ),
+    ),
+    Mutation(
+        "the context stops explaining what a proposed link means",
+        "build_knowledge_context.py",
+        "A ticket listed under `proposed` in the intent index",
+        "A ticket in the intent index",
+        "agents read a branch-only link as an ordinary ticket link",
+        (
+            "test_build_knowledge_context.BuildOutputsTest.test_context_says_a_proposed_link_is_not_the_code",
+        ),
+    ),
+    Mutation(
+        "omit drops a branch commit whose files landed",
+        "build_intent_index.py",
+        '    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):',
+        "    if omit_proposed:",
+        "KSB_PROPOSED_LINKS=omit discarded squash-merged work along with the proposals",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still publishes the unlanded files of a branch commit",
+        "build_intent_index.py",
+        "        if omit_proposed and not file_landed:",
+        "        if False:",
+        "a store that opted out of proposals still got them from a commit that was partly landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still records the branch of a landed branch commit",
+        "build_intent_index.py",
+        '        elif commit.get("ref") and not omit_proposed:',
+        '        elif commit.get("ref"):',
+        "a store that opted out of proposals still published branch names",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+        ),
+    ),
+    Mutation(
+        "a branch name is stored unredacted",
+        "build_intent_index.py",
+        '            info["branches"].add(sensitive.redact(commit["ref"], counts))',
+        '            info["branches"].add(commit["ref"])',
+        "a branch named after a person was embedded in the explorer page",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_name_is_redacted_before_it_is_stored",
+        ),
+    ),
+    Mutation(
+        "configure leaves PROPOSED_LINKS as given",
+        "config.py",
+        '    "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",',
+        '    "PROPOSED_LINKS": lambda given: given,',
+        "configure(PROPOSED_LINKS='OMIT') behaved as write",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_the_setting_is_normalised_however_it_arrives",
+        ),
+    ),
+    Mutation(
         "source url: a clone URL on another host is linked as github.com",
         "source_urls.py",
         r"(?:git@|ssh://git@|https://|http://|git://)github\.com[:/]",
@@ -5010,6 +5229,16 @@ MUTATIONS = (
         (
             "test_source_urls.TheSkillCarriesTheCitationRule.test_the_question_skill_says_cite_the_url_and_never_the_corpus",
         ),
+    ),
+    Mutation(
+        "a node's ticket list takes in its file's proposed tickets",
+        "build_explorer.py",
+        '    return list(entry["tickets"].keys())[:MAX_TICKETS] if entry else []',
+        '    return list({**entry["tickets"], **entry.get("proposed", {})})[:MAX_TICKETS] if entry else []',
+        "#425: the explorer's per-node list is what the page calls the code's history, "
+        "and the graph is of the default branch - so a ticket found only on a branch "
+        "would be published as what changed this code, the reading the label exists to stop",
+        ("test_build_explorer.NodeTicketsTest.test_proposed_tickets_stay_off_a_code_node",),
     ),
 )
 
