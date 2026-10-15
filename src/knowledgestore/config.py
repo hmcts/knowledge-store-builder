@@ -252,6 +252,12 @@ AUTOMATION_IDENTITIES = [
     if name.strip()
 ]
 
+# Whether the intent index publishes links from commits found only on a branch,
+# as `proposed`. `omit` leaves branch-only work out of the index entirely, for a
+# store that wants none; history keeps it either way, so changing this needs no
+# re-export.
+PROPOSED_LINKS = os.environ.get("KSB_PROPOSED_LINKS", "write").strip().lower() or "write"
+
 
 def _browse_url(value: str) -> str:
     """A tracker browse URL a ticket id can be appended to.
