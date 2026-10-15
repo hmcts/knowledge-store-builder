@@ -113,7 +113,7 @@ sentence-level semantics.
 | Graph | `graphify-out/graph.json` | graphify, plus the `gherkin`, `packages` and `deployments` stages |
 | Community summaries | `knowledge/summaries/communities.json` | `summaries` + an LLM at build time |
 | Semantic token index | `knowledge/semantic/token-neighbours.json.gz` | `semantic` (local model) |
-| Intent index and ticket descriptions | `knowledge/intent/file-tickets.json.gz`, `knowledge/intent/ticket-descriptions.json.gz` | `intent` |
+| Intent index and ticket descriptions (`proposed` holds branch-only links) | `knowledge/intent/file-tickets.json.gz`, `knowledge/intent/ticket-descriptions.json.gz` | `intent` |
 | Ticket titles | `knowledge/intent/ticket-titles.json.gz` | `ticket-titles` (tracker CSV) |
 | Tracker detail | `knowledge/intent/ticket-tracker.json.gz` | `fetch-tickets` (opt-in, needs credentials) |
 | Topic briefs | `knowledge/topics/briefs.json`, `docs/topics/*.md` | `topics` + an LLM at build time |

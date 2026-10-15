@@ -9,7 +9,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import NamedTuple
+from typing import Iterable, Iterator
 
 
 FIELD_SEPARATOR = "\x1f"
@@ -138,7 +139,131 @@ def get_commit_files(repo_path: Path, commit_sha: str) -> list[dict[str, object]
     return parse_numstat(output)
 
 
-def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
+REACH_DEFAULT = "default"
+REACH_TAG = "tag"
+REACH_BRANCH = "branch"
+_REF_PREFIXES = ("refs/remotes/origin/", "refs/heads/")
+
+
+def branch_name(source: str) -> str:
+    """The branch a `--source` ref names, without its remote or local prefix."""
+    for prefix in _REF_PREFIXES:
+        if source.startswith(prefix):
+            return source[len(prefix) :]
+    return source
+
+
+def _verified(repo_path: Path, ref: str) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
+def resolve_default(repo_path: Path, default_branch: str | None) -> tuple[str | None, str | None]:
+    """The ref reach is measured against, and a warning when it is not the configured one.
+
+    The configured branch wins over `origin/HEAD`, which in some repositories names
+    a ticket or version branch. A stale configuration falls back to `origin/HEAD`
+    rather than classing every commit as a branch, and says so.
+    """
+    if default_branch:
+        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):
+            if _verified(repo_path, ref):
+                return ref, None
+    configured = default_branch or "(none configured)"
+    if _verified(repo_path, "refs/remotes/origin/HEAD"):
+        return "refs/remotes/origin/HEAD", (
+            f"{repo_path.name}: default branch {configured} not found; reach measured "
+            "against origin/HEAD"
+        )
+    return None, (
+        f"{repo_path.name}: default branch {configured} not found and no origin/HEAD; "
+        "every commit not reached by a tag is classed as branch"
+    )
+
+
+def reach_sets(repo_path: Path, ref: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """SHAs reachable from the default ref, and SHAs reachable only from tags."""
+    if ref is None:
+        tagged = run_git(repo_path, "rev-list", "--tags")
+        return frozenset(), frozenset(tagged.split())
+    landed = run_git(repo_path, "rev-list", ref)
+    tagged = run_git(repo_path, "rev-list", "--tags", "--not", ref)
+    return frozenset(landed.split()), frozenset(tagged.split())
+
+
+EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+_NULL_BLOB = "0" * 40
+
+
+def _raw_writes(output: str) -> Iterator[tuple[str, str, str]]:
+    """(commit, path, blob) for each file a commit wrote, from `--raw --format=%x1e%H`.
+
+    Deletions (the null blob) and the empty blob are dropped: a deleted file
+    wrote nothing, and every empty file shares one blob, so it matches unrelated
+    work.
+    """
+    for record in output.split(RECORD_SEPARATOR):
+        lines = record.strip("\n").splitlines()
+        if not lines:
+            continue
+        sha = lines[0].strip()
+        for line in lines[1:]:
+            if not line.startswith(":"):
+                continue
+            meta, _, path = line.partition("\t")
+            blob = meta.split()[3]
+            if blob not in (_NULL_BLOB, EMPTY_BLOB):
+                yield sha, path, blob
+
+
+_RAW = ("--raw", "--no-abbrev", "--no-renames", f"--format={RECORD_SEPARATOR}%H")
+
+
+def landed_blobs(
+    repo_path: Path, ref: str | None, paths: frozenset[str] | None = None
+) -> frozenset[tuple[str, str]]:
+    """Every (path, blob) written by a commit reachable from the default ref or a tag.
+
+    `paths` keeps only those paths: on a very large repository the unfiltered
+    set runs to hundreds of MB. Paths in rename or copy notation never match,
+    which leans towards proposed and is deliberate. The one case that leans
+    towards landed: a branch commit restoring an earlier default-branch version
+    of a file (a revert proposal) matches that old blob and is marked landed.
+
+    No paths means nothing can match, so the walk is skipped.
+    """
+    if paths is not None and not paths:
+        return frozenset()
+    revisions = [ref, "--tags"] if ref else ["--tags"]
+    output = run_git(repo_path, "log", *revisions, *_RAW)
+    return frozenset(
+        (path, blob) for _, path, blob in _raw_writes(output) if paths is None or path in paths
+    )
+
+
+def branch_blobs(repo_path: Path, ref: str | None) -> dict[str, list[tuple[str, str]]]:
+    """For each commit reachable only from a branch, the (path, blob) pairs it wrote.
+
+    Files of branch merge commits and paths in rename or copy notation are never
+    reported, so they are never marked landed: that leans towards proposed and
+    is deliberate.
+    """
+    excluded = [ref, "--tags"] if ref else ["--tags"]
+    output = run_git(
+        repo_path, "log", "--exclude=refs/remotes/*/HEAD", "--all", "--not", *excluded, *_RAW
+    )
+    written: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for sha, path, blob in _raw_writes(output):
+        written[sha].append((path, blob))
+    return written
+
+
+def _git_log_output(repo_path: Path) -> str:
+    """One `git log` pass over every ref, with the fields and numstat of each commit."""
     pretty_format = (
         FIELD_SEPARATOR.join(
             [
@@ -151,6 +276,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
                 "%cn",  # committer name
                 "%ce",  # committer email
                 "%D",  # refs
+                "%S",  # the ref --source reached the commit by
                 "%s",  # subject
                 "%b",  # body
             ]
@@ -167,7 +293,9 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
     output = run_git(
         repo_path,
         "log",
+        "--exclude=refs/remotes/*/HEAD",
         "--all",
+        "--source",
         "--topo-order",
         "--date-order",
         "--no-show-signature",
@@ -177,6 +305,95 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         "--diff-merges=cc",
         f"--pretty=format:{RECORD_SEPARATOR}{pretty_format}",
     )
+    return output
+
+
+class _Reach(NamedTuple):
+    """What decides each commit's reach, computed once per repository."""
+
+    landed: frozenset[str]
+    tagged: frozenset[str]
+    written: dict[str, list[tuple[str, str]]]
+    on_default: frozenset[tuple[str, str]]
+
+
+def _repository_reach(repo_path: Path, default_branch: str | None) -> _Reach:
+    ref, _ = resolve_default(repo_path, default_branch)
+    landed, tagged = reach_sets(repo_path, ref)
+    written = branch_blobs(repo_path, ref)
+    on_default = landed_blobs(
+        repo_path, ref, frozenset(path for pairs in written.values() for path, _ in pairs)
+    )
+    return _Reach(landed, tagged, written, on_default)
+
+
+def _classify_reach(
+    record: dict[str, object], files: list[dict[str, object]], source: str, reach: _Reach
+) -> None:
+    """Set `reach` on a commit record, and for a branch-only commit its `ref` and
+    which of its files carry content that landed on the default branch."""
+    sha = record["sha"]
+    if sha in reach.landed:
+        record["reach"] = REACH_DEFAULT
+    elif sha in reach.tagged:
+        record["reach"] = REACH_TAG
+    else:
+        record["reach"] = REACH_BRANCH
+        record["ref"] = branch_name(source.strip())
+        landed_paths = {
+            path
+            for path, blob in reach.written.get(str(sha), ())
+            if (path, blob) in reach.on_default
+        }
+        for file in files:
+            if file["path"] in landed_paths:
+                file["landed"] = True
+
+
+def _commit_record(fields: list[str], files: list[dict[str, object]]) -> dict[str, object]:
+    """A commit's record from its twelve log fields, before reach is classified."""
+    (
+        sha,
+        parents,
+        author_date,
+        committer_date,
+        author_name,
+        author_email,
+        committer_name,
+        committer_email,
+        refs,
+        _source,
+        subject,
+        body,
+    ) = fields
+    return {
+        "sha": sha,
+        "short_sha": sha[:12],
+        "parents": parents.split() if parents else [],
+        "author_date": author_date,
+        "committer_date": committer_date,
+        "author": {
+            "name": author_name,
+            "email": author_email,
+        },
+        "committer": {
+            "name": committer_name,
+            "email": committer_email,
+        },
+        "refs": [name.strip() for name in refs.split(",") if name.strip()],
+        "subject": subject.strip(),
+        "body": normalise_message(body),
+        "files": files,
+        "file_count": len(files),
+        "additions": sum(f["additions"] for f in files if isinstance(f["additions"], int)),
+        "deletions": sum(f["deletions"] for f in files if isinstance(f["deletions"], int)),
+        "is_merge": len(parents.split()) > 1,
+    }
+
+
+def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[dict[str, object]]:
+    output = _git_log_output(repo_path)
+    reach = _repository_reach(repo_path, default_branch)
 
     for raw_record in output.split(RECORD_SEPARATOR):
         # Strip only newlines: Python's str.strip() treats \x1f/\x1e as
@@ -190,60 +407,18 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         metadata, _, numstat = raw_record.partition(STAT_SEPARATOR)
         fields = metadata.split(FIELD_SEPARATOR)
 
-        if len(fields) != 11:
+        if len(fields) != 12:
             print(
                 f"Skipping malformed Git record in {repo_path}: "
-                f"expected 11 fields, found {len(fields)}",
+                f"expected 12 fields, found {len(fields)}",
                 file=sys.stderr,
             )
             continue
 
-        (
-            sha,
-            parents,
-            author_date,
-            committer_date,
-            author_name,
-            author_email,
-            committer_name,
-            committer_email,
-            refs,
-            subject,
-            body,
-        ) = fields
-
         files = parse_numstat(numstat)
-
-        total_additions = sum(
-            file["additions"] for file in files if isinstance(file["additions"], int)
-        )
-        total_deletions = sum(
-            file["deletions"] for file in files if isinstance(file["deletions"], int)
-        )
-
-        yield {
-            "sha": sha,
-            "short_sha": sha[:12],
-            "parents": parents.split() if parents else [],
-            "author_date": author_date,
-            "committer_date": committer_date,
-            "author": {
-                "name": author_name,
-                "email": author_email,
-            },
-            "committer": {
-                "name": committer_name,
-                "email": committer_email,
-            },
-            "refs": [ref.strip() for ref in refs.split(",") if ref.strip()],
-            "subject": subject.strip(),
-            "body": normalise_message(body),
-            "files": files,
-            "file_count": len(files),
-            "additions": total_additions,
-            "deletions": total_deletions,
-            "is_merge": len(parents.split()) > 1,
-        }
+        record = _commit_record(fields, files)
+        _classify_reach(record, files, fields[9], reach)
+        yield record
 
 
 def write_ndjson(
@@ -402,6 +577,18 @@ def write_index(
         assert isinstance(author, dict)
         authors[str(author["name"])] += 1
 
+    by_reach: dict[str, int] = defaultdict(int)
+    branches: set[str] = set()
+    for commit in commits:
+        by_reach[str(commit.get("reach", REACH_DEFAULT))] += 1
+        if commit.get("ref"):
+            branches.add(str(commit["ref"]))
+    scope = (
+        f"default branch `{repository.default_branch}`: {by_reach[REACH_DEFAULT]} commits; "
+        f"tags only: {by_reach[REACH_TAG]}; "
+        f"branches only: {by_reach[REACH_BRANCH]} across {len(branches)} branches"
+    )
+
     top_authors = sorted(
         authors.items(),
         key=lambda item: (-item[1], item[0].lower()),
@@ -415,7 +602,7 @@ def write_index(
         f"- **Current HEAD:** `{head_sha}`",
         f"- **Current HEAD date:** {head_date}",
         f"- **Total commits:** {len(commits)}",
-        "- **History scope:** all locally fetched branches and tags",
+        f"- **History scope:** {scope}",
         "",
         "## History files",
         "",
@@ -472,7 +659,10 @@ def export_repository(
     output_dir = output_root / repository.name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    commits = list(get_commits(repo_path))
+    _, warning = resolve_default(repo_path, repository.default_branch)
+    if warning:
+        print(f"  {warning}", file=sys.stderr)
+    commits = list(get_commits(repo_path, repository.default_branch))
 
     write_ndjson(
         output_dir / "commits.ndjson",

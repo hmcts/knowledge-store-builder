@@ -30,7 +30,14 @@ def make_descriptions():
 
 
 def make_files():
-    return defaultdict(lambda: {"tickets": defaultdict(int), "first": None, "last": None})
+    return defaultdict(
+        lambda: {
+            "tickets": defaultdict(int),
+            "proposed": defaultdict(int),
+            "first": None,
+            "last": None,
+        }
+    )
 
 
 HUMAN = {"name": "A Person", "email": "a.person@example.example"}
@@ -780,8 +787,10 @@ ARTEFACT = "ticket-descriptions.json.gz"
 TEXT_VIEWS = ("d", "s", "b")
 # A list of strings the record carries that is not one of the commit-text views,
 # so a fourth view arriving is not read as this one. `repos` is a list of
-# repository names; the table documents what the commits said.
-NOT_A_TEXT_VIEW = frozenset({"repos"})
+# repository names; the table documents what the commits said. `proposed` and
+# `branches` are rows of that table that say where the ticket landed, not what
+# its commits said, so neither is a view with a cap to compare.
+NOT_A_TEXT_VIEW = frozenset({"repos", "proposed", "branches"})
 
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
 FIELD_ROW = re.compile(r"^\s*\|\s*`([a-z]+)`\s*\|(.+?)\|\s*$", re.MULTILINE)
@@ -813,6 +822,8 @@ def documented_shape(text: str) -> dict:
     block = documented_block(text)
     caps: dict[str, int | None] = {}
     for field, description in FIELD_ROW.findall(block):
+        if field in NOT_A_TEXT_VIEW:
+            continue
         stated = STATED_CAP.search(description)
         word = stated.group(1) if stated else ""
         caps[field] = NUMBER_WORDS.get(word, int(word) if word.isdigit() else None)
@@ -1396,6 +1407,174 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
                 code = check_evidence.main([str(Path(tmp) / "absent.json.gz")])
         self.assertEqual(code, 0)
         self.assertIn("nothing to check", printed.getvalue())
+
+
+class ProposedLinksTest(SettingsIsolated):
+    """Branch-only work is a proposal, never an implementation."""
+
+    def _commit(self, subject, reach=None, ref=None, path="src/x.ts", landed=False):
+        entry = {"path": path}
+        if landed:
+            entry["landed"] = True
+        commit = {
+            "repository": "repo-a",
+            "subject": subject,
+            "is_merge": False,
+            "author_date": "2024-05-01T10:00:00+00:00",
+            "body": "",
+            "author": HUMAN,
+            "committer": HUMAN,
+            "files": [entry],
+        }
+        if reach:
+            commit["reach"] = reach
+        if ref:
+            commit["ref"] = ref
+        return commit
+
+    def _index(self, commits):
+        with tempfile.TemporaryDirectory() as tmp:
+            ndjson = Path(tmp) / "commits.ndjson"
+            ndjson.write_text("".join(json.dumps(c) + "\n" for c in commits), encoding="utf-8")
+            descriptions = intent.ticket_pool()
+            index, _ = intent.index_repository(ndjson, descriptions)
+        records = {t: intent._ticket_record(info) for t, info in descriptions.items()}
+        return index, records
+
+    def test_a_branch_only_link_is_proposed_not_a_ticket(self):
+        """Catches the defect reported by an operator: an unmerged branch's ticket
+        read as what the file implements."""
+        index, records = self._index(
+            [
+                self._commit("AA-1: base", "default"),
+                self._commit("AA-5: proposal", "branch", "team/proposal"),
+            ]
+        )
+        entry = index["src/x.ts"]
+        self.assertEqual(entry["tickets"], {"AA-1": 1})
+        self.assertEqual(entry["proposed"], {"AA-5": 1})
+        self.assertTrue(records["AA-5"]["proposed"])
+        self.assertEqual(records["AA-5"]["branches"], ["team/proposal"])
+        self.assertNotIn("proposed", records["AA-1"])
+        self.assertNotIn("branches", records["AA-1"])
+
+    def test_tag_reach_is_landed(self):
+        """Catches shipped work on a release line published as a proposal."""
+        index, records = self._index([self._commit("AA-4: release fix", "tag")])
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-4": 1})
+        self.assertNotIn("proposed", index["src/x.ts"])
+        self.assertNotIn("proposed", records["AA-4"])
+
+    def test_landed_wins_on_one_file_and_proposed_stays_on_another(self):
+        """Catches a ticket kept in both maps, and the flag set on a ticket that
+        landed somewhere else."""
+        index, records = self._index(
+            [
+                self._commit("AA-7: part one", "default", path="src/x.ts"),
+                self._commit("AA-7: part two", "branch", "team/p", path="src/x.ts"),
+                self._commit("AA-7: part three", "branch", "team/p", path="src/y.ts"),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-7": 1})
+        self.assertNotIn("proposed", index["src/x.ts"])
+        self.assertEqual(index["src/y.ts"]["proposed"], {"AA-7": 1})
+        self.assertEqual(index["src/y.ts"]["tickets"], {})
+        self.assertNotIn("proposed", records["AA-7"])
+        self.assertEqual(records["AA-7"]["branches"], ["team/p"])
+
+    def test_proposed_values_are_counts_never_branch_names(self):
+        """Catches branch names written per file, which would multiply the
+        index's size on an estate with long-lived branches."""
+        index, _ = self._index(
+            [
+                self._commit("AA-5: one", "branch", "team/a"),
+                self._commit("AA-5: two", "branch", "team/b"),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["proposed"], {"AA-5": 2})
+
+    def test_branches_are_sorted_and_capped(self):
+        """Catches an unsorted or unbounded branch list on a ticket record."""
+        commits = [
+            self._commit(f"AA-5: n{i}", "branch", f"team/{c}") for i, c in enumerate("gfedcba")
+        ]
+        _, records = self._index(commits)
+        self.assertEqual(
+            records["AA-5"]["branches"], ["team/a", "team/b", "team/c", "team/d", "team/e"]
+        )
+
+    def test_history_exported_before_reach_existed_is_all_landed(self):
+        """Catches a store that has not re-exported losing every link to `proposed`."""
+        index, records = self._index([self._commit("AA-1: base")])
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-1": 1})
+        self.assertNotIn("proposed", index["src/x.ts"])
+        self.assertNotIn("proposed", records["AA-1"])
+
+    def test_omit_leaves_out_branch_only_material_entirely(self):
+        """Catches KSB_PROPOSED_LINKS=omit ignored."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = self._index(
+            [
+                self._commit("AA-1: base", "default"),
+                self._commit("AA-5: proposal", "branch", "team/proposal"),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-1": 1})
+        self.assertNotIn("proposed", index["src/x.ts"])
+        self.assertNotIn("AA-5", records)
+
+    def test_a_branch_file_whose_content_landed_is_a_ticket(self):
+        """Catches squash-merged work published as a proposal."""
+        index, records = self._index(
+            [
+                self._commit("AA-9: squashed", "branch", "team/s", landed=True),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-9": 1})
+        self.assertNotIn("proposed", index["src/x.ts"])
+        self.assertNotIn("proposed", records["AA-9"])
+        self.assertEqual(records["AA-9"]["branches"], ["team/s"])
+
+    def test_omit_keeps_a_branch_file_whose_content_landed(self):
+        """Catches KSB_PROPOSED_LINKS=omit dropping squash-merged work, which lives
+        only on a branch commit but is on the default branch."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = self._index(
+            [
+                self._commit("AA-9: squashed", "branch", "team/s", landed=True),
+                self._commit("AA-9: unmerged", "branch", "team/s", path="src/y.ts"),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-9": 1})
+        self.assertNotIn("src/y.ts", index)
+        self.assertNotIn("proposed", records["AA-9"])
+        self.assertNotIn("branches", records["AA-9"])
+
+    def test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out(self):
+        """Catches `omit` publishing a proposal because it shares a commit with
+        squash-landed work."""
+        config.configure(PROPOSED_LINKS="omit")
+        commit = self._commit("AA-9: mixed", "branch", "team/s", landed=True)
+        commit["files"].append({"path": "src/y.ts"})
+        index, _ = self._index([commit])
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-9": 1})
+        self.assertNotIn("src/y.ts", index)
+
+    def test_the_setting_is_normalised_however_it_arrives(self):
+        """Catches `configure(PROPOSED_LINKS="OMIT")` silently behaving as write."""
+        config.configure(PROPOSED_LINKS=" OMIT ")
+        self.assertEqual(config.PROPOSED_LINKS, "omit")
+
+    def test_a_branch_name_is_redacted_before_it_is_stored(self):
+        """Catches a branch name carrying a person's identifier published in the
+        ticket record, which the explorer page embeds."""
+        _, records = self._index(
+            [self._commit("AA-5: p", "branch", "team/jane.doe@example.example-fix")]
+        )
+        stored = records["AA-5"]["branches"]
+        self.assertEqual(len(stored), 1)
+        self.assertNotIn("jane.doe@example.example", stored[0])
+        self.assertIn("withheld", stored[0])
 
 
 if __name__ == "__main__":
