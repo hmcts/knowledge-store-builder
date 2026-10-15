@@ -145,6 +145,18 @@ It combines:
 The checked-out code under `repositories/` is the source of truth for the
 current implementation.
 
+Cite a file as a link pinned to the commit the store was built from:
+
+    https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>
+
+Graph nodes carry this link in their `url` field: copy it. Where a node has
+none, build the same form from the repository's github.com clone URL in
+`config/repositories.txt` and its sha in `knowledge/provenance.json`, and
+leave off `#L<line>` when no line is known. If neither gives a link, cite the
+repository and its repo-relative path and say no link is available.
+Never cite `repositories/<repo>/...`: the corpus is not committed, so no
+reader can open that path.
+
 The files under `knowledge/git-history/` describe how the implementation
 changed over time. Historical commit messages may be incomplete, outdated
 or inaccurate and must not override evidence in the current source.

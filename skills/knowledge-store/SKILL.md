@@ -174,7 +174,14 @@ repository, degree ranking, community sizes.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
-- Cite `source_file` / `source_location` for specific claims.
+- Cite a node's `url` for specific claims. It links the file at the commit the
+  store was built from, `https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>`,
+  anchored at the line `source_location` gives. Where a node has none, build that
+  form from the repository's github.com clone URL in `config/repositories.txt` and
+  its sha in `knowledge/provenance.json`; if neither gives a link, cite the
+  repository and its repo-relative `source_file` and say no link is available.
+  **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
+  commits, so no reader can open it.
 - Answer only from what the graph returns. If the graph lacks it, say so.
 - Absence of evidence is itself a finding — report it as one, **and say what was
   searched**. A store is built from repositories discovered in one organisation on
@@ -216,7 +223,8 @@ Three conditions, and each has a different correct response:
 
 **A corpus grep is the weakest layer in the store, so name it.** It is raw text
 with no repository attribution and no relationship to any node — cite the file
-path, say the match came from a text search rather than from the graph, and apply
+as a link (drop the `repositories/<repo>/` prefix and build the form in Step 4),
+say the match came from a text search rather than from the graph, and apply
 the same rule as everywhere else: absence in the content set means absence from
 what this store holds, not from the world.
 

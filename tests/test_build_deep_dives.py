@@ -11,6 +11,9 @@ from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import io  # noqa: E402
 from knowledgestore import build_deep_dives as dives
+from knowledgestore.source_urls import SourceUrls
+
+DIVE_SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 def node(nid, repo, label, community, source_file=None, kind=None):
@@ -82,6 +85,30 @@ class ChurnTest(SettingsIsolated):
         self.assertEqual(got["files_with_history"], 3)
         self.assertEqual(got["top_files"][0]["path"], "src/CaseAggregate.java")
         self.assertEqual(got["top_files"][0]["tickets"], 3)
+
+    def test_each_top_file_links_to_the_file_at_the_build_commit(self):
+        """Breaks if a dossier's most-changed files reach its author as corpus paths
+        only: the author then cites `repositories/...`, which no reader can open. A
+        file-level link, with no line anchor - churn is about a file, not a line."""
+        urls = SourceUrls({"target": "git@github.com:example-org/target.git"}, {"target": DIVE_SHA})
+        got = dives.churn_section(INTENT_FILES, "target", urls)
+        self.assertEqual(
+            got["top_files"][0],
+            {
+                "path": "src/CaseAggregate.java",
+                "tickets": 3,
+                "first": "2020-01-01",
+                "last": "2026-07-01",
+                "url": "https://github.com/example-org/target/blob/"
+                "0123456789abcdef0123456789abcdef01234567/src/CaseAggregate.java",
+            },
+        )
+
+    def test_a_file_that_cannot_be_linked_carries_no_url(self):
+        """Breaks if a repository with no provenance sha gets a guessed link."""
+        urls = SourceUrls({"target": "git@github.com:example-org/target.git"}, {})
+        got = dives.churn_section(INTENT_FILES, "target", urls)
+        self.assertTrue(all("url" not in entry for entry in got["top_files"]))
 
 
 class InstabilityTest(SettingsIsolated):
@@ -170,8 +197,21 @@ class ExtractTest(SettingsIsolated):
                 json.dump({"target": INTENT_FILES}, f)
             with gzip.open(root / "desc.json.gz", "wt") as f:
                 json.dump(DESCRIPTIONS, f)
+            (root / "repositories.txt").write_text(
+                "target|git@github.com:example-org/target.git|main\n", encoding="utf-8"
+            )
+            config.configure(REPOSITORIES_CONFIG=root / "repositories.txt")
+            (root / "provenance.json").write_text(
+                json.dumps({"repositories": {"target": {"sha": DIVE_SHA, "branch": "main"}}})
+            )
             self.assertEqual(dives.extract("target"), 0)
             bundle = json.loads((root / "deep-dives" / "target-input.json").read_text())
+        # The extract reads the store's own repository list and provenance; a bundle
+        # built without them would hand the author bare paths again.
+        self.assertEqual(
+            bundle["churn"]["top_files"][0]["url"],
+            f"https://github.com/example-org/target/blob/{DIVE_SHA}/src/CaseAggregate.java",
+        )
         for key in (
             "repo",
             "provenance",

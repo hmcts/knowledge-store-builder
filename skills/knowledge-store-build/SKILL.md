@@ -728,7 +728,15 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
+knowledgestore source-urls     # a `url` on each node: its file at the build commit
 ```
+
+`source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
+they add are linked too. It reads `config/repositories.txt` and `knowledge/provenance.json`, and
+reports every node it could not link, by reason. **Read that report:** a store
+with no provenance links nothing, and says so there rather than by failing.
+Answers cite the `url`; without it they cite `repositories/<repo>/...`, which no
+reader can open.
 
 **Cluster after `gherkin`, not before**, so the Gherkin layer is clustered with
 everything else. Then record which partitioner did it, in the same environment
@@ -743,7 +751,7 @@ Stages are independent and idempotent — re-run one without repeating the rest.
 
 ### Run local extractors before the stages that rewrite the archive
 
-Three stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+Four stages rewrite the committed archive `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`:
 
 ```bash
@@ -751,10 +759,11 @@ mid-pipeline `graphify-out/graph.json`:
 knowledgestore gherkin
 knowledgestore packages
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+knowledgestore source-urls
 ```
 
 A store with extractors of its own has one ordering to keep: **run them before
-those three, or remove the archive between them.** Nodes written into
+those four, or remove the archive between them.** Nodes written into
 `graph.json` after the archive was last built leave the two files describing
 different graphs, and neither outcome from there is the one you want: either the
 stage refuses, in a message about communities and clustered nodes, or it

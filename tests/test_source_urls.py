@@ -1,0 +1,264 @@
+"""Links a reader can open, for the files a store cites.
+
+An answer citing `repositories/<repo>/<path>` names a file in the build corpus,
+which no store commits, so nobody reading the answer can follow it. The store
+already holds what a followable link needs - the repository's clone URL and the
+commit it was built from - and `source_urls` assembles it once, so an agent copies
+a link instead of building one and getting the sha or the path wrong.
+
+Expected values are written out by hand. Each test names the defect it catches.
+"""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from settings_isolation import SettingsIsolated
+from knowledgestore import config, provenance, source_urls
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+
+# The header and line format `knowledgestore discover` writes, verbatim.
+REPOSITORIES_TXT = """\
+# Generated from the example-org organisation repository listing
+# Filtered by config/repository-filters.txt (archived always excluded)
+# Format: name|clone-url|default-branch
+example-repo|git@github.com:example-org/example-repo.git|main
+renamed-locally|https://github.com/example-org/upstream-name.git|master
+hosted-elsewhere|git@gitlab.example.com:example-org/hosted-elsewhere.git|main
+never-synced|git@github.com:example-org/never-synced.git|main
+"""
+
+
+class ParsingTheCloneUrl(unittest.TestCase):
+    def test_every_github_clone_url_form_names_its_org_and_repository(self):
+        """Breaks if one clone URL form is not recognised. `discover` writes the scp
+        form, and an operator's hand-written list may use any of the others."""
+        for url in (
+            "git@github.com:example-org/example-repo.git",
+            "git@github.com:example-org/example-repo",
+            "https://github.com/example-org/example-repo.git",
+            "https://github.com/example-org/example-repo",
+            "https://github.com/example-org/example-repo/",
+            "ssh://git@github.com/example-org/example-repo.git",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(source_urls.github_origin(url), ("example-org", "example-repo"))
+
+    def test_a_clone_url_on_another_host_names_nothing(self):
+        """Breaks if the host is not checked: a GitLab or self-hosted repository
+        would get a github.com link to a repository that does not exist there."""
+        for url in (
+            "git@gitlab.example.com:example-org/example-repo.git",
+            "https://gitlab.example.com/example-org/example-repo.git",
+            "https://notgithub.com/example-org/example-repo.git",
+            "https://github.com.example.com/example-org/example-repo.git",
+            "https://github.com/example-org",
+            "",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(source_urls.github_origin(url))
+
+
+class TheLineAnchor(unittest.TestCase):
+    def test_every_location_shape_graphify_writes_reads_as_its_first_line(self):
+        """Breaks if a shape that names a line loses its anchor, or one that names
+        none gains one. The shapes are those a real merged graph carries, and the
+        readings match the consuming store that wrote this field first."""
+        cases = [
+            ("L26", "#L26"),
+            ("L12-L20", "#L12-L20"),
+            ("L9-12", "#L9-L12"),
+            ("L5-L5", "#L5"),
+            ("values.yaml:149", "#L149"),
+            ("values.yaml:L1", "#L1"),
+            ("payment.sql:1-19", "#L1-L19"),
+            ("lines 75, 109, 116", "#L75"),
+            ("line 4", "#L4"),
+            ("1-9", "#L1-L9"),
+            ("variables.tf", ""),
+            ("components.schemas.SearchResponse_status", ""),
+            ("apps[3]", ""),
+            ("", ""),
+            (None, ""),
+        ]
+        for location, anchor in cases:
+            with self.subTest(location=location):
+                self.assertEqual(source_urls.line_anchor(location), anchor)
+
+
+class TheRepositoryRelativePath(unittest.TestCase):
+    def test_both_build_routes_name_the_same_file(self):
+        """Breaks if the single-root route's prefix is kept: the link would point at
+        `repositories/<repo>/...` inside the repository, which does not exist."""
+        self.assertEqual(source_urls.repo_relative("example-repo", "src/app.py"), "src/app.py")
+        self.assertEqual(
+            source_urls.repo_relative("example-repo", "repositories/example-repo/src/app.py"),
+            "src/app.py",
+        )
+
+    def test_a_path_that_is_not_inside_its_own_repository_names_nothing(self):
+        """Breaks if a prefix naming a different repository is stripped anyway,
+        which would link one repository's file under another's name."""
+        for path in (
+            "repositories/other-repo/src/app.py",
+            "repositories/example-repo",
+            "repositories/example-repo/",
+            "/home/build/store/repositories/example-repo/src/app.py",
+            "../example-repo/src/app.py",
+            "src/../../escape.py",
+            "",
+        ):
+            with self.subTest(path=path):
+                self.assertIsNone(source_urls.repo_relative("example-repo", path))
+
+
+def _builder() -> source_urls.SourceUrls:
+    return source_urls.SourceUrls(
+        clone_urls={
+            "example-repo": "git@github.com:example-org/example-repo.git",
+            "renamed-locally": "https://github.com/example-org/upstream-name.git",
+            "hosted-elsewhere": "git@gitlab.example.com:example-org/hosted-elsewhere.git",
+            "never-synced": "git@github.com:example-org/never-synced.git",
+            "bad-sha": "git@github.com:example-org/bad-sha.git",
+        },
+        shas={
+            "example-repo": SHA,
+            "renamed-locally": OTHER_SHA,
+            "hosted-elsewhere": SHA,
+            "bad-sha": "",
+            "unconfigured": SHA,
+        },
+    )
+
+
+class BuildingTheUrl(unittest.TestCase):
+    def test_a_node_links_to_its_line_at_the_build_commit(self):
+        """Breaks if any part of the link drifts from the form consuming stores
+        already write: host, org, repo, `blob`, the provenance sha, path, anchor."""
+        got = _builder().resolve("example-repo", "src/app/case.py", "L12-L20")
+        self.assertEqual(
+            got.url,
+            "https://github.com/example-org/example-repo/blob/"
+            "0123456789abcdef0123456789abcdef01234567/src/app/case.py#L12-L20",
+        )
+        self.assertEqual(got.reason, "")
+
+    def test_both_path_forms_give_one_url(self):
+        """Breaks if the single-root route gets a different (wrong) link."""
+        urls = _builder()
+        self.assertEqual(
+            urls.resolve("example-repo", "repositories/example-repo/src/a.py").url,
+            urls.resolve("example-repo", "src/a.py").url,
+        )
+
+    def test_the_org_and_name_come_from_the_clone_url_not_the_local_name(self):
+        """Breaks if the local name stands in for the repository's name on the host:
+        a repository listed under another name would link to a 404."""
+        self.assertEqual(
+            _builder().file_url("renamed-locally", "README.md"),
+            f"https://github.com/example-org/upstream-name/blob/{OTHER_SHA}/README.md",
+        )
+
+    def test_a_file_url_never_carries_a_line_anchor(self):
+        """Breaks if a per-file artefact is given a line it never named."""
+        self.assertEqual(
+            _builder().file_url("example-repo", "src/a.py"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/src/a.py",
+        )
+
+    def test_a_character_that_would_change_the_url_is_escaped(self):
+        """Breaks if a `#` or a space in a path is written raw: the `#` would cut the
+        path into a fragment and link a different file, which is a wrong URL rather
+        than a missing one."""
+        self.assertEqual(
+            _builder().file_url("example-repo", "docs/release notes#2.md"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/docs/release%20notes%232.md",
+        )
+
+    def test_the_escaping_matches_the_links_stores_already_publish(self):
+        """Breaks if a wider safe set is adopted. `(` is legal raw in a URL path, but
+        the consuming store's committed links encode it, and one file spelled two
+        ways makes the same citation compare unequal across the two writers."""
+        self.assertEqual(
+            _builder().file_url("example-repo", "sql/Static (Add Keys).sql"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/sql/Static%20%28Add%20Keys%29.sql",
+        )
+
+    def test_no_url_is_written_where_one_cannot_be_right(self):
+        """Breaks if any missing input is papered over - a guessed host, an empty sha,
+        or a repository the store never configured. Each says why."""
+        urls = _builder()
+        cases = {
+            ("hosted-elsewhere", "src/a.py"): source_urls.NOT_GITHUB,
+            ("never-synced", "src/a.py"): source_urls.NO_SHA,
+            ("bad-sha", "src/a.py"): source_urls.NO_SHA,
+            ("unconfigured", "src/a.py"): source_urls.NOT_CONFIGURED,
+            ("example-repo", "repositories/other-repo/a.py"): source_urls.OUTSIDE_REPOSITORY,
+        }
+        for (repo, path), reason in cases.items():
+            with self.subTest(repo=repo, path=path):
+                got = urls.resolve(repo, path, "L3")
+                self.assertIsNone(got.url)
+                self.assertEqual(got.reason, reason)
+
+
+class ReadingTheStore(SettingsIsolated):
+    def test_the_store_files_are_read_in_the_formats_their_stages_write(self):
+        """Breaks if either input is read from the wrong place or in the wrong shape:
+        `repositories.txt` as `discover` writes it and provenance as `sync` does."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config.configure(root=str(root))
+            config.REPOSITORIES_CONFIG.parent.mkdir(parents=True)
+            config.REPOSITORIES_CONFIG.write_text(REPOSITORIES_TXT, encoding="utf-8")
+            provenance.write(
+                {
+                    "example-repo": {"sha": SHA, "branch": "main", "committed": "2026-01-02"},
+                    "renamed-locally": {"sha": OTHER_SHA, "branch": "master", "committed": ""},
+                },
+                external={"never-synced": {"sha": SHA, "branch": "main", "committed": ""}},
+            )
+            urls = source_urls.SourceUrls.from_store()
+        self.assertEqual(
+            urls.file_url("example-repo", "a.py"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a.py",
+        )
+        self.assertEqual(
+            urls.file_url("renamed-locally", "a.py"),
+            f"https://github.com/example-org/upstream-name/blob/{OTHER_SHA}/a.py",
+        )
+        # A fetch-only repository's sha is not the estate's: it is recorded apart
+        # from `repositories` for that reason, and a node is never one of its files.
+        self.assertEqual(urls.resolve("never-synced", "a.py").reason, source_urls.NO_SHA)
+
+    def test_a_store_with_neither_file_links_nothing_and_says_why(self):
+        """Breaks if a store without its config or provenance raises instead of
+        reporting, or invents a link from nothing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config.configure(root=str(tmp))
+            urls = source_urls.SourceUrls.from_store()
+        self.assertEqual(urls.resolve("example-repo", "a.py").reason, source_urls.NOT_CONFIGURED)
+
+
+class TheSkillCarriesTheCitationRule(unittest.TestCase):
+    """CLAUDE.md 3: an agent reads the skill it was invoked with, so a rule that
+    lives only in the context file or the docs binds nobody answering a question."""
+
+    SKILL = Path(__file__).resolve().parent.parent / "skills/knowledge-store/SKILL.md"
+
+    def test_the_question_skill_says_cite_the_url_and_never_the_corpus(self):
+        """Breaks if the skill goes back to telling agents to cite `source_file`
+        alone, which in a single-root store is a `repositories/...` corpus path."""
+        text = " ".join(self.SKILL.read_text(encoding="utf-8").split())
+        self.assertIn("Cite a node's `url` for specific claims", text)
+        self.assertIn("https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>", text)
+        self.assertIn("**Never cite `repositories/<repo>/...`**", text)
+        self.assertNotIn("Cite `source_file` / `source_location` for specific claims", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

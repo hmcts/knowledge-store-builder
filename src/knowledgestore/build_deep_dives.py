@@ -21,6 +21,7 @@ from itertools import combinations
 
 from . import config, graph_files, io, kinds, provenance
 from .build_topic_briefs import markdown_to_html
+from .source_urls import SourceUrls
 
 
 MIN_DIVE_LENGTH = 800
@@ -46,20 +47,38 @@ def scale_section(graph: dict, repo: str, labels: dict, summaries: dict) -> dict
     }
 
 
-def churn_section(files: dict) -> dict:
+def churn_section(files: dict, repo: str = "", urls: SourceUrls | None = None) -> dict:
+    """The most-changed files, each with a link to it at the build commit where one
+    can be built. The link is what a dossier's author cites: the path alone names a
+    file in the uncommitted corpus. File-level, with no line anchor, because churn
+    is a property of the file."""
     ranked = sorted(files.items(), key=lambda kv: (-len(kv[1].get("tickets", {})), kv[0]))
-    return {
-        "files_with_history": len(files),
-        "top_files": [
-            {
-                "path": path,
-                "tickets": len(info.get("tickets", {})),
-                "first": info.get("first", ""),
-                "last": info.get("last", ""),
-            }
-            for path, info in ranked[: config.DIVE_TOP_FILES]
-        ],
-    }
+    top = []
+    for path, info in ranked[: config.DIVE_TOP_FILES]:
+        entry = {
+            "path": path,
+            "tickets": len(info.get("tickets", {})),
+            "first": info.get("first", ""),
+            "last": info.get("last", ""),
+        }
+        url = urls.file_url(repo, path) if urls else None
+        if url:
+            entry["url"] = url
+        top.append(entry)
+    return {"files_with_history": len(files), "top_files": top}
+
+
+def _source_urls() -> SourceUrls | None:
+    """The store's link builder, or None when its repository list cannot be read.
+
+    A dossier is still worth extracting without links, so an unreadable list is
+    reported and the bundle carries paths alone - never a guessed link.
+    """
+    try:
+        return SourceUrls.from_store()
+    except ValueError as error:
+        print(f"No file links in this bundle: {error}", file=sys.stderr)
+        return None
 
 
 def repo_tickets(files: dict) -> set[str]:
@@ -218,7 +237,7 @@ def extract(repo: str) -> int:
         "repo": repo,
         "provenance": provenance.read().get(repo),
         "scale": scale_section(graph, repo, labels, summaries),
-        "churn": churn_section(files),
+        "churn": churn_section(files, repo, _source_urls()),
         "instability": instability_section(tickets, descriptions),
         "timeline": timeline_section(tickets, descriptions),
         "cochange": cochange_section(files),
