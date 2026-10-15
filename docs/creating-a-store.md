@@ -619,11 +619,27 @@ arguments are ignored, so `setValue(null)` resolves where the graph holds
 to resolve. A path resolves when its directories are the trailing directories of a
 real source file. An identifier that does not resolve is printed with the nearest
 real one, and the stage exits 1. It exits 2, having asserted nothing, when there is
-no graph or no answer to read.
+no graph or no answer to read, or when `config/repositories.txt` cannot be parsed.
+
+A source link, `https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`, is
+checked wherever the answer writes it: a markdown link, a bare link or a backticked
+one. Run the stage from the store root, because it reads the repository list and
+`knowledge/provenance.json` there. The link fails, and the report says which claim
+is wrong, when:
+
+- its path is not a `source_file` of that repository: `unknown file`, with the
+  nearest file the repository does hold;
+- its sha is not the commit provenance records for that repository, including a
+  branch name or an abbreviated sha: `different sha`, naming the commit the store
+  read.
+
+The line anchor is not checked. Any other URL is skipped.
 
 A `table.column` citation is a third result. The graph holds code, so a database
-column never resolves and never should. These are counted and named, and do not
-change the exit code; read the list and decide. Generated evidence is never read,
+column never resolves and never should. A source link to a repository the store
+does not configure, such as a third-party library, is treated the same way. These
+are counted and named, and do not change the exit code; read the list and decide.
+Generated evidence is never read,
 and fenced code blocks are skipped. A pass shows the cited thing exists, not that
 the claim about it is true.
 

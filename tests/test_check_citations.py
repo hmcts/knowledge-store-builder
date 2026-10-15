@@ -18,7 +18,14 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 
-from knowledgestore import build_community_summaries, check_citations, cli, config
+from knowledgestore import (
+    build_community_summaries,
+    check_citations,
+    cli,
+    config,
+    provenance,
+    source_urls,
+)
 
 FIELD_HOLDER = "src/main/java/uk/example/form/FieldHolder.java"
 REPOSITORY = "src/main/java/uk/example/repo/CaseRepository.java"
@@ -206,3 +213,209 @@ class TheStage(Bed):
         self.assertEqual(code, 1)
         self.assertIn("other.md", err)
         self.assertNotIn("case-lookup.md", err)
+
+
+# A store whose answers cite source links. The graph, repository list and
+# provenance are in the shapes their stages write: nodes carry `repo`,
+# `source_file`, `source_location` and the `url` `source-urls` gave them; the
+# repository list is `discover`'s `name|clone-url|branch`; provenance is `sync`'s.
+BUILD_SHA = "0123456789abcdef0123456789abcdef01234567"
+RENAMED_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+STALE_SHA = "1111111111111111111111111111111111111111"
+CASE_SERVICE = "src/main/java/uk/example/CaseService.java"
+ONLY_ELSEWHERE = "src/main/java/uk/example/OnlyElsewhere.java"
+BASE = f"https://github.com/example-org/example-repo/blob/{BUILD_SHA}/"
+
+
+def _node(node_id: str, label: str, repo: str, source_file: str, url: str = "") -> dict:
+    node = {
+        "id": node_id,
+        "label": label,
+        "repo": repo,
+        "source_file": source_file,
+        "source_location": "L12",
+    }
+    if url:
+        node["url"] = url
+    return node
+
+
+LINKED_GRAPH = {
+    "nodes": [
+        _node("a", "CaseService", "example-repo", CASE_SERVICE, BASE + CASE_SERVICE + "#L12"),
+        _node("b", ".findCase()", "example-repo", CASE_SERVICE, BASE + CASE_SERVICE + "#L12"),
+        _node("c", "OnlyElsewhere", "other-repo", ONLY_ELSEWHERE),
+        # The single-root route: every file of the repository carries its own prefix.
+        _node("d", "values.yaml", "flat-repo", "repositories/flat-repo/charts/values.yaml"),
+        _node("e", "README.md", "renamed-locally", "README.md"),
+        {"id": "f", "label": "uk.example"},
+    ],
+    "links": [],
+}
+
+REPOSITORY_LIST = """\
+# Format: name|clone-url|default-branch
+example-repo|git@github.com:example-org/example-repo.git|main
+other-repo|git@github.com:example-org/other-repo.git|main
+flat-repo|git@github.com:example-org/flat-repo.git|main
+renamed-locally|https://github.com/example-org/upstream-name.git|master
+"""
+
+
+class SourceLinkBed(Bed):
+    def setUp(self) -> None:
+        super().setUp()
+        self.graph.write_text(json.dumps(LINKED_GRAPH))
+        config.REPOSITORIES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        config.REPOSITORIES_CONFIG.write_text(REPOSITORY_LIST, encoding="utf-8")
+        provenance.write(
+            {
+                name: {"sha": sha, "branch": "main", "committed": "2026-01-02T00:00:00Z"}
+                for name, sha in (
+                    ("example-repo", BUILD_SHA),
+                    ("other-repo", BUILD_SHA),
+                    ("flat-repo", BUILD_SHA),
+                    ("renamed-locally", RENAMED_SHA),
+                )
+            }
+        )
+
+    def vocabulary(self) -> check_citations.Vocabulary:
+        return check_citations.load_vocabulary(self.graph, source_urls.SourceUrls.from_store())
+
+
+class VerdictsOnSourceLinks(SourceLinkBed):
+    def setUp(self) -> None:
+        super().setUp()
+        self.loaded = self.vocabulary()
+
+    def verdict(self, span: str) -> check_citations.Verdict:
+        return check_citations.resolve(span, self.loaded)
+
+    def test_a_link_to_a_real_file_at_the_build_commit_resolves(self):
+        """Breaks if a correct link fails: the path compared still encoded, the
+        single-root prefix left on the graph's side, or the repository looked up by
+        its local name rather than its name on the host."""
+        for span in (
+            BASE + CASE_SERVICE + "#L12",
+            BASE + CASE_SERVICE,
+            f"https://github.com/example-org/flat-repo/blob/{BUILD_SHA}/charts/values.yaml#L3",
+            f"https://github.com/example-org/upstream-name/blob/{RENAMED_SHA}/README.md",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(self.verdict(span).kind, "resolved")
+
+    def test_a_link_at_another_commit_fails_and_says_it_is_the_sha(self):
+        """Breaks if the sha is not checked: a link pinned to a commit the store never
+        read - or to a branch, which drifts - would pass as a citation of this build."""
+        for ref in (STALE_SHA, "main", RENAMED_SHA):
+            with self.subTest(ref=ref):
+                got = self.verdict(
+                    f"https://github.com/example-org/example-repo/blob/{ref}/{CASE_SERVICE}#L12"
+                )
+                self.assertEqual(got.kind, "unresolved")
+                self.assertEqual(
+                    got.reason, f"{check_citations.DIFFERENT_SHA}: the store read {BUILD_SHA}"
+                )
+
+    def test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so(self):
+        """Breaks if the path is not resolved, or is resolved across the estate: a file
+        that exists only in another repository is still a link to nothing."""
+        for path in (
+            "src/main/java/uk/example/CaseServise.java",
+            ONLY_ELSEWHERE,
+            "CaseService.java",
+        ):
+            with self.subTest(path=path):
+                got = self.verdict(BASE + path + "#L1")
+                self.assertEqual(got.kind, "unresolved")
+                self.assertEqual(got.reason, f"{check_citations.UNKNOWN_FILE} in example-repo")
+        self.assertEqual(
+            self.verdict(BASE + "src/main/java/uk/example/CaseServise.java").nearest, CASE_SERVICE
+        )
+
+    def test_a_link_wrong_in_both_ways_names_both(self):
+        """Breaks if one reason hides the other, so fixing the one named still fails."""
+        got = self.verdict(f"https://github.com/example-org/example-repo/blob/{STALE_SHA}/nope.py")
+        self.assertEqual(
+            got.reason,
+            f"{check_citations.UNKNOWN_FILE} in example-repo; "
+            f"{check_citations.DIFFERENT_SHA}: the store read {BUILD_SHA}",
+        )
+
+    def test_a_link_to_a_repository_the_store_does_not_build_is_neither_passed_nor_failed(self):
+        """Breaks if a link outside the estate fails the gate (a store citing a
+        third-party library could never go green) or passes it silently."""
+        span = f"https://github.com/another-org/library/blob/{BUILD_SHA}/src/Lib.java"
+        self.assertEqual(self.verdict(span).kind, "unchecked")
+
+    def test_without_the_store_files_a_link_is_unchecked_not_passed(self):
+        """Breaks if a vocabulary loaded with no repository list or provenance lets a
+        link through as resolved: nothing was read that could resolve it."""
+        bare = check_citations.load_vocabulary(self.graph)
+        self.assertEqual(check_citations.resolve(BASE + CASE_SERVICE, bare).kind, "unchecked")
+
+    def test_any_other_url_is_skipped_as_before(self):
+        """Breaks if the parser's scope widens to links the graph cannot answer for."""
+        for span in (
+            "https://example.com/docs/a.html",
+            "https://github.com/example-org/example-repo/tree/main/src",
+            "https://github.com/example-org/example-repo/pull/12",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(self.verdict(span).kind, "skipped")
+
+
+class TheLinksOfAnAnswer(unittest.TestCase):
+    def test_a_link_is_a_citation_however_it_is_written(self):
+        """Breaks if only backticked spans are read: answers cite a link as a
+        markdown link or bare, and a made-up one there would never be looked at."""
+        good = BASE + CASE_SERVICE + "#L12"
+        text = (
+            f"See [CaseService]({good}) and {BASE}a.py. "
+            f"Also <{BASE}b.py>, `{BASE}c.py` and https://example.com/x.\n"
+            f"```\n{BASE}fenced.py\n```\n"
+        )
+        self.assertEqual(
+            check_citations.citations(text),
+            [good, BASE + "a.py", BASE + "b.py", BASE + "c.py"],
+        )
+
+
+class TheStageOnSourceLinks(SourceLinkBed):
+    def test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is(self):
+        """Breaks if a made-up link passes the publish gate, or the report does not say
+        whether the file or the commit is wrong, which decides what to fix."""
+        (self.answers / "case-lookup.md").write_text(
+            f"Found in [CaseService]({BASE}{CASE_SERVICE}#L12), which "
+            f"`CaseService` defines.\n"
+            f"Pinned wrong: https://github.com/example-org/example-repo/blob/{STALE_SHA}/"
+            f"{CASE_SERVICE}#L12\n"
+            f"Invented: {BASE}src/Invented.java#L4\n"
+            f"Elsewhere: https://github.com/another-org/library/blob/main/Lib.java\n"
+        )
+        code, out, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 1)
+        self.assertIn("4 citations checked, 2 resolve, 2 do not", out)
+        self.assertIn("1 source links to repositories this store does not build", out)
+        self.assertIn("https://github.com/another-org/library/blob/main/Lib.java", out)
+        self.assertIn(
+            f"/{STALE_SHA}/{CASE_SERVICE}#L12`  {check_citations.DIFFERENT_SHA}: "
+            f"the store read {BUILD_SHA}",
+            err,
+        )
+        self.assertIn(f"src/Invented.java#L4`  {check_citations.UNKNOWN_FILE} in example-repo", err)
+
+    def test_a_clean_answer_citing_links_passes(self):
+        (self.answers / "case-lookup.md").write_text(f"See {BASE}{CASE_SERVICE}#L12.\n")
+        code, out, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("1 citations checked, 1 resolve", out)
+
+    def test_an_unreadable_repository_list_stops_the_gate(self):
+        """Breaks if a malformed list is read as an empty estate, which turns every
+        link into an unchecked one and lets the gate pass over them."""
+        config.REPOSITORIES_CONFIG.write_text("example-repo|only-two-fields\n", encoding="utf-8")
+        code, _, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 2)
+        self.assertIn("repositories.txt", err)
