@@ -4724,6 +4724,7 @@ MUTATIONS = (
         "a link pinned to a commit the store never read, or to a branch, passes the "
         "publish gate as a citation of this build and drifts off the line it cites",
         (
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_wrong_sha_still_fails",
             "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
             "test_check_citations.VerdictsOnSourceLinks.test_a_link_at_another_commit_fails_and_says_it_is_the_sha",
             "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
@@ -4752,6 +4753,8 @@ MUTATIONS = (
         "answers cite a link as a markdown link or bare, so a made-up one there is never "
         "looked at and the gate's silence is about text it did not read",
         (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
             "test_check_citations.TheLinksOfAnAnswer.test_a_link_is_a_citation_however_it_is_written",
             "test_check_citations.TheStageOnSourceLinks.test_a_clean_answer_citing_links_passes",
             "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
@@ -4823,6 +4826,7 @@ MUTATIONS = (
         "an operator told only that a link does not resolve cannot tell whether to fix the "
         "path or re-pin the commit",
         (
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
             "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
         ),
     ),
