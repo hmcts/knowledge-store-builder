@@ -4459,6 +4459,15 @@ MUTATIONS = (
         ("test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",),
     ),
     Mutation(
+        "answers: --out written through an upward component",
+        "answers.py",
+        "            io.checked_write_target(arguments.out)",
+        "            pass",
+        "--out is a path from the command line; without the write policy's check a "
+        "`..` in it writes wherever whatever built the arguments chose",
+        ("test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",),
+    ),
+    Mutation(
         "answers: a malformed record file raises",
         "answers.py",
         "    except (KeyError, TypeError, AttributeError) as error:",
