@@ -820,8 +820,10 @@ MUTATIONS = (
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
         (
+            "test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",
             "test_answers.CommandLine.test_out_writes_one_record_per_answer",
             "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",
             "test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",
             "test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
