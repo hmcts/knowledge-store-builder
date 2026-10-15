@@ -4870,6 +4870,7 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing",
             "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
         ),
     ),

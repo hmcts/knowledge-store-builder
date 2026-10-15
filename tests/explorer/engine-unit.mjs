@@ -611,7 +611,7 @@ const QUOTED = [
   ['~._-', '~._-'],
   ['a+b=c&d?e', 'a%2Bb%3Dc%26d%3Fe'],
   ['<b>"x"', '%3Cb%3E%22x%22'],
-  ['back\\slash', 'back%5Cslash'],
+  [String.raw`back\slash`, 'back%5Cslash'],
   ['@:;,$', '%40%3A%3B%2C%24'],
   ['☃', '%E2%98%83'],
   ['😀.ts', '%F0%9F%98%80.ts'],

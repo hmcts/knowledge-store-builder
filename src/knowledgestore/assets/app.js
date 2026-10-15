@@ -295,7 +295,7 @@ function repoRelative(repo, path, singleRoot) {
 function quotePath(path) {
   try {
     return path.split('/').map((segment) => encodeURIComponent(segment).replace(
-      /[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase()
+      /[!'()*]/g, (c) => '%' + (c.codePointAt(0) ?? 0).toString(16).toUpperCase()
     )).join('/');
   } catch {
     return null;
