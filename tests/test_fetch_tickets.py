@@ -451,6 +451,7 @@ class RefreshTest(FetchTicketsTestCase):
             "a resolved record is final, so it carries no checked date",
         )
         self.assertIn("refreshed 1 of 1 due, with 0 left for later runs, in 1 requests", output)
+        self.assertIn("Tracker: 0 fetched, 1 refreshed,", output, "a refresh is not a new fetch")
 
     def test_an_open_ticket_is_not_fetched_again_inside_the_interval(self):
         """Breaks if the minimum age is ignored, so every run re-requests every
@@ -541,8 +542,64 @@ class RefreshTest(FetchTicketsTestCase):
                 after = self._cache()["AAA-1"]
             self.assertEqual(code, 0)
             self.assertEqual(later.keys_requested, ["AAA-1"])
-            self.assertEqual(after, before)
+            self.assertEqual(
+                after, {**before, "checked": A_WEEK_LATER}, "content kept, only re-dated"
+            )
             self.assertIn("1 kept their earlier record", output)
+
+
+class RefreshKeepsTest(FetchTicketsTestCase):
+    def test_a_kept_refresh_waits_its_interval_and_does_not_starve_the_queue(self):
+        """Breaks if a refresh the tracker did not answer leaves the record's
+        date alone. It is then still due, still oldest, and heads the queue on
+        every run: two unreadable tickets and a cap of two would take every
+        refresh for ever, and the readable one would never be refreshed. Three
+        daily runs: the unreadable pair once, the readable one next, then
+        nothing until the interval passes."""
+        seeded = {
+            "AAA-1": open_record("unreadable one", "2025-11-01"),
+            "AAA-2": open_record("unreadable two", "2025-11-02"),
+            "AAA-3": open_record("readable", "2025-11-03"),
+        }
+        asked = []
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, list(seeded), TRACKER_REFRESH_MAX=2)
+            pio.write_gzip_json(config.TICKET_TRACKER_PATH, seeded)
+            for today in ("2026-01-02", "2026-01-03", "2026-01-04"):
+                tracker = FakeTracker({"AAA-3": open_fields("readable", status="In Review")})
+                self._run_stage(tracker, today=today)
+                asked.append(tracker.keys_requested)
+            cache = self._cache()
+        self.assertEqual(asked, [["AAA-1", "AAA-2"], ["AAA-3"], []])
+        self.assertEqual(cache["AAA-3"]["status"], "In Review")
+        self.assertEqual(
+            cache["AAA-1"], {**seeded["AAA-1"], "checked": "2026-01-02"}, "content untouched"
+        )
+
+    def test_a_refresh_never_leaves_a_record_holding_less(self):
+        """Breaks if a refresh replaces the record wholesale. A refresh with
+        descriptions turned off would erase every stored description, and a
+        transport returning only a recent page of comments would cut a thread
+        another fetch stored whole. The refreshed fields still win."""
+        stored = {
+            "checked": "2025-12-01",
+            "comments": ["first", "second", "third"],
+            "description": "What the ticket was for",
+            "status": "Open",
+            "summary": "Old title",
+        }
+        later = open_fields("New title", status="In Review")
+        later["comment"] = {"comments": [{"body": "second"}, {"body": "third"}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"], TRACKER_FETCH_COMMENTS=True)
+            pio.write_gzip_json(config.TICKET_TRACKER_PATH, {"AAA-1": stored})
+            self._run_stage(FakeTracker({"AAA-1": later}))
+            record = self._cache()["AAA-1"]
+        self.assertEqual(record["summary"], "New title")
+        self.assertEqual(record["status"], "In Review")
+        self.assertEqual(record["description"], "What the ticket was for")
+        self.assertEqual(record["comments"], ["first", "second", "third"])
+        self.assertEqual(record["checked"], TODAY)
 
 
 def open_record(summary: str, checked: str | None = None) -> dict:
@@ -1179,7 +1236,7 @@ class FakeTwg:
     def __call__(self, arguments: list[str]) -> str:
         self.calls.append(list(arguments))
         if arguments[2] == "get":
-            return self.gets.get(arguments[3], twg_fixture("get-missing.json"))
+            return self.gets.get(arguments[-1], twg_fixture("get-missing.json"))
         return self.bulk
 
 
@@ -1193,10 +1250,15 @@ class TwgTransportTestCase(FetchTicketsTestCase):
         }
         return self._store(tmp, ["ABC-1", "ABC-2", "ABC-3"], **{**defaults, **settings})
 
-    def _run_twg(self, runner):
+    def _run_twg(self, runner, sleeps: list | None = None, today: str = TODAY):
         out = StringIO()
         with redirect_stdout(out), redirect_stderr(out):
-            code = fetch_tickets.main([], runner=runner, sleep=lambda _s: None, today=TODAY)
+            code = fetch_tickets.main(
+                [],
+                runner=runner,
+                sleep=(sleeps.append if sleeps is not None else lambda _s: None),
+                today=today,
+            )
         return code, out.getvalue()
 
 
@@ -1219,15 +1281,16 @@ class TwgRequestTest(TwgTransportTestCase):
                 "jira",
                 "workitem",
                 "bulk-get",
-                "ABC-1",
-                "ABC-2",
-                "ABC-3",
                 "--fields",
                 "summary,issuetype,status,resolution,created,resolutiondate,parent",
                 "-o",
                 "json",
                 "--output-summary",
                 "none",
+                "--",
+                "ABC-1",
+                "ABC-2",
+                "ABC-3",
             ],
         )
         self.assertEqual(
@@ -1286,7 +1349,7 @@ class TwgRefreshTest(TwgTransportTestCase):
             cache = self._cache()
         self.assertEqual(len(twg.calls), 1)
         self.assertEqual(
-            twg.calls[0][:6], ["jira", "workitem", "bulk-get", "ABC-1", "ABC-2", "--fields"]
+            twg.calls[0][2:4] + twg.calls[0][-3:], ["bulk-get", "--fields", "--", "ABC-1", "ABC-2"]
         )
         self.assertEqual(cache["ABC-1"]["summary"], "Sort the widgets")
         self.assertEqual(
@@ -1306,7 +1369,7 @@ class TwgBodyTest(TwgTransportTestCase):
             twg = FakeTwg(twg_fixture("bulk-get.json"))
             self._run_twg(twg)
             record = self._cache()["ABC-1"]
-        self.assertEqual(twg.calls[0][7], NARRATIVE)
+        self.assertEqual(twg.calls[0][4], NARRATIVE)
         self.assertEqual(
             record["description"],
             "Background\n"
@@ -1419,7 +1482,7 @@ class TwgExitCodeTest(TwgTransportTestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(cache["ABC-1"]["summary"], "Sort the widgets")
         self.assertEqual(cache["ABC-3"], {"absent": True, "checked": TODAY})
-        self.assertIn("2 fetched, 1 absent", output)
+        self.assertIn("2 fetched, 0 refreshed, 1 absent", output)
 
     def test_output_that_does_not_parse_is_no_answer(self):
         """Breaks if unreadable output is read as an empty answer, which caches
@@ -1465,13 +1528,14 @@ class TwgMovedTicketTest(TwgTransportTestCase):
                 "jira",
                 "workitem",
                 "get",
-                "ABC-3",
                 "--fields",
                 "summary,issuetype,status,resolution,created,resolutiondate,parent",
                 "-o",
                 "json",
                 "--output-summary",
                 "none",
+                "--",
+                "ABC-3",
             ],
         )
         self.assertEqual(len(twg.calls), 2, "only the unreturned key is followed")
@@ -1498,11 +1562,211 @@ class TwgMovedTicketTest(TwgTransportTestCase):
     def test_an_unreadable_follow_up_is_no_answer_not_absence(self):
         """Breaks if a `get` that printed nothing readable is taken as "does not
         exist". Absent is final, so one bad follow-up would lose the ticket for
-        good; only the tracker's own not-found is an answer."""
+        good; only the tracker's own not-found is an answer. The rest of the
+        page still lands: the no-answer is that key's alone."""
         twg = FakeTwg(twg_fixture("bulk-get.json"), {"ABC-3": "Error: rate limited\n"})
         with tempfile.TemporaryDirectory() as tmp:
             self._twg_store(tmp)
             _code, output = self._run_twg(twg)
             cache = self._cache()
         self.assertNotIn("ABC-3", cache)
-        self.assertIn("3 failed", output)
+        self.assertEqual(sorted(cache), ["ABC-1", "ABC-2"])
+        self.assertIn("1 failed", output)
+
+    def test_only_a_not_found_from_get_is_absence(self):
+        """Breaks if any error twg reports from `get` is read as not-found. A
+        throttled (429) or signed-out (401) follow-up prints the same JSON error
+        envelope as a missing ticket, and caching it as absent - which is final -
+        would lose the ticket for good. Built from the captured not-found reply
+        with only its status changed."""
+        for status in (429, 401, 503):
+            error = json.loads(twg_fixture("get-missing.json"))
+            error["error"]["statusCode"] = status
+            error["error"]["downstreamError"]["statusCode"] = status
+            twg = FakeTwg(twg_fixture("bulk-get.json"), {"ABC-3": json.dumps(error)})
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                self._twg_store(tmp)
+                _code, output = self._run_twg(twg)
+                cache = self._cache()
+            self.assertNotIn("ABC-3", cache, "no answer, so asked again next run")
+            self.assertIn("1 failed", output)
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp)
+            self._run_twg(FakeTwg(twg_fixture("bulk-get.json")))
+            self.assertEqual(self._cache()["ABC-3"], {"absent": True, "checked": TODAY})
+
+
+def with_unreturned(*keys: str) -> str:
+    """The captured `bulk-get` answer with `keys` reported as unreturned."""
+    bulk = json.loads(twg_fixture("bulk-get.json"))
+    bulk["data"]["items"] = [
+        {"input": item["input"], "ok": False, "error": {"message": "not returned"}}
+        if item["input"] in keys
+        else item
+        for item in bulk["data"]["items"]
+    ]
+    return json.dumps(bulk)
+
+
+class TwgFollowUpCostTest(TwgTransportTestCase):
+    def test_a_follow_up_is_counted_and_paced_like_a_request(self):
+        """Breaks if a follow-up `get` is free in the run's accounting, or
+        fired without the pause the library keeps between requests. One page
+        with one unreturned key is two tracker calls, and the report must say
+        two - a page of a hundred unreturned keys would otherwise read as one."""
+        sleeps: list[float] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp, TRACKER_DELAY_SECONDS=0.5)
+            _code, output = self._run_twg(FakeTwg(twg_fixture("bulk-get.json")), sleeps)
+        self.assertIn("(2 requests", output)
+        self.assertEqual(sleeps, [0.5], "the get waits the page delay after the bulk-get")
+
+    def test_a_refresh_counts_its_follow_ups_in_its_cost(self):
+        """Breaks if the refresh cost the run reports and records leaves out
+        the follow-ups a refresh page needed. The kept record is re-dated, so
+        it is not asked again next run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp)
+            pio.write_gzip_json(
+                config.TICKET_TRACKER_PATH,
+                {key: open_record(key, "2025-12-01") for key in ("ABC-1", "ABC-2", "ABC-3")},
+            )
+            _code, output = self._run_twg(FakeTwg(twg_fixture("bulk-get.json")))
+            measured = json.loads(config.TELEMETRY_PATH.read_text(encoding="utf-8"))
+            cache = self._cache()
+        self.assertIn("refreshed 2 of 3 due, with 1 left for later runs, in 2 requests", output)
+        self.assertEqual(measured["measurements"]["tickets.refresh_requests"], 2)
+        self.assertEqual(cache["ABC-3"]["checked"], TODAY)
+
+    def test_follow_ups_stop_at_the_per_run_budget(self):
+        """Breaks if follow-ups are unbounded, so one page of unreturned keys
+        becomes a call per key. Past `KSB_TRACKER_FOLLOWUP_MAX` a key is no
+        answer - not absent, which would be final - and is asked next run."""
+        twg = FakeTwg(with_unreturned("ABC-2", "ABC-3"))
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp, TRACKER_FOLLOWUP_MAX=1)
+            _code, output = self._run_twg(twg)
+            cache = self._cache()
+        self.assertEqual([call[2] for call in twg.calls], ["bulk-get", "get"])
+        self.assertEqual(twg.calls[1][-1], "ABC-2", "follow-ups in key order")
+        self.assertEqual(cache["ABC-2"], {"absent": True, "checked": TODAY})
+        self.assertNotIn("ABC-3", cache)
+        self.assertIn("1 failed", output)
+
+
+INVENTED_NAMES = ("Gil Fictive", "Hal Notreal", "Ida Imaginary", "Jo Madeup")
+
+
+class TwgPrivacyTest(TwgTransportTestCase):
+    def test_no_node_s_attrs_text_reaches_the_flattened_text(self):
+        """Breaks if any inline node falls back to `attrs.text`, which is where
+        ADF keeps a display name - the helpful fallback someone adds to show a
+        status lozenge or a date would publish a name from any node carrying
+        one. An unknown node's content children still render; its attributes
+        never do."""
+
+        def node(kind: str, name: str) -> dict:
+            return {"type": kind, "attrs": {"text": name, "timestamp": "1700000000000"}}
+
+        body = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "before "},
+                        node("status", INVENTED_NAMES[0]),
+                        node("date", INVENTED_NAMES[1]),
+                        node("placeholder", INVENTED_NAMES[2]),
+                        node("inventedInline", INVENTED_NAMES[3]),
+                        {"type": "text", "text": " after"},
+                    ],
+                },
+                {
+                    "type": "inventedBlock",
+                    "attrs": {"text": INVENTED_NAMES[0]},
+                    "content": [{"type": "text", "text": "visible child"}],
+                },
+            ],
+        }
+        flat = twg_transport.flatten(body)
+        for name in INVENTED_NAMES:
+            self.assertNotIn(name, str(flat))
+        self.assertIn("before", str(flat))
+        self.assertIn("visible child", str(flat))
+
+    def test_the_transport_hands_the_library_no_comment_author(self):
+        """Breaks if the transport passes a comment's author through. The
+        library happens to read only `body` today; this holds the transport to
+        its own promise, so the name is gone before the library could see it."""
+        bulk = json.loads(twg_fixture("bulk-get.json"))
+        issue = bulk["data"]["items"][0]["data"]
+        handed = json.dumps(twg_transport.projected(issue, ["comment"]))
+        self.assertIn("Agreed with", handed)
+        for leaked in ("author", "updateAuthor", "displayName", "Dee Invented", "acct-0000-delta"):
+            self.assertNotIn(leaked, handed)
+
+    def test_an_emoji_and_a_link_card_render(self):
+        """Breaks if the emoji or link-card branch stops rendering: an emoji is
+        its character (or its short name), and a link card is its URL."""
+        body = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "emoji", "attrs": {"shortName": ":tick:", "text": "✅"}},
+                        {"type": "text", "text": " "},
+                        {"type": "emoji", "attrs": {"shortName": ":cross:"}},
+                        {"type": "text", "text": " see "},
+                        {"type": "inlineCard", "attrs": {"url": "https://docs.example/a"}},
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(twg_transport.flatten(body), "✅ :cross: see https://docs.example/a")
+
+
+class TwgBoundaryTest(TwgTransportTestCase):
+    def test_a_page_holding_something_that_is_not_a_ticket_key_is_refused(self):
+        """Breaks if anything but a ticket key can reach twg's command line.
+        Keys come from commit messages through a configurable pattern; one that
+        looks like an option, or carries a comma or a bracket, is refused as no
+        answer rather than handed to a process."""
+        for odd in ("--help", "ABC-1;x", "ABC-", "1-ABC"):
+            url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", odd], ["summary"])
+            with self.subTest(odd=odd), self.assertRaises(twg_transport.NoAnswer):
+                twg_transport.requested(url)
+        url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", "abc_2-30"], ["summary"])
+        self.assertEqual(twg_transport.requested(url), (["ABC-1", "abc_2-30"], ["summary"]))
+
+    def test_output_that_is_not_valid_utf_8_is_still_read(self):
+        """Breaks if twg's output is decoded with the locale's codec or strictly:
+        one undecodable byte in a ticket's text would raise out of the stage
+        and stop the run. Drives the real runner against a real process."""
+        raw = twg_fixture("bulk-get.json").encode("utf-8")
+        raw = raw.replace(b"Sort the widgets", b"Sort the widgets \xff")
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as bin_dir:
+            answer = Path(bin_dir) / "answer.json"
+            answer.write_bytes(raw)
+            fake = Path(bin_dir) / "twg"
+            fake.write_text(
+                "#!/bin/sh\n"
+                'if [ "$3" = get ]; then cat "$TWG_MISSING"; exit 1; fi\n'
+                'cat "$TWG_BULK"\n'
+                "exit 3\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            self._twg_store(tmp)
+            environment = {
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                "TWG_BULK": str(answer),
+                "TWG_MISSING": str(TWG_FIXTURES / "get-missing.json"),
+            }
+            with unittest.mock.patch.dict(os.environ, environment):
+                code, output = self._run_twg(twg_transport.run_twg)
+            cache = self._cache()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(cache["ABC-1"]["summary"], "Sort the widgets �")

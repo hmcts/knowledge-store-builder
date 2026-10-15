@@ -31,6 +31,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_TRACKER_DELAY_SECONDS` | `1` | Pause between requests |
 | `KSB_TRACKER_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
 | `KSB_TRACKER_REFRESH_MAX` | `200` | Most open tickets one run requests again, oldest first. The rest wait for later runs |
+| `KSB_TRACKER_FOLLOWUP_MAX` | `100` | `twg` transport only: most follow-up `twg jira workitem get` calls one run makes for keys `bulk-get` did not return. A key past the limit is not cached and is asked about next run |
 | `KSB_AUTOMATION_IDENTITIES` | `jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa` | Author or committer identities whose commit bodies are not treated as evidence. Matched as whole words against the name and the email's local part, so narrow it if a contributor shares a name with a build server — the run reports which identities it filtered. GitHub App accounts are always excluded via `[bot]` and need no entry; an empty value leaves only that rule |
 | `KSB_PROPOSED_LINKS` | `write` | Whether the intent index publishes links from commits found only on a branch, under `proposed`. `omit` leaves proposals out; branch work whose content landed on the default branch is still indexed. Changing this setting needs no re-export, but separating proposed links in the first place does: history exported before `reach` was recorded reads as all landed until `export-history` is re-run (`intent` reports how many repositories are in that state) |
 
@@ -98,7 +99,7 @@ costs:
 | Setting | What it buys | What it costs |
 |---|---|---|
 | `KSB_TRACKER_REFRESH_DAYS` (default `7`) | How stale an open ticket's record can get | A shorter interval makes more records due each run. `0` turns refresh off: open tickets keep the record from their first fetch, which is how the stage behaved before refresh existed |
-| `KSB_TRACKER_REFRESH_MAX` (default `200`) | How many due records one run brings up to date | At most `KSB_TRACKER_REFRESH_MAX ÷ KSB_TRACKER_PAGE_SIZE` extra requests per run, rounded up — two at the defaults — each followed by the `KSB_TRACKER_DELAY_SECONDS` pause |
+| `KSB_TRACKER_REFRESH_MAX` (default `200`) | How many due records one run brings up to date | On the `rest` transport, at most `KSB_TRACKER_REFRESH_MAX ÷ KSB_TRACKER_PAGE_SIZE` extra requests per run, rounded up — two at the defaults — each followed by the `KSB_TRACKER_DELAY_SECONDS` pause. On the `twg` transport, the same number of `bulk-get` calls, plus one follow-up `get` for each refreshed key `bulk-get` did not return, within `KSB_TRACKER_FOLLOWUP_MAX` for the whole run and paced the same way |
 
 Refreshes go through the same batched search as new tickets, in pages of their
 own after them, so they add whole requests rather than one per ticket. When more
@@ -110,16 +111,42 @@ mentions any more, or whose prefix is now in `KSB_TRACKER_DENY`, is kept as it
 is and never requested.
 
 Each run prints `refreshed N of M due, with K left for later runs, in R
-requests`, and records `tickets.refreshed`, `tickets.refresh_due` and
+requests`, where R counts every call to the tracker, follow-ups included, and
+records `tickets.refreshed`, `tickets.refresh_due` and
 `tickets.refresh_requests` in `knowledge/telemetry.json`, so the next run says
-whether the cost moved.
+whether the cost moved. The run's first line counts newly fetched and refreshed
+tickets separately.
 
-A refresh never downgrades a record. If the tracker leaves a fetched ticket out
-of its reply, or denies the page, the earlier record is kept and the run reports
-it as kept: a search omits tickets the token cannot browse, so an operator with
-narrower access would otherwise turn known text into a permanent `absent`.
+A refresh never downgrades a record:
+
+- **An unanswered refresh keeps the record.** If the tracker leaves a fetched
+  ticket out of its reply, or denies the page, the earlier record is kept and
+  the run reports it as kept: a search omits tickets the token cannot browse, so
+  an operator with narrower access would otherwise turn known text into a
+  permanent `absent`. The kept record's date is moved to today, with its content
+  untouched, so it waits a full interval before it is asked again rather than
+  heading the queue on every run.
+- **An answered refresh merges.** Every field the refresh returns replaces the
+  stored one, but stored text is not given up: a description the refresh did not
+  return — because `KSB_TRACKER_FETCH_DESCRIPTION` is off, say — is kept, and so
+  is the longer of the stored and returned comment threads. To remove stored
+  text, clear the ticket's cache entry (below) and fetch it again.
+
 A ticket resolved by either a resolution name or a resolution date counts as
 resolved.
+
+To clear one ticket's cache entry, run this from the store root, naming the key;
+the next run fetches the ticket as if it were new:
+
+```bash
+python3 - ABC-3 <<'PY'
+import sys
+from knowledgestore import config, fetch_tickets, io
+cache = io.read_gzip_json_dict(config.TICKET_TRACKER_PATH)
+cache.pop(sys.argv[1], None)
+fetch_tickets.write_cache(cache)
+PY
+```
 
 ### Read Jira Cloud through the TWG CLI
 
@@ -150,18 +177,34 @@ cache writer are the same code on both routes. What the `twg` route adds:
   becomes one line.
 - **No names.** A mention is stored as `[~accountid:<id>]`, never as the display
   name the document carries beside it, and a comment's author is dropped before
-  the stage sees the comment. An inline node the transport does not know renders
-  as nothing rather than being trusted to hold only text.
+  the stage sees the comment. No node's `attrs.text` — where a document keeps a
+  display name — is ever read: text, emoji and link cards render, while status
+  lozenges, dates and placeholders render as nothing. A node type the transport
+  does not know is read as a block: the text inside it renders, its attributes
+  do not.
 - **The exit code is not the answer.** `twg` exits non-zero whenever a key in the
   page was not returned, and still prints the full result; the stage reads that
-  output either way. Output it cannot read, or that leaves out a key it asked
-  about, is no answer: nothing is cached and the next run asks again.
+  output either way, as UTF-8. Output it cannot read, or that leaves out a key it
+  asked about, is no answer: nothing is cached and the next run asks again.
+- **Keys are checked before they reach `twg`.** Only something shaped like a
+  ticket key (`ABC-123`) is passed, after `--`, so no key can be read as an
+  option.
 - **Moved tickets are followed once.** `bulk-get` reports a ticket moved to
   another project as not returned. Each such key gets one `twg jira workitem
   get`, which follows the move, and the ticket is filed under the key the
   commits cite — but only when its new project is in `KSB_TRACKER_PROJECTS` and
-  not in `KSB_TRACKER_DENY`. A ticket that moved to an undecided project stays
-  absent.
+  not in `KSB_TRACKER_DENY`. Only that command's own not-found counts as
+  absent; a throttled, signed-out or failed `get` is no answer for that key, and
+  it is asked about next run.
+- **Follow-ups are counted and bounded.** Each follow-up is paced by
+  `KSB_TRACKER_DELAY_SECONDS`, counted in the run's requests, and limited to
+  `KSB_TRACKER_FOLLOWUP_MAX` per run; a key past the limit is no answer and waits
+  for the next run.
+
+A ticket that moved to an undecided or denied project is cached as absent, and
+absent is final: adding its new project to `KSB_TRACKER_PROJECTS` later does not
+bring it back on its own. Clear its cache entry, as shown in
+[Refreshing open tickets](#refreshing-open-tickets), and the next run asks again.
 
 One limit to know: `bulk-get` returns a page of each ticket's most recent
 comments rather than the whole thread, so a ticket with a long thread is stored

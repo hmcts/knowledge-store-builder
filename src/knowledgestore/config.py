@@ -354,6 +354,12 @@ TRACKER_REFRESH_DAYS = _env_int("KSB_TRACKER_REFRESH_DAYS", 7)
 # backlog over several runs so no single refresh pays for all of it. At the
 # default page size, 200 is two requests.
 TRACKER_REFRESH_MAX = _env_int("KSB_TRACKER_REFRESH_MAX", 200)
+# Most follow-up calls the twg transport makes in one run. `bulk-get` answers a
+# page of keys in one call, but each key it does not return costs a `get` to
+# learn whether the ticket moved; past this many, the key is left for the next
+# run rather than turning one page into a hundred calls. The REST transport makes
+# none.
+TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 
 # --- identifiers redacted out of mined commit text ------------------------
 # Commit messages are written for colleagues, not for publication, and some of

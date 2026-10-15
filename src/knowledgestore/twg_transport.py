@@ -26,22 +26,27 @@ body would store nothing. Each block becomes one line.
 person's display name in `attrs.text`. It is rendered as `[~accountid:<id>]`,
 the form Data Center bodies already use, and `attrs.text` is never read. That is
 a privacy requirement rather than a formatting choice: a person's name must not
-reach the store. Unknown inline nodes render as nothing for the same reason - a
-node type this module has not seen is not trusted to carry only text. Comment
-authors are dropped before the library sees the comment.
+reach the store. For the same reason no node's `attrs.text` is ever read:
+status, date and placeholder nodes render as nothing, and a node type this
+module does not know is read as a block - its `content` children render, its
+attributes do not. Comment authors are dropped before the library sees the
+comment.
 
 **The exit code is not the answer.** `bulk-get` exits 3 when any key in the page
 is unreturned, and stdout still carries the complete per-item result. stdout is
-parsed whatever the exit code; only output that does not parse - or that does
-not mention every key asked about - is no answer, which the library leaves
-uncached and retries next run.
+parsed whatever the exit code, as UTF-8 with undecodable bytes replaced; only
+output that does not parse - or that does not mention every key asked about - is
+no answer, which the library leaves uncached and retries next run.
 
 **Moves need a second request.** `bulk-get` does not follow a ticket moved to
 another project: it reports the old key as unreturned. Each unreturned key is
 asked about once more with `twg jira workitem get`, which does follow a move. A
 moved ticket is filed under the key the commits cite, and only when the library
 says its new project may be read; one that moved to an undecided or denied
-project stays absent.
+project stays absent. Only `get`'s own not-found (404) is absence: any other
+error is no answer for that key. Follow-ups are paced like pages, counted into
+the run's requests, and bounded per run by `KSB_TRACKER_FOLLOWUP_MAX` - see
+`Session`.
 
 The process boundary is the `runner` argument: a callable taking `twg`'s
 arguments and returning its stdout. Tests stub it there; `run_twg` is the real
@@ -51,9 +56,11 @@ one.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import urllib.parse
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 # The root `fetch_tickets` builds its request URL on when the transport is twg.
 # Nothing is ever sent to it: the opener reads the keys and fields back out.
@@ -61,15 +68,31 @@ ROOT = "twg://jira"
 # One page of keys, plus Jira's own latency. Past this the page is no answer.
 TIMEOUT_SECONDS = 300.0
 # The status `twg jira workitem get` reports for a key that does not exist, or
-# that this sign-in cannot see. Any other error says nothing about the ticket.
+# that this sign-in cannot see. Any other error - a 429, a 401, a 5xx - says
+# nothing about the ticket, and is no answer for that key.
 NOT_FOUND = 404
+# What a key must look like before it is put on twg's command line. The keys
+# come from commit messages through a configurable pattern; anything else is
+# refused rather than handed to a process as an argument.
+TICKET_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]*-[0-9]+")
 
 Runner = Callable[[list[str]], str]
 
-# Inline ADF nodes, and what each contributes to its line. Anything else is a
-# block, and its children are read.
+# Inline ADF nodes, and what each contributes to its line - see `_inline`.
+# Anything else is read as a block: its `content` children are rendered and its
+# attributes never are.
 INLINE_NODES = frozenset(
-    {"text", "mention", "hardBreak", "emoji", "inlineCard", "date", "status", "mediaInline"}
+    {
+        "text",
+        "mention",
+        "hardBreak",
+        "emoji",
+        "inlineCard",
+        "date",
+        "status",
+        "placeholder",
+        "mediaInline",
+    }
 )
 
 
@@ -85,7 +108,8 @@ def run_twg(arguments: list[str]) -> str:
         completed = subprocess.run(
             ["twg", *arguments],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             stdin=subprocess.DEVNULL,
             timeout=TIMEOUT_SECONDS,
             check=False,
@@ -99,7 +123,13 @@ def run_twg(arguments: list[str]) -> str:
 
 
 def _inline(node: dict) -> str:
-    """One inline node's text. A mention is its account id, never its name."""
+    """One inline node's text. A mention is its account id, never its name.
+
+    Text, an emoji and a link card render. Every other inline node - status,
+    date, placeholder, media and any type not listed - renders as nothing,
+    because what it would show lives in `attrs`, and `attrs.text` is where ADF
+    puts a display name. Nothing here reads it.
+    """
     kind = node.get("type")
     raw = node.get("attrs")
     attrs: dict = raw if isinstance(raw, dict) else {}
@@ -155,11 +185,17 @@ def flatten(body: object) -> object:
 
 
 def requested(url: str) -> tuple[list[str], list[str]]:
-    """The keys and fields in a search URL `fetch_tickets.search_url` built."""
+    """The keys and fields in a search URL `fetch_tickets.search_url` built.
+
+    Every key must look like a ticket key before it goes near a command line;
+    a page holding anything else is refused whole, as no answer.
+    """
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
     jql = query.get("jql", [""])[0]
     inside = jql[jql.find("(") + 1 : jql.rfind(")")] if "(" in jql else ""
     keys = [key.strip() for key in inside.split(",") if key.strip()]
+    if not all(TICKET_KEY.fullmatch(key) for key in keys):
+        raise NoAnswer("a page held something that is not a ticket key")
     fields = [name for name in query.get("fields", [""])[0].split(",") if name]
     return keys, fields
 
@@ -218,66 +254,116 @@ def bulk_items(stdout: str) -> dict[str, dict]:
 
 
 class NoAnswer(OSError):
-    """`twg` printed nothing this module can read. Raised through the opener,
-    where `fetch_tickets` records it as no answer and caches nothing."""
+    """`twg` printed nothing this module can read about a whole page. Raised
+    through the opener, where `fetch_tickets` records it as no answer and caches
+    nothing. `calls` is how many times twg ran before the page was given up."""
+
+    def __init__(self, message: str, calls: int = 0) -> None:
+        super().__init__(message)
+        self.calls = calls
 
 
-def followed(runner: Runner, key: str, fields: Sequence[str]) -> dict | None:
-    """Ask `get`, which follows a move, about one key `bulk-get` did not return.
-
-    None when the tracker says the key does not exist for this sign-in, which
-    is an answer. Anything unreadable is not, and raises."""
-    payload = _parsed(runner(_arguments("get", [key], fields)))
-    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
-        for issue in payload["data"]:
-            if isinstance(issue, dict) and issue.get("key"):
-                return issue
-        return None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(error, dict) and error.get("statusCode") == NOT_FOUND:
-        return None
-    raise NoAnswer("twg get gave no readable answer")
+# What a follow-up `get` said about one key.
+ABSENT = "absent"  # the tracker's own not-found: an answer
+UNANSWERED = "unanswered"  # anything else: no answer, asked again next run
 
 
-def _arguments(command: str, keys: Sequence[str], fields: Sequence[str]) -> list[str]:
+def _arguments(command: str, keys: Sequence[str], fields: Sequence[str], *extra: str) -> list[str]:
+    """twg's argument list. The keys go after `--`, so none can be read as an
+    option whatever it looks like."""
     return [
         "jira",
         "workitem",
         command,
-        *keys,
         "--fields",
         ",".join(fields),
+        *extra,
         "-o",
         "json",
         "--output-summary",
         "none",
+        "--",
+        *keys,
     ]
 
 
-def answer(runner: Runner, url: str, may_read: Callable[[str], bool]) -> str:
-    """The v2 search body for one page the library asked for.
+@dataclass
+class Session:
+    """One run's use of twg: every call paced and counted, follow-ups budgeted.
 
-    `may_read` is the library's own allowlist decision, applied to the key a
-    moved ticket now has. Raises `NoAnswer` when `twg` said nothing readable
-    about every key in the page.
+    `bulk-get` answers a page in one call, but an unreturned key costs a second
+    `get` to learn whether it moved. Those follow-ups are what could turn a page
+    into a hundred calls, so a run may make at most `followups` of them; a key
+    past the budget is no answer and is asked about again next run. Every call
+    after the first waits `delay` seconds, the same pause the library keeps
+    between pages, and `calls` is what the page cost - which the library adds to
+    its request counts.
     """
-    keys, fields = requested(url)
-    items = bulk_items(runner(_arguments("bulk-get", keys, fields)))
-    # Every key must be mentioned, as returned or as unreturned. One that is not
-    # is output this module does not understand - including output that did not
-    # parse at all - and absent is final, so it must not be read as absence.
-    if any(key not in items for key in keys):
-        raise NoAnswer("twg bulk-get gave no readable answer for the whole page")
-    issues = []
-    for key in keys:
-        item = items.get(key, {})
-        issue = item.get("data") if item.get("ok") else None
-        if not isinstance(issue, dict):
-            issue = followed(runner, key, fields)
-        if issue is None:
-            continue
-        found = str(issue.get("key") or key)
-        if found.upper() != key.upper() and not may_read(found):
-            continue
-        issues.append({"key": key, "fields": projected(issue, fields)})
-    return json.dumps({"issues": issues})
+
+    runner: Runner
+    may_read: Callable[[str], bool]
+    sleep: Callable[[float], None]
+    delay: float
+    followups: int
+    calls: int = 0
+
+    def run(self, arguments: list[str]) -> str:
+        if self.calls:
+            self.sleep(self.delay)
+        self.calls += 1
+        return self.runner(arguments)
+
+    def followed(self, key: str, fields: Sequence[str]) -> dict | str:
+        """Ask `get`, which follows a move, about one key `bulk-get` did not
+        return: the issue, `ABSENT` on the tracker's own not-found, or
+        `UNANSWERED` for anything else - including no budget left to ask."""
+        if self.followups <= 0:
+            return UNANSWERED
+        self.followups -= 1
+        payload = _parsed(self.run(_arguments("get", [key], fields)))
+        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+            for issue in payload["data"]:
+                if isinstance(issue, dict) and issue.get("key"):
+                    return issue
+            return UNANSWERED
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict) and error.get("statusCode") == NOT_FOUND:
+            return ABSENT
+        return UNANSWERED
+
+    def answer(self, url: str) -> tuple[str, list[str]]:
+        """The v2 search body for one page the library asked for, and the keys
+        it has no answer for.
+
+        `may_read` is the library's own allowlist decision, applied to the key a
+        moved ticket now has. Raises `NoAnswer` when twg said nothing readable
+        about the page as a whole.
+        """
+        self.calls = 0
+        try:
+            keys, fields = requested(url)
+        except NoAnswer as error:
+            raise NoAnswer(str(error), self.calls) from error
+        items = bulk_items(self.run(_arguments("bulk-get", keys, fields)))
+        # Every key must be mentioned, as returned or as unreturned. One that is
+        # not is output this module does not understand - including output that
+        # did not parse at all - and absent is final, so it must not be read as
+        # absence.
+        if any(key not in items for key in keys):
+            raise NoAnswer("twg bulk-get gave no readable answer", self.calls)
+        issues, unanswered = [], []
+        for key in keys:
+            item = items.get(key, {})
+            issue = item.get("data") if item.get("ok") else None
+            if not isinstance(issue, dict):
+                issue = self.followed(key, fields)
+            if issue == UNANSWERED:
+                unanswered.append(key)
+                continue
+            if not isinstance(issue, dict):
+                continue
+            found = str(issue.get("key") or key)
+            if found.upper() != key.upper() and not self.may_read(found):
+                continue
+            issues.append({"key": key, "fields": projected(issue, fields)})
+        return json.dumps({"issues": issues}), unanswered

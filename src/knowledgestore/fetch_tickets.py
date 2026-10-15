@@ -123,6 +123,13 @@ class Response:
     status: int
     body: str
     retry_after: str | None = None
+    # How many calls the tracker took to give this answer: one for an HTTP
+    # request, more when a transport needed follow-ups. Counted into the run's
+    # requests, so a page's real cost is what the run reports.
+    calls: int = 1
+    # Keys in the page the transport has no answer for. Not cached, and asked
+    # about again next run, exactly as a page that failed.
+    unanswered: tuple[str, ...] = ()
 
 
 Opener = Callable[[str, dict], Response]
@@ -260,13 +267,22 @@ def may_read(key: str) -> bool:
     return name in allowed and name not in refused
 
 
-def twg_opener(runner: twg_transport.Runner) -> Opener:
-    """The `opener` for the twg transport. The library still decides: the
-    request is the one it built, and a moved ticket is read only when
-    `may_read` allows its new key."""
+def twg_opener(runner: twg_transport.Runner, sleep: Callable[[float], None]) -> Opener:
+    """The `opener` for the twg transport, one session for the whole run. The
+    library still decides: the request is the one it built, and a moved ticket
+    is read only when `may_read` allows its new key. Follow-ups are paced at the
+    page delay and bounded by `KSB_TRACKER_FOLLOWUP_MAX` across the run."""
+    session = twg_transport.Session(
+        runner,
+        may_read,
+        sleep,
+        config.TRACKER_DELAY_SECONDS,
+        config.TRACKER_FOLLOWUP_MAX,
+    )
 
     def opener(url: str, headers: dict) -> Response:
-        return Response(200, twg_transport.answer(runner, url, may_read))
+        body, unanswered = session.answer(url)
+        return Response(200, body, calls=session.calls, unanswered=tuple(unanswered))
 
     return opener
 
@@ -505,22 +521,26 @@ def retry_delay(retry_after: str | None) -> float:
 
 def request_page(
     url: str, headers: dict, opener: Opener, sleep: Callable[[float], None]
-) -> Response | None:
-    """One page, waiting as long as the tracker asks. None means no answer.
+) -> tuple[Response | None, int]:
+    """One page, waiting as long as the tracker asks, and the calls it cost.
+    None means no answer.
 
     A transport failure and repeated throttling are the same outcome - the
     tracker said nothing about these tickets - and neither is recorded in the
-    cache. The error itself is not quoted anywhere.
+    cache. The error itself is not quoted anywhere. Every attempt is counted,
+    and a failed one counts what the transport says it spent, at least one.
     """
+    calls = 0
     for _ in range(MAX_ATTEMPTS):
         try:
             response = opener(url, headers)
-        except OSError:
-            return None
+        except OSError as error:
+            return None, calls + max(getattr(error, "calls", 1), 1)
+        calls += response.calls
         if response.status != TOO_MANY_REQUESTS:
-            return response
+            return response, calls
         sleep(retry_delay(response.retry_after))
-    return None
+    return None, calls
 
 
 def _issues(body: str) -> dict[str, dict] | None:
@@ -547,23 +567,52 @@ def fetched_record(issue: dict, counts: Counter[str], today: str) -> dict:
     return dict(sorted({**record, CHECKED: today}.items()))
 
 
-def _settle(cache: dict, key: str, record: dict, report: Report) -> bool:
+# What `_settle` did with one outcome.
+STORED = "stored"
+REFRESHED = "refreshed"
+KEPT = "kept"
+
+
+def merged(previous: dict, record: dict) -> dict:
+    """A refreshed record that holds no less than the stored one.
+
+    The refresh's fields win - status, resolution, summary - but text the store
+    already holds is not given up: a description the refresh did not return is
+    kept (it is not returned when `KSB_TRACKER_FETCH_DESCRIPTION` is off), and
+    the longer of the two comment threads is kept, so a transport that returns
+    only a recent page of comments cannot cut a thread another fetch stored.
+    """
+    out = dict(record)
+    if "description" not in out and "description" in previous:
+        out["description"] = previous["description"]
+    if len(previous.get("comments") or []) > len(out.get("comments") or []):
+        out["comments"] = previous["comments"]
+    return dict(sorted(out.items()))
+
+
+def _settle(cache: dict, key: str, record: dict, report: Report, today: str) -> str:
     """Store one outcome, unless it would lose what the store already knows.
 
-    Only a fetched answer replaces a fetched record. A search leaves out tickets
-    the token cannot browse, so a refresh by someone with narrower access sees a
-    fetched ticket as missing - and absent is final, so caching it would delete
-    the ticket's text for good. A denial is the same loss by another route.
-    Returns whether the outcome was stored.
+    Only a fetched answer replaces a fetched record, and then by `merged`. A
+    search leaves out tickets the token cannot browse, so a refresh by someone
+    with narrower access sees a fetched ticket as missing - and absent is final,
+    so caching it would delete the ticket's text for good. A denial is the same
+    loss by another route. Such a record is kept with its content untouched but
+    re-dated: the refresh was asked and answered, and an undated retry would be
+    due again on every run, at the head of the queue, starving the cap.
     """
     previous = cache.get(key)
-    if is_fetched(previous):
+    if isinstance(previous, dict) and is_fetched(previous):
         if not is_fetched(record):
+            if not is_resolved(previous):
+                cache[key] = dict(sorted({**previous, CHECKED: today}.items()))
             report.kept += 1
-            return False
+            return KEPT
+        cache[key] = merged(previous, record)
         report.refreshed += 1
+        return REFRESHED
     cache[key] = record
-    return True
+    return STORED
 
 
 def _record_outcomes(
@@ -572,11 +621,12 @@ def _record_outcomes(
     for key in keys:
         issue = issues.get(key)
         if issue is None:
-            if _settle(cache, key, {"absent": True, CHECKED: today}, report):
+            if _settle(cache, key, {"absent": True, CHECKED: today}, report, today) == STORED:
                 report.absent += 1
         else:
-            _settle(cache, key, fetched_record(issue, report.redactions, today), report)
-            report.fetched += 1
+            record = fetched_record(issue, report.redactions, today)
+            if _settle(cache, key, record, report, today) == STORED:
+                report.fetched += 1
 
 
 def apply_page(
@@ -589,7 +639,7 @@ def apply_page(
         return
     if response.status in DENIED_STATUSES:
         for key in keys:
-            if _settle(cache, key, {"denied": True, CHECKED: today}, report):
+            if _settle(cache, key, {"denied": True, CHECKED: today}, report, today) == STORED:
                 report.denied += 1
         return
     issues = _issues(response.body) if response.status == 200 else None
@@ -597,7 +647,12 @@ def apply_page(
         report.failed += len(keys)
         report.failures[response.status] += len(keys)
         return
-    _record_outcomes(keys, issues, cache, report, today)
+    unanswered = [key for key in keys if key in response.unanswered]
+    if unanswered:
+        report.failed += len(unanswered)
+        report.failures[0] += len(unanswered)
+    answered = [key for key in keys if key not in response.unanswered]
+    _record_outcomes(answered, issues, cache, report, today)
 
 
 def write_cache(cache: dict) -> None:
@@ -634,9 +689,9 @@ def fetch(
     for index, (page, refresh) in enumerate(batches):
         if index:
             sleep(config.TRACKER_DELAY_SECONDS)
-        response = request_page(search_url(root, page, fields), headers, opener, sleep)
-        report.requests += 1
-        report.refresh_requests += int(refresh)
+        response, calls = request_page(search_url(root, page, fields), headers, opener, sleep)
+        report.requests += calls
+        report.refresh_requests += calls if refresh else 0
         apply_page(page, response, cache, report, today)
         # After every page, not at the end of the run: a throttled or cancelled
         # run must leave a usable cache and resume where it stopped.
@@ -717,7 +772,8 @@ def _report_prefixes(part: Partition) -> None:
 
 def summarise(report: Report, cache: dict, part: Partition) -> None:
     print(
-        f"Tracker: {report.fetched:,} fetched, {report.absent:,} absent, "
+        f"Tracker: {report.fetched:,} fetched, {report.refreshed:,} refreshed, "
+        f"{report.absent:,} absent, "
         f"{report.denied:,} denied, {report.failed:,} failed "
         f"({report.requests:,} requests, {report.cached:,} already cached)"
     )
@@ -769,7 +825,7 @@ def main(
         )
         return 0
     if config.TRACKER_TRANSPORT == TWG:
-        root, opener = twg_transport.ROOT, twg_opener(runner)
+        root, opener = twg_transport.ROOT, twg_opener(runner, sleep)
     else:
         try:
             root = tracker_root(config.TRACKER_BASE_URL)
