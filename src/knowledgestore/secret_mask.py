@@ -348,7 +348,11 @@ _CREDENTIAL_LENGTH = 16
 
 
 def _is_plain_url(value: str) -> bool:
-    """A URL with no password in it: `scheme://host[:port][/path][?query]`."""
+    """A URL with no password in it: `scheme://host[:port][/path][?query]`.
+
+    A template's interpolation is read as the placeholder it stands for, so the
+    spaces inside `{{ .Values.env }}` do not make a templated host read as text."""
+    value = deploy_values.strip_template(value)
     scheme = _URL_SCHEME.match(value)
     if scheme is None or _WHITESPACE.search(value):
         return False
