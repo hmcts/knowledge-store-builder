@@ -429,6 +429,17 @@ Add business specifications after the merge:
 knowledgestore gherkin
 ```
 
+Then link every node to its file at the commit the store was built from:
+
+```bash
+knowledgestore source-urls
+```
+
+It writes a `url` onto each node whose repository is on github.com,
+`https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`, and reports the
+nodes it could not link by reason. Answers cite that link. Without it they cite
+`repositories/<repo>/...`, which is not committed, so no reader can open it.
+
 Cluster after `gherkin`, so features and scenarios participate in the same
 communities as the code they describe. Follow the clustering procedure in
 `/knowledge-store:knowledge-store-build` and verify that every node received a

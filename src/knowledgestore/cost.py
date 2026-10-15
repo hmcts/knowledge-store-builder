@@ -84,6 +84,32 @@ class Headless:
 
 
 @dataclass
+class MessageLedger:
+    """Which assistant turns have been counted, and the largest output each carried.
+
+    The de-duplication every transcript reader in this library shares, so `cost` and
+    `answers` cannot disagree about what one turn is. A line is a turn's first sighting
+    when its message id has not been seen before, and only then is its usage counted;
+    a later line of the same turn only raises the output floor. A line with no id is
+    always a first sighting, because nothing says two id-less lines are one turn.
+    """
+
+    largest_output: dict[str, int] = field(default_factory=dict)
+
+    def sight(self, message: dict[str, Any]) -> bool:
+        """Record one line's message; True when its usage is to be counted."""
+        message_id = message.get("id")
+        if not isinstance(message_id, str):
+            return True
+        output = int(message["usage"].get("output_tokens") or 0)
+        if message_id in self.largest_output:
+            self.largest_output[message_id] = max(self.largest_output[message_id], output)
+            return False
+        self.largest_output[message_id] = output
+        return True
+
+
+@dataclass
 class Transcripts:
     """Summed over transcript lines, once per distinct message id."""
 
@@ -92,36 +118,28 @@ class Transcripts:
     input: int = 0
     naive_input: int = 0
     unidentified: int = 0
-    largest_output: dict[str, int] = field(default_factory=dict)
+    ledger: MessageLedger = field(default_factory=MessageLedger)
     unidentified_output: int = 0
 
     @property
     def messages(self) -> int:
-        return len(self.largest_output) + self.unidentified
+        return len(self.ledger.largest_output) + self.unidentified
 
     @property
     def output(self) -> int:
         """A floor: the largest value any line of a turn carried, summed over turns."""
-        return sum(self.largest_output.values()) + self.unidentified_output
+        return sum(self.ledger.largest_output.values()) + self.unidentified_output
 
     def add(self, message: dict[str, Any]) -> None:
         usage = message["usage"]
         tokens = input_tokens(usage)
-        output = int(usage.get("output_tokens") or 0)
         self.records += 1
         self.naive_input += tokens
-        message_id = message.get("id")
-        if not isinstance(message_id, str):
-            # Nothing says two id-less lines are one turn, so each is its own.
+        if not isinstance(message.get("id"), str):
             self.unidentified += 1
+            self.unidentified_output += int(usage.get("output_tokens") or 0)
+        if self.ledger.sight(message):
             self.input += tokens
-            self.unidentified_output += output
-            return
-        if message_id not in self.largest_output:
-            self.input += tokens
-            self.largest_output[message_id] = output
-        else:
-            self.largest_output[message_id] = max(self.largest_output[message_id], output)
 
 
 @dataclass

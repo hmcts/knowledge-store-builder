@@ -88,6 +88,11 @@ if (internedColumns.length) {
  * repositories and files, LABELS for the community names, INTENT for the
  * tickets, and `links` for the connections - ordered by degree descending then
  * by node id, which is what `entry_connections` documents.
+ *
+ * AddressEntryComponent's tickets are empty on purpose, and that is a ruling
+ * (#425): its file's only ticket, DEMO-4, sits under `proposed` in the intent
+ * index, and a node's list carries landed work only. A branch never changed the
+ * code this graph was extracted from.
  */
 const EXPECTED_ROWS = [
   ['AddressEntryComponent', 'demo-app-b', 'src/address/address-entry.component.ts',
@@ -224,6 +229,30 @@ check('DEMO-1', 'ticket lookup',
    'Show a formatted address on the payment confirmation',   // tracker: headline
    'description, from commit messages',                      // provenance named
    'Add address formatting to the payment confirmation screen']);  // mined: kept
+// Branch-only work (#425). DEMO-4's only commit sits on a branch, so the intent
+// stage wrote its record with `proposed: true` and the branch it was found on.
+// Without the label the lookup reads exactly like DEMO-1's: a ticket, a
+// description, a date range - an unmerged proposal presented as what the code
+// does. The wording is the knowledge-store skill's, so the page and an agent
+// reading the same store say the same thing. The branch name carries markup, an
+// ampersand and quotes - a valid git ref - so it is matched here as escaped text;
+// the inert checks further down assert no live tag came out of it.
+const DEMO4_LABEL = 'proposed on branch feature/gazetteer&amp;&quot;lookup&quot;&lt;img/src=x/onerror=alert(1)&gt;';
+check('DEMO-4', 'ticket lookup',
+  [DEMO4_LABEL,
+   'not confirmed on the default branch',
+   'Look up the street through the gazetteer before entry']);
+// DEMO-5 landed AND has a branch-only commit, so its record carries `branches`
+// without `proposed`. Catches the label keyed on `branches`: that would call
+// shipped work a proposal, the reverse of the defect above.
+check('DEMO-5', 'ticket lookup', ['Document the rollback runbook'], [],
+  { text: ['proposed', 'feature/runbook-appendix'] });
+// The other place a ticket is a search result: the evidence section of an
+// answer, found by the words its commits used. "gazetteer" is in DEMO-4's
+// commits and nowhere else, so this row is the only thing that can answer.
+// Catches the label drawn in the lookup but not where the ticket is found.
+check('which gazetteer does the lookup use?', 'commit evidence',
+  ['What the commits say about these words', 'DEMO-4', DEMO4_LABEL]);
 // business-first composition: prose leads, code sits behind the disclosure
 check('how are addresses handled?', 'topic brief',
   ['Addresses in the demo estate', 'Pre-written topic brief']);
@@ -410,6 +439,17 @@ if (chipHtml.includes('not per &quot;line item&quot; onmouseover=alert(1)')) {
   console.error(`      html: ${chipHtml.slice(chipHtml.indexOf('title='), chipHtml.indexOf('title=') + 200)}`);
 }
 
+// A branch name reaches the page from the repository, through the intent stage,
+// and git accepts markup in one. DEMO-4's carries an <img> with a handler, so
+// both places that draw its label must render it inert. Catches the label
+// interpolated unescaped - the fixture's branch was benign before, and an
+// unescaped label then passed this whole file.
+for (const question of ['DEMO-4', 'which gazetteer does the lookup use?']) {
+  api.q.value = question;
+  api.runAsk();
+  assertInert(`a hostile branch name in the proposed label: ${question}`, api.out.innerHTML);
+}
+
 // The question as typed: tokenising should mean markup never survives into the
 // answer, and the brief-request link must escape what it encodes.
 for (const hostile of ['<img src=x onerror=alert(1)>', '"><script>alert(1)</script>',
@@ -433,6 +473,17 @@ for (const hostile of ['<img src=x onerror=alert(1)>', '"><script>alert(1)</scri
 // trap. A refusal on an unrecognised format is worth nothing if it also refuses
 // the pages already published, which carry no marker at all.
 const pageConfig = JSON.parse(jsonBlocks.config || '{}');
+// The intent stage keeps five branches per ticket (BRANCH_LIMIT), and the page
+// says "and possibly others" at the cap only if the build tells it the cap.
+// Catches the build no longer writing it: every capped list would then read as
+// the complete set of branches.
+if (pageConfig.branchLimit === 5) {
+  console.log('ok    page config: carries the intent stage\'s branch cap (5)');
+} else {
+  failures++;
+  console.error('FAIL  page config: branchLimit is'
+    + ` ${JSON.stringify(pageConfig.branchLimit)}, not the intent stage's cap of 5`);
+}
 if (READS_PAGE_FORMATS.includes(pageConfig.pageFormat)) {
   console.log(`ok    page format: this page declares format ${pageConfig.pageFormat}, which`
     + ' this library reads');

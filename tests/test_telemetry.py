@@ -391,7 +391,7 @@ class ExplorerWiringTest(SettingsIsolated):
 class IntentWiringTest(SettingsIsolated):
     """`intent` records the inventory whose collapse is otherwise invisible."""
 
-    def _run(self, directory: Path, files: list[str]) -> dict:
+    def _run(self, directory: Path, files: list[str], reach: bool = True) -> dict:
         from knowledgestore import build_intent_index
 
         history = directory / "history" / "repo-a"
@@ -406,8 +406,24 @@ class IntentWiringTest(SettingsIsolated):
                 "author": {"name": "A Person", "email": "a.person@example.example"},
                 "committer": {"name": "A Person", "email": "a.person@example.example"},
                 "files": [{"path": path} for path in files],
-            }
+            },
+            {
+                "repository": "repo-a",
+                "subject": "PROJ-2: a proposal",
+                "is_merge": False,
+                "author_date": "2024-05-02T10:00:00+00:00",
+                "body": "",
+                "author": {"name": "A Person", "email": "a.person@example.example"},
+                "committer": {"name": "A Person", "email": "a.person@example.example"},
+                "files": [{"path": path} for path in files[:1]],
+                "reach": "branch",
+                "ref": "team/proposal",
+            },
         ]
+        if not reach:
+            for commit in commits:
+                commit.pop("reach", None)
+                commit.pop("ref", None)
         (history / "commits.ndjson").write_text(
             "\n".join(json.dumps(c) for c in commits) + "\n", encoding="utf-8"
         )
@@ -437,6 +453,27 @@ class IntentWiringTest(SettingsIsolated):
         self.assertEqual(recorded["intent.files_indexed"], len(index["repo-a"]))
         self.assertEqual(recorded["intent.repositories_mined"], 1)
         self.assertEqual(recorded["intent.tickets_distinct"], 1)
+
+    def test_the_stage_records_how_much_work_is_only_proposed(self):
+        """Breaks if a proposed-link metric is dropped or miscounted, or if the
+        second telemetry record call replaces the first instead of adding to it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            recorded = self._run(Path(tmp), ["a.py", "b.py", "c.py"])
+
+        self.assertEqual(recorded["intent.proposed_links"], 1)
+        self.assertEqual(recorded["intent.tickets_proposed_only"], 1)
+        self.assertEqual(recorded["intent.files_indexed"], 3)
+
+    def test_the_stage_records_repositories_whose_history_predates_reach(self):
+        """Breaks if a store that never re-exported history is not told that its
+        branch-only links still read as landed, in the run and in the record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            old = self._run(Path(tmp), ["a.py"], reach=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            new = self._run(Path(tmp), ["a.py"], reach=True)
+
+        self.assertEqual(old["intent.repositories_without_reach"], 1)
+        self.assertEqual(new["intent.repositories_without_reach"], 0)
 
     def test_a_collapsed_inventory_is_warned_about_on_the_next_build(self):
         """Breaks if an inventory that lost its files reads as a thinner estate.

@@ -30,6 +30,7 @@ from pathlib import Path
 
 from . import config, io, sensitive, telemetry
 
+BRANCH_LIMIT = 5
 
 TICKET_PREFIX = re.compile(r"^[\s\[\(]*[A-Z][A-Z0-9]{1,9}-\d{1,6}[\]\)]*[\s:,\-–]*")
 JUNK_DESCRIPTION = re.compile(
@@ -407,6 +408,34 @@ def commit_description(subject: str, body: str, boilerplate: frozenset[str] = fr
     return body_description(body, boilerplate)
 
 
+def landed(commit: dict) -> bool:
+    """Whether a commit's work reached the default branch or a tag.
+
+    History exported before reach was recorded has no field, and reads as landed:
+    that is what the index assumed of it, and a store that has not re-exported
+    must not see its links move.
+    """
+    return commit.get("reach", "default") != "branch"
+
+
+def lacks_reach(ndjson: Path) -> bool:
+    """Whether a history dataset has commits and none of them records `reach`.
+
+    Such a dataset was exported before reach existed, so `landed` reads all of it
+    as landed. Stops at the first record that carries the field, so a current
+    dataset costs one line.
+    """
+    seen = False
+    with ndjson.open(encoding="utf-8") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            seen = True
+            if "reach" in json.loads(line):
+                return False
+    return seen
+
+
 def ticket_pool() -> defaultdict[str, dict]:
     """The per-ticket accumulator `apply_commit` folds commits into.
 
@@ -422,6 +451,8 @@ def ticket_pool() -> defaultdict[str, dict]:
             "first": None,
             "last": None,
             "count": 0,
+            "landed": False,
+            "branches": set(),
         }
     )
 
@@ -499,28 +530,78 @@ def apply_commit(
     """
     if commit.get("is_merge"):
         return False
+    is_landed = landed(commit)
+    # Under `omit` a branch commit is kept only for the files whose content
+    # landed (a squash merge leaves its work on the default branch under other
+    # commits); the rest of it is a proposal, which `omit` leaves out entirely.
+    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"
+    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):
+        return False
     tickets = commit_tickets(commit, boilerplate)
     if not tickets:
         return False
-    date = commit["author_date"][:10]
     counts = None if redactions is None else redactions.by_rule
     subject_text = sensitive.redact(commit["subject"], counts)
     body = sensitive.redact(commit_body(commit), counts)
     description = stored_value(commit_description(subject_text, body, boilerplate), redactions)
     subject = stored_value(clean_description(subject_text), redactions)
     prose = stored_value(body_evidence(body, boilerplate), redactions)
+    _fold_tickets(
+        commit, tickets, descriptions, (description, subject, prose), omit_proposed, counts
+    )
+    _fold_files(commit, tickets, files, descriptions, omit_proposed)
+    return True
+
+
+def _fold_tickets(
+    commit: dict,
+    tickets: list[str],
+    descriptions: dict[str, dict],
+    texts: tuple[str, str, str],
+    omit_proposed: bool,
+    counts: Counter[str] | None,
+) -> None:
+    """Add one commit to each named ticket's pool: count, repository, dates, text,
+    and where it was found - landed, or the branch it sits on."""
+    is_landed = landed(commit)
+    date = commit["author_date"][:10]
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])
         _widen_range(info, date)
-        _pool_text(info, description, subject, prose)
+        _pool_text(info, *texts)
+        if is_landed:
+            info["landed"] = True
+        elif commit.get("ref") and not omit_proposed:
+            info["branches"].add(sensitive.redact(commit["ref"], counts))
+
+
+def _fold_files(
+    commit: dict,
+    tickets: list[str],
+    files: dict[str, dict],
+    descriptions: dict[str, dict],
+    omit_proposed: bool,
+) -> None:
+    """Link a commit's tickets to each file it touched, as landed or proposed.
+
+    A branch commit's file whose content landed counts as landed, and marks its
+    tickets landed too; under `omit` the other files of a branch commit are left out.
+    """
+    is_landed = landed(commit)
+    date = commit["author_date"][:10]
     for changed in commit.get("files", []):
+        file_landed = is_landed or changed.get("landed")
+        if omit_proposed and not file_landed:
+            continue
         entry = files[changed["path"]]
         for ticket in tickets:
-            entry["tickets"][ticket] += 1
+            entry["tickets" if file_landed else "proposed"][ticket] += 1
         _widen_range(entry, date)
-    return True
+    if not is_landed and any(f.get("landed") for f in commit.get("files", [])):
+        for ticket in tickets:
+            descriptions[ticket]["landed"] = True
 
 
 def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: BodyReport) -> None:
@@ -563,7 +644,12 @@ def index_repository(
     if report is not None:
         report.boilerplate_lines += len(boilerplate)
     files: dict[str, dict] = defaultdict(
-        lambda: {"tickets": defaultdict(int), "first": None, "last": None}
+        lambda: {
+            "tickets": defaultdict(int),
+            "proposed": defaultdict(int),
+            "first": None,
+            "last": None,
+        }
     )
     commits_seen = 0
     with ndjson.open(encoding="utf-8") as source:
@@ -573,14 +659,15 @@ def index_repository(
                 _record_discarded_body(commit, boilerplate, report)
             if apply_commit(commit, files, descriptions, boilerplate, redactions):
                 commits_seen += 1
-    finalised = {
-        path: {
-            "tickets": dict(sorted(data["tickets"].items(), key=lambda kv: -kv[1])),
-            "first": data["first"],
-            "last": data["last"],
-        }
-        for path, data in files.items()
-    }
+    finalised = {}
+    for path, data in files.items():
+        entry = {"tickets": dict(sorted(data["tickets"].items(), key=lambda kv: -kv[1]))}
+        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}
+        if proposed:
+            entry["proposed"] = dict(sorted(proposed.items(), key=lambda kv: (-kv[1], kv[0])))
+        entry["first"] = data["first"]
+        entry["last"] = data["last"]
+        finalised[path] = entry
     return finalised, commits_seen
 
 
@@ -622,11 +709,25 @@ def _ticket_record(info: dict) -> dict:
     ):
         if texts:
             record[name] = texts
+    if not info["landed"]:
+        record["proposed"] = True
+    if info["branches"]:
+        record["branches"] = sorted(info["branches"])[:BRANCH_LIMIT]
     record["first"] = info["first"]
     record["last"] = info["last"]
     record["repos"] = sorted(info["repos"])
     record["n"] = info["count"]
     return record
+
+
+def ticket_records(descriptions: dict[str, dict]) -> dict[str, dict]:
+    """The `ticket-descriptions` artefact, assembled from a filled ticket pool.
+
+    The one place records are assembled, so a caller outside this stage - the
+    explorer's test fixture builds its branch-only tickets through it - reads the
+    shape `main()` writes rather than a copy of how it is put together.
+    """
+    return {ticket: _ticket_record(info) for ticket, info in descriptions.items()}
 
 
 def summarise(
@@ -651,6 +752,10 @@ def summarise(
         f"Indexed {total_files:,} files across {len(index)} repos from "
         f"{commits_seen:,} ticketed commits; {total_tickets:,} distinct tickets."
     )
+    proposed_links = sum(
+        len(d.get("proposed", {})) for files in index.values() for d in files.values()
+    )
+    print(f"Proposed links (branch-only work, under `proposed`): {proposed_links:,}.")
     print(
         f"Bodies discarded: {bodies.automated:,} by automated authorship, "
         f"{bodies.bot_text:,} by bot-generated text."
@@ -677,6 +782,7 @@ def summarise(
         "intent.files_indexed": total_files,
         "intent.tickets_distinct": total_tickets,
         "intent.ticketed_commits": commits_seen,
+        "intent.proposed_links": proposed_links,
     }
 
 
@@ -741,7 +847,7 @@ def main() -> int:
     with io.gzip_text(config.INTENT_INDEX_PATH) as out:
         json.dump(index, out, ensure_ascii=False)
 
-    ticket_out = {ticket: _ticket_record(info) for ticket, info in descriptions.items()}
+    ticket_out = ticket_records(descriptions)
     with io.gzip_text(config.TICKET_DESCRIPTIONS_PATH) as out:
         json.dump(ticket_out, out, ensure_ascii=False)
     described = sum(1 for t in ticket_out.values() if t["d"])
@@ -757,6 +863,25 @@ def main() -> int:
     )
     report_redactions(redactions)
 
+    without_reach = sum(1 for ndjson in ndjson_files if lacks_reach(ndjson))
+    print(
+        f"Repositories whose history predates reach: {without_reach:,}"
+        + (
+            "; their branch-only links still read as landed - "
+            "re-run export-history to separate proposed links."
+            if without_reach
+            else "."
+        )
+    )
+    # Merges with the record `summarise` writes next, not replaces it.
+    telemetry.record(
+        {
+            "intent.tickets_proposed_only": sum(
+                1 for t in ticket_out.values() if t.get("proposed")
+            ),
+            "intent.repositories_without_reach": without_reach,
+        }
+    )
     telemetry.record(summarise(index, commits_seen, report))
     return 0
 

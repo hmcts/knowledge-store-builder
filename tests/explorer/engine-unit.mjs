@@ -9,6 +9,20 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 
+/** The text of an HTML fragment: everything outside its tags. A scan, not a
+ * regular expression, so it cannot backtrack (Sonar S8786).
+ * @param {string} html */
+function textOf(html) {
+  let text = '';
+  let inTag = false;
+  for (const c of html) {
+    if (c === '<') inTag = true;
+    else if (c === '>') inTag = false;
+    else if (!inTag) text += c;
+  }
+  return text;
+}
+
 // [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets, communityId]
 const DATA = [
   ['AddressPipe', 'repo-a', 'src/pipes/address.pipe.ts', 'Address Handling', 'code', 9, [], ['CRC-12016'], 1],
@@ -60,6 +74,11 @@ const TICKET_INFO = {
         + '- callers must migrate\n'
         + '- see ADR 0007 <script>alert(1)</script> & the migration plan'],
     first: '2024-01-05', last: '2024-02-01', repos: ['repo-e2e'], n: 4,
+    // Found only on branches (#425), and carried by the feature row above: a
+    // feature file on the default branch can be tagged with a ticket whose
+    // commits never left their branch. Neither key is in the evidence haystack,
+    // so nothing ranked below moves.
+    proposed: true, branches: ['team/amend-address', 'team/amend-retry'],
   },
   'CRC-12016': {
     d: ['Format the address on the confirmation screen'],
@@ -129,7 +148,8 @@ const elements = {
   summaries: { textContent: JSON.stringify(SUMMARIES) },
   synonyms: { textContent: JSON.stringify(SYN) },
   tickets: { textContent: JSON.stringify(TICKET_INFO) },
-  config: { textContent: '{}' },
+  // The intent stage's branch cap, as build_explorer writes it into #config.
+  config: { textContent: JSON.stringify({ branchLimit: 5 }) },
   topics: { textContent: JSON.stringify(TOPICS) },
   dives: { textContent: JSON.stringify(DIVES) },
 };
@@ -422,6 +442,119 @@ const unchanged = createHash('sha256')
   .digest('hex');
 assert('a question with no ticket evidence renders exactly as before',
   unchanged === '734c03f122f115a1689d34123e3fca76b0e5eb1e211cdfc5722a4bb79fe282cc', unchanged);
+
+// proposedLabel: the knowledge-store skill's wording for branch-only work (#425)
+//
+// The page regression drives the one-branch form through a page the real intent
+// stage fed. These are the forms that fixture does not carry, written as
+// literals so each says which break it catches.
+assert('a proposed ticket on one branch reads "proposed on branch X"',
+  context.proposedLabel({ proposed: true, branches: ['team/a'] }) === 'proposed on branch team/a',
+  context.proposedLabel({ proposed: true, branches: ['team/a'] }));
+assert('a proposed ticket on several branches names them all',
+  context.proposedLabel({ proposed: true, branches: ['team/a', 'team/b'] })
+    === 'proposed on branches team/a, team/b');
+// The stage keeps at most five branches and drops the rest without a trace, so
+// a list at the cap must not read as complete. Catches the cap ignored, and the
+// cap read from somewhere other than the page's #config (four is under it).
+assert('a branch list at the stage cap says there may be more',
+  context.proposedLabel({ proposed: true, branches: ['a', 'b', 'c', 'd', 'e'] })
+    === 'proposed on branches a, b, c, d, e and possibly others');
+assert('a branch list under the cap reads as complete',
+  context.proposedLabel({ proposed: true, branches: ['a', 'b', 'c', 'd'] })
+    === 'proposed on branches a, b, c, d');
+// Catches the label dropped when the branch is unknown: the record still says
+// no landed work names the ticket, and that is the claim the label makes.
+assert('a proposed ticket with no branch recorded is still labelled',
+  context.proposedLabel({ proposed: true }) === 'proposed on a branch');
+// Catches the label keyed on `branches`: a ticket that landed can have had
+// branch-only commits as well, and it is not a proposal.
+assert('a landed ticket with branch-only commits is not labelled',
+  context.proposedLabel({ branches: ['team/a'] }) === '');
+
+// Search mode: a result card's ticket chip carries the label. Catches the chip
+// - the only place search mode shows a ticket - left reading as landed work.
+// The stub has no kind checkboxes, and search mode shows only ticked kinds.
+documentStub.querySelectorAll = (sel) => (sel === '.k' ? [{ checked: true, value: 'feature' }] : []);
+context.q.value = 'amend';
+context.runSearch();
+assert('a search result card labels its proposed ticket',
+  textOf(context.out.innerHTML)
+    .includes('DD-1 proposed on branches team/amend-address, team/amend-retry'),
+  context.out.innerHTML.slice(0, 400));
+
+// A branch name is repository data, and git allows `<`, `>`, `"` and `&` in one.
+// Catches the label interpolated unescaped, which would make a pushed branch name
+// live markup on every page that cites its ticket.
+const realBranches = context.TICKET_INFO['DD-1'].branches;
+context.TICKET_INFO['DD-1'].branches = ['team/<img/src=x/onerror=alert(1)>&"q"'];
+context.runSearch();
+assert('a branch name in the label is escaped, not interpreted',
+  !context.out.innerHTML.includes('<img')
+    && context.out.innerHTML.includes('team/&lt;img/src=x/onerror=alert(1)&gt;&amp;&quot;q&quot;'),
+  context.out.innerHTML.slice(0, 400));
+context.TICKET_INFO['DD-1'].branches = realBranches;
+
+// A card's chips are drawn with `map`, which passes each chip its index as a
+// second argument - the argument that switches a chip to its short form. With
+// the proposed ticket second on the card, catches that index read as the flag:
+// the card would show "proposed" and hide the branches in a tooltip, with no
+// row beside it to name them.
+const amendRow = context.DATA.findIndex((e) => e[0] === 'Amend defendant address');
+const realTickets = context.DATA[amendRow][7];
+context.DATA[amendRow][7] = ['CRC-12016', 'DD-1'];
+context.runSearch();
+assert('a proposed ticket second on a card still shows its full label',
+  textOf(context.out.innerHTML)
+    .includes('DD-1 proposed on branches team/amend-address, team/amend-retry'),
+  context.out.innerHTML.slice(0, 600));
+context.DATA[amendRow][7] = realTickets;
+documentStub.querySelectorAll = () => [];
+
+// The business-intent answer lists a neighbourhood's tickets as readable rows,
+// and DD-1 reaches it through the feature row that carries it. Catches the rows
+// - the one rendering of a ticket that is neither a chip nor a lookup - drawn
+// without the label.
+context.q.value = 'why does the Amend defendant address feature exist?';
+context.runAsk();
+{
+  const html = context.out.innerHTML;
+  const text = textOf(html);
+  assert('a business-intent ticket row labels its proposed ticket',
+    text.includes('DD-1 proposed on branches team/amend-address, team/amend-retry Amend the'),
+    context.meta.textContent + ' | ' + html.slice(0, 600));
+  // The chip strip under those rows marks the proposal and keeps the branch
+  // names in its tooltip. Catches the full label drawn a second time per ticket,
+  // and the chip left reading as landed work.
+  assert('the chip beside a labelled row names the branches once, in its tooltip',
+    // Above the technical-evidence disclosure, whose cards draw their own chips.
+    text.slice(0, text.indexOf('Technical evidence')).split('team/amend-address').length === 2
+      && html.includes('<span title="Amend the defendant address journey — proposed on branches'
+        + ' team/amend-address, team/amend-retry">DD-1 <em class="tprop">proposed</em></span>'),
+    html.slice(html.indexOf('class="chips"'), html.indexOf('class="chips"') + 300));
+}
+
+// An unproposed ticket renders exactly as it did before the label existed: DD-1
+// is the proposed one, so the assertions above read only the labelled path.
+// CRC-12016 is carried by the repo-a AddressPipe row, so a search shows its chip
+// and a "why" question its row and its strip chip. Literals written by hand from
+// TICKET_INFO. Catches markup added to every ticket, not only proposed ones.
+const CRC_CHIP = '<span title="Format the address on the confirmation screen">CRC-12016</span>';
+documentStub.querySelectorAll = (sel) => (sel === '.k' ? [{ checked: true, value: 'code' }] : []);
+context.q.value = 'addresspipe';
+context.runSearch();
+documentStub.querySelectorAll = () => [];
+assert('an unproposed ticket\'s chip on a search card is unchanged',
+  context.out.innerHTML.includes('<b>tickets:</b> ' + CRC_CHIP + '</div>'),
+  context.out.innerHTML.slice(0, 600));
+context.q.value = 'why does AddressPipe exist?';
+context.runAsk();
+assert('an unproposed ticket\'s row and strip chip in a "why" answer are unchanged',
+  context.out.innerHTML.includes('<div class="trow"><span class="tid">CRC-12016</span> Format the'
+    + ' address on the confirmation screen <span class="tdates">(2024-01-05 → 2024-03-01, from'
+    + ' commit messages)</span></div>')
+    && context.out.innerHTML.includes('<div class="chips">' + CRC_CHIP),
+  context.out.innerHTML.slice(0, 900));
 
 // applySummaryBoost: a community matched ONLY by summary prose is represented
 // once, at its single boost (#343)

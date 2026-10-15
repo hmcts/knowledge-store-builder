@@ -46,6 +46,7 @@ SELF_PARSING = frozenset(
         "gaps",
         "size-cuts",
         "cost",
+        "answers",
     }
 )
 
@@ -158,6 +159,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_deployments",
         "add per-environment deployment config and join it to services (opt-in)",
     ),
+    "source-urls": (
+        "build_source_urls",
+        "give each graph node a `url` to its file at the commit the store was built from",
+    ),
     "record-clustering": (
         "record_clustering",
         "record which partitioner produced the graph's communities (run after clustering)",
@@ -194,6 +199,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "cost": (
         "cost",
         "report what a run consumed, from result files and transcripts (de-duplicated)",
+    ),
+    "answers": (
+        "answers",
+        "report what each answer in a session cost and cited, or compare two runs by question",
     ),
     "check-install-docs": (
         "check_install_docs",

@@ -279,6 +279,246 @@ class ExportRepositoryEndToEndTest(SettingsIsolated):
             any(name.endswith(".md") and name[:4].isdigit() for name in produced), produced
         )
         self.assertIn("**Total commits:** 1", index)
+        # The fixture has no remote, so the configured branch only resolves locally.
+        self.assertIn(
+            "**History scope:** default branch `main`: 1 commits; tags only: 0; branches only: 0 across 0 branches",
+            index,
+        )
+
+
+class ReachTest(SettingsIsolated):
+    """Which commits landed, read against the configured default branch.
+
+    The fixture is a real clone of a real origin: a merged branch, a squash, a
+    release line reached only by a tag, an unmerged long-lived branch, and a
+    remote default (`origin/HEAD`) that points at that unmerged branch, as some
+    repositories' do.
+    """
+
+    def _git(self, cwd, *args):
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _commit(self, repo, name, text, message):
+        (repo / name).write_text(text)
+        self._git(repo, "add", name)
+        self._git(repo, "commit", "-q", "-m", message)
+
+    def _fixture(self, root: Path) -> Path:
+        origin = root / "origin"
+        origin.mkdir()
+        g = lambda *a: self._git(origin, *a)  # noqa: E731
+        g("init", "-q", "-b", "main")
+        g("config", "user.email", "t@example.com")
+        g("config", "user.name", "Test")
+        self._commit(origin, "a.txt", "1\n", "AA-1: base")
+        g("checkout", "-q", "-b", "feature/merged")
+        self._commit(origin, "b.txt", "1\n", "AA-2: merged work")
+        g("checkout", "-q", "main")
+        g("merge", "-q", "--no-ff", "-m", "Merge feature/merged", "feature/merged")
+        g("checkout", "-q", "-b", "feature/squash")
+        self._commit(origin, "c.txt", "1\n", "AA-3: squash work")
+        g("checkout", "-q", "main")
+        g("merge", "-q", "--squash", "feature/squash")
+        g("commit", "-q", "-m", "tidy c")
+        g("checkout", "-q", "-b", "release/1")
+        self._commit(origin, "d.txt", "1\n", "AA-4: release fix")
+        g("tag", "v1")
+        g("checkout", "-q", "main")
+        g("checkout", "-q", "-b", "team/proposal")
+        self._commit(origin, "a.txt", "2\n", "AA-5: proposal")
+        g("checkout", "-q", "main")
+        work = root / "work"
+        self._git(root, "clone", "-q", str(origin), str(work))
+        # The remote default names the unmerged branch, as it does in some estates.
+        self._git(work, "remote", "set-head", "origin", "team/proposal")
+        return work
+
+    def _by_subject(self, repo, default_branch="main"):
+        return {c["subject"]: c for c in export.get_commits(repo, default_branch)}
+
+    def test_each_commit_is_classed_against_the_configured_branch(self):
+        """Catches reach read from origin/HEAD, which here names the unmerged
+        branch: the proposal would read as landed and the base as a branch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        self.assertEqual(commits["AA-1: base"]["reach"], "default")
+        self.assertEqual(commits["AA-2: merged work"]["reach"], "default")
+        self.assertEqual(commits["tidy c"]["reach"], "default")
+        self.assertEqual(commits["AA-5: proposal"]["reach"], "branch")
+        self.assertEqual(commits["AA-5: proposal"]["ref"], "team/proposal")
+        self.assertNotIn("ref", commits["AA-1: base"])
+
+    def test_a_squash_merged_branch_file_is_marked_landed(self):
+        """Catches squash-merged work read as a proposal: the branch commit is
+        unreachable from main, but the file version it wrote is on main."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        squash = commits["AA-3: squash work"]
+        self.assertEqual(squash["reach"], "branch")
+        self.assertEqual([f.get("landed") for f in squash["files"]], [True])
+
+    def test_an_unmerged_branch_file_is_not_marked_landed(self):
+        """Catches a match on path alone: the proposal edits a.txt, which main
+        also has, but main never held the proposal's version of it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        proposal = commits["AA-5: proposal"]
+        self.assertEqual([f.get("landed") for f in proposal["files"]], [None])
+
+    def test_an_empty_file_never_counts_as_landed(self):
+        """Catches the empty blob matching across unrelated work: every empty
+        file in a repository has the same blob id."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            self._git(work, "config", "user.email", "t@example.com")
+            self._git(work, "config", "user.name", "Test")
+            self._git(work, "checkout", "-q", "main")
+            self._commit(work, "e.txt", "", "empty on main")
+            # resolve_default reads the remote-tracking ref first, so move it too.
+            self._git(work, "update-ref", "refs/remotes/origin/main", "HEAD")
+            self._git(work, "checkout", "-q", "-b", "empty-branch", "origin/team/proposal")
+            self._commit(work, "e.txt", "", "AA-9: empty on branch")
+            blobs = export.landed_blobs(work, "refs/heads/main")
+            commits = self._by_subject(work)
+        self.assertNotIn(("e.txt", export.EMPTY_BLOB), blobs)
+        self.assertEqual(
+            [f.get("landed") for f in commits["AA-9: empty on branch"]["files"]], [None]
+        )
+
+    def test_landed_blobs_keeps_only_the_paths_asked_for(self):
+        """Catches the paths filter being ignored, which keeps every blob on the
+        default branch in memory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            everything = export.landed_blobs(work, "refs/heads/main")
+            kept = export.landed_blobs(work, "refs/heads/main", frozenset({"c.txt"}))
+        self.assertGreater(len({path for path, _ in everything}), 1)
+        self.assertEqual({path for path, _ in kept}, {"c.txt"})
+
+    def test_raw_writes_drops_deletions_and_the_empty_blob(self):
+        """Catches a deletion or an empty file read as content a commit wrote."""
+        real = "a" * 40
+        output = (
+            f"\x1e{'1' * 40}\n\n"
+            f":100644 100644 {'b' * 40} {real} M\tkept.txt\n"
+            f":100644 100644 {'b' * 40} {export.EMPTY_BLOB} M\tempty.txt\n"
+            f":100644 000000 {'b' * 40} {'0' * 40} D\tgone.txt\n"
+        )
+        self.assertEqual(list(export._raw_writes(output)), [("1" * 40, "kept.txt", real)])
+
+    def test_landed_commits_carry_no_landed_marks(self):
+        """Catches the mark applied outside branch commits, where reach already says it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        for subject in ("AA-1: base", "AA-4: release fix", "tidy c"):
+            self.assertTrue(all("landed" not in f for f in commits[subject]["files"]), subject)
+
+    def test_a_release_line_reached_only_by_a_tag_is_tag(self):
+        """Catches tag-only commits classed as branch: shipped work would read as
+        a proposal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        self.assertEqual(commits["AA-4: release fix"]["reach"], "tag")
+        self.assertNotIn("ref", commits["AA-4: release fix"])
+
+    def test_squashed_branch_commits_are_branch_and_name_their_branch(self):
+        """The squash's own commits never reach the default branch; the squash
+        commit does. Catches a ref left as the full refname."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        self.assertEqual(commits["AA-3: squash work"]["reach"], "branch")
+        self.assertEqual(commits["AA-3: squash work"]["ref"], "feature/squash")
+
+    def test_a_missing_configured_branch_falls_back_to_the_remote_default_and_says_so(self):
+        """Catches a stale repositories.txt silently classing everything as branch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            self._git(work, "remote", "set-head", "origin", "main")
+            ref, warning = export.resolve_default(work, "trunk")
+            commits = self._by_subject(work, "trunk")
+        self.assertEqual(ref, "refs/remotes/origin/HEAD")
+        self.assertIn("trunk", warning)
+        self.assertEqual(commits["AA-1: base"]["reach"], "default")
+
+    def test_a_branch_that_exists_only_locally_still_resolves(self):
+        """Catches resolution that only looks under the remote: a configured
+        branch with no remote copy would fall through to the warning path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            self._git(work, "branch", "local-only", "origin/team/proposal")
+            ref, warning = export.resolve_default(work, "local-only")
+        self.assertEqual(ref, "refs/heads/local-only")
+        self.assertIsNone(warning)
+
+    def test_with_nothing_to_resolve_untagged_commits_are_branch_and_tagged_ones_stay_tag(self):
+        """Catches a crash on a local-only clone, where nothing resolves, and
+        catches the tag set being dropped there: shipped work would read as a
+        proposal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self._git(repo, "init", "-q", "-b", "main")
+            self._git(repo, "config", "user.email", "t@example.com")
+            self._git(repo, "config", "user.name", "Test")
+            self._commit(repo, "a.txt", "1\n", "AA-1: tagged")
+            self._git(repo, "tag", "v1")
+            self._commit(repo, "a.txt", "2\n", "AA-2: untagged")
+            ref, warning = export.resolve_default(repo, "trunk")
+            commits = self._by_subject(repo, "trunk")
+        self.assertIsNone(ref)
+        self.assertIn("trunk", warning)
+        self.assertEqual(commits["AA-1: tagged"]["reach"], "tag")
+        self.assertEqual(commits["AA-2: untagged"]["reach"], "branch")
+
+    def test_two_exports_of_one_repository_are_identical(self):
+        """Catches non-determinism in which ref --source names (CLAUDE.md 1.3)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            first = list(export.get_commits(work, "main"))
+            second = list(export.get_commits(work, "main"))
+        self.assertEqual(first, second)
+
+    def test_branch_name_strips_ref_prefixes(self):
+        """Catches a recorded ref that keeps its remote or local prefix, or a
+        non-branch ref being mangled."""
+        self.assertEqual(export.branch_name("refs/remotes/origin/team/x"), "team/x")
+        self.assertEqual(export.branch_name("refs/heads/team/x"), "team/x")
+        self.assertEqual(export.branch_name("refs/stash"), "refs/stash")
+
+    def test_a_commit_record_without_reach_counts_as_default_in_the_scope_line(self):
+        """Catches the missing-reach fallback becoming branch: records written
+        before reach existed would be reported as unmerged proposals."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo-a"
+            repo.mkdir()
+            self._git(repo, "init", "-q", "-b", "main")
+            self._git(repo, "config", "user.email", "t@example.com")
+            self._git(repo, "config", "user.name", "Test")
+            (repo / "a.txt").write_text("one\n")
+            self._git(repo, "add", "a.txt")
+            self._git(repo, "commit", "-q", "-m", "DD-1: first")
+            index = root / "index.md"
+            export.write_index(
+                index,
+                export.RepositoryConfig(
+                    name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+                ),
+                [{"author": {"name": "Test", "email": "t@example.com"}}],
+                {"2026": 1},
+                repo,
+            )
+            text = index.read_text(encoding="utf-8")
+        self.assertIn(
+            "**History scope:** default branch `main`: 1 commits; tags only: 0; "
+            "branches only: 0 across 0 branches",
+            text,
+        )
 
 
 if __name__ == "__main__":

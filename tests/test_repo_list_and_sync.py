@@ -545,6 +545,9 @@ class CliTest(SettingsIsolated):
                 "packages",
                 # before clustering, so deployment nodes join communities
                 "deployments",
+                # after every stage that adds nodes, so they are linked too, and
+                # before clustering, because it rewrites both graph files
+                "source-urls",
                 # clustering itself is graphify's; this records which partitioner
                 # it used, because that choice re-keys every summary
                 "record-clustering",
@@ -564,6 +567,9 @@ class CliTest(SettingsIsolated):
                 # not part of a build: reads what a run consumed from its usage
                 # records, so the next one is planned on a measurement (#399)
                 "cost",
+                # not part of a build either: what each answer in a session cost
+                # and cited, so a store compares its questions across a change
+                "answers",
                 # not part of a build: gates a store runs in CI
                 "check-install-docs",
                 "check-corpus",

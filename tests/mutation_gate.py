@@ -423,6 +423,7 @@ MUTATIONS = (
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
         (
+            "test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",
             "test_io_write_targets.WriteTargetTest.test_gzip_text_refuses_an_upward_path",
             "test_io_write_targets.WriteTargetTest.test_the_check_is_lexical_not_resolved",
             "test_io_write_targets.WriteTargetTest.test_the_guard_reports_which_path_it_refused",
@@ -820,6 +821,12 @@ MUTATIONS = (
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
         (
+            "test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",
+            "test_answers.CommandLine.test_out_writes_one_record_per_answer",
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",
+            "test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",
+            "test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
             "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
@@ -2451,6 +2458,8 @@ MUTATIONS = (
         (
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_fell_to_zero_is_a_warning_not_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_merely_fell_stays_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_metric_that_was_zero_and_is_not_reads_as_recovery",
@@ -2483,6 +2492,8 @@ MUTATIONS = (
         "nothing - a mechanism that reads green and measures nothing, which is the class "
         "this gate exists for",
         (
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
         ),
     ),
@@ -2701,6 +2712,7 @@ MUTATIONS = (
         "read as a smaller estate; nothing but its predecessor contradicts it",
         (
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
     ),
@@ -4664,6 +4676,718 @@ MUTATIONS = (
         (
             "test_fetch_tickets.TwgRequestTest.test_an_unknown_transport_is_refused_before_anything_is_asked",
         ),
+    ),
+    # The answers stage. Not escapes caught late, unlike most of this table: each is
+    # a break its design named before it was built, entered so the tests that
+    # describe it are held to failing when it returns.
+    Mutation(
+        "answers: a tool result opens an answer",
+        "answers.py",
+        '        isinstance(block, dict) and block.get("type") == "tool_result" for block in content',
+        "        False for block in content",
+        "a tool's result comes back to the session as a user-role line; read as a prompt "
+        "it splits one answer at every tool call, so the answer count is wrong and no "
+        "question pairs with its earlier run",
+        (
+            "test_answers.CommandLine.test_out_writes_one_record_per_answer",
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.HeadlessCost.test_dollars_come_only_from_a_matching_headless_result",
+            "test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",
+            "test_answers.SplittingASession.test_a_tool_result_does_not_open_an_answer",
+            "test_answers.SplittingASession.test_a_turn_split_over_lines_is_counted_once",
+            "test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",
+            "test_answers.SplittingASession.test_the_answer_text_is_the_last_text_before_the_next_prompt",
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+            "test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",
+        ),
+    ),
+    Mutation(
+        "answers: usage counted per line, not per message",
+        "cost.py",
+        "        if message_id in self.largest_output:",
+        "        if False:",
+        "a transcript writes one line per content block of a turn, each carrying the "
+        "whole turn's usage, so a per-line sum reads a three-block turn three times - "
+        "in `cost`'s run total and in every answer's input alike, since both share it",
+        (
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",
+            "test_answers.SplittingASession.test_a_tool_result_does_not_open_an_answer",
+            "test_answers.SplittingASession.test_a_turn_split_over_lines_is_counted_once",
+            "test_cost.CostStage.test_a_turn_written_as_several_content_blocks_is_counted_once",
+            "test_cost.CostStage.test_one_turn_seen_in_two_transcripts_is_counted_once",
+            "test_cost.CostStage.test_the_report_gives_the_de_duplicated_figure_as_the_input",
+        ),
+    ),
+    Mutation(
+        "answers: subagent usage dropped",
+        "answers.py",
+        "            self._subagent(transcript, answer, session)",
+        "            pass",
+        "an answer that delegates its search to a subagent reads as the cheapest answer "
+        "in the run, because the parent session holds only the dispatch",
+        (
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+            "test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",
+        ),
+    ),
+    Mutation(
+        "answers: a file outside the store counted",
+        "answers.py",
+        "                if candidate.is_relative_to(self.store) and candidate.is_file():",
+        "                if candidate.is_file():",
+        "every file a session touched lands in `store_files`, so a store's footprint "
+        "includes the operator's home directory and the corpus clones",
+        ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
+    ),
+    Mutation(
+        "answers: a Bash path read with its separator",
+        "answers.py",
+        "        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
+        "        lexer = shlex.shlex(command, posix=True)",
+        "`cat a.md; echo done` names `a.md;`, which is no file, so the commonest shell "
+        "form drops out of `store_files`; found by the first run over a real session",
+        ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
+    ),
+    Mutation(
+        "answers: a corpus path classed by the graph",
+        "answers.py",
+        '    if text.removeprefix("./").startswith("repositories/"):\n'
+        '        return "corpus_path"\n',
+        "",
+        "a `repositories/...` path names the sync tree, which no reader of a published "
+        "answer can open; classed by the graph it reads as a resolving citation",
+        ("test_answers.Citations.test_each_citation_is_classed_once",),
+    ),
+    Mutation(
+        "answers: compare drops an unpaired question",
+        "answers.py",
+        '    comparison.only_before = [rows[0]["question"] for sha, rows in old.items() if sha not in new]',
+        "    comparison.only_before = []",
+        "a question the second run no longer answers vanishes from the comparison, and "
+        "the paired medians read as the whole story",
+        ("test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",),
+    ),
+    Mutation(
+        "answers: absence matched inside a code span",
+        "answers.py",
+        "        if _ABSENCE.search(masked[start:end]):",
+        "        if _ABSENCE.search(prose[start:end]):",
+        "an answer quoting a log message such as `order is not found` is flagged as "
+        "claiming that something is absent - and a span holding a full stop was cut "
+        "in two by the sentence split before it could be masked, which the first "
+        "version of the masking missed",
+        (
+            "test_answers.AbsenceClaims.test_a_code_span_holding_a_sentence_break_is_not_a_claim",
+            "test_answers.AbsenceClaims.test_absence_words_inside_a_code_span_are_not_a_claim",
+        ),
+    ),
+    Mutation(
+        "answers: an interrupt marker read as a prompt",
+        "answers.py",
+        '    "[Request interrupted",\n',
+        "",
+        "the harness writes the interrupt marker as a user line of text with no "
+        "origin; read as a prompt, every interrupted answer becomes two and the empty "
+        "one pairs with every other run's interrupt",
+        ("test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: a shell line read as a prompt",
+        "answers.py",
+        '    "<bash-input>",\n',
+        "",
+        "a `!` command typed at the prompt opens an answer of its own",
+        ("test_answers.SplittingASession.test_a_shell_line_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: another user's home expanded",
+        "answers.py",
+        '                word = Path(named).expanduser() if named == "~" or named.startswith("~/") else named',
+        "                word = Path(named).expanduser()",
+        "`~nosuchuser/x` in any Bash command raises RuntimeError and loses every record in the run",
+        ("test_answers.StoreFiles.test_a_word_naming_another_user_s_home_does_not_stop_the_run",),
+    ),
+    Mutation(
+        "answers: a column citation classed unresolved",
+        "answers.py",
+        '    "column": "column",',
+        '    "column": "unresolved",',
+        "a `table.column` citation fails as code the graph lacks, though the graph "
+        "holds code and never schemas",
+        ("test_answers.Citations.test_each_citation_is_classed_once",),
+    ),
+    Mutation(
+        "answers: a summary note on the wrong quantity",
+        "answers.py",
+        '    "output_floor": " - a floor: transcript lines under-report output",',
+        '    "cache_write": " - a floor: transcript lines under-report output",',
+        "the summary calls an exact figure a floor and leaves output unqualified, "
+        "which is how notes placed by line position fail when the fields are reordered",
+        ("test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",),
+    ),
+    Mutation(
+        "answers: --out written through an upward component",
+        "answers.py",
+        "            io.checked_write_target(arguments.out)",
+        "            pass",
+        "--out is a path from the command line; without the write policy's check a "
+        "`..` in it writes wherever whatever built the arguments chose",
+        ("test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",),
+    ),
+    Mutation(
+        "answers: a malformed record file raises",
+        "answers.py",
+        "    except (KeyError, TypeError, AttributeError) as error:",
+        "    except () as error:",
+        "--compare over a file another tool wrote prints a traceback rather than "
+        "saying which file is not a record file",
+        ("test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",),
+    ),
+    Mutation(
+        "answers: a carried-over prompt answered twice",
+        "answers.py",
+        "            if not self.first_reading(record):\n                if prompt:",
+        "            if False:\n                if prompt:",
+        "a resumed session repeats the lines it carried over; read again, each earlier "
+        "question is answered a second time at no cost and drags the medians down",
+        ("test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",),
+    ),
+    Mutation(
+        "answers: an injected user line read as a prompt",
+        "answers.py",
+        '    if isinstance(origin, dict) and origin.get("kind") != "human":',
+        "    if False:",
+        "a background agent's completion notice arrives as a user line; read as a "
+        "prompt it splits the answer that dispatched the agent in two",
+        (
+            "test_answers.SplittingASession.test_injected_user_lines_are_not_prompts",
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+        ),
+    ),
+    Mutation(
+        "answers: the first text taken as the answer",
+        "answers.py",
+        '                answer.text = str(block.get("text") or "")',
+        '                answer.text = answer.text or str(block.get("text") or "")',
+        "the preamble before the first tool call is read as the answer, so the answer's "
+        "citations and absence claims are never read",
+        (
+            "test_answers.SplittingASession.test_the_answer_text_is_the_last_text_before_the_next_prompt",
+        ),
+    ),
+    Mutation(
+        "answers: a subagent's text taken as the answer",
+        "answers.py",
+        '            if block.get("type") == "text" and not record.get("isSidechain"):',
+        '            if block.get("type") == "text":',
+        "the subagent's report to its parent is classed as the answer the person read",
+        ("test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",),
+    ),
+    Mutation(
+        "answers: a run's cost put on one of several answers",
+        "answers.py",
+        "        if len(owned) == 1 and len(dollars) == 1:",
+        "        if owned and dollars:",
+        "a headless result prices the whole run; attached to a session's first answer "
+        "it charges one question for all of them",
+        ("test_answers.HeadlessCost.test_dollars_come_only_from_a_matching_headless_result",),
+    ),
+    Mutation(
+        "answers: a repeated question compared by its first asking",
+        "answers.py",
+        "                deltas.append(statistics.median(now) - statistics.median(was))",
+        "                deltas.append(now[0] - was[0])",
+        "a question asked three times is compared on whichever repetition came first, "
+        "so one slow or fast run decides the change",
+        ("test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",),
+    ),
+    Mutation(
+        "answers: the question hashed untrimmed",
+        "answers.py",
+        '    return hashlib.sha256(question.strip().encode("utf-8")).hexdigest()',
+        '    return hashlib.sha256(question.encode("utf-8")).hexdigest()',
+        "a question asked with a trailing newline in one run fails to pair with itself "
+        "in the other, and is listed as unpaired on both sides",
+        ("test_answers.SplittingASession.test_the_question_hash_ignores_surrounding_whitespace",),
+    ),
+    Mutation(
+        "a squash-merged branch file reads as unlanded",
+        "export_git_history.py",
+        '            if file["path"] in landed_paths:',
+        "            if False:",
+        "a squash merge lands a branch's work without its commits, so the branch's files "
+        "read as proposals though their content is on the default branch",
+        ("test_export_git_history.ReachTest.test_a_squash_merged_branch_file_is_marked_landed",),
+    ),
+    Mutation(
+        "the empty blob matches unrelated work as landed",
+        "export_git_history.py",
+        "            if blob not in (_NULL_BLOB, EMPTY_BLOB):",
+        "            if blob != _NULL_BLOB:",
+        "every empty file shares one blob, so an empty file on any branch read as landed",
+        (
+            "test_export_git_history.ReachTest.test_an_empty_file_never_counts_as_landed",
+            "test_export_git_history.ReachTest.test_raw_writes_drops_deletions_and_the_empty_blob",
+        ),
+    ),
+    Mutation(
+        "reach is read from the remote default instead of the configured branch",
+        "export_git_history.py",
+        '        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):',
+        "        for ref in ():",
+        "a repository whose origin/HEAD names a ticket branch classed that branch's "
+        "proposals as landed and the real default's work as proposed",
+        (
+            "test_export_git_history.ExportRepositoryEndToEndTest.test_export_repository_produces_dataset_files",
+            "test_export_git_history.ReachTest.test_a_branch_that_exists_only_locally_still_resolves",
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+        ),
+    ),
+    Mutation(
+        "a release line reached only by a tag reads as a proposal",
+        "export_git_history.py",
+        "    elif sha in reach.tagged:",
+        "    elif False:",
+        "shipped work on a release line that never merged back was published as a proposed change",
+        (
+            "test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",
+            "test_export_git_history.ReachTest.test_with_nothing_to_resolve_untagged_commits_are_branch_and_tagged_ones_stay_tag",
+        ),
+    ),
+    Mutation(
+        "a branch commit is recorded without the branch it was found on",
+        "export_git_history.py",
+        '        record["ref"] = branch_name(source.strip())',
+        "        pass",
+        "an agent could not say which branch held a proposal",
+        (
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+            "test_export_git_history.ReachTest.test_squashed_branch_commits_are_branch_and_name_their_branch",
+        ),
+    ),
+    Mutation(
+        "a branch-only commit is linked as landed work",
+        "build_intent_index.py",
+        '            entry["tickets" if file_landed else "proposed"][ticket] += 1',
+        '            entry["tickets"][ticket] += 1',
+        "an operator found an unmerged branch's ticket stated as what a file implements",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+            "test_build_intent_index.ProposedLinksTest.test_proposed_values_are_counts_never_branch_names",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "a branch file whose content landed is published as proposed",
+        "build_intent_index.py",
+        '        file_landed = is_landed or changed.get("landed")',
+        "        file_landed = is_landed",
+        "squash-merged work, whose commits are on no default-branch path, read as a proposal",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "a ticket landed through a branch file is still flagged as only proposed",
+        "build_intent_index.py",
+        '            descriptions[ticket]["landed"] = True',
+        "            pass",
+        "a squash-merged ticket's record said it had never landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+        ),
+    ),
+    Mutation(
+        "a ticket landed on a file is also listed as proposed there",
+        "build_intent_index.py",
+        '        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
+        '        proposed = dict(data["proposed"])',
+        "one ticket on one file read as both implemented and only proposed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+        ),
+    ),
+    Mutation(
+        "history without reach reads as branch-only",
+        "build_intent_index.py",
+        '    return commit.get("reach", "default") != "branch"',
+        '    return commit.get("reach", "branch") != "branch"',
+        "a store that had not re-exported would have seen every link move to proposed",
+        (
+            "test_build_intent_index.ApplyCommitTest.test_body_contributes_at_most_three_tickets",
+            "test_build_intent_index.ApplyCommitTest.test_body_ticket_is_indexed_when_the_subject_names_none",
+            "test_build_intent_index.ApplyCommitTest.test_subject_ticket_is_not_diluted_by_body_tickets",
+            "test_build_intent_index.ApplyCommitTest.test_ticketed_commit_updates_files_and_descriptions",
+            "test_build_intent_index.AutomatedAuthorTest.test_human_noreply_github_address_is_kept",
+            "test_build_intent_index.AutomatedAuthorTest.test_human_prose_naming_a_bot_is_kept",
+            "test_build_intent_index.ConfigurableAutomationTest.test_emptying_the_list_leaves_only_the_bot_convention",
+            "test_build_intent_index.ConfigurableAutomationTest.test_narrowing_the_list_keeps_that_person",
+            "test_build_intent_index.ConfigurableAutomationTest.test_the_list_is_read_when_called_not_when_imported",
+            "test_build_intent_index.IndexRepositoryTest.test_end_to_end_over_ndjson",
+            "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
+            "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "proposed links are published although the store opted out",
+        "build_intent_index.py",
+        '    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"',
+        "    omit_proposed = False",
+        "KSB_PROPOSED_LINKS=omit had no effect",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_out_branch_only_material_entirely",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "a ticket that landed somewhere is flagged as only proposed",
+        "build_intent_index.py",
+        '    if not info["landed"]:',
+        "    if True:",
+        "a shipped ticket would read as never landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
+            "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+        ),
+    ),
+    Mutation(
+        "the context stops explaining what a proposed link means",
+        "build_knowledge_context.py",
+        "A ticket listed under `proposed` in the intent index",
+        "A ticket in the intent index",
+        "agents read a branch-only link as an ordinary ticket link",
+        (
+            "test_build_knowledge_context.BuildOutputsTest.test_context_says_a_proposed_link_is_not_the_code",
+        ),
+    ),
+    Mutation(
+        "omit drops a branch commit whose files landed",
+        "build_intent_index.py",
+        '    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):',
+        "    if omit_proposed:",
+        "KSB_PROPOSED_LINKS=omit discarded squash-merged work along with the proposals",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still publishes the unlanded files of a branch commit",
+        "build_intent_index.py",
+        "        if omit_proposed and not file_landed:",
+        "        if False:",
+        "a store that opted out of proposals still got them from a commit that was partly landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still records the branch of a landed branch commit",
+        "build_intent_index.py",
+        '        elif commit.get("ref") and not omit_proposed:',
+        '        elif commit.get("ref"):',
+        "a store that opted out of proposals still published branch names",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+        ),
+    ),
+    Mutation(
+        "a branch name is stored unredacted",
+        "build_intent_index.py",
+        '            info["branches"].add(sensitive.redact(commit["ref"], counts))',
+        '            info["branches"].add(commit["ref"])',
+        "a branch named after a person was embedded in the explorer page",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_name_is_redacted_before_it_is_stored",
+        ),
+    ),
+    Mutation(
+        "configure leaves PROPOSED_LINKS as given",
+        "config.py",
+        '    "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",',
+        '    "PROPOSED_LINKS": lambda given: given,',
+        "configure(PROPOSED_LINKS='OMIT') behaved as write",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_the_setting_is_normalised_however_it_arrives",
+        ),
+    ),
+    Mutation(
+        "source url: a clone URL on another host is linked as github.com",
+        "source_urls.py",
+        r"(?:git@|ssh://git@|https://|http://|git://)github\.com[:/]",
+        r"(?:git@|ssh://git@|https://|http://|git://)[\w.-]+[:/]",
+        "a repository hosted on GitLab or a self-hosted server would get a github.com link "
+        "naming a repository that does not exist there: a wrong link where the rule is to "
+        "write none",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
+        ),
+    ),
+    Mutation(
+        "source url: the link loses its line anchor",
+        "source_urls.py",
+        'quote(inside, safe=_PATH_SAFE) + line_anchor(source_location), "")',
+        'quote(inside, safe=_PATH_SAFE), "")',
+        "every node would link the top of its file rather than the line `source_location` "
+        "names, so a citation of one method in a long class sends the reader to find it",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
+        ),
+    ),
+    Mutation(
+        "source url: the single-root corpus prefix is kept",
+        "source_urls.py",
+        "        path = path[len(own) :]\n",
+        "",
+        "a store built by the single-root route writes `repositories/<repo>/<path>`, and "
+        "keeping the prefix links a path inside the repository that does not exist",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
+            "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
+        ),
+    ),
+    Mutation(
+        "source url: a single-root path naming another repository is accepted",
+        "source_urls.py",
+        "        if not path.startswith(own):\n",
+        "        if False:\n",
+        "a single-root node whose `source_file` names a different repository's clone would "
+        "be linked under its own repository's name: a link to a file that is not there",
+        (
+            "test_source_urls.TheRepositoryRelativePath.test_a_path_that_is_not_inside_its_own_repository_names_nothing",
+        ),
+    ),
+    Mutation(
+        "source url: one prefixed path makes a repository single-root",
+        "source_urls.py",
+        "        prefixed[repo] = prefixed.get(repo, True) and own\n",
+        "        prefixed[repo] = prefixed.get(repo, False) or own\n",
+        "deciding the route per path misreads a per-repository repository that really holds "
+        "a `repositories/` directory: its own files are stripped to a different path and "
+        "its files under another name are refused",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_real_repositories_directory_is_not_read_as_the_corpus_prefix",
+            "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_source_urls.TheBuildRoute.test_a_repository_is_single_root_only_when_every_file_carries_its_prefix",
+        ),
+    ),
+    Mutation(
+        "source url: an empty sha is written into the link",
+        "source_urls.py",
+        "            elif not isinstance(sha, str) or not sha:\n",
+        "            elif not isinstance(sha, str):\n",
+        "a repository with no recorded commit would get `.../blob//<path>`, which GitHub "
+        "does not resolve - a link that reads as a citation and opens nothing",
+        ("test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",),
+    ),
+    Mutation(
+        "source url: a malformed sha is reported as a missing one",
+        "source_urls.py",
+        "                self._missing[repo] = MALFORMED_SHA\n",
+        "                self._missing[repo] = NO_SHA\n",
+        "an operator told `no provenance sha` beside a provenance file that has one looks "
+        "for a missing sync rather than an abbreviated or uppercase value",
+        ("test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",),
+    ),
+    Mutation(
+        "source url: a path character that changes the URL is written raw",
+        "source_urls.py",
+        "base + quote(inside, safe=_PATH_SAFE) + line_anchor",
+        "base + inside + line_anchor",
+        "a `#` in a file name turns the rest of the path into a fragment and a space ends "
+        "the URL in most renderers, so the link opens a different file or none",
+        (
+            "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
+            "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
+        ),
+    ),
+    Mutation(
+        "source url: the escaping widens past the links stores already publish",
+        "source_urls.py",
+        '_PATH_SAFE = "/"\n',
+        '_PATH_SAFE = "/!$&\'()*+,;=:@-._~"\n',
+        "RFC 3986 allows `(` raw, and a consuming store's committed links encode it: a "
+        "file written both ways is one citation that compares unequal across the two writers",
+        (
+            "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
+        ),
+    ),
+    Mutation(
+        "source url: the local repository name stands in for the name on the host",
+        "source_urls.py",
+        'f"https://github.com/{org}/{name}/blob/{sha}/"',
+        'f"https://github.com/{org}/{repo}/blob/{sha}/"',
+        "a repository listed under a local name that differs from its name on GitHub would "
+        "link to a 404",
+        (
+            "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
+            "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
+        ),
+    ),
+    Mutation(
+        "source url stage: a link from an earlier build survives",
+        "build_source_urls.py",
+        '        had = node.pop("url", None) is not None\n',
+        '        had = node.get("url") is not None\n',
+        "a repository that left the configuration or moved host keeps the link an earlier "
+        "build wrote, citing a commit this build did not read",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+        ),
+    ),
+    Mutation(
+        "source url stage: removed links are not counted",
+        "build_source_urls.py",
+        "            outcome.removed += had\n",
+        "",
+        "links an earlier build published disappear from the graph with nothing on the "
+        "console saying so - the skip counts name why a node is unlinked, not that it "
+        "lost a link",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+        ),
+    ),
+    Mutation(
+        "source url stage: missing provenance strips every link",
+        "build_source_urls.py",
+        "    if not provenance.read():\n",
+        "    if False:\n",
+        "a machine without `knowledge/provenance.json` would remove every link the store "
+        "published, from both graph files, and exit 0",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_missing_provenance_is_refused_and_nothing_is_written",
+        ),
+    ),
+    Mutation(
+        "source url stage: a run that links nothing removes every link",
+        "build_source_urls.py",
+        "    if outcome.carried and not outcome.linked:\n",
+        "    if False:\n",
+        "a store whose repository list is missing, with provenance present, would lose "
+        "every link it published and exit 0",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
+        ),
+    ),
+    Mutation(
+        "source url stage: only the plain graph is rewritten",
+        "build_source_urls.py",
+        '    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:\n'
+        "        out.write(serialised)\n",
+        "",
+        "every store gitignores `graph.json` and commits `graph.json.gz`, so links written "
+        "only into the plain file never reach a reader and the stage still reports them",
+        (
+            "test_archive_writer_ordering.ArchiveWriterOrderingGuidanceTest.test_the_documented_stage_set_is_the_set_that_writes_the_archive",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_rerun_is_byte_identical",
+            "test_build_source_urls.SourceUrlsStageTest.test_both_graph_files_are_written_and_agree",
+        ),
+    ),
+    Mutation(
+        "source url stage: the stale-graph guard is skipped",
+        "build_source_urls.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)\n",
+        '    refusal = ""\n',
+        "the fourth stage that rewrites both graph files would overwrite the committed "
+        "archive from a stale `graph.json`, losing the newer clustering (#198)",
+        ("test_stale_graph_refusal.StaleRefusalTest.test_source_urls_refuses_and_writes_nothing",),
+    ),
+    Mutation(
+        "source url stage: an unreadable repository list reads as an empty estate",
+        "build_source_urls.py",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        return 1\n",
+        "        urls = SourceUrls({}, {})\n",
+        "one malformed line in `repositories.txt` would be read as an estate of nothing",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_malformed_repository_list_is_refused_and_nothing_is_written",
+        ),
+    ),
+    Mutation(
+        "source url stage: skipped nodes are not reported",
+        "build_source_urls.py",
+        "            outcome.skipped[found.reason] += 1\n",
+        "            pass\n",
+        "a store with no provenance would print `0 of N linked` with no reason beside it, "
+        "which is the silent-zero shape this stage's report exists to prevent",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+        ),
+    ),
+    Mutation(
+        "source url stage is not registered",
+        "cli.py",
+        '    "source-urls": (\n'
+        '        "build_source_urls",\n'
+        '        "give each graph node a `url` to its file at the commit the store was built from",\n'
+        "    ),\n",
+        "",
+        "the documented `knowledgestore source-urls` would answer `unknown stage`, and no "
+        "store could produce the links its skill tells agents to cite",
+        (
+            "test_archive_writer_ordering.ArchiveWriterOrderingGuidanceTest.test_the_documented_stage_set_is_the_set_that_writes_the_archive",
+            "test_documented_stages.DocumentedStagesExist.test_every_documented_stage_is_a_real_stage",
+            "test_repo_list_and_sync.CliTest.test_stages_are_listed_in_pipeline_order",
+        ),
+    ),
+    Mutation(
+        "source url: the context file stops forbidding corpus citations",
+        "build_knowledge_context.py",
+        "off `#L<line>` when no line is known. Never cite `repositories/<repo>/...`:\n"
+        "no reader can open that path.\n",
+        "off `#L<line>` when no line is known.\n",
+        "every agent answering from a store reads the context file; without the rule it "
+        "cites the uncommitted corpus path a reader cannot open",
+        (
+            "test_build_knowledge_context.BuildOutputsTest.test_context_tells_agents_to_cite_a_link_and_never_the_corpus",
+        ),
+    ),
+    Mutation(
+        "source url: the question skill goes back to citing source_file",
+        "skills/knowledge-store/SKILL.md",
+        "- In an answer or an exported finding, cite a node's `url` for specific claims.",
+        "- Cite `source_file` / `source_location` for specific claims.",
+        "the skill is where an answering agent reads its rules (CLAUDE.md 3); the old line "
+        "is the one that produced `repositories/...` citations",
+        (
+            "test_source_urls.TheSkillCarriesTheCitationRule.test_the_question_skill_says_cite_the_url_and_never_the_corpus",
+        ),
+    ),
+    Mutation(
+        "a node's ticket list takes in its file's proposed tickets",
+        "build_explorer.py",
+        '    return list(entry["tickets"].keys())[:MAX_TICKETS] if entry else []',
+        '    return list({**entry["tickets"], **entry.get("proposed", {})})[:MAX_TICKETS] if entry else []',
+        "#425: the explorer's per-node list is what the page calls the code's history, "
+        "and the graph is of the default branch - so a ticket found only on a branch "
+        "would be published as what changed this code, the reading the label exists to stop",
+        ("test_build_explorer.NodeTicketsTest.test_proposed_tickets_stay_off_a_code_node",),
     ),
 )
 

@@ -252,6 +252,12 @@ AUTOMATION_IDENTITIES = [
     if name.strip()
 ]
 
+# Whether the intent index publishes links from commits found only on a branch,
+# as `proposed`. `omit` leaves proposals out, for a store that wants none; branch
+# work whose content landed on the default branch is still indexed. History keeps
+# it either way, so changing this setting needs no re-export.
+PROPOSED_LINKS = os.environ.get("KSB_PROPOSED_LINKS", "write").strip().lower() or "write"
+
 
 def _browse_url(value: str) -> str:
     """A tracker browse URL a ticket id can be appended to.
@@ -274,7 +280,10 @@ def _browse_url(value: str) -> str:
 TICKET_BROWSE_URL = _browse_url(os.environ.get("KSB_TICKET_BROWSE_URL", ""))
 
 # Settings whose value is normalised however it arrives.
-_NORMALISERS = {"TICKET_BROWSE_URL": _browse_url}
+_NORMALISERS = {
+    "TICKET_BROWSE_URL": _browse_url,
+    "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",
+}
 
 # --- asking the tracker what a ticket is (the `fetch-tickets` stage) ------
 # Every setting here is empty or off by default, because the stage is opt-in:

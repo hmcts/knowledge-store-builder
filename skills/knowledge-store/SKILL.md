@@ -174,7 +174,19 @@ repository, degree ranking, community sizes.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
-- Cite `source_file` / `source_location` for specific claims.
+- In an answer or an exported finding, cite a node's `url` for specific claims.
+  It links the file at the commit the store was built from,
+  `https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>`, anchored
+  at the line `source_location` gives. In a store where nodes carry `url`, a node
+  without one was refused a link for a reason - another host, no recorded commit,
+  a path outside its repository - so cite its repository and repo-relative
+  `source_file` and say no link is available; do not build one. Build the form
+  yourself only for a file no node names (a corpus-search match), or in a store
+  where no node carries `url`, from the repository's github.com clone URL in
+  `config/repositories.txt` and its sha in `knowledge/provenance.json`.
+  **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
+  commits, so no reader can open it. Authored topic briefs and deep dives are not
+  answers: they keep file paths in backticks, which the page renderer links.
 - Answer only from what the graph returns. If the graph lacks it, say so.
 - Absence of evidence is itself a finding — report it as one, **and say what was
   searched**. A store is built from repositories discovered in one organisation on
@@ -216,7 +228,8 @@ Three conditions, and each has a different correct response:
 
 **A corpus grep is the weakest layer in the store, so name it.** It is raw text
 with no repository attribution and no relationship to any node — cite the file
-path, say the match came from a text search rather than from the graph, and apply
+as a link (drop the `repositories/<repo>/` prefix and build the form in Step 4),
+say the match came from a text search rather than from the graph, and apply
 the same rule as everywhere else: absence in the content set means absence from
 what this store holds, not from the world.
 
@@ -236,17 +249,30 @@ Two layers connect code to intent:
    ```python
    import gzip, json
    index = json.load(gzip.open('knowledge/intent/file-tickets.json.gz', 'rt'))
-   index['<repo>']['<source file>']
+   entry = index['<repo>']['<source file>']
+   entry['tickets']             # work that landed on the default branch or a tag
+   entry.get('proposed', {})    # found on a branch, not confirmed on the default branch
    ```
 
-   `ticket-descriptions.json.gz` holds, per ticket, three views of what its
-   commits said:
+   A ticket under `proposed` was found on a branch, and its work is not
+   confirmed on the default branch. Say "proposed on branch X", using the
+   ticket's `branches` from `ticket-descriptions.json.gz`, and check the
+   checked-out code before saying what the code does or does not do: a squash
+   merge can land a branch's work without its commits. A ticket record carrying
+   `"proposed": true` has no confirmed landing anywhere in the estate. A file
+   touched only on a branch has an empty `tickets` and a filled `proposed`, and
+   a file's `first` and `last` span both its landed and its proposed commits.
+
+   `ticket-descriptions.json.gz` holds, per ticket, three text views of what its
+   commits said (`d`, `s`, `b`) and two flags about where they were found:
 
    | Field | What it is |
    |---|---|
    | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
    | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
    | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
+   | `proposed` | `true` when no landed work names the ticket; omitted otherwise |
+   | `branches` | up to five branches the ticket's branch-only commits were found on, across every repository in `repos`, so check the branch exists in the file's repository; omitted when there are none |
 
    Every one of the three is a **list of strings**. Quote an element, never the
    field: `record['d']` is a list, and printing it puts brackets and quotes into

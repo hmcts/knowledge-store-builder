@@ -70,6 +70,39 @@ class BuildOutputsTest(SettingsIsolated):
         self.assertIn("source of truth", content)
         self.assertIn("commits.ndjson", content)
 
+    def test_context_says_a_proposed_link_is_not_the_code(self):
+        """Catches the rule dropped from the generated context: agents would read
+        `proposed` as an ordinary ticket link."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            repo_dir = make_history(tmp)
+            self._patch_paths(tmp)
+            context.build_context([repo_dir])
+            content = config.CONTEXT_PATH.read_text(encoding="utf-8")
+        self.assertIn("`proposed`", content)
+        self.assertIn("proposed on branch", content)
+        self.assertIn("not confirmed on the default branch", content)
+
+    def test_context_tells_agents_to_cite_a_link_and_never_the_corpus(self):
+        """Breaks if the citation rule leaves the context file. Every agent answering
+        from a store reads it, and without the rule they cite `repositories/<repo>/...`,
+        a path in a corpus no store commits, which no reader can open."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            repo_dir = make_history(tmp)
+            self._patch_paths(tmp)
+            context.build_context([repo_dir])
+            content = config.CONTEXT_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>", content
+        )
+        self.assertIn("their `url` field", content)
+        self.assertIn("Never cite `repositories/<repo>/...`", content)
+        self.assertIn("In an answer or an exported finding, cite a file as a link", content)
+        # The corpus is authoritative only for whoever holds it; an unqualified
+        # "source of truth" beside "never cite it" reads as a contradiction.
+        self.assertIn("For whoever holds the corpus, the checked-out code", content)
+
     def test_manifest_includes_provenance_when_recorded(self):
         # arrange a history dir with one repo and a provenance file
         with tempfile.TemporaryDirectory() as tmp:

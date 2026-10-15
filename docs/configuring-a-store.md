@@ -32,6 +32,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_TICKET_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
 | `KSB_TICKET_REFRESH_MAX` | `200` | Most open tickets one run requests again, oldest first. The rest wait for later runs |
 | `KSB_AUTOMATION_IDENTITIES` | `jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa` | Author or committer identities whose commit bodies are not treated as evidence. Matched as whole words against the name and the email's local part, so narrow it if a contributor shares a name with a build server — the run reports which identities it filtered. GitHub App accounts are always excluded via `[bot]` and need no entry; an empty value leaves only that rule |
+| `KSB_PROPOSED_LINKS` | `write` | Whether the intent index publishes links from commits found only on a branch, under `proposed`. `omit` leaves proposals out; branch work whose content landed on the default branch is still indexed. Changing this setting needs no re-export, but separating proposed links in the first place does: history exported before `reach` was recorded reads as all landed until `export-history` is re-run (`intent` reports how many repositories are in that state) |
 
 The full set, including tuning thresholds, is defined in
 [`src/knowledgestore/config.py`](../src/knowledgestore/config.py). A store can

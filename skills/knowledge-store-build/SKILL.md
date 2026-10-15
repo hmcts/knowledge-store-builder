@@ -728,7 +728,25 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
+knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+knowledgestore source-urls     # a `url` on each node: its file at the build commit
 ```
+
+`source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
+they add are linked too. It reads `config/repositories.txt` and
+`knowledge/provenance.json`, and reports every node it could not link, by
+reason. **Read that report.** It links each node it can, and removes any `url`
+a node carried that it can no longer build correctly; the report counts those
+on their own line, `removed N links an earlier build wrote`. Two
+cases refuse instead, exit 1 and write nothing, because they would strip links
+across the whole estate rather than from a few nodes:
+
+- `knowledge/provenance.json` is missing or records no repository - run `sync`;
+- the graph carried links and this run would link none - the reasons printed
+  above the refusal say why no node could be linked.
+
+Answers cite the `url`; without it they cite `repositories/<repo>/...`, which no
+reader can open.
 
 **Cluster after `gherkin`, not before**, so the Gherkin layer is clustered with
 everything else. Then record which partitioner did it, in the same environment
@@ -743,7 +761,7 @@ Stages are independent and idempotent — re-run one without repeating the rest.
 
 ### Run local extractors before the stages that rewrite the archive
 
-Three stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+Four stages rewrite the committed archive `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`:
 
 ```bash
@@ -751,10 +769,11 @@ mid-pipeline `graphify-out/graph.json`:
 knowledgestore gherkin
 knowledgestore packages
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+knowledgestore source-urls
 ```
 
 A store with extractors of its own has one ordering to keep: **run them before
-those three, or remove the archive between them.** Nodes written into
+those four, or remove the archive between them.** Nodes written into
 `graph.json` after the archive was last built leave the two files describing
 different graphs, and neither outcome from there is the one you want: either the
 stage refuses, in a message about communities and clustered nodes, or it
