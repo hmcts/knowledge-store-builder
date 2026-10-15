@@ -222,15 +222,29 @@ def _raw_writes(output: str) -> Iterator[tuple[str, str, str]]:
 _RAW = ("--raw", "--no-abbrev", "--no-renames", f"--format={RECORD_SEPARATOR}%H")
 
 
-def landed_blobs(repo_path: Path, ref: str | None) -> frozenset[tuple[str, str]]:
-    """Every (path, blob) written by a commit reachable from the default ref or a tag."""
+def landed_blobs(
+    repo_path: Path, ref: str | None, paths: frozenset[str] | None = None
+) -> frozenset[tuple[str, str]]:
+    """Every (path, blob) written by a commit reachable from the default ref or a tag.
+
+    `paths` keeps only those paths: on a very large repository the unfiltered
+    set runs to hundreds of MB. Paths in rename or copy notation never match,
+    which leans towards proposed and is deliberate.
+    """
     revisions = [ref, "--tags"] if ref else ["--tags"]
     output = run_git(repo_path, "log", *revisions, *_RAW)
-    return frozenset((path, blob) for _, path, blob in _raw_writes(output))
+    return frozenset(
+        (path, blob) for _, path, blob in _raw_writes(output) if paths is None or path in paths
+    )
 
 
 def branch_blobs(repo_path: Path, ref: str | None) -> dict[str, list[tuple[str, str]]]:
-    """For each commit reachable only from a branch, the (path, blob) pairs it wrote."""
+    """For each commit reachable only from a branch, the (path, blob) pairs it wrote.
+
+    Files of branch merge commits and paths in rename or copy notation are never
+    reported, so they are never marked landed: that leans towards proposed and
+    is deliberate.
+    """
     excluded = [ref, "--tags"] if ref else ["--tags"]
     output = run_git(
         repo_path, "log", "--exclude=refs/remotes/*/HEAD", "--all", "--not", *excluded, *_RAW
@@ -286,8 +300,10 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
 
     ref, _ = resolve_default(repo_path, default_branch)
     landed, tagged = reach_sets(repo_path, ref)
-    on_default = landed_blobs(repo_path, ref)
     written = branch_blobs(repo_path, ref)
+    on_default = landed_blobs(
+        repo_path, ref, frozenset(path for pairs in written.values() for path, _ in pairs)
+    )
 
     for raw_record in output.split(RECORD_SEPARATOR):
         # Strip only newlines: Python's str.strip() treats \x1f/\x1e as

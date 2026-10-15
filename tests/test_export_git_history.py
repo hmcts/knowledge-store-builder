@@ -380,6 +380,8 @@ class ReachTest(SettingsIsolated):
             self._git(work, "config", "user.name", "Test")
             self._git(work, "checkout", "-q", "main")
             self._commit(work, "e.txt", "", "empty on main")
+            # resolve_default reads the remote-tracking ref first, so move it too.
+            self._git(work, "update-ref", "refs/remotes/origin/main", "HEAD")
             self._git(work, "checkout", "-q", "-b", "empty-branch", "origin/team/proposal")
             self._commit(work, "e.txt", "", "AA-9: empty on branch")
             blobs = export.landed_blobs(work, "refs/heads/main")
@@ -388,6 +390,16 @@ class ReachTest(SettingsIsolated):
         self.assertEqual(
             [f.get("landed") for f in commits["AA-9: empty on branch"]["files"]], [None]
         )
+
+    def test_landed_blobs_keeps_only_the_paths_asked_for(self):
+        """Catches the paths filter being ignored, which keeps every blob on the
+        default branch in memory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            everything = export.landed_blobs(work, "refs/heads/main")
+            kept = export.landed_blobs(work, "refs/heads/main", frozenset({"c.txt"}))
+        self.assertGreater(len({path for path, _ in everything}), 1)
+        self.assertEqual({path for path, _ in kept}, {"c.txt"})
 
     def test_raw_writes_drops_deletions_and_the_empty_blob(self):
         """Catches a deletion or an empty file read as content a commit wrote."""
