@@ -4793,8 +4793,8 @@ MUTATIONS = (
     Mutation(
         "citation link: a link outside the estate fails the gate",
         "check_citations.py",
-        '    if urls is None or not repos:\n        return Verdict("unchecked")\n',
-        '    if urls is None or not repos:\n        return Verdict("unresolved")\n',
+        '    if urls is None or not repos:\n        return Verdict("unchecked", reason=OUTSIDE_STORE)\n',
+        '    if urls is None or not repos:\n        return Verdict("unresolved", reason=OUTSIDE_STORE)\n',
         "a store whose answers cite a third-party library's source could never go green, "
         "so it would stop running the gate",
         (
@@ -4824,6 +4824,102 @@ MUTATIONS = (
         "path or re-pin the commit",
         (
             "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
+        "citation link: a file no node names is not asked of the clone",
+        "check_citations.py",
+        "            if held:\n                holding.add(r)\n",
+        "",
+        "every link to a corpus-search match fails as an unknown file, though the "
+        "repository holds it - the links the question skill tells an agent to build",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_holds_at_the_build_commit_resolves",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+        ),
+    ),
+    Mutation(
+        "citation link: the clone is asked at its head, not the build commit",
+        "check_citations.py",
+        "vocabulary.clone_holds(r, urls.build_sha(r) or link.sha, link.path)",
+        'vocabulary.clone_holds(r, "HEAD", link.path)',
+        "a file added after the build passes as though the store had read it, and a "
+        "file deleted since fails though the cited commit holds it",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+        ),
+    ),
+    Mutation(
+        "citation link: a missing path in the clone passes",
+        "check_citations.py",
+        "        except subprocess.CalledProcessError:\n            return False\n",
+        "        except subprocess.CalledProcessError:\n            return True\n",
+        "with the clone present, any invented path passes the gate: the clone's no is "
+        "read as a yes",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+        ),
+    ),
+    Mutation(
+        "citation link: no clone fails the link",
+        "check_citations.py",
+        '    if not holding and undecided and built:\n        return Verdict("unchecked", reason=NO_CLONE)\n',
+        "",
+        "a machine without the corpus - every one but the build machine - fails links "
+        "nothing it holds can decide, so the gate is red for honest answers",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_file_no_node_names_is_unchecked_not_failed",
+        ),
+    ),
+    Mutation(
+        "citation link: a missing clone hides a wrong sha",
+        "check_citations.py",
+        "    if not holding and undecided and built:\n",
+        "    if not holding and undecided:\n",
+        "a link pinned to the wrong commit passes as unchecked on any machine without a "
+        "clone, though provenance alone shows it is wrong",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_wrong_sha_still_fails",
+        ),
+    ),
+    Mutation(
+        "citation link: the stage does not hand over the clones",
+        "check_citations.py",
+        "load_vocabulary(graph, urls, config.REPOSITORIES_DIR)",
+        "load_vocabulary(graph, urls)",
+        "the stage lists every corpus-search link as unchecked, so an invented one "
+        "passes on the machine that holds the clone that could refute it",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
+        "citation link: answers hands a link it cannot see to resolve",
+        "answers.py",
+        "    if _URL.fullmatch(text) or parse_blob_url(text) is not None:\n",
+        "    if _URL.fullmatch(text):\n",
+        "a hand-written link with a raw `(` in its path slips past the URL pattern into "
+        "`resolve`, which returns `unchecked`, and the class lookup raises: one link ends "
+        "the whole measurement",
+        (
+            "test_answers.ClassingALinkCheckCitationsCanParse.test_a_link_with_a_raw_bracket_is_a_pinned_url_not_a_crash",
+        ),
+    ),
+    Mutation(
+        "citation link: an undecided link is called outside the estate",
+        "check_citations.py",
+        'return Verdict("unchecked", reason=NO_CLONE)',
+        'return Verdict("unchecked", reason=OUTSIDE_STORE)',
+        "a corpus-search link with no clone here is listed as a repository the store "
+        "does not build, so a reader checks the repository list rather than the file",
+        (
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
         ),
     ),
     Mutation(

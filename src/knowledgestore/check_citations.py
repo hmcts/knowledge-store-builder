@@ -40,8 +40,14 @@ wrote it, and holds two claims, each checked against what the store read:
 
 - the file: its path must be one of the graph's `source_file`s *for that
   repository* (repo-relative on either build route). A path held only by another
-  repository does not resolve. Reported as `unknown file`, with the nearest file
-  that repository does hold.
+  repository does not resolve. A path no node names - a corpus-search match - is
+  asked of the repository's clone under `repositories/<name>/`, at the commit
+  provenance records, with `git rev-parse --verify --quiet <sha>:<path>` (the
+  existence test `git cat-file -e` makes, without a `fatal:` line on every miss
+  interleaved with the report). Reported as `unknown file`, with the nearest file
+  the graph holds for that repository. With no clone on this machine the file
+  claim cannot be decided, so the link is listed as unchecked rather than failed -
+  unless its sha is wrong, which needs no clone to say.
 - the commit: its sha must be the one `knowledge/provenance.json` records for that
   repository. A branch or an abbreviated sha is not, and a link to it drifts off
   the line it cites. Reported as `different sha`, naming the sha the store read.
@@ -88,12 +94,15 @@ from __future__ import annotations
 import argparse
 import difflib
 import re
+import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, graph_files, graph_stream
 from .build_community_summaries import _normalise, prose_identifiers
+from .sync_repositories import run_git
 from .source_urls import (
     BlobUrl,
     SourceUrls,
@@ -117,6 +126,8 @@ _CITED = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"]+)")
 _SENTENCE_END = ".,;:!?"
 UNKNOWN_FILE = "unknown file"
 DIFFERENT_SHA = "different sha"
+OUTSIDE_STORE = "a repository this store does not build"
+NO_CLONE = "a file no node names, and no clone under repositories/ to look in"
 _INNER_CALL = re.compile(r"\([^()]*\)")
 _NAME_CHARS = re.compile(r"[.\w$@]+")
 _FILE_EXTENSION = re.compile(
@@ -140,6 +151,9 @@ class Vocabulary:
     sources: dict[str, set[str]] = field(default_factory=dict)
     # the store's repository list and provenance; None when they were not read
     urls: SourceUrls | None = None
+    # the store's `repositories/`, whose clones answer for files no node names
+    clones: Path | None = None
+    run: Callable[[list[str]], str] = run_git
     _names: list[str] | None = None
     _basenames: list[str] | None = None
     _files: dict[str, set[str]] | None = None
@@ -184,10 +198,27 @@ class Vocabulary:
                 self._files[name] = {p for p in inside if p}
         return self._files.get(repo, set())
 
+    def clone_holds(self, repo: str, sha: str, path: str) -> bool | None:
+        """Whether `repo`'s clone holds `path` at `sha`; None when there is no clone."""
+        clone = self.clones / repo if self.clones else None
+        if clone is None or not (clone / ".git").exists():
+            return None
+        try:
+            self.run(["-C", str(clone), "rev-parse", "--verify", "--quiet", f"{sha}:{path}"])
+        except subprocess.CalledProcessError:
+            return False
+        return True
 
-def load_vocabulary(graph: Path, urls: SourceUrls | None = None) -> Vocabulary:
-    """Stream the graph's nodes once. Without `urls`, no source link is checked."""
-    vocabulary = Vocabulary(urls=urls)
+
+def load_vocabulary(
+    graph: Path,
+    urls: SourceUrls | None = None,
+    clones: Path | None = None,
+    run: Callable[[list[str]], str] = run_git,
+) -> Vocabulary:
+    """Stream the graph's nodes once. Without `urls`, no source link is checked;
+    without `clones`, a link to a file no node names is unchecked."""
+    vocabulary = Vocabulary(urls=urls, clones=clones, run=run)
     for node in graph_stream.iter_array(graph, "nodes"):
         vocabulary.add(
             str(node.get("label") or ""),
@@ -201,7 +232,7 @@ def load_vocabulary(graph: Path, urls: SourceUrls | None = None) -> Vocabulary:
 class Verdict:
     """`kind` is resolved, unresolved, column, unchecked or skipped.
 
-    `reason` says why a source link is unresolved; it is empty for anything else.
+    `reason` says why a source link is unresolved or unchecked; else it is empty.
     """
 
     kind: str
@@ -270,13 +301,23 @@ def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
     urls = vocabulary.urls
     repos = urls.repositories_at(link.org, link.repo) if urls else ()
     if urls is None or not repos:
-        return Verdict("unchecked")
+        return Verdict("unchecked", reason=OUTSIDE_STORE)
     holding = {r for r in repos if link.path in vocabulary.repository_files(r)}
     built = {r for r in repos if urls.build_sha(r) == link.sha}
+    undecided = False
+    if not holding:
+        # A file no node names: the clone answers, at the commit the store read.
+        for r in repos:
+            held = vocabulary.clone_holds(r, urls.build_sha(r) or link.sha, link.path)
+            undecided = undecided or held is None
+            if held:
+                holding.add(r)
     if holding & built:
         return Verdict("resolved")
+    if not holding and undecided and built:
+        return Verdict("unchecked", reason=NO_CLONE)
     reasons, nearest = [], ""
-    if not holding:
+    if not holding and not undecided:
         reasons.append(f"{UNKNOWN_FILE} in {', '.join(repos)}")
         pool = sorted(set().union(*(vocabulary.repository_files(r) for r in repos)))
         nearest = _nearest(link.path, pool)
@@ -364,9 +405,9 @@ class Report:
     skipped: int = 0
     unresolved: list[tuple[str, str, str]] = field(default_factory=list)
     columns: list[tuple[str, str]] = field(default_factory=list)
-    # source links to repositories the store does not configure: (file, link)
+    # source links the store cannot decide, either way: (file, link)
     unchecked: list[tuple[str, str]] = field(default_factory=list)
-    # why each unresolved source link failed, by span (the same span, the same reason)
+    # why each source link failed or went unchecked, by span (one span, one reason)
     reasons: dict[str, str] = field(default_factory=dict)
 
 
@@ -386,6 +427,7 @@ def check(files: list[Path], vocabulary: Vocabulary) -> Report:
                 report.columns.append((str(path), span))
             elif verdict.kind == "unchecked":
                 report.unchecked.append((str(path), span))
+                report.reasons[span] = verdict.reason
             else:
                 report.unresolved.append((str(path), span, verdict.nearest))
                 if verdict.reason:
@@ -433,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)
         return 2
 
-    report = check(files, load_vocabulary(graph, urls))
+    report = check(files, load_vocabulary(graph, urls, config.REPOSITORIES_DIR))
     checked = report.resolved + len(report.unresolved)
     print(
         f"{len(files):,} answer files against {graph.name}: {checked:,} citations checked, "
@@ -441,8 +483,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(report.columns):,} database-column citations reported separately; "
         f"{report.skipped:,} spans skipped (no code shape)"
         + (
-            f"; {len(report.unchecked):,} source links to repositories this store does "
-            "not build, reported separately"
+            f"; {len(report.unchecked):,} source links this store cannot decide, "
+            "reported separately"
             if report.unchecked
             else ""
         )
@@ -456,11 +498,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {path}  `{span}`")
     if report.unchecked:
         print(
-            "\nSource links to repositories this store does not build, neither passed nor "
-            "failed (the graph cannot answer for them) - check these by hand:"
+            "\nSource links this store cannot decide, neither passed nor failed - check "
+            "these by hand:"
         )
         for path, span in report.unchecked:
-            print(f"  {path}  `{span}`")
+            print(f"  {path}  `{span}`  {report.reasons.get(span, '')}".rstrip())
     if not report.unresolved:
         return 0
     print("\nCited but not in the graph:", file=sys.stderr)

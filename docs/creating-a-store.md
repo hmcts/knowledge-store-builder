@@ -627,8 +627,10 @@ one. Run the stage from the store root, because it reads the repository list and
 `knowledge/provenance.json` there. The link fails, and the report says which claim
 is wrong, when:
 
-- its path is not a `source_file` of that repository: `unknown file`, with the
-  nearest file the repository does hold;
+- its path is not a `source_file` of that repository, nor a file the repository's
+  clone under `repositories/<name>/` holds at the recorded commit: `unknown file`,
+  with the nearest file the graph holds for that repository. Where no clone is
+  present, a path no node names cannot be decided and is listed as unchecked;
 - its sha is not the commit provenance records for that repository, including a
   branch name or an abbreviated sha: `different sha`, naming the commit the store
   read.

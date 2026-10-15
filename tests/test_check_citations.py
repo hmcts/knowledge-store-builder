@@ -12,6 +12,8 @@ import contextlib
 import gzip
 import io
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -262,10 +264,44 @@ renamed-locally|https://github.com/example-org/upstream-name.git|master
 """
 
 
+def _git(repo: Path, *args: str) -> str:
+    """Real git, with an identity and no signing, so a commit works on any machine."""
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Example",
+        "GIT_AUTHOR_EMAIL": "example@example.invalid",
+        "GIT_COMMITTER_NAME": "Example",
+        "GIT_COMMITTER_EMAIL": "example@example.invalid",
+    }
+    completed = subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "-C", str(repo), *args],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        env=env,
+    )
+    return completed.stdout.strip()
+
+
+def _commit(repo: Path, path: str) -> str:
+    """Add one file and commit it; the new commit's sha."""
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"{path}\n", encoding="utf-8")
+    _git(repo, "add", path)
+    _git(repo, "commit", "-q", "-m", f"add {path}")
+    return _git(repo, "rev-parse", "HEAD")
+
+
 class SourceLinkBed(Bed):
     def setUp(self) -> None:
         super().setUp()
         self.graph.write_text(json.dumps(LINKED_GRAPH))
+        # example-repo's clone is present and holds no commit, so a path the graph
+        # does not hold is looked for in real git and not found there.
+        self.clone = config.REPOSITORIES_DIR / "example-repo"
+        self.clone.mkdir(parents=True)
+        _git(self.clone, "init", "-q")
         config.REPOSITORIES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
         config.REPOSITORIES_CONFIG.write_text(REPOSITORY_LIST, encoding="utf-8")
         provenance.write(
@@ -281,7 +317,9 @@ class SourceLinkBed(Bed):
         )
 
     def vocabulary(self) -> check_citations.Vocabulary:
-        return check_citations.load_vocabulary(self.graph, source_urls.SourceUrls.from_store())
+        return check_citations.load_vocabulary(
+            self.graph, source_urls.SourceUrls.from_store(), config.REPOSITORIES_DIR
+        )
 
 
 class VerdictsOnSourceLinks(SourceLinkBed):
@@ -397,7 +435,7 @@ class TheStageOnSourceLinks(SourceLinkBed):
         code, out, err = self.run_stage("--graph", str(self.graph))
         self.assertEqual(code, 1)
         self.assertIn("4 citations checked, 2 resolve, 2 do not", out)
-        self.assertIn("1 source links to repositories this store does not build", out)
+        self.assertIn("1 source links this store cannot decide", out)
         self.assertIn("https://github.com/another-org/library/blob/main/Lib.java", out)
         self.assertIn(
             f"/{STALE_SHA}/{CASE_SERVICE}#L12`  {check_citations.DIFFERENT_SHA}: "
@@ -419,3 +457,82 @@ class TheStageOnSourceLinks(SourceLinkBed):
         code, _, err = self.run_stage("--graph", str(self.graph))
         self.assertEqual(code, 2)
         self.assertIn("repositories.txt", err)
+
+
+class LinksToFilesNoNodeNames(SourceLinkBed):
+    """A corpus-search match: a file the repository holds that no graph node names.
+    The clone under `repositories/<name>/` answers for it at the build commit."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.build = _commit(self.clone, "docs/RUNBOOK.md")
+        # Committed after the build: in the clone's working tree, not at the build sha.
+        _commit(self.clone, "docs/LATER.md")
+        provenance.write(
+            {
+                "example-repo": {"sha": self.build, "branch": "main", "committed": ""},
+                "other-repo": {"sha": BUILD_SHA, "branch": "main", "committed": ""},
+            }
+        )
+        self.loaded = self.vocabulary()
+
+    def link(self, path: str, sha: str = "", repo: str = "example-repo") -> str:
+        return f"https://github.com/example-org/{repo}/blob/{sha or self.build}/{path}#L1"
+
+    def test_a_file_the_clone_holds_at_the_build_commit_resolves(self):
+        """Breaks if a link to a real file that no node names fails the gate, which
+        is every link the skill tells an agent to build for a corpus-search match."""
+        verdict = check_citations.resolve(self.link("docs/RUNBOOK.md"), self.loaded)
+        self.assertEqual(verdict.kind, "resolved")
+
+    def test_a_file_the_clone_does_not_hold_at_the_build_commit_fails(self):
+        """Breaks if the clone is asked about its working tree or its head rather than
+        the build commit - a file added later would pass - or if the clone's answer
+        is not taken at all and an invented path passes."""
+        for path in ("docs/LATER.md", "docs/NEVER.md"):
+            with self.subTest(path=path):
+                verdict = check_citations.resolve(self.link(path), self.loaded)
+                self.assertEqual(verdict.kind, "unresolved")
+                self.assertEqual(verdict.reason, f"{check_citations.UNKNOWN_FILE} in example-repo")
+
+    def test_without_a_clone_a_file_no_node_names_is_unchecked_not_failed(self):
+        """Breaks if a store without its corpus - every machine that did not build
+        it - fails a link nothing it holds can decide, or passes it silently."""
+        verdict = check_citations.resolve(
+            self.link("docs/RUNBOOK.md", BUILD_SHA, "other-repo"), self.loaded
+        )
+        self.assertEqual(verdict.kind, "unchecked")
+
+    def test_without_a_clone_a_wrong_sha_still_fails(self):
+        """Breaks if the missing clone hides the claim that can still be decided: the
+        sha is checked against provenance, which needs no clone."""
+        verdict = check_citations.resolve(
+            self.link("docs/RUNBOOK.md", STALE_SHA, "other-repo"), self.loaded
+        )
+        self.assertEqual(verdict.kind, "unresolved")
+        self.assertEqual(
+            verdict.reason, f"{check_citations.DIFFERENT_SHA}: the store read {BUILD_SHA}"
+        )
+
+    def test_the_stage_reads_the_clones_under_the_store(self):
+        """Breaks if the stage does not hand the store's `repositories/` to the
+        check, so every corpus-search link is unchecked and an invented one passes."""
+        (self.answers / "case-lookup.md").write_text(
+            f"See {self.link('docs/RUNBOOK.md')} and {self.link('docs/NEVER.md')}.\n"
+        )
+        code, out, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 1)
+        self.assertIn("2 citations checked, 1 resolve, 1 do not", out)
+        self.assertIn(f"docs/NEVER.md#L1`  {check_citations.UNKNOWN_FILE} in example-repo", err)
+
+    def test_a_link_no_clone_can_decide_is_listed_as_undecided(self):
+        """Breaks if the unchecked list describes every entry as outside the estate:
+        a corpus-search link with no clone here is inside it, and a reader told
+        otherwise checks the wrong thing."""
+        (self.answers / "case-lookup.md").write_text(
+            f"See {self.link('docs/RUNBOOK.md', BUILD_SHA, 'other-repo')}.\n"
+        )
+        code, out, _ = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 0)
+        self.assertIn("1 source links this store cannot decide", out)
+        self.assertIn("no clone under repositories/ to look in", out)

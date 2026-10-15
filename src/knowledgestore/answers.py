@@ -97,6 +97,7 @@ from typing import Any
 
 from . import config, graph_files, io
 from .check_citations import FENCE, SPAN, Vocabulary, load_vocabulary, resolve, spans
+from .source_urls import parse_blob_url
 from .cost import (
     RESULT_SUFFIXES,
     TRANSCRIPT_SUFFIXES,
@@ -357,7 +358,9 @@ def _count_turn(message: dict[str, Any], usage: dict[str, Any], answer: Answer) 
 def classify(span: str, vocabulary: Vocabulary) -> str:
     """One citation's class. See the module docstring for what each means."""
     text = span.strip()
-    if _URL.fullmatch(text):
+    # `parse_blob_url` too: `_URL` stops at a raw `(`, which a hand-written link can
+    # hold, and `resolve` would class that link against a store this run never read.
+    if _URL.fullmatch(text) or parse_blob_url(text) is not None:
         return "pinned_url" if _PINNED.search(text) else "skipped"
     if text.removeprefix("./").startswith("repositories/"):
         return "corpus_path"

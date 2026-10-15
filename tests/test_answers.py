@@ -595,6 +595,27 @@ class Citations(AnswersStage):
         )
 
 
+class ClassingALinkCheckCitationsCanParse(SettingsIsolated):
+    def test_a_link_with_a_raw_bracket_is_a_pinned_url_not_a_crash(self):
+        """Break: `check_citations.resolve` parses blob links, and returns `unchecked`
+        for one when no store is loaded. A link whose path holds a raw `(` slips past
+        this module's own URL pattern into `resolve`, and the class lookup raised
+        KeyError, ending the whole measurement on one hand-written link."""
+        vocabulary = check_citations.Vocabulary()
+        for span in (
+            f"https://github.com/example/shop-api/blob/{SHA}/db/Order(Draft).sql",
+            f"https://github.com/example/shop-api/blob/{SHA}/src/OrderService.java#L12",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(answers.classify(span, vocabulary), "pinned_url")
+        self.assertEqual(
+            answers.classify(
+                "https://github.com/example/shop-api/blob/main/db/Order(Draft).sql", vocabulary
+            ),
+            "skipped",
+        )
+
+
 class AbsenceClaims(AnswersStage):
     def _claim(self, text: str) -> dict:
         root = self._dir()
