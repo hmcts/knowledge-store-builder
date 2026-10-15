@@ -280,14 +280,11 @@ class SourceUrlsStageTest(SettingsIsolated):
         ).read_bytes()
 
     def _assert_nothing_written(self, before):
-        self.assertEqual(
-            (
-                config.GRAPH_PATH.read_bytes(),
-                config.GRAPH_PATH.with_name("graph.json.gz").read_bytes(),
-            ),
-            before,
-            "a refusal must leave both graph files as they were",
+        after = (
+            config.GRAPH_PATH.read_bytes(),
+            config.GRAPH_PATH.with_name("graph.json.gz").read_bytes(),
         )
+        self.assertEqual(after, before, "a refusal must leave both graph files as they were")
 
     def test_missing_provenance_is_refused_and_nothing_is_written(self):
         """Breaks if a machine without `knowledge/provenance.json` strips every
