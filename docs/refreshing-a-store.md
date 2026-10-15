@@ -61,8 +61,8 @@ knowledgestore fetch-tickets
 ```
 
 It asks the tracker about tickets it has never had an answer for, and about up
-to `KSB_TICKET_REFRESH_MAX` unresolved tickets whose record is
-`KSB_TICKET_REFRESH_DAYS` old, so a refresh costs requests for the tickets it
+to `KSB_TRACKER_REFRESH_MAX` unresolved tickets whose record is
+`KSB_TRACKER_REFRESH_DAYS` old, so a refresh costs requests for the tickets it
 added plus at most a couple of pages of open ones — see
 [Refreshing open tickets](configuring-a-store.md#refreshing-open-tickets). Read
 four numbers from its report:

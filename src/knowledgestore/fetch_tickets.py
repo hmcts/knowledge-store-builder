@@ -6,9 +6,9 @@ commits the answer to `knowledge/intent/ticket-tracker.json.gz`. Resolved ticket
 do not change, so a resolved ticket that has been fetched is never fetched again -
 the cache is the artefact, and a later build with no credentials reads it rather
 than degrading. An unresolved ticket is still changing: its record carries the
-day it was read, and is asked about again once it is `KSB_TICKET_REFRESH_DAYS`
+day it was read, and is asked about again once it is `KSB_TRACKER_REFRESH_DAYS`
 old (#421). Refresh is bounded so it cannot inflate a run: at most
-`KSB_TICKET_REFRESH_MAX` records per run, oldest first, in their own batched
+`KSB_TRACKER_REFRESH_MAX` records per run, oldest first, in their own batched
 pages, and only for tickets the store still cites.
 
     knowledgestore fetch-tickets
@@ -436,12 +436,12 @@ def refresh_due(record: object, today: str) -> bool:
     A record with no readable date - every open record an older release wrote -
     is due rather than presumed fresh. Zero days turns refresh off.
     """
-    if config.TICKET_REFRESH_DAYS <= 0:
+    if config.TRACKER_REFRESH_DAYS <= 0:
         return False
     if not isinstance(record, dict) or not is_fetched(record) or is_resolved(record):
         return False
     age = _age_in_days(record.get(CHECKED), today)
-    return age is None or age >= config.TICKET_REFRESH_DAYS
+    return age is None or age >= config.TRACKER_REFRESH_DAYS
 
 
 def _read_on(record: dict) -> str:
@@ -455,7 +455,7 @@ def refresh_plan(keys: Iterable[str], cache: dict, today: str) -> tuple[list[str
 
     Candidates are `keys` - the tickets the store still cites - never the whole
     cache, so a ticket no commit mentions any more is not paid for. The oldest
-    read go first, the key breaking ties, and at most `KSB_TICKET_REFRESH_MAX` are
+    read go first, the key breaking ties, and at most `KSB_TRACKER_REFRESH_MAX` are
     taken: the rest stay due and carry to the next run, so a large backlog drains
     over several runs rather than landing on one.
     """
@@ -463,7 +463,7 @@ def refresh_plan(keys: Iterable[str], cache: dict, today: str) -> tuple[list[str
         (key for key in keys if refresh_due(cache.get(key), today)),
         key=lambda key: (_read_on(cache[key]), key),
     )
-    return due[: max(config.TICKET_REFRESH_MAX, 0)], len(due)
+    return due[: max(config.TRACKER_REFRESH_MAX, 0)], len(due)
 
 
 # --- the run -------------------------------------------------------------
@@ -674,7 +674,7 @@ def _report_refresh(report: Report) -> None:
     is visible rather than indistinguishable from nothing being open. Whatever
     was due and not refreshed stays due, so it is what later runs inherit."""
     left = report.refresh_due - report.refreshed
-    off = "" if config.TICKET_REFRESH_DAYS > 0 else "; refresh is off (KSB_TICKET_REFRESH_DAYS=0)"
+    off = "" if config.TRACKER_REFRESH_DAYS > 0 else "; refresh is off (KSB_TRACKER_REFRESH_DAYS=0)"
     print(
         f"  refreshed {report.refreshed:,} of {report.refresh_due:,} due, with {left:,} left "
         f"for later runs, in {report.refresh_requests:,} requests; {report.kept:,} kept "

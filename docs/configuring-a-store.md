@@ -29,8 +29,8 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_TRACKER_FETCH_COMMENTS` | `false` | Add each ticket's comments to the request |
 | `KSB_TRACKER_PAGE_SIZE` | `100` | Tickets per search request |
 | `KSB_TRACKER_DELAY_SECONDS` | `1` | Pause between requests |
-| `KSB_TICKET_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
-| `KSB_TICKET_REFRESH_MAX` | `200` | Most open tickets one run requests again, oldest first. The rest wait for later runs |
+| `KSB_TRACKER_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
+| `KSB_TRACKER_REFRESH_MAX` | `200` | Most open tickets one run requests again, oldest first. The rest wait for later runs |
 | `KSB_AUTOMATION_IDENTITIES` | `jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa` | Author or committer identities whose commit bodies are not treated as evidence. Matched as whole words against the name and the email's local part, so narrow it if a contributor shares a name with a build server — the run reports which identities it filtered. GitHub App accounts are always excluded via `[bot]` and need no entry; an empty value leaves only that rule |
 | `KSB_PROPOSED_LINKS` | `write` | Whether the intent index publishes links from commits found only on a branch, under `proposed`. `omit` leaves proposals out; branch work whose content landed on the default branch is still indexed. Changing this setting needs no re-export, but separating proposed links in the first place does: history exported before `reach` was recorded reads as all landed until `export-history` is re-run (`intent` reports how many repositories are in that state) |
 
@@ -48,7 +48,7 @@ the pipeline runs unchanged. A resolved ticket that has been fetched is never
 fetched again, so a later build with no credentials reads the committed cache
 rather than degrading. An unresolved ticket is still changing: its record carries
 the date it was read, and a run requests it again once that date is
-`KSB_TICKET_REFRESH_DAYS` old, within the bounds described in
+`KSB_TRACKER_REFRESH_DAYS` old, within the bounds described in
 [Refreshing open tickets](#refreshing-open-tickets).
 
 By default the stage speaks Jira Data Center or Server: a personal access token
@@ -79,7 +79,7 @@ two matters:
 | Outcome | Cached as | Asked about again |
 |---|---|---|
 | Fetched, resolved | the projected fields, redacted | No |
-| Fetched, unresolved | the projected fields, redacted, with the date | Once the date is `KSB_TICKET_REFRESH_DAYS` old |
+| Fetched, unresolved | the projected fields, redacted, with the date | Once the date is `KSB_TRACKER_REFRESH_DAYS` old |
 | Not in the response | `absent`, with the date | No |
 | Access denied (401, 403) | `denied`, with the date | **Yes** |
 | Transport error, 5xx, or a reply that is not a search response | not cached | Yes |
@@ -97,8 +97,8 @@ costs:
 
 | Setting | What it buys | What it costs |
 |---|---|---|
-| `KSB_TICKET_REFRESH_DAYS` (default `7`) | How stale an open ticket's record can get | A shorter interval makes more records due each run. `0` turns refresh off: open tickets keep the record from their first fetch, which is how the stage behaved before refresh existed |
-| `KSB_TICKET_REFRESH_MAX` (default `200`) | How many due records one run brings up to date | At most `KSB_TICKET_REFRESH_MAX ÷ KSB_TRACKER_PAGE_SIZE` extra requests per run, rounded up — two at the defaults — each followed by the `KSB_TRACKER_DELAY_SECONDS` pause |
+| `KSB_TRACKER_REFRESH_DAYS` (default `7`) | How stale an open ticket's record can get | A shorter interval makes more records due each run. `0` turns refresh off: open tickets keep the record from their first fetch, which is how the stage behaved before refresh existed |
+| `KSB_TRACKER_REFRESH_MAX` (default `200`) | How many due records one run brings up to date | At most `KSB_TRACKER_REFRESH_MAX ÷ KSB_TRACKER_PAGE_SIZE` extra requests per run, rounded up — two at the defaults — each followed by the `KSB_TRACKER_DELAY_SECONDS` pause |
 
 Refreshes go through the same batched search as new tickets, in pages of their
 own after them, so they add whole requests rather than one per ticket. When more

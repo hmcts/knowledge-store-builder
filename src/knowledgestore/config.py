@@ -348,12 +348,12 @@ TRACKER_DELAY_SECONDS = _env_float("KSB_TRACKER_DELAY_SECONDS", 1.0)
 # its status and text would otherwise freeze at the first fetch. A week keeps a
 # daily build from re-requesting every open ticket every day. Zero (or less)
 # turns refresh off, which is how the stage behaved before it existed.
-TICKET_REFRESH_DAYS = _env_int("KSB_TICKET_REFRESH_DAYS", 7)
+TRACKER_REFRESH_DAYS = _env_int("KSB_TRACKER_REFRESH_DAYS", 7)
 # Most open tickets one run re-requests, oldest first. A store upgrading from a
 # release without refresh has every open record due at once; the cap spreads that
 # backlog over several runs so no single refresh pays for all of it. At the
 # default page size, 200 is two requests.
-TICKET_REFRESH_MAX = _env_int("KSB_TICKET_REFRESH_MAX", 200)
+TRACKER_REFRESH_MAX = _env_int("KSB_TRACKER_REFRESH_MAX", 200)
 
 # --- identifiers redacted out of mined commit text ------------------------
 # Commit messages are written for colleagues, not for publication, and some of

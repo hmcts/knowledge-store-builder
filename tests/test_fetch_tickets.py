@@ -494,11 +494,11 @@ class RefreshTest(FetchTicketsTestCase):
         self.assertEqual(later.urls, [])
 
     def test_the_interval_is_read_from_its_setting(self):
-        """Breaks if `KSB_TICKET_REFRESH_DAYS` is not what decides the age - an
+        """Breaks if `KSB_TRACKER_REFRESH_DAYS` is not what decides the age - an
         estate that wants daily status could not have it, and one on a strict
         rate limit could not lengthen it."""
         with tempfile.TemporaryDirectory() as tmp:
-            self._store(tmp, ["AAA-1"], TICKET_REFRESH_DAYS=1)
+            self._store(tmp, ["AAA-1"], TRACKER_REFRESH_DAYS=1)
             self._run_stage(FakeTracker({"AAA-1": open_fields("Still open")}))
             later = FakeTracker({"AAA-1": open_fields("Still open", status="In Review")})
             self._run_stage(later, today="2026-01-03")
@@ -570,7 +570,7 @@ class RefreshBoundsTest(FetchTicketsTestCase):
         Also pins the three telemetry measurements."""
         keys = [f"AAA-{n}" for n in range(1, 6)]
         with tempfile.TemporaryDirectory() as tmp:
-            self._store(tmp, keys, TICKET_REFRESH_MAX=2)
+            self._store(tmp, keys, TRACKER_REFRESH_MAX=2)
             self._seed({key: open_record(key, "2025-12-01") for key in keys})
             first = FakeTracker({key: open_fields(key) for key in keys})
             _code, output = self._run_stage(first)
@@ -590,7 +590,7 @@ class RefreshBoundsTest(FetchTicketsTestCase):
         record could then wait behind fresher ones indefinitely while the cap
         keeps refreshing the same few. No date counts as the oldest of all."""
         with tempfile.TemporaryDirectory() as tmp:
-            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3", "AAA-4"], TICKET_REFRESH_MAX=2)
+            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3", "AAA-4"], TRACKER_REFRESH_MAX=2)
             self._seed(
                 {
                     "AAA-1": open_record("one", "2025-12-20"),
@@ -610,7 +610,7 @@ class RefreshBoundsTest(FetchTicketsTestCase):
         iteration order. Called directly, because the stage hands it keys that
         are already sorted, which would hide a missing tiebreak."""
         cache = {key: open_record(key, "2025-12-01") for key in ("AAA-1", "AAA-2", "AAA-3")}
-        config.configure(TICKET_REFRESH_DAYS=7, TICKET_REFRESH_MAX=2)
+        config.configure(TRACKER_REFRESH_DAYS=7, TRACKER_REFRESH_MAX=2)
         forwards = fetch_tickets.refresh_plan(["AAA-1", "AAA-2", "AAA-3"], cache, TODAY)
         backwards = fetch_tickets.refresh_plan(["AAA-3", "AAA-2", "AAA-1"], cache, TODAY)
         self.assertEqual(forwards, (["AAA-1", "AAA-2"], 3))
@@ -621,7 +621,7 @@ class RefreshBoundsTest(FetchTicketsTestCase):
         back to the behaviour before refresh existed, and reading it as the
         opposite would make the escape hatch the most expensive setting."""
         with tempfile.TemporaryDirectory() as tmp:
-            self._store(tmp, ["AAA-1"], TICKET_REFRESH_DAYS=0)
+            self._store(tmp, ["AAA-1"], TRACKER_REFRESH_DAYS=0)
             self._seed({"AAA-1": open_record("Still open")})
             tracker = FakeTracker({"AAA-1": open_fields("Changed")})
             _code, output = self._run_stage(tracker)
@@ -1276,7 +1276,7 @@ class TwgRefreshTest(TwgTransportTestCase):
         bounded, paged request. Three due, capped at two, is one `bulk-get`
         naming exactly the first two."""
         with tempfile.TemporaryDirectory() as tmp:
-            self._twg_store(tmp, TICKET_REFRESH_MAX=2)
+            self._twg_store(tmp, TRACKER_REFRESH_MAX=2)
             pio.write_gzip_json(
                 config.TICKET_TRACKER_PATH,
                 {key: open_record(key, "2025-12-01") for key in ("ABC-1", "ABC-2", "ABC-3")},

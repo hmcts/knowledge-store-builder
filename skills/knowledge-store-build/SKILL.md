@@ -816,7 +816,7 @@ invent credentials to make it run**, and never put a token on a command line or
 into any file in the store; it comes from the environment the operator set up.
 Resolved tickets are never re-fetched, so a build without credentials reads the
 committed cache; an unresolved ticket is requested again once its record is
-`KSB_TICKET_REFRESH_DAYS` old, at most `KSB_TICKET_REFRESH_MAX` per run. Commit
+`KSB_TRACKER_REFRESH_DAYS` old, at most `KSB_TRACKER_REFRESH_MAX` per run. Commit
 `knowledge/intent/ticket-tracker.json.gz` with the rest.
 
 Four numbers from its report belong in yours, and three of them are findings

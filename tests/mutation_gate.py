@@ -4316,7 +4316,7 @@ MUTATIONS = (
     Mutation(
         "ticket refresh: a fetched record is final again",
         "fetch_tickets.py",
-        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
+        "    return age is None or age >= config.TRACKER_REFRESH_DAYS\n",
         "    return False\n",
         "the shipped defect in #421: any fetched record counted as final, so a ticket "
         "fetched while open kept that status, description and comments for ever, and "
@@ -4337,7 +4337,7 @@ MUTATIONS = (
     Mutation(
         "ticket refresh: the minimum age is ignored",
         "fetch_tickets.py",
-        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
+        "    return age is None or age >= config.TRACKER_REFRESH_DAYS\n",
         "    return True\n",
         "the easy over-correction of #421: every run re-requests every open ticket, "
         "which on a large estate is most of a first run's traffic again on each build",
@@ -4348,8 +4348,8 @@ MUTATIONS = (
     Mutation(
         "ticket refresh: an undated open record is presumed fresh",
         "fetch_tickets.py",
-        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
-        "    return age is not None and age >= config.TICKET_REFRESH_DAYS\n",
+        "    return age is None or age >= config.TRACKER_REFRESH_DAYS\n",
+        "    return age is not None and age >= config.TRACKER_REFRESH_DAYS\n",
         "every open record in a cache committed before #421 has no date, so reading "
         "no date as just-read leaves exactly the records the issue was about frozen",
         (
@@ -4427,7 +4427,7 @@ MUTATIONS = (
     Mutation(
         "ticket refresh: the per-run cap is ignored",
         "fetch_tickets.py",
-        "    return due[: max(config.TICKET_REFRESH_MAX, 0)], len(due)\n",
+        "    return due[: max(config.TRACKER_REFRESH_MAX, 0)], len(due)\n",
         "    return due, len(due)\n",
         "a store upgrading from a release without refresh has every open record due at once, and an uncapped refresh lands that whole backlog on one build",
         (
@@ -4472,7 +4472,7 @@ MUTATIONS = (
     Mutation(
         "ticket refresh: zero days refreshes every run",
         "fetch_tickets.py",
-        "    if config.TICKET_REFRESH_DAYS <= 0:\n        return False\n",
+        "    if config.TRACKER_REFRESH_DAYS <= 0:\n        return False\n",
         "",
         "0 is the documented way back to the behaviour before refresh existed; read as an age it is the most expensive setting instead",
         ("test_fetch_tickets.RefreshBoundsTest.test_zero_days_turns_refresh_off",),
