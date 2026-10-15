@@ -93,6 +93,7 @@ _LINE = re.compile(r"(?:^(?:lines?\s+)?|:)L?(\d+)(?:\s*-\s*L?(\d+))?")  # NOSONA
 # and deliberately so: it is the escaping the consuming store's links already use,
 # and two spellings of one link would make the same citation compare unequal.
 _PATH_SAFE = "/"
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # A link to one file on github.com, in the form `resolve` writes. The ref is any
 # one segment, so an unpinned link parses and is then reported as not the build's
 # sha. `?plain=1` is GitHub's own spelling for a rendered file's source view.
@@ -124,16 +125,28 @@ class BlobUrl:
     anchor: str
 
 
+def is_full_sha(ref: str) -> bool:
+    """Whether `ref` is a full commit id, the only form a link this module writes pins."""
+    return bool(_SHA.match(ref))
+
+
 def parse_blob_url(url: str) -> BlobUrl | None:
-    """The parts of a `https://github.com/<org>/<repo>/blob/<ref>/<path>` link, or None."""
+    """The parts of a `https://github.com/<org>/<repo>/blob/<ref>/<path>` link, or None.
+
+    None too for a path that decodes to a control character (`%00`, `%0A`): no file
+    in a repository is named that way, and a NUL cannot be passed to a subprocess.
+    """
     match = _BLOB.match(url.strip())
     if not match:
+        return None
+    path = unquote(match.group("path"))
+    if _CONTROL.search(path):
         return None
     return BlobUrl(
         match.group("org"),
         match.group("repo"),
         match.group("sha"),
-        unquote(match.group("path")),
+        path,
         match.group("anchor") or "",
     )
 

@@ -42,15 +42,21 @@ wrote it, and holds two claims, each checked against what the store read:
   repository* (repo-relative on either build route). A path held only by another
   repository does not resolve. A path no node names - a corpus-search match - is
   asked of the repository's clone under `repositories/<name>/`, at the commit
-  provenance records, with `git rev-parse --verify --quiet <sha>:<path>` (the
-  existence test `git cat-file -e` makes, without a `fatal:` line on every miss
-  interleaved with the report). Reported as `unknown file`, with the nearest file
-  the graph holds for that repository. With no clone on this machine the file
-  claim cannot be decided, so the link is listed as unchecked rather than failed -
-  unless its sha is wrong, which needs no clone to say.
+  provenance records, with `git rev-parse --verify --quiet <sha>:<path>` - the
+  existence test `git cat-file -e` makes - and git's stderr discarded, so a miss
+  never prints a `fatal:` line into the report. The clone is asked only when
+  provenance records a full sha, never at a ref the link supplies, and a path with
+  a `..` segment is not asked at all. Reported as `unknown file`, with the nearest
+  file the graph holds for that repository. With no clone on this machine, or one
+  git could not be asked, the file claim cannot be decided, so the link is listed
+  as unchecked rather than failed - unless its sha is wrong, which needs no clone
+  to say.
 - the commit: its sha must be the one `knowledge/provenance.json` records for that
   repository. A branch or an abbreviated sha is not, and a link to it drifts off
   the line it cites. Reported as `different sha`, naming the sha the store read.
+  A ref that is not a full sha is reported for that alone: a slashed branch
+  (`blob/feature/x/a.py`) also shifts where the path starts, so the file claim
+  read from it would be noise.
 
 A link wrong both ways says both. The repository is found from the link's
 `<org>/<repo>` through `config/repositories.txt`, the same map that wrote the link,
@@ -59,6 +65,18 @@ the store does not configure - a third-party library, another organisation - is 
 fourth result like a database column: counted, named, never failing. Any other URL
 is skipped as before. The graph is the one already streamed for identifiers, so
 checking links adds no second read of it; the line anchor is not checked.
+
+**Without the repository list nothing can be said about a link.** Answers that cite
+a source link, read where `config/repositories.txt` is absent - run from outside the
+store root, most often - stop the stage with exit 2 rather than listing every link as
+outside an estate that was never loaded. The list is read from the store root, which
+is the working directory or `KSB_ROOT`.
+
+A bare link ends where GitHub's autolinker ends it: trailing `.,;:!?*_~` are dropped,
+so `**<link>**` and `<link>.` cite the link, and a curly apostrophe ends it. A link
+inside a fenced block is not read - but only a fence opened at the start of a line
+and closed; an indented fence, or one never closed, is read as prose, and the links
+in it are checked.
 
 **Database columns are a third result, not a pass or a failure.** The graph holds
 AST nodes, so a `table.column` citation will never resolve and never should.
@@ -97,6 +115,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
+from functools import partial
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,6 +125,7 @@ from .sync_repositories import run_git
 from .source_urls import (
     BlobUrl,
     SourceUrls,
+    is_full_sha,
     parse_blob_url,
     repo_relative,
     single_root_repositories,
@@ -122,12 +142,21 @@ SPAN = re.compile(r"`([^`\n]+)`")
 # A backticked span, or a github.com link written outside one. The link stops at
 # the characters that end it in markdown - `)` closing a link, `>` an autolink -
 # which `source_urls` always percent-encodes inside a path.
-_CITED = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"]+)")
-_SENTENCE_END = ".,;:!?"
+# A curly apostrophe ends a link too (`<link>’s`): `source_urls` percent-encodes
+# every non-ASCII character in a path, so a raw one is never part of a link it wrote.
+_CITED = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"\u2019]+)")
+# What GitHub's autolinker drops from the end of a bare link: sentence punctuation
+# and the emphasis marks of `**link**`, `*link*`, `_link_` and `~link~`.
+_LINK_TRAILING = ".,;:!?*_~"
 UNKNOWN_FILE = "unknown file"
 DIFFERENT_SHA = "different sha"
 OUTSIDE_STORE = "a repository this store does not build"
 NO_CLONE = "a file no node names, and no clone under repositories/ to look in"
+CLONE_UNASKED = "a file no node names, and the clone could not be asked"
+# Every kind `resolve` returns, so a consumer mapping them can be held to the list.
+KINDS = ("resolved", "unresolved", "column", "unchecked", "skipped")
+# What `Vocabulary.clone_holds` answers.
+HELD, ABSENT, NO_CLONE_HERE, UNASKED = "held", "absent", "no clone", "unasked"
 _INNER_CALL = re.compile(r"\([^()]*\)")
 _NAME_CHARS = re.compile(r"[.\w$@]+")
 _FILE_EXTENSION = re.compile(
@@ -153,7 +182,8 @@ class Vocabulary:
     urls: SourceUrls | None = None
     # the store's `repositories/`, whose clones answer for files no node names
     clones: Path | None = None
-    run: Callable[[list[str]], str] = run_git
+    run: Callable[[list[str]], str] = partial(run_git, quiet=True)
+    _flags: dict[str, list[str] | None] = field(default_factory=dict)
     _names: list[str] | None = None
     _basenames: list[str] | None = None
     _files: dict[str, set[str]] | None = None
@@ -198,15 +228,46 @@ class Vocabulary:
                 self._files[name] = {p for p in inside if p}
         return self._files.get(repo, set())
 
-    def clone_holds(self, repo: str, sha: str, path: str) -> bool | None:
-        """Whether `repo`'s clone holds `path` at `sha`; None when there is no clone."""
+    def clone_holds(self, repo: str, sha: str, path: str) -> str:
+        """`HELD` or `ABSENT` when `repo`'s clone answers for `path` at `sha`;
+        `NO_CLONE_HERE` when there is no clone; `UNASKED` when it was not asked.
+
+        Asked only at a full sha - the build commit from provenance, never a ref the
+        link supplied - so the revision git reads always begins with a hex digit and
+        cannot be taken for an option. A path with an empty, `.` or `..` segment
+        names no file in a repository and is `ABSENT` without asking. Git's stderr is
+        discarded by the default runner, so a refusal never interleaves with the
+        report, and a link git cannot be handed (a missing binary, an unpassable
+        argument) is `UNASKED` rather than a traceback.
+        """
         clone = self.clones / repo if self.clones else None
         if clone is None or not (clone / ".git").exists():
-            return None
+            return NO_CLONE_HERE
+        if not is_full_sha(sha):
+            return UNASKED
+        if any(segment in ("", ".", "..") for segment in path.split("/")):
+            return ABSENT
+        if repo not in self._flags:
+            # `--end-of-options` where this git honours it in `rev-parse --verify`:
+            # asking for HEAD with it succeeds only then (or fails on an unborn HEAD,
+            # where going without costs nothing - the revision is hex either way).
+            probe = self._ask(clone, ["--end-of-options", "HEAD"])
+            self._flags[repo] = ["--end-of-options"] if probe else []
+        flags = self._flags[repo] or []
+        answer = self._ask(clone, [*flags, f"{sha}:{path}"])
+        if answer is None:
+            return UNASKED
+        return HELD if answer else ABSENT
+
+    def _ask(self, clone: Path, tail: list[str]) -> bool | None:
+        """Whether `rev-parse --verify` finds the revision; None when git could not
+        be asked at all."""
         try:
-            self.run(["-C", str(clone), "rev-parse", "--verify", "--quiet", f"{sha}:{path}"])
+            self.run(["-C", str(clone), "rev-parse", "--verify", "--quiet", *tail])
         except subprocess.CalledProcessError:
             return False
+        except (OSError, ValueError):
+            return None
         return True
 
 
@@ -214,7 +275,7 @@ def load_vocabulary(
     graph: Path,
     urls: SourceUrls | None = None,
     clones: Path | None = None,
-    run: Callable[[list[str]], str] = run_git,
+    run: Callable[[list[str]], str] = partial(run_git, quiet=True),
 ) -> Vocabulary:
     """Stream the graph's nodes once. Without `urls`, no source link is checked;
     without `clones`, a link to a file no node names is unchecked."""
@@ -304,20 +365,23 @@ def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
         return Verdict("unchecked", reason=OUTSIDE_STORE)
     holding = {r for r in repos if link.path in vocabulary.repository_files(r)}
     built = {r for r in repos if urls.build_sha(r) == link.sha}
-    undecided = False
+    undecided: set[str] = set()
     if not holding:
         # A file no node names: the clone answers, at the commit the store read.
         for r in repos:
-            held = vocabulary.clone_holds(r, urls.build_sha(r) or link.sha, link.path)
-            undecided = undecided or held is None
-            if held:
+            state = vocabulary.clone_holds(r, urls.build_sha(r), link.path)
+            if state == HELD:
                 holding.add(r)
+            elif state != ABSENT:
+                undecided.add(state)
     if holding & built:
         return Verdict("resolved")
     if not holding and undecided and built:
-        return Verdict("unchecked", reason=NO_CLONE)
+        return Verdict("unchecked", reason=CLONE_UNASKED if UNASKED in undecided else NO_CLONE)
     reasons, nearest = [], ""
-    if not holding and not undecided:
+    # An unpinned ref (`main`, `feature/x`, an abbreviated sha) is wrong on its own,
+    # and a slashed branch also shifts the path, so the file claim says nothing.
+    if not holding and not undecided and is_full_sha(link.sha):
         reasons.append(f"{UNKNOWN_FILE} in {', '.join(repos)}")
         pool = sorted(set().union(*(vocabulary.repository_files(r) for r in repos)))
         nearest = _nearest(link.path, pool)
@@ -383,10 +447,19 @@ def citations(text: str) -> list[str]:
         if match.group(1) is not None:
             seen.setdefault(match.group(1).strip(), None)
             continue
-        link = match.group(2).rstrip(_SENTENCE_END)
+        link = match.group(2).rstrip(_LINK_TRAILING)
         if parse_blob_url(link) is not None:
             seen.setdefault(link, None)
     return list(seen)
+
+
+def cites_links(files: list[Path]) -> bool:
+    """Whether any answer cites a source link."""
+    return any(
+        parse_blob_url(span) is not None
+        for path in files
+        for span in citations(path.read_text(encoding="utf-8"))  # NOSONAR(S8707)
+    )
 
 
 def answer_files(paths: list[Path]) -> list[Path]:
@@ -468,6 +541,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    if not config.REPOSITORIES_CONFIG.is_file() and cites_links(files):
+        print(
+            f"No {config.REPOSITORIES_CONFIG} - the answers cite source links, and "
+            "without the repository list none of them can be checked. Change to the "
+            "store root, or set KSB_ROOT to it.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         urls = SourceUrls.from_store()
     except ValueError as error:

@@ -29,6 +29,7 @@ import io as _io
 import json
 import os
 import tempfile
+import unittest
 from unittest import mock
 from pathlib import Path
 
@@ -614,6 +615,22 @@ class ClassingALinkCheckCitationsCanParse(SettingsIsolated):
             ),
             "skipped",
         )
+
+
+class EveryVerdictHasAClass(unittest.TestCase):
+    def test_every_kind_check_citations_returns_is_mapped(self):
+        """Break: `check_citations` returns a kind this module does not name, and the
+        class lookup raises KeyError mid-measurement. Each kind is named here."""
+        self.assertEqual(set(answers._VERDICT_CLASS), set(check_citations.KINDS))
+
+    def test_an_unknown_kind_is_skipped_rather_than_raising(self):
+        """Break: a kind added to `check_citations` later ends the run on a KeyError.
+        Stubbed at `resolve`, the boundary the kind crosses."""
+        future = check_citations.Verdict("some-future-kind")
+        with mock.patch.object(answers, "resolve", return_value=future):
+            self.assertEqual(
+                answers.classify("CaseService", check_citations.Vocabulary()), "skipped"
+            )
 
 
 class AbsenceClaims(AnswersStage):

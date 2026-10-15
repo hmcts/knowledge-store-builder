@@ -298,6 +298,11 @@ class ParsingALink(unittest.TestCase):
             "https://raw.githubusercontent.com/example-org/example-repo/main/a.py",
             "https://github.com/example-org/example-repo",
             "http://github.com/example-org/example-repo/blob/main/a.py",
+            # A control character decoded into the path: no file is named so, and a
+            # NUL cannot be handed to the git subprocess the gate asks.
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%00b.py",
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%0Ab.py",
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%7Fb.py",
             "src/app/case.py",
             "",
         ):

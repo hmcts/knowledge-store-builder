@@ -13,7 +13,9 @@ import gzip
 import io
 import json
 import os
+import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,7 @@ from knowledgestore import (
     config,
     provenance,
     source_urls,
+    sync_repositories,
 )
 
 FIELD_HOLDER = "src/main/java/uk/example/form/FieldHolder.java"
@@ -372,6 +375,19 @@ class VerdictsOnSourceLinks(SourceLinkBed):
             self.verdict(BASE + "src/main/java/uk/example/CaseServise.java").nearest, CASE_SERVICE
         )
 
+    def test_an_unpinned_link_reports_the_sha_alone(self):
+        """Breaks if a slashed branch (`blob/feature/x/a.py`, read as ref `feature`
+        and path `x/a.py`) also reports `unknown file`, sending the reader to fix a
+        path that was never the problem."""
+        for ref in ("feature/x", "main", "0123abc"):
+            with self.subTest(ref=ref):
+                got = self.verdict(
+                    f"https://github.com/example-org/example-repo/blob/{ref}/src/Invented.java"
+                )
+                self.assertEqual(
+                    got.reason, f"{check_citations.DIFFERENT_SHA}: the store read {BUILD_SHA}"
+                )
+
     def test_a_link_wrong_in_both_ways_names_both(self):
         """Breaks if one reason hides the other, so fixing the one named still fails."""
         got = self.verdict(f"https://github.com/example-org/example-repo/blob/{STALE_SHA}/nope.py")
@@ -419,6 +435,22 @@ class TheLinksOfAnAnswer(unittest.TestCase):
             [good, BASE + "a.py", BASE + "b.py", BASE + "c.py"],
         )
 
+    def test_a_bare_link_ends_where_github_ends_it(self):
+        """Breaks if emphasis or a curly apostrophe stays on the link: `**<link>**`
+        would cite `a.py**`, a file nobody holds, and fail an honest answer."""
+        for written in (
+            f"**{BASE}a.py**",
+            f"*{BASE}a.py*",
+            f"_{BASE}a.py_",
+            f"{BASE}a.py~",
+            f"{BASE}a.py\u2019s",
+            f"{BASE}a.py.",
+        ):
+            with self.subTest(written=written):
+                self.assertEqual(
+                    check_citations.citations(f"See {written} here.\n"), [BASE + "a.py"]
+                )
+
 
 class TheStageOnSourceLinks(SourceLinkBed):
     def test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is(self):
@@ -457,6 +489,24 @@ class TheStageOnSourceLinks(SourceLinkBed):
         code, _, err = self.run_stage("--graph", str(self.graph))
         self.assertEqual(code, 2)
         self.assertIn("repositories.txt", err)
+
+    def test_links_with_no_repository_list_stop_the_gate(self):
+        """Breaks if a missing list - the stage run from outside the store root - lets
+        every link through as "a repository this store does not build", exit 0: a
+        silence about a file the gate never read."""
+        config.REPOSITORIES_CONFIG.unlink()
+        (self.answers / "case-lookup.md").write_text(f"See {BASE}src/Invented.java.\n")
+        code, out, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn(f"No {config.REPOSITORIES_CONFIG}", err)
+
+    def test_no_repository_list_is_fine_when_no_link_is_cited(self):
+        """Breaks if the new refusal reaches stores whose answers cite no link, which
+        had no reason to keep a repository list beside them."""
+        config.REPOSITORIES_CONFIG.unlink()
+        (self.answers / "case-lookup.md").write_text("Use `CaseService`.\n")
+        code, _, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual((code, err), (0, ""))
 
 
 class LinksToFilesNoNodeNames(SourceLinkBed):
@@ -536,3 +586,122 @@ class LinksToFilesNoNodeNames(SourceLinkBed):
         self.assertEqual(code, 0)
         self.assertIn("1 source links this store cannot decide", out)
         self.assertIn("no clone under repositories/ to look in", out)
+
+
+class AskingTheClone(LinksToFilesNoNodeNames):
+    """What reaches git, read at the seam: the argv of every call, run for real."""
+
+    def recorded(self) -> tuple[list[list[str]], check_citations.Vocabulary]:
+        calls: list[list[str]] = []
+
+        def run(arguments: list[str]) -> str:
+            calls.append(list(arguments))
+            return sync_repositories.run_git(arguments, quiet=True)
+
+        loaded = check_citations.load_vocabulary(
+            self.graph, source_urls.SourceUrls.from_store(), config.REPOSITORIES_DIR, run
+        )
+        return calls, loaded
+
+    def test_the_question_carries_end_of_options_where_git_honours_it(self):
+        """Breaks if the revision is passed without `--end-of-options` on a git that
+        honours it, which is every git CI runs (the clone here has a HEAD)."""
+        calls, loaded = self.recorded()
+        check_citations.resolve(self.link("docs/RUNBOOK.md"), loaded)
+        self.assertIn(
+            ["--end-of-options", f"{self.build}:docs/RUNBOOK.md"], [c[-2:] for c in calls]
+        )
+
+    def test_git_is_never_handed_a_ref_the_link_supplied(self):
+        """Breaks if, with no build sha recorded, the link's own ref is asked of git:
+        text from a published answer would reach a subprocess's argv for nothing,
+        since a link with no build sha to match fails on the sha anyway."""
+        provenance.write({"other-repo": {"sha": BUILD_SHA, "branch": "main", "committed": ""}})
+        calls, loaded = self.recorded()
+        for ref in (self.build, "--help"):
+            with self.subTest(ref=ref):
+                got = check_citations.resolve(self.link("docs/RUNBOOK.md", ref), loaded)
+                self.assertEqual(got.kind, "unresolved")
+                self.assertNotIn(check_citations.UNKNOWN_FILE, got.reason)
+        self.assertEqual(
+            [c for c in calls if any(ref in a for a in c for ref in (self.build, "--help"))], []
+        )
+        # Nor anything else that does not begin with a full sha: with no build sha,
+        # `:<path>` would be asked, which git reads as a lookup in the clone's index.
+        self.assertEqual(
+            [c[-1] for c in calls if c[-1] != "HEAD" and not re.match(r"[0-9a-f]{40}:", c[-1])],
+            [],
+        )
+
+    def test_a_path_climbing_with_dot_dot_is_never_asked(self):
+        """Breaks if a `..` path reaches git, which prints `fatal: ... outside
+        repository` for it; the path names no file in a repository either way."""
+        calls, loaded = self.recorded()
+        for path in ("../secret.txt", "docs/../docs/RUNBOOK.md"):
+            with self.subTest(path=path):
+                got = check_citations.resolve(self.link(path), loaded)
+                self.assertEqual(got.reason, f"{check_citations.UNKNOWN_FILE} in example-repo")
+        self.assertEqual([c for c in calls if any(".." in a for a in c)], [])
+
+    def test_a_git_that_cannot_be_asked_leaves_the_link_unchecked(self):
+        """Breaks if a missing git binary, or an argument git cannot be handed, ends
+        the gate with a traceback instead of a report."""
+        for error in (FileNotFoundError("git"), ValueError("embedded null byte")):
+            with self.subTest(error=type(error).__name__):
+
+                def run(arguments: list[str], error: Exception = error) -> str:
+                    raise error
+
+                loaded = check_citations.load_vocabulary(
+                    self.graph, source_urls.SourceUrls.from_store(), config.REPOSITORIES_DIR, run
+                )
+                got = check_citations.resolve(self.link("docs/RUNBOOK.md"), loaded)
+                self.assertEqual(
+                    (got.kind, got.reason), ("unchecked", check_citations.CLONE_UNASKED)
+                )
+
+    def test_a_nul_in_a_link_is_not_a_link(self):
+        """Breaks if `%00` decodes into a path handed to git, where subprocess raises
+        on the NUL and the stage dies without a report."""
+        (self.answers / "case-lookup.md").write_text(f"See {self.link('docs/a%00b.md')}.\n")
+        code, out, _ = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 0)
+        self.assertIn("0 citations checked", out)
+
+
+class TheQuietRunner(unittest.TestCase):
+    def test_a_quiet_git_call_prints_nothing_when_git_refuses(self):
+        """Breaks if `quiet` stops discarding stderr: git's `fatal:` line for a
+        refused question would land in the middle of the gate's report. Read from a
+        real child process, because a child's stderr bypasses `sys.stderr`."""
+        script = (
+            "import subprocess, sys\n"
+            "from knowledgestore.sync_repositories import run_git\n"
+            "try:\n"
+            "    run_git(['rev-parse', '--verify', 'HEAD:../outside'], quiet=True)\n"
+            "except subprocess.CalledProcessError:\n"
+            "    print('refused')\n"
+        )
+        src = str(Path(__file__).resolve().parent.parent / "src")
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": src},
+            check=False,
+        )
+        self.assertEqual((completed.stdout, completed.stderr), ("refused\n", ""))
+
+
+class EveryVerdictKindIsNamed(unittest.TestCase):
+    def test_kinds_lists_what_resolve_returns(self):
+        """Breaks if a kind is dropped from KINDS, which `answers` is held to."""
+        self.assertEqual(
+            set(check_citations.KINDS),
+            {"resolved", "unresolved", "column", "unchecked", "skipped"},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
