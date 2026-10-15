@@ -75,8 +75,10 @@ from .build_community_summaries import _normalise, prose_identifiers
 # The supported spelling of the private function. An alias rather than a copy.
 normalise = _normalise
 
-_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
-_SPAN = re.compile(r"`([^`\n]+)`")
+# Public: `answers` reads answers by the same rule, and a rename here must not
+# silently become a break there.
+FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+SPAN = re.compile(r"`([^`\n]+)`")
 _INNER_CALL = re.compile(r"\([^()]*\)")
 _NAME_CHARS = re.compile(r"[.\w$@]+")
 _FILE_EXTENSION = re.compile(
@@ -225,7 +227,7 @@ def resolve(span: str, vocabulary: Vocabulary) -> Verdict:
 def citations(text: str) -> list[str]:
     """Inline backticked spans outside fenced code blocks, in order, de-duplicated."""
     seen: dict[str, None] = {}
-    for match in _SPAN.finditer(_FENCE.sub("", text)):
+    for match in SPAN.finditer(FENCE.sub("", text)):
         seen.setdefault(match.group(1).strip(), None)
     return list(seen)
 

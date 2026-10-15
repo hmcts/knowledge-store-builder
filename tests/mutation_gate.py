@@ -423,6 +423,7 @@ MUTATIONS = (
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
         (
+            "test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",
             "test_io_write_targets.WriteTargetTest.test_gzip_text_refuses_an_upward_path",
             "test_io_write_targets.WriteTargetTest.test_the_check_is_lexical_not_resolved",
             "test_io_write_targets.WriteTargetTest.test_the_guard_reports_which_path_it_refused",
@@ -820,6 +821,12 @@ MUTATIONS = (
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
         (
+            "test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",
+            "test_answers.CommandLine.test_out_writes_one_record_per_answer",
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",
+            "test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",
+            "test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
             "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
@@ -4305,6 +4312,243 @@ MUTATIONS = (
         "job's own reads is granted the originals: the worker that was kept from every "
         "secret in round 1 is handed them in round 2, and the report still says masked",
         ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
+    ),
+    # The answers stage. Not escapes caught late, unlike most of this table: each is
+    # a break its design named before it was built, entered so the tests that
+    # describe it are held to failing when it returns.
+    Mutation(
+        "answers: a tool result opens an answer",
+        "answers.py",
+        '        isinstance(block, dict) and block.get("type") == "tool_result" for block in content',
+        "        False for block in content",
+        "a tool's result comes back to the session as a user-role line; read as a prompt "
+        "it splits one answer at every tool call, so the answer count is wrong and no "
+        "question pairs with its earlier run",
+        (
+            "test_answers.CommandLine.test_out_writes_one_record_per_answer",
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.HeadlessCost.test_dollars_come_only_from_a_matching_headless_result",
+            "test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",
+            "test_answers.SplittingASession.test_a_tool_result_does_not_open_an_answer",
+            "test_answers.SplittingASession.test_a_turn_split_over_lines_is_counted_once",
+            "test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",
+            "test_answers.SplittingASession.test_the_answer_text_is_the_last_text_before_the_next_prompt",
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+            "test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",
+        ),
+    ),
+    Mutation(
+        "answers: usage counted per line, not per message",
+        "cost.py",
+        "        if message_id in self.largest_output:",
+        "        if False:",
+        "a transcript writes one line per content block of a turn, each carrying the "
+        "whole turn's usage, so a per-line sum reads a three-block turn three times - "
+        "in `cost`'s run total and in every answer's input alike, since both share it",
+        (
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",
+            "test_answers.SplittingASession.test_a_tool_result_does_not_open_an_answer",
+            "test_answers.SplittingASession.test_a_turn_split_over_lines_is_counted_once",
+            "test_cost.CostStage.test_a_turn_written_as_several_content_blocks_is_counted_once",
+            "test_cost.CostStage.test_one_turn_seen_in_two_transcripts_is_counted_once",
+            "test_cost.CostStage.test_the_report_gives_the_de_duplicated_figure_as_the_input",
+        ),
+    ),
+    Mutation(
+        "answers: subagent usage dropped",
+        "answers.py",
+        "            self._subagent(transcript, answer, session)",
+        "            pass",
+        "an answer that delegates its search to a subagent reads as the cheapest answer "
+        "in the run, because the parent session holds only the dispatch",
+        (
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+            "test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",
+        ),
+    ),
+    Mutation(
+        "answers: a file outside the store counted",
+        "answers.py",
+        "                if candidate.is_relative_to(self.store) and candidate.is_file():",
+        "                if candidate.is_file():",
+        "every file a session touched lands in `store_files`, so a store's footprint "
+        "includes the operator's home directory and the corpus clones",
+        ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
+    ),
+    Mutation(
+        "answers: a Bash path read with its separator",
+        "answers.py",
+        "        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
+        "        lexer = shlex.shlex(command, posix=True)",
+        "`cat a.md; echo done` names `a.md;`, which is no file, so the commonest shell "
+        "form drops out of `store_files`; found by the first run over a real session",
+        ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
+    ),
+    Mutation(
+        "answers: a corpus path classed by the graph",
+        "answers.py",
+        '    if text.removeprefix("./").startswith("repositories/"):\n'
+        '        return "corpus_path"\n',
+        "",
+        "a `repositories/...` path names the sync tree, which no reader of a published "
+        "answer can open; classed by the graph it reads as a resolving citation",
+        ("test_answers.Citations.test_each_citation_is_classed_once",),
+    ),
+    Mutation(
+        "answers: compare drops an unpaired question",
+        "answers.py",
+        '    comparison.only_before = [rows[0]["question"] for sha, rows in old.items() if sha not in new]',
+        "    comparison.only_before = []",
+        "a question the second run no longer answers vanishes from the comparison, and "
+        "the paired medians read as the whole story",
+        ("test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",),
+    ),
+    Mutation(
+        "answers: absence matched inside a code span",
+        "answers.py",
+        "        if _ABSENCE.search(masked[start:end]):",
+        "        if _ABSENCE.search(prose[start:end]):",
+        "an answer quoting a log message such as `order is not found` is flagged as "
+        "claiming that something is absent - and a span holding a full stop was cut "
+        "in two by the sentence split before it could be masked, which the first "
+        "version of the masking missed",
+        (
+            "test_answers.AbsenceClaims.test_a_code_span_holding_a_sentence_break_is_not_a_claim",
+            "test_answers.AbsenceClaims.test_absence_words_inside_a_code_span_are_not_a_claim",
+        ),
+    ),
+    Mutation(
+        "answers: an interrupt marker read as a prompt",
+        "answers.py",
+        '    "[Request interrupted",\n',
+        "",
+        "the harness writes the interrupt marker as a user line of text with no "
+        "origin; read as a prompt, every interrupted answer becomes two and the empty "
+        "one pairs with every other run's interrupt",
+        ("test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: a shell line read as a prompt",
+        "answers.py",
+        '    "<bash-input>",\n',
+        "",
+        "a `!` command typed at the prompt opens an answer of its own",
+        ("test_answers.SplittingASession.test_a_shell_line_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: another user's home expanded",
+        "answers.py",
+        '                word = Path(named).expanduser() if named == "~" or named.startswith("~/") else named',
+        "                word = Path(named).expanduser()",
+        "`~nosuchuser/x` in any Bash command raises RuntimeError and loses every record in the run",
+        ("test_answers.StoreFiles.test_a_word_naming_another_user_s_home_does_not_stop_the_run",),
+    ),
+    Mutation(
+        "answers: a column citation classed unresolved",
+        "answers.py",
+        '    "column": "column",',
+        '    "column": "unresolved",',
+        "a `table.column` citation fails as code the graph lacks, though the graph "
+        "holds code and never schemas",
+        ("test_answers.Citations.test_each_citation_is_classed_once",),
+    ),
+    Mutation(
+        "answers: a summary note on the wrong quantity",
+        "answers.py",
+        '    "output_floor": " - a floor: transcript lines under-report output",',
+        '    "cache_write": " - a floor: transcript lines under-report output",',
+        "the summary calls an exact figure a floor and leaves output unqualified, "
+        "which is how notes placed by line position fail when the fields are reordered",
+        ("test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",),
+    ),
+    Mutation(
+        "answers: --out written through an upward component",
+        "answers.py",
+        "            io.checked_write_target(arguments.out)",
+        "            pass",
+        "--out is a path from the command line; without the write policy's check a "
+        "`..` in it writes wherever whatever built the arguments chose",
+        ("test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",),
+    ),
+    Mutation(
+        "answers: a malformed record file raises",
+        "answers.py",
+        "    except (KeyError, TypeError, AttributeError) as error:",
+        "    except () as error:",
+        "--compare over a file another tool wrote prints a traceback rather than "
+        "saying which file is not a record file",
+        ("test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",),
+    ),
+    Mutation(
+        "answers: a carried-over prompt answered twice",
+        "answers.py",
+        "            if not self.first_reading(record):\n                if prompt:",
+        "            if False:\n                if prompt:",
+        "a resumed session repeats the lines it carried over; read again, each earlier "
+        "question is answered a second time at no cost and drags the medians down",
+        ("test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",),
+    ),
+    Mutation(
+        "answers: an injected user line read as a prompt",
+        "answers.py",
+        '    if isinstance(origin, dict) and origin.get("kind") != "human":',
+        "    if False:",
+        "a background agent's completion notice arrives as a user line; read as a "
+        "prompt it splits the answer that dispatched the agent in two",
+        (
+            "test_answers.SplittingASession.test_injected_user_lines_are_not_prompts",
+            "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
+            "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+        ),
+    ),
+    Mutation(
+        "answers: the first text taken as the answer",
+        "answers.py",
+        '                answer.text = str(block.get("text") or "")',
+        '                answer.text = answer.text or str(block.get("text") or "")',
+        "the preamble before the first tool call is read as the answer, so the answer's "
+        "citations and absence claims are never read",
+        (
+            "test_answers.SplittingASession.test_the_answer_text_is_the_last_text_before_the_next_prompt",
+        ),
+    ),
+    Mutation(
+        "answers: a subagent's text taken as the answer",
+        "answers.py",
+        '            if block.get("type") == "text" and not record.get("isSidechain"):',
+        '            if block.get("type") == "text":',
+        "the subagent's report to its parent is classed as the answer the person read",
+        ("test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",),
+    ),
+    Mutation(
+        "answers: a run's cost put on one of several answers",
+        "answers.py",
+        "        if len(owned) == 1 and len(dollars) == 1:",
+        "        if owned and dollars:",
+        "a headless result prices the whole run; attached to a session's first answer "
+        "it charges one question for all of them",
+        ("test_answers.HeadlessCost.test_dollars_come_only_from_a_matching_headless_result",),
+    ),
+    Mutation(
+        "answers: a repeated question compared by its first asking",
+        "answers.py",
+        "                deltas.append(statistics.median(now) - statistics.median(was))",
+        "                deltas.append(now[0] - was[0])",
+        "a question asked three times is compared on whichever repetition came first, "
+        "so one slow or fast run decides the change",
+        ("test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",),
+    ),
+    Mutation(
+        "answers: the question hashed untrimmed",
+        "answers.py",
+        '    return hashlib.sha256(question.strip().encode("utf-8")).hexdigest()',
+        '    return hashlib.sha256(question.encode("utf-8")).hexdigest()',
+        "a question asked with a trailing newline in one run fails to pair with itself "
+        "in the other, and is listed as unpaired on both sides",
+        ("test_answers.SplittingASession.test_the_question_hash_ignores_surrounding_whitespace",),
     ),
     Mutation(
         "a squash-merged branch file reads as unlanded",
