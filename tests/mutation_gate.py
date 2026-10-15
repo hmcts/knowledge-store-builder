@@ -423,6 +423,7 @@ MUTATIONS = (
         "assembled from CLI arguments reached write_text unvalidated, so whatever "
         "built those arguments chose where the process wrote",
         (
+            "test_answers.CommandLine.test_an_out_path_that_climbs_upward_is_refused",
             "test_io_write_targets.WriteTargetTest.test_gzip_text_refuses_an_upward_path",
             "test_io_write_targets.WriteTargetTest.test_the_check_is_lexical_not_resolved",
             "test_io_write_targets.WriteTargetTest.test_the_guard_reports_which_path_it_refused",
