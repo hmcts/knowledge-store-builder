@@ -5015,6 +5015,16 @@ MUTATIONS = (
             "test_source_urls.TheSkillCarriesTheCitationRule.test_the_question_skill_says_cite_the_url_and_never_the_corpus",
         ),
     ),
+    Mutation(
+        "a node's ticket list takes in its file's proposed tickets",
+        "build_explorer.py",
+        '    return list(entry["tickets"].keys())[:MAX_TICKETS] if entry else []',
+        '    return list({**entry["tickets"], **entry.get("proposed", {})})[:MAX_TICKETS] if entry else []',
+        "#425: the explorer's per-node list is what the page calls the code's history, "
+        "and the graph is of the default branch - so a ticket found only on a branch "
+        "would be published as what changed this code, the reading the label exists to stop",
+        ("test_build_explorer.NodeTicketsTest.test_proposed_tickets_stay_off_a_code_node",),
+    ),
 )
 
 
