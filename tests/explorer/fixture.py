@@ -257,7 +257,10 @@ BRANCH_HISTORY = [
         "author_date": "2024-05-10T09:00:00+00:00",
         "files": [{"path": "src/address/address-entry.component.ts"}],
         "reach": "branch",
-        "ref": "feature/gazetteer-lookup",
+        # A valid git ref name (`git check-ref-format --branch` accepts it) that
+        # carries markup, an ampersand and quotes: a branch name is repository
+        # data, and the page must escape it on the whole path from the stage.
+        "ref": 'feature/gazetteer&"lookup"<img/src=x/onerror=alert(1)>',
     },
     {
         "subject": "DEMO-5: Document the rollback runbook",
@@ -301,7 +304,7 @@ def branch_evidence(work: Path) -> tuple[dict, dict]:
     pool = build_intent_index.ticket_pool()
     files, _ = build_intent_index.index_repository(ndjson, pool)
     ndjson.unlink()
-    return files, {t: build_intent_index._ticket_record(info) for t, info in pool.items()}
+    return files, build_intent_index.ticket_records(pool)
 
 
 # Real tracker titles imported from a CSV export, as `ticket-titles` writes them.

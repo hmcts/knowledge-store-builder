@@ -720,6 +720,16 @@ def _ticket_record(info: dict) -> dict:
     return record
 
 
+def ticket_records(descriptions: dict[str, dict]) -> dict[str, dict]:
+    """The `ticket-descriptions` artefact, assembled from a filled ticket pool.
+
+    The one place records are assembled, so a caller outside this stage - the
+    explorer's test fixture builds its branch-only tickets through it - reads the
+    shape `main()` writes rather than a copy of how it is put together.
+    """
+    return {ticket: _ticket_record(info) for ticket, info in descriptions.items()}
+
+
 def summarise(
     index: dict[str, dict[str, dict]],
     commits_seen: int,
@@ -837,7 +847,7 @@ def main() -> int:
     with io.gzip_text(config.INTENT_INDEX_PATH) as out:
         json.dump(index, out, ensure_ascii=False)
 
-    ticket_out = {ticket: _ticket_record(info) for ticket, info in descriptions.items()}
+    ticket_out = ticket_records(descriptions)
     with io.gzip_text(config.TICKET_DESCRIPTIONS_PATH) as out:
         json.dump(ticket_out, out, ensure_ascii=False)
     described = sum(1 for t in ticket_out.values() if t["d"])

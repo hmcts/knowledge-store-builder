@@ -80,8 +80,12 @@ const DICTS = JSON.parse(getEl('dicts').textContent || '{}');
  * `droppedColumns`: the columns left off every row, by full-row position, each
  * with the one value it held (#338); absent when none were. Parsed ahead of the
  * rows because `decodeRows` restores them.
+ *
+ * `branchLimit`: how many branches the intent stage keeps on a ticket record, so
+ * a list that reached it can say it may be incomplete. Absent on a page built
+ * before it was written, which then never claims that.
  * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string,
- *         droppedColumns?: Record<string, string|number|null>}} */
+ *         droppedColumns?: Record<string, string|number|null>, branchLimit?: number}} */
 const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 /** @type {Entry[]} */
 const DATA = decodeRows(
@@ -240,6 +244,8 @@ function ticketDates(info, hasTitle) {
 }
 
 const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
+/** The intent stage's cap on a record's `branches` - see CONFIG. */
+const BRANCH_LIMIT = CONFIG.branchLimit || 0;
 
 /** "proposed on branch X" for a ticket no landed work names, and '' otherwise.
  *
@@ -252,7 +258,11 @@ function proposedLabel(info) {
   if (!info?.proposed) return '';
   const branches = info.branches || [];
   if (!branches.length) return 'proposed on a branch';
-  return 'proposed on ' + (branches.length === 1 ? 'branch ' : 'branches ') + branches.join(', ');
+  // The stage keeps the first few branches in name order and drops the rest
+  // silently, so a list at the cap may be the whole story or only its start.
+  const capped = BRANCH_LIMIT > 0 && branches.length >= BRANCH_LIMIT;
+  return 'proposed on ' + (branches.length === 1 ? 'branch ' : 'branches ') + branches.join(', ')
+    + (capped ? ' and possibly others' : '');
 }
 
 /** The label as markup, after a ticket id. Branch names are repository data, so
@@ -312,12 +322,29 @@ function clipWords(text, limit) {
   return (cut > 0 ? head.slice(0, cut) : head).trimEnd() + '…';
 }
 
-/** @param {string} t */
-function ticketChip(t) {
+/** A ticket id as a chip, its description in the tooltip.
+ *
+ * `beside` is for a chip strip drawn under ticket rows that already name the
+ * branches: there the chip carries only a short "proposed", and the full label
+ * moves into the tooltip, so five branch names are not drawn twice. Not nothing,
+ * because the strip holds more tickets than the rows do - a row is drawn only for
+ * a ticket with a description, and only up to a cap.
+ *
+ * Reached only through the two one-argument wrappers below, because chips are
+ * drawn with `map`, which would pass its index here as `beside`.
+ * @param {string} t @param {boolean} beside */
+function chipMarkup(t, beside) {
   const detail = ticketDetail(t);
-  return '<span title="' + (detail ? esc(detail) : 'no description found') + '">' + ticketLink(t)
-    + proposedTag(t) + '</span>';
+  const label = proposedLabel(TICKET_INFO[t]);
+  const title = (detail || 'no description found') + (beside && label ? ' — ' + label : '');
+  return '<span title="' + esc(title) + '">' + ticketLink(t)
+    + (beside && label ? ' <em class="tprop">proposed</em>' : proposedTag(t)) + '</span>';
 }
+
+/** @param {string} t */
+const ticketChip = (t) => chipMarkup(t, false);
+/** @param {string} t */
+const besideChip = (t) => chipMarkup(t, true);
 
 /** Inline ticket rows - id, business description, dates - for answers where
  * the detail should be readable without hovering.
@@ -1131,7 +1158,7 @@ function vWhy(seeds) {
         : '')
     + (topT.length
         ? '<h2>What changed here, per the commit history</h2>' + ticketRows(topT, 8)
-          + '<div class="chips">' + topT.map(ticketChip).join('') + '</div>'
+          + '<div class="chips">' + topT.map(besideChip).join('') + '</div>'
         : '')
     + techDetails(card(e), 1);
 }
@@ -1196,7 +1223,7 @@ function vCluster(ranked) {
     + featureCards(reached.keys(), 4)
     + (topT.length
         ? '<h2>What changed here, per the commit history</h2>' + ticketRows(topT, 5)
-          + '<div class="chips">' + topT.map(ticketChip).join('') + '</div>'
+          + '<div class="chips">' + topT.map(besideChip).join('') + '</div>'
         : '')
     + techDetails(tech,
         shownSeeds.length + grouped.reduce((n, g) => n + Math.min(g[1].length, 10), 0));

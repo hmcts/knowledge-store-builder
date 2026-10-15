@@ -39,7 +39,7 @@ from pathlib import Path
 
 
 from . import config
-from .build_intent_index import truncate
+from .build_intent_index import BRANCH_LIMIT, truncate
 from . import graph_files
 from . import io
 from . import kinds
@@ -991,6 +991,7 @@ h2 { font-size:15px; margin:18px 0 8px; color:var(--muted); font-weight:600; }
 .trow { font-size:13.5px; margin:6px 0; padding-left:10px; border-left:3px solid var(--chip); }
 .trow .tid { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--accent); }
 .trow .tdates { color:var(--muted); font-size:12px; }
+.tprop { color:var(--muted); font-size:12px; }
 .ev { font-size:13px; margin:4px 0 0 10px; }
 .ev .ev-l { color:var(--muted); font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
 .cbody { font-size:13px; line-height:1.5; margin:6px 0 6px 10px; }
@@ -1362,6 +1363,9 @@ def main() -> int:
         # Where "request a topic brief" links point (pre-filled issue).
         # Empty string hides the link.
         "briefRequestUrl": config.BRIEF_REQUEST_URL,
+        # The intent stage's cap on a ticket's `branches`, so a list that reached it
+        # can say "and possibly others" rather than read as complete (#425).
+        "branchLimit": BRANCH_LIMIT,
     }
 
     app_js = app_source()
