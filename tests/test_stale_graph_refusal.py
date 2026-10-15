@@ -1,6 +1,6 @@
 """Stages that write the graph back must refuse a stale uncompressed one (#198).
 
-`build_deployments`, `build_package_edges` and `extract_gherkin` read
+`build_deployments`, `build_package_edges`, `build_source_urls` and `extract_gherkin` read
 `graphify-out/graph.json`, add a layer, and write **both** `graph.json` and
 `graph.json.gz`. Every store gitignores the plain file and commits the archive,
 so a leftover `graph.json` from an earlier run is ordinary rather than exotic —
@@ -173,6 +173,20 @@ class StaleRefusalTest(SettingsIsolated):
         from knowledgestore import extract_gherkin
 
         self._assert_stage_refuses(extract_gherkin.main)
+
+    def test_source_urls_refuses_and_writes_nothing(self):
+        """Breaks if the fourth stage that rewrites both graph files is left unguarded.
+
+        Provenance is recorded so the stage's own provenance refusal cannot stand in
+        for this one: with it, a graph carrying no links proceeds to the write, so the
+        stale-graph refusal is the only thing between it and the archive."""
+        self.write_pair(agree=False)
+        from knowledgestore import provenance
+
+        provenance.write({"a": {"sha": "0" * 40, "branch": "main", "committed": ""}})
+        from knowledgestore import build_source_urls
+
+        self._assert_stage_refuses(build_source_urls.main)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """An operator must be told that local extractors run before the archive is rewritten.
 
-Three stages rewrite the committed `graphify-out/graph.json.gz` from the
+Four stages rewrite the committed `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`. A store whose own extractors add nodes
 after one of them leaves the two files describing different graphs, and the next
 of those stages refuses — in a message that counts communities and clustered
@@ -15,7 +15,7 @@ The break this catches has two halves, and the second is the one worth having:
 1. **The guidance is stated.** The ordering constraint, the symptom to recognise
    it by, and the warning about the printed remedy.
 2. **The stage set is derived from the code, not maintained by hand.** A list of
-   three stage names in a document is correct the day it is written. `CLAUDE.md`
+   stage names in a document is correct the day it is written. `CLAUDE.md`
    names this failure mode directly, and it is the reason the constraint is worth
    documenting at all: which stages rewrite the archive is not visible from
    outside. So the set the documents name is compared against the set of modules
@@ -24,8 +24,8 @@ The break this catches has two halves, and the second is the one worth having:
    writes the summaries snapshot, the intent index and the ticket descriptions,
    and a gate that counted those would name the wrong stages.
 
-Both directions of that comparison fail. A fourth module starting to write the
-archive is drift the documents have not caught up with; one of the three ceasing
+Both directions of that comparison fail. A fifth module starting to write the
+archive is drift the documents have not caught up with; one of the four ceasing
 to write it leaves a warning that costs an operator time for nothing.
 
 The code side asserts its own discriminating power in the same run, over forged
@@ -97,7 +97,7 @@ REQUIRED = (
     # the mechanism the constraint follows from
     "rewrite the committed archive",
     # the constraint itself, in both of its permitted orders
-    "before those three, or remove the archive",
+    "before those four, or remove the archive",
     # who it applies to
     "extractors of its own",
     # the symptom, and that it is not what it appears to be

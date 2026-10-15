@@ -80,6 +80,15 @@ copies — independent implementations, which the store already answers
 correctly — so symbol-level identity (SCIP) stays deferred until
 package-level answers prove insufficient.
 
+**Source links** make a citation followable (`src/knowledgestore/source_urls.py`).
+Each node gets a `url` naming its file on github.com at the commit recorded in
+`knowledge/provenance.json`, with the line from `source_location` where there
+is one. A node gets no link rather than a wrong one: a repository on another
+host, or one with no recorded commit, is reported and left unlinked. The sha is
+the head `sync` recorded, not the commit each graph was extracted from, so a
+refresh that syncs a repository without re-extracting it pins the old graph's
+line numbers to the new commit.
+
 What id continuity cannot fix is **splits**: re-clustering from scratch can
 shatter a stable community into fragments, and prose attached to the whole
 does not describe a part. The measured cost of that, and the economics of

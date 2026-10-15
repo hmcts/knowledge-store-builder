@@ -174,7 +174,19 @@ repository, degree ranking, community sizes.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
-- Cite `source_file` / `source_location` for specific claims.
+- In an answer or an exported finding, cite a node's `url` for specific claims.
+  It links the file at the commit the store was built from,
+  `https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>`, anchored
+  at the line `source_location` gives. In a store where nodes carry `url`, a node
+  without one was refused a link for a reason - another host, no recorded commit,
+  a path outside its repository - so cite its repository and repo-relative
+  `source_file` and say no link is available; do not build one. Build the form
+  yourself only for a file no node names (a corpus-search match), or in a store
+  where no node carries `url`, from the repository's github.com clone URL in
+  `config/repositories.txt` and its sha in `knowledge/provenance.json`.
+  **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
+  commits, so no reader can open it. Authored topic briefs and deep dives are not
+  answers: they keep file paths in backticks, which the page renderer links.
 - Answer only from what the graph returns. If the graph lacks it, say so.
 - Absence of evidence is itself a finding — report it as one, **and say what was
   searched**. A store is built from repositories discovered in one organisation on
@@ -216,7 +228,8 @@ Three conditions, and each has a different correct response:
 
 **A corpus grep is the weakest layer in the store, so name it.** It is raw text
 with no repository attribution and no relationship to any node — cite the file
-path, say the match came from a text search rather than from the graph, and apply
+as a link (drop the `repositories/<repo>/` prefix and build the form in Step 4),
+say the match came from a text search rather than from the graph, and apply
 the same rule as everywhere else: absence in the content set means absence from
 what this store holds, not from the world.
 
