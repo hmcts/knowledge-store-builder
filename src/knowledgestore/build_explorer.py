@@ -731,8 +731,13 @@ DROPPED_COLUMNS_KEY = "droppedColumns"
 
 
 def config_text(page_config: Mapping[str, object]) -> str:
-    """The #config block exactly as the page writes it."""
-    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS)
+    """The #config block exactly as the page writes it.
+
+    With `json_text`'s `</` escape, because this block carries estate text too:
+    repository names are keys of `sourceBases`, and nothing validates a name in
+    `config/repositories.txt`, so one holding `</script>` would close the block.
+    """
+    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS).replace("</", "<\\/")
 
 
 def layout_bytes(dropped: Mapping[str, object]) -> int:
@@ -1361,20 +1366,68 @@ SOURCE_SINGLE_ROOT_KEY = "sourceSingleRoot"
 
 
 def store_source_urls() -> SourceUrls | None:
-    """The store's link builder, or None when its repository list cannot be read.
+    """The store's link builder, or None when its inputs cannot be read.
 
     None rather than a raise: the page is still worth having without links, and
-    a list that cannot be parsed must not be read as an estate that links
-    nothing silently - so the reason is printed.
+    a file that cannot be parsed must not be read as an estate that links
+    nothing silently - so the reason is printed. The error names the file that
+    failed, `config/repositories.txt` or `knowledge/provenance.json`; this does
+    not guess which.
     """
     try:
         return SourceUrls.from_store()
     except ValueError as error:
-        print(
-            f"No source links on the page: cannot read {config.REPOSITORIES_CONFIG}: {error}",
-            file=sys.stderr,
-        )
+        print(f"No source links on the page: {error}", file=sys.stderr)
         return None
+
+
+# How many nodes `link_drift` compares at most. Enough to notice a sync between
+# `source-urls` and this stage - which moves every link of the repositories it
+# synced - without resolving every node of a large graph a second time.
+DRIFT_SAMPLE = 500
+
+
+def link_drift(
+    nodes: list, urls: SourceUrls | None, single_root: set[str], sample: int = DRIFT_SAMPLE
+) -> tuple[int, int]:
+    """`(nodes compared, nodes whose graph url differs from the link this page builds)`.
+
+    The page's links are built from `knowledge/provenance.json` and
+    `config/repositories.txt` as they stand now; the graph's `url` was written
+    from them when `source-urls` last ran. A `sync` in between pins the page to the
+    new commit and the graph to the old one, and the two would cite one node two
+    ways. Compared on an evenly spaced sample of the nodes that carry a `url`, so
+    the cost is bounded and the choice is the same on every build.
+    """
+    if urls is None:
+        return 0, 0
+    carrying = [node for node in nodes if isinstance(node.get("url"), str)]
+    step = max(1, -(-len(carrying) // sample))
+    checked = differing = 0
+    for node in carrying[::step]:
+        repo = node.get("repo")
+        found = urls.resolve(
+            repo,
+            node.get("source_file"),
+            node.get("source_location"),
+            isinstance(repo, str) and repo in single_root,
+        )
+        checked += 1
+        differing += found.url != node["url"]
+    return checked, differing
+
+
+def drift_warning(checked: int, differing: int) -> str:
+    """What to say when the graph's links and the page's disagree, or ""."""
+    if not differing:
+        return ""
+    return (
+        f"WARNING: {differing} of {checked} sampled nodes carry a graph `url` that differs "
+        "from the link this page builds for them, so knowledge/provenance.json or "
+        "config/repositories.txt changed after `knowledgestore source-urls` ran. The page "
+        "links the current commit and the graph the earlier one. Run `knowledgestore "
+        "source-urls`, then rebuild this page.\n"
+    )
 
 
 def source_link_config(
@@ -1417,11 +1470,17 @@ def main() -> int:
     entries, edges = build_index(graph, labels, intent, urls, single_root)
     source_links = source_link_config(entries, urls, single_root)
     on_page = {entry[1] for entry in entries if entry[1]}
-    linkable = sum(1 for repo in on_page if urls is not None and urls.base(repo))
-    print(
-        f"Source links: {linkable} of {len(on_page)} repositories on this page link their "
-        "files at the build commit; the rest have no github.com clone URL or provenance sha."
-    )
+    if urls is None:
+        print("Source links: none, because the store's link inputs could not be read (above).")
+    else:
+        bases = source_links.get(SOURCE_BASES_KEY, {})
+        linked = len(bases) if isinstance(bases, dict) else 0
+        print(
+            f"Source links: {linked} of {len(on_page)} repositories on this page link their "
+            "files at the build commit; the rest are not configured with a github.com clone "
+            "URL or have no valid provenance sha."
+        )
+    print(drift_warning(*link_drift(graph["nodes"], urls, single_root)), end="", file=sys.stderr)
     summaries = io.read_summaries(config.SUMMARIES_PATH)
     synonyms = (
         json.load(gzip.open(config.SYNONYMS_PATH, "rt", encoding="utf-8"))

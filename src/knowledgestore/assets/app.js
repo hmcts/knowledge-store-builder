@@ -289,7 +289,8 @@ function repoRelative(repo, path, singleRoot) {
  * be the same bytes. `encodeURIComponent` encodes UTF-8 and leaves the same
  * unreserved set raw except for `!'()*`, which `quote` encodes, so those five
  * are encoded here too; each segment is encoded alone, so `/` stays raw. A lone
- * surrogate cannot be encoded at all - `quote` raises on one - and gets no link.
+ * surrogate cannot be encoded at all - `quote` raises on one, and `resolve` then
+ * gives the node no `url` (`NOT_ENCODABLE`) - so it gets no link here either.
  * @param {string} path @returns {string|null} */
 function quotePath(path) {
   try {

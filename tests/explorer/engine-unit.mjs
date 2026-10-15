@@ -625,7 +625,8 @@ for (const [path, python] of QUOTED) {
 }
 // Catches: a lone surrogate encoded as U+FFFD (TextEncoder's behaviour), which
 // would link a file whose name is not the one the row shows. Python's `quote`
-// raises on one, so the graph has no `url` for it and the page must have none.
+// raises on one, `resolve` turns that into no `url` (`NOT_ENCODABLE`), and the
+// page must have no link either.
 assert('quotePath refuses a path it cannot encode', context.quotePath('a\ud800b') === null);
 
 // Catches: a port of `repo_relative` that drifts from the original - stripping a

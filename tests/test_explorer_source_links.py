@@ -108,9 +108,10 @@ class SourceLinksOnThePage(SettingsIsolated):
 
     def _build(self) -> tuple[dict, list, str]:
         """`(the page's #config, its decoded rows, what the stage printed to stderr)`."""
-        err = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(explorer.main(), 0)
+        self.stdout = out.getvalue()
         page = config.EXPLORER_PATH.read_text(encoding="utf-8")
 
         def block(name: str):
@@ -225,3 +226,95 @@ class SourceLinksOnThePage(SettingsIsolated):
         self.assertNotIn(explorer.SOURCE_BASES_KEY, page_config)
         self.assertEqual({row[10] for row in rows}, {""})
         self.assertIn("repositories.txt", stderr)
+        self.assertNotIn("provenance.json", stderr)
+        # The summary line must not blame the hosts or the shas for it.
+        self.assertIn("Source links: none, because the store's link inputs could not", self.stdout)
+        self.assertNotIn("github.com clone URL", self.stdout)
+
+    def test_unreadable_provenance_is_named_as_the_file_that_failed(self):
+        """Breaks if a malformed `knowledge/provenance.json` is reported as a problem
+        with `config/repositories.txt`, sending the operator to the wrong file.
+
+        Asked of the link builder rather than the whole page: the page also reads
+        provenance for its sync date, and fails there on a malformed file, which is
+        older behaviour this does not change.
+        """
+        config.PROVENANCE_PATH.write_text("{not json", encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertIsNone(explorer.store_source_urls())
+
+        self.assertIn("provenance.json", err.getvalue())
+        self.assertNotIn("repositories.txt", err.getvalue())
+
+    def test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing(self):
+        """Breaks if a lone surrogate in a `source_file` - what a non-UTF-8 file name
+        decodes to under surrogateescape - raises out of the index instead of leaving
+        that row unlinked. The other rows of its repository keep their lines."""
+        graph = {
+            "nodes": [*NODES, _node("h", "example-repo", "src/caf\udcff.ts", "L8")],
+            "links": [*LINKS, {"source": "h", "target": "a"}],
+        }
+        with contextlib.redirect_stderr(io.StringIO()):
+            entries, _ = explorer.build_index(
+                graph, {}, {}, source_urls.SourceUrls.from_store(), set()
+            )
+        lines = {entry[2]: entry[10] for entry in entries}
+
+        self.assertEqual(lines["src/caf\udcff.ts"], "")
+        self.assertEqual(lines["src/a.ts"], "L10")
+
+    def test_a_repository_name_cannot_close_the_config_block(self):
+        """Breaks if #config is written without the `</` escape the other blocks use.
+
+        Repository names are keys of `sourceBases`, and nothing validates a name in
+        `config/repositories.txt`; one holding `</script>` would end the block there
+        and run what follows it as page script.
+        """
+        name = "x</script><script>alert(1)</script>"
+        config.REPOSITORIES_CONFIG.write_text(
+            REPOSITORIES_TXT + f"{name}|git@github.com:example-org/x.git|main\n",
+            encoding="utf-8",
+        )
+        provenance = json.loads(json.dumps(PROVENANCE))
+        provenance["repositories"][name] = {"sha": SHA, "branch": "main", "committed": ""}
+        store_io.write_json(config.PROVENANCE_PATH, provenance)
+        store_io.write_json(
+            config.GRAPH_PATH,
+            {
+                "nodes": [*NODES, _node("h", name, "src/h.ts", "L1")],
+                "links": [*LINKS, {"source": "h", "target": "a"}],
+            },
+        )
+
+        page_config, _, _ = self._build()
+        page = config.EXPLORER_PATH.read_text(encoding="utf-8")
+
+        # The block still parses whole, so it ended where it should.
+        self.assertEqual(
+            page_config[explorer.SOURCE_BASES_KEY][name],
+            f"https://github.com/example-org/x/blob/{SHA}/",
+        )
+        self.assertNotIn("</script><script>alert(1)", page)
+
+    def test_a_sync_after_source_urls_is_warned_about(self):
+        """Breaks if the page links one commit while the graph's `url` cites another
+        with nothing said. A `sync` between `source-urls` and this stage does that:
+        provenance moves on, the graph keeps the links written from the old sha.
+
+        The graph is linked by the real stage function, then example-repo's recorded
+        commit moves: its two linked nodes now differ, of the four nodes linked."""
+        graph = {"nodes": [dict(node) for node in NODES], "links": LINKS}
+        build_source_urls.annotate(graph, source_urls.SourceUrls.from_store())
+        store_io.write_json(config.GRAPH_PATH, graph)
+
+        _, _, settled = self._build()
+        self.assertNotIn("WARNING", settled)
+
+        moved = json.loads(json.dumps(PROVENANCE))
+        moved["repositories"]["example-repo"]["sha"] = "9" * 40
+        store_io.write_json(config.PROVENANCE_PATH, moved)
+        _, _, drifted = self._build()
+
+        self.assertIn("WARNING: 2 of 4 sampled nodes carry a graph `url` that differs", drifted)
+        self.assertIn("knowledgestore source-urls", drifted)

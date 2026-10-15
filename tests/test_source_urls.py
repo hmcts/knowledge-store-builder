@@ -259,6 +259,9 @@ class BuildingTheUrl(unittest.TestCase):
             ("short-sha", "src/a.py"): source_urls.MALFORMED_SHA,
             ("unconfigured", "src/a.py"): source_urls.NOT_CONFIGURED,
             ("example-repo", "../a.py"): source_urls.OUTSIDE_REPOSITORY,
+            # A lone surrogate, as a non-UTF-8 file name decodes under
+            # surrogateescape: `quote` cannot encode it, and must not raise.
+            ("example-repo", "src/caf\udcff.py"): source_urls.NOT_ENCODABLE,
         }
         for (repo, path), reason in cases.items():
             with self.subTest(repo=repo, path=path):
