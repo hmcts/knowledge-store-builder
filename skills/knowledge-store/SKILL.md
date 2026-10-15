@@ -279,8 +279,9 @@ Two layers connect code to intent:
 
    Every one of the five is a **list of strings**. Quote an element, never the
    field: `record['d']` is a list, and printing it puts brackets and quotes into
-   an answer. `d` is always present and is `[]` on a ticket whose commits
-   offered nothing usable; `s` and `b` are each **omitted** when their own pool
+   an answer. `d` is always present and is `[]` on a ticket whose landed
+   commits offered nothing usable - such a ticket can still carry `ps` or `pb`,
+   so look there before saying its commits said nothing; `s` and `b` are each **omitted** when their own pool
    is empty, so read those two with `.get(..., [])`. `ps` and `pb` are
    **omitted** on a ticket with no branch-only text, and on a `proposed` ticket,
    whose branch text is in `d`, `s` and `b` because it has no other. Text in

@@ -4712,6 +4712,7 @@ MUTATIONS = (
         (
             "test_build_intent_index.BranchTextTest.test_a_landed_tickets_branch_text_is_kept_apart",
             "test_build_intent_index.BranchTextTest.test_branch_text_that_also_landed_is_not_called_branch_only",
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
             "test_build_intent_index.DocumentedRecordShapeTest.test_a_cap_the_stage_does_not_keep_is_reported",
             "test_build_intent_index.DocumentedRecordShapeTest.test_a_documented_view_the_record_does_not_carry_is_reported",
             "test_build_intent_index.DocumentedRecordShapeTest.test_a_singular_description_is_reported",
@@ -4737,11 +4738,32 @@ MUTATIONS = (
     Mutation(
         "branch-only text the landed commits also said stays in branch-only",
         "build_intent_index.py",
-        "            branch[name] = {t: n for t, n in branch[name].items() if t not in main[name]}",
-        "            pass",
+        "            repeated = [text for text in branch[name] if text in main[name]]",
+        "            repeated = []",
         "a rebased branch's stale commits labelled landed words as branch-only (#429)",
         (
+            "test_build_intent_index.BranchTextTest.test_branch_copies_of_landed_text_keep_their_count",
             "test_build_intent_index.BranchTextTest.test_branch_text_that_also_landed_is_not_called_branch_only",
+        ),
+    ),
+    Mutation(
+        "branch copies of landed text are dropped with their count",
+        "build_intent_index.py",
+        "                main[name][text] += branch[name].pop(text)",
+        "                branch[name].pop(text)",
+        "separating branch text re-ranked a landed ticket's own fields (#429 review)",
+        (
+            "test_build_intent_index.BranchTextTest.test_branch_copies_of_landed_text_keep_their_count",
+        ),
+    ),
+    Mutation(
+        "the run stops recording how many tickets carry branch-only text",
+        "build_intent_index.py",
+        '            "intent.tickets_with_branch_text": branch_texted,',
+        '            "intent.tickets_with_branch_text": 0,',
+        "a rebuild that moved text into `ps`/`pb` reported nothing of it (#429 review)",
+        (
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
         ),
     ),
     Mutation(

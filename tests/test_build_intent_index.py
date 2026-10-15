@@ -20,6 +20,7 @@ from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_intent_index as intent  # noqa: E402
 from knowledgestore import check_evidence  # noqa: E402
 from knowledgestore import config  # noqa: E402
+from knowledgestore import telemetry  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -1691,6 +1692,57 @@ class BranchTextTest(SettingsIsolated):
         self.assertEqual(record["b"], [self.DRAFT_BODY])
         self.assertEqual(record["ps"], [self.DRAFT])
         self.assertNotIn("pb", record)
+
+    def test_branch_copies_of_landed_text_keep_their_count(self):
+        """Catches the landed fields re-ranking when branch copies of a landed
+        subject are filtered out of `ps` with their count discarded (#429 review).
+        Before the separation every copy counted, so "zebra" (one landed commit,
+        two branch copies) outranked "alpha" (one landed commit); dropping the
+        branch count ties them, and the tie breaks alphabetically to put "alpha"
+        first. Ranks hand-derived: zebra 3, alpha 1."""
+        zebra = "zebra crossing added to the address form"
+        alpha = "alphabetical ordering for the hearing list"
+        tickets, _, _ = run_stage(
+            [
+                make_commit(f"DD-6: {zebra}", reach="default"),
+                make_commit(f"DD-6: {alpha}", reach="default"),
+                branch_commit(f"DD-6: {zebra}"),
+                branch_commit(f"DD-6: {zebra}", ref="team/other"),
+            ]
+        )
+        record = tickets["DD-6"]
+        self.assertEqual(record["s"], [zebra, alpha])
+        self.assertEqual(record["d"], [zebra, alpha])
+        self.assertNotIn("ps", record)
+
+    def test_the_run_counts_tickets_carrying_branch_text(self):
+        """Catches the new fields arriving unreported: an operator rebuilding a
+        store sees how many tickets gained `ps`/`pb`, in the run and the record."""
+        commits = [
+            make_commit(f"DD-7: {self.LANDED}", reach="default"),
+            branch_commit(f"DD-7: {self.DRAFT}"),
+            branch_commit(f"DD-8: {self.DRAFT}"),
+            make_commit(f"DD-9: {self.LANDED}", reach="default"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "history" / "repo-a"
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            config.configure(
+                HISTORY_DIR=root / "history",
+                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+                TELEMETRY_PATH=root / "telemetry.json",
+            )
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertEqual(intent.main(), 0)
+            recorded = telemetry.read()
+        # DD-7 only: DD-8 is proposed-only and keeps its text in `s`, DD-9 has
+        # no branch commits.
+        self.assertIn("1 landed tickets with branch-only text", printed.getvalue())
+        self.assertEqual(recorded["intent.tickets_with_branch_text"], 1)
 
     def test_a_branch_commit_whose_content_landed_is_landed_text(self):
         """Catches squash-merged work's own words labelled as branch-only, when

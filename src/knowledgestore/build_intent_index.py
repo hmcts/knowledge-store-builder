@@ -705,14 +705,18 @@ def _text_pools(info: dict) -> tuple[dict[str, dict[str, int]], dict[str, dict[s
 
     A landed ticket keeps branch text apart, less whatever the landed commits also
     said: a branch left behind by a rebase repeats subjects the default branch
-    carries, and those words are not branch-only.
+    carries, and those words are not branch-only. Their branch counts go to the
+    landed text they repeat, so the landed fields rank exactly as they did when
+    every copy was pooled together - only genuinely branch-only text moves.
     """
     names = ("descriptions", "subjects", "bodies")
     main = {name: dict(info[name]) for name in names}
     branch = {name: dict(info["proposed_" + name]) for name in names}
     if info["landed"]:
         for name in names:
-            branch[name] = {t: n for t, n in branch[name].items() if t not in main[name]}
+            repeated = [text for text in branch[name] if text in main[name]]
+            for text in repeated:
+                main[name][text] += branch[name].pop(text)
         return main, branch
     for name in names:
         for text, count in branch[name].items():
@@ -907,6 +911,11 @@ def main() -> int:
         f"  commit text kept as evidence: {subjected:,} tickets with subjects, "
         f"{bodied:,} with body prose."
     )
+    branch_texted = sum(1 for t in ticket_out.values() if t.get("ps") or t.get("pb"))
+    print(
+        f"  branch-only commit text kept apart: {branch_texted:,} landed tickets "
+        "with branch-only text, under `ps` and `pb`."
+    )
     report_redactions(redactions)
 
     without_reach = sum(1 for ndjson in ndjson_files if lacks_reach(ndjson))
@@ -926,6 +935,7 @@ def main() -> int:
                 1 for t in ticket_out.values() if t.get("proposed")
             ),
             "intent.repositories_without_reach": without_reach,
+            "intent.tickets_with_branch_text": branch_texted,
         }
     )
     telemetry.record(summarise(index, commits_seen, report))

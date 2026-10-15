@@ -434,6 +434,8 @@ for (const [id, info] of Object.entries(TICKETS)) {
     ...(info.d || []).map((t) => ['mined description', t]),
     ...(info.s || []).map((t) => ['commit subject', t]),
     ...(info.b || []).map((t) => ['commit body', t]),
+    ...(info.ps || []).map((t) => ['branch-only commit subject', t]),
+    ...(info.pb || []).map((t) => ['branch-only commit body', t]),
     ...(info.x ? [['tracker description', info.x]] : []),
     ...(info.c || []).slice(0, 2).map((t) => ['tracker comment', t]),
   ];

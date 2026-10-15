@@ -306,9 +306,8 @@ TICKET_TRACKER = {
 # commit carries a subject and a body, which the stage keeps in `ps` and `pb`
 # rather than among the landed evidence (#429): "appendix" is in that commit's
 # text and nowhere else, so a question using it can only be answered from there.
-# Neither touches
-# anything another fixture question asks about: "gazetteer" and "runbook" occur
-# nowhere else in this estate.
+# Neither touches anything another fixture question asks about: "gazetteer" and
+# "runbook" occur nowhere else in this estate.
 BRANCH_HISTORY = [
     {
         "subject": "DEMO-4: Look up the street through the gazetteer before entry",
