@@ -4319,6 +4319,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshTest.test_an_open_record_with_no_checked_date_is_due",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
             "test_fetch_tickets.RefreshTest.test_the_interval_is_read_from_its_setting",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4356,6 +4357,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshTest.test_a_resolved_ticket_is_never_fetched_again",
             "test_fetch_tickets.RefreshTest.test_a_ticket_resolved_without_a_resolution_name_is_still_resolved",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+            "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
         ),
     ),
     Mutation(
@@ -4382,6 +4384,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_not_fetched_again_inside_the_interval",
             "test_fetch_tickets.RefreshTest.test_the_interval_is_read_from_its_setting",
+            "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
         ),
     ),
     Mutation(
@@ -4406,6 +4409,7 @@ MUTATIONS = (
         (
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4418,6 +4422,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
             "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
             "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4431,6 +4436,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
             "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
             "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4468,6 +4474,7 @@ MUTATIONS = (
         (
             "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4480,6 +4487,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
     ),
     Mutation(
@@ -4500,6 +4508,161 @@ MUTATIONS = (
         "without a recorded predecessor the next run cannot say whether refresh cost moved",
         (
             "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+        ),
+    ),
+    Mutation(
+        "twg transport: a mention renders the display name",
+        "twg_transport.py",
+        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
+        '        return str(attrs.get("text", ""))\n',
+        "#420 point 3, a hard privacy requirement: an ADF mention carries the person's display name in attrs.text, and the store is republished",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
+            "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+        ),
+    ),
+    Mutation(
+        "twg transport: a mention with no id falls back to the name",
+        "twg_transport.py",
+        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
+        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else str(attrs.get("text", ""))\n',
+        "the friendly fallback for a mention with no id is the one that publishes a name",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
+        ),
+    ),
+    Mutation(
+        "twg transport: document bodies are stored as nothing",
+        "twg_transport.py",
+        "    if not isinstance(body, dict):\n        return body\n",
+        "    return body\n",
+        "#420 point 2: Cloud bodies are ADF mappings and the library keeps only strings, so an unflattened body stores nothing and reports success",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
+            "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+        ),
+    ),
+    Mutation(
+        "twg transport: blocks run together",
+        "twg_transport.py",
+        '    return "\\n".join(out)\n',
+        '    return " ".join(out)\n',
+        "#420 point 2 asks for one line per block; joined, a heading, a list item and a table cell read as one sentence",
+        ("test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",),
+    ),
+    Mutation(
+        "twg transport: nested blocks are not read",
+        "twg_transport.py",
+        "        _lines(child, out)\n",
+        "        pass\n",
+        "list items, table cells and panels hold most of a structured description; skipping containers drops them and every mention inside",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
+            "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+        ),
+    ),
+    Mutation(
+        "twg transport: the exit code is read as no answer",
+        "twg_transport.py",
+        "    return completed.stdout\n",
+        '    if completed.returncode:\n        raise OSError("twg failed")\n    return completed.stdout\n',
+        "#420 point 4: twg exits 3 when any key in a page is unreturned, which is most pages, so reading the exit code leaves nearly every ticket uncached",
+        ("test_fetch_tickets.TwgExitCodeTest.test_stdout_is_read_whatever_twg_exits_with",),
+    ),
+    Mutation(
+        "twg transport: output it cannot read is taken as absence",
+        "twg_transport.py",
+        "    if any(key not in items for key in keys):\n",
+        "    if False:\n",
+        "absent is final, so a signed-out run or a reshaped reply read as an empty answer loses every ticket in the page for good",
+        (
+            "test_fetch_tickets.TwgExitCodeTest.test_an_answer_that_omits_a_key_is_no_answer",
+            "test_fetch_tickets.TwgExitCodeTest.test_output_that_does_not_parse_is_no_answer",
+        ),
+    ),
+    Mutation(
+        "twg transport: an unreadable follow-up is taken as absence",
+        "twg_transport.py",
+        '    raise NoAnswer("twg get gave no readable answer")\n',
+        "    return None\n",
+        "the same permanent loss through the second request: only the tracker's own not-found is an answer",
+        (
+            "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
+        ),
+    ),
+    Mutation(
+        "twg transport: moved tickets are not followed",
+        "twg_transport.py",
+        "            issue = followed(runner, key, fields)\n",
+        "            issue = None\n",
+        "#420's correction: bulk-get does not follow moves, so without the second request every moved ticket is cached as absent",
+        (
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
+            "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
+        ),
+    ),
+    Mutation(
+        "twg transport: a move crosses the allowlist",
+        "twg_transport.py",
+        "        if found.upper() != key.upper() and not may_read(found):\n",
+        "        if False:\n",
+        "a ticket moved to an undecided or denied project would be read although nobody authorised that project",
+        (
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_a_project_nobody_allowed_stays_absent",
+        ),
+    ),
+    Mutation(
+        "twg transport: a moved ticket is filed under its new key",
+        "twg_transport.py",
+        '        issues.append({"key": key, "fields": projected(issue, fields)})\n',
+        '        issues.append({"key": found, "fields": projected(issue, fields)})\n',
+        "the library files a page's answers by the keys the commits cite; under the new key the record is absent where it is looked up",
+        (
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
+        ),
+    ),
+    Mutation(
+        "twg transport: the request is widened to every field",
+        "twg_transport.py",
+        '        "--fields",\n        ",".join(fields),\n',
+        '        "--full",\n',
+        "a widened request fetches narrative nobody enabled, which the HTTP route guarantees against by never asking",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
+            "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
+        ),
+    ),
+    Mutation(
+        "twg transport: the route still demands a token",
+        "fetch_tickets.py",
+        "    if config.TRACKER_TRANSPORT == TWG:\n        return []\n",
+        "",
+        "twg signs in by itself, so demanding KSB_TRACKER_TOKEN makes the route unusable without a credential it never sends",
+        (
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
+            "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+            "test_fetch_tickets.TwgExitCodeTest.test_output_that_does_not_parse_is_no_answer",
+            "test_fetch_tickets.TwgExitCodeTest.test_stdout_is_read_whatever_twg_exits_with",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_a_project_nobody_allowed_stays_absent",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
+            "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
+            "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
+            "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
+        ),
+    ),
+    Mutation(
+        "twg transport: an unknown transport falls back",
+        "fetch_tickets.py",
+        "    if config.TRACKER_TRANSPORT not in TRANSPORTS:\n",
+        "    if False:\n",
+        "a misspelt transport silently becomes the HTTP route or a not-configured no-op, and its result reads as the tracker's",
+        (
+            "test_fetch_tickets.TwgRequestTest.test_an_unknown_transport_is_refused_before_anything_is_asked",
         ),
     ),
 )

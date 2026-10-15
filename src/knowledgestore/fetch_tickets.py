@@ -52,7 +52,9 @@ Everything fetched goes through the same redaction as mined commit text
 text is, and does not earn a weaker filter for being nominally cleaner.
 
 The HTTP boundary is the `opener` argument to `main()`, which is where the tests
-stub. Requests go out one at a time, batched as a JQL `key in (...)` search at
+stub. `KSB_TRACKER_TRANSPORT=twg` puts a different transport behind the same seam
+- Jira Cloud through the TWG CLI, see `twg_transport.py` - and changes nothing
+else: the decisions below are made here either way. Requests go out one at a time, batched as a JQL `key in (...)` search at
 `KSB_TRACKER_PAGE_SIZE` keys each, with a pause between pages and `Retry-After`
 honoured - a large estate becomes hundreds of requests rather than tens of
 thousands, which is what keeps a first run inside rate limits and out of an
@@ -74,7 +76,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
-from . import __version__, config, io, sensitive, telemetry
+from . import __version__, config, io, sensitive, telemetry, twg_transport
 from .build_intent_index import truncate
 
 
@@ -93,6 +95,11 @@ BASE_FIELDS = (
 USER_AGENT = (
     f"knowledge-store-builder/{__version__} (+https://github.com/hmcts/knowledge-store-builder)"
 )
+
+# The transports `KSB_TRACKER_TRANSPORT` may name.
+REST = "rest"
+TWG = "twg"
+TRANSPORTS = (REST, TWG)
 
 DENIED_STATUSES = (401, 403)
 TOO_MANY_REQUESTS = 429
@@ -162,7 +169,10 @@ def tracker_root(base: str) -> str:
 
 
 def missing_settings() -> list[str]:
-    """The settings without which this stage cannot run at all."""
+    """The settings without which this stage cannot run at all. The twg
+    transport needs none: the CLI holds its own sign-in."""
+    if config.TRACKER_TRANSPORT == TWG:
+        return []
     return [
         name
         for name, value in (
@@ -175,12 +185,12 @@ def missing_settings() -> list[str]:
 
 def request_headers() -> dict[str, str]:
     """The one place the credential appears. A Data Center personal access token
-    is a bearer token, with no email or account name beside it."""
-    return {
-        "Authorization": f"Bearer {config.TRACKER_TOKEN}",
-        "Accept": "application/json",
-        "User-Agent": USER_AGENT,
-    }
+    is a bearer token, with no email or account name beside it. With no token -
+    the twg transport, which signs in by itself - there is no header to send."""
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+    if config.TRACKER_TOKEN:
+        headers["Authorization"] = f"Bearer {config.TRACKER_TOKEN}"
+    return headers
 
 
 def projected_fields() -> tuple[str, ...]:
@@ -238,6 +248,27 @@ def discovered_keys() -> list[str]:
     """
     records = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
     return [key for key in records if isinstance(key, str) and "-" in key]
+
+
+def may_read(key: str) -> bool:
+    """Whether this store may read the ticket a key names: allowlisted and not
+    denied. The same rule as `partition`, for a key the run learns about
+    mid-page - a ticket that has moved to another project."""
+    name = prefix_of(key)
+    allowed = {entry.upper() for entry in config.TRACKER_PROJECTS}
+    refused = {entry.upper() for entry in config.TRACKER_DENY}
+    return name in allowed and name not in refused
+
+
+def twg_opener(runner: twg_transport.Runner) -> Opener:
+    """The `opener` for the twg transport. The library still decides: the
+    request is the one it built, and a moved ticket is read only when
+    `may_read` allows its new key."""
+
+    def opener(url: str, headers: dict) -> Response:
+        return Response(200, twg_transport.answer(runner, url, may_read))
+
+    return opener
 
 
 def partition(keys: Iterable[str]) -> Partition:
@@ -624,12 +655,17 @@ def _report_failures(report: Report) -> None:
         for status, count in sorted(report.failures.items())
     )
     print(f"  replies that carried no answer, so nothing was cached: {named}")
+    if config.TRACKER_TRANSPORT == TWG and 0 in report.failures:
+        print(
+            "  with KSB_TRACKER_TRANSPORT=twg, no response means twg printed nothing "
+            "this stage could read: check that `twg` is on PATH and signed in"
+        )
     if any(status in WRONG_ENDPOINT_STATUSES for status in report.failures):
         print(
             "  a 404 or 410 on the search endpoint usually means this is a Jira Cloud "
             "deployment. This stage speaks Jira Data Center or Server: Bearer token, "
-            "GET /rest/api/2/search. Cloud authenticates with Basic and has removed "
-            "that endpoint, so no setting here will make it answer."
+            "GET /rest/api/2/search. Cloud has removed that endpoint; set "
+            "KSB_TRACKER_TRANSPORT=twg to reach it through the Atlassian TWG CLI."
         )
 
 
@@ -710,11 +746,19 @@ def main(
     opener: Opener = open_url,
     sleep: Callable[[float], None] = time.sleep,
     today: str = "",
+    runner: twg_transport.Runner = twg_transport.run_twg,
 ) -> int:
     parser = argparse.ArgumentParser(prog="knowledgestore fetch-tickets", add_help=False)
     parser.add_argument("-h", "--help", action="help")
     parser.parse_args(sys.argv[1:] if argv is None else argv)
 
+    if config.TRACKER_TRANSPORT not in TRANSPORTS:
+        print(
+            f"KSB_TRACKER_TRANSPORT must be one of: {', '.join(TRANSPORTS)}. "
+            "Nothing was requested.",
+            file=sys.stderr,
+        )
+        return 1
     missing = missing_settings()
     if missing:
         print(f"fetch-tickets is not configured: {' and '.join(missing)} not set.")
@@ -724,11 +768,14 @@ def main(
             "whatever a credentialled run last committed."
         )
         return 0
-    try:
-        root = tracker_root(config.TRACKER_BASE_URL)
-    except ValueError as error:
-        print(error, file=sys.stderr)
-        return 1
+    if config.TRACKER_TRANSPORT == TWG:
+        root, opener = twg_transport.ROOT, twg_opener(runner)
+    else:
+        try:
+            root = tracker_root(config.TRACKER_BASE_URL)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 1
 
     keys = discovered_keys()
     if not keys:

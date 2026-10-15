@@ -281,6 +281,12 @@ _NORMALISERS = {"TICKET_BROWSE_URL": _browse_url}
 # the pipeline is complete without it, and a store with no tracker credentials
 # reads whatever the last credentialled run committed.
 #
+# How the stage reaches the tracker. `rest` is Jira Data Center or Server over
+# HTTP, with the base URL and token below. `twg` is Jira Cloud through the
+# Atlassian TWG CLI, which holds its own sign-in, so neither setting is needed.
+# Only the transport changes: every decision about what to ask and what to keep
+# is the same on both. See twg_transport.py.
+TRACKER_TRANSPORT = os.environ.get("KSB_TRACKER_TRANSPORT", "rest").strip().lower()
 # The tracker's API root, e.g. https://tracker.example/jira - the part before
 # /rest/api/2. Empty means the stage is not configured and does nothing.
 TRACKER_BASE_URL = os.environ.get("KSB_TRACKER_BASE_URL", "")

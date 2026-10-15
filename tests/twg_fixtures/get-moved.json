@@ -1,0 +1,101 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.get",
+  "request": {
+    "issueIdOrKey": "ABC-3",
+    "site": "example.atlassian.example",
+    "fields": [
+      "summary",
+      "issuetype",
+      "status",
+      "resolution",
+      "created",
+      "resolutiondate",
+      "parent",
+      "description",
+      "comment"
+    ]
+  },
+  "data": [
+    {
+      "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+      "id": "20003",
+      "self": "https://example.atlassian.example/rest/api/3/issue/20003",
+      "key": "XYZ-7",
+      "summary": "Moved to another project",
+      "issuetype": {
+        "self": "https://example.atlassian.example/rest/api/3/issuetype/10004",
+        "id": "10004",
+        "description": "An invented issue type.",
+        "name": "Story",
+        "subtask": false,
+        "avatarId": 10318,
+        "hierarchyLevel": 0
+      },
+      "created": "2024-03-04T09:00:00.000+0000",
+      "resolutiondate": "2024-04-01T12:00:00.000+0000",
+      "description": null,
+      "comment": {
+        "comments": [],
+        "self": "https://example.atlassian.example/rest/api/3/issue/20003/comment",
+        "maxResults": 0,
+        "total": 0,
+        "startAt": 0
+      },
+      "resolution": {
+        "self": "https://example.atlassian.example/rest/api/3/resolution/10000",
+        "id": "10000",
+        "description": "Work has been completed.",
+        "name": "Done"
+      },
+      "status": {
+        "self": "https://example.atlassian.example/rest/api/3/status/10001",
+        "description": "",
+        "name": "Done",
+        "id": "10001",
+        "statusCategory": {
+          "self": "https://example.atlassian.example/rest/api/3/statuscategory/3",
+          "id": 3,
+          "key": "done",
+          "colorName": "green",
+          "name": "Done"
+        }
+      },
+      "url": "https://example.atlassian.example/browse/XYZ-7"
+    }
+  ],
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.workitem",
+    "backend": "agg",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.workitem"
+    },
+    "acquisition": {
+      "requested": 1,
+      "returned": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "omitted": 0,
+      "truncated": 0
+    },
+    "evidence": {
+      "provenance": {
+        "source": "teamwork-graph"
+      },
+      "coverage": {
+        "status": "complete",
+        "covered": [
+          "jira:issue:XYZ-7"
+        ]
+      },
+      "truncation": {
+        "truncated": false
+      }
+    }
+  }
+}

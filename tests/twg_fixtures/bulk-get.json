@@ -1,0 +1,420 @@
+{
+  "apiVersion": "v2",
+  "command": "jira.workitem.bulk-get",
+  "request": {
+    "issueIdsOrKeys": [
+      "ABC-1",
+      "ABC-2",
+      "ABC-3"
+    ],
+    "site": "example.atlassian.example",
+    "fields": [
+      "summary",
+      "issuetype",
+      "status",
+      "resolution",
+      "created",
+      "resolutiondate",
+      "parent",
+      "description",
+      "comment"
+    ]
+  },
+  "data": {
+    "items": [
+      {
+        "input": "ABC-1",
+        "ok": true,
+        "data": {
+          "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+          "id": "20001",
+          "self": "https://example.atlassian.example/rest/api/3/issue/20001",
+          "key": "ABC-1",
+          "summary": "Sort the widgets",
+          "issuetype": {
+            "self": "https://example.atlassian.example/rest/api/3/issuetype/10004",
+            "id": "10004",
+            "description": "An invented issue type.",
+            "name": "Story",
+            "subtask": false,
+            "avatarId": 10318,
+            "hierarchyLevel": 0
+          },
+          "parent": {
+            "id": "20900",
+            "key": "ABC-900",
+            "self": "https://example.atlassian.example/rest/api/3/issue/20900",
+            "fields": {
+              "summary": "An invented epic",
+              "status": {
+                "self": "https://example.atlassian.example/rest/api/3/status/10001",
+                "description": "",
+                "name": "Done",
+                "id": "10001",
+                "statusCategory": {
+                  "self": "https://example.atlassian.example/rest/api/3/statuscategory/3",
+                  "id": 3,
+                  "key": "done",
+                  "colorName": "green",
+                  "name": "Done"
+                }
+              },
+              "priority": {
+                "self": "https://example.atlassian.example/rest/api/3/priority/3",
+                "name": "Medium",
+                "id": "3"
+              },
+              "issuetype": {
+                "self": "https://example.atlassian.example/rest/api/3/issuetype/10004",
+                "id": "10004",
+                "description": "An invented issue type.",
+                "name": "Epic",
+                "subtask": false,
+                "hierarchyLevel": 1
+              }
+            }
+          },
+          "created": "2024-03-04T09:00:00.000+0000",
+          "resolutiondate": "2024-03-09T17:30:00.000+0000",
+          "description": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+              {
+                "type": "heading",
+                "attrs": {
+                  "level": 2
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Background",
+                    "marks": [
+                      {
+                        "type": "em"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Widgets are ",
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "sorted by colour."
+                  },
+                  {
+                    "type": "hardBreak"
+                  },
+                  {
+                    "type": "text",
+                    "text": "See the "
+                  },
+                  {
+                    "type": "text",
+                    "text": "design note",
+                    "marks": [
+                      {
+                        "type": "link",
+                        "attrs": {
+                          "href": "https://docs.example/note"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "."
+                  }
+                ]
+              },
+              {
+                "type": "bulletList",
+                "content": [
+                  {
+                    "type": "listItem",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Raised by "
+                          },
+                          {
+                            "type": "mention",
+                            "attrs": {
+                              "id": "acct-0000-alpha",
+                              "text": "@Alex Example",
+                              "accessLevel": ""
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "listItem",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Second point"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "table",
+                "attrs": {
+                  "isNumberColumnEnabled": false,
+                  "layout": "default"
+                },
+                "content": [
+                  {
+                    "type": "tableRow",
+                    "content": [
+                      {
+                        "type": "tableCell",
+                        "attrs": {},
+                        "content": [
+                          {
+                            "type": "paragraph",
+                            "content": [
+                              {
+                                "type": "text",
+                                "text": "Owner"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableCell",
+                        "attrs": {},
+                        "content": [
+                          {
+                            "type": "paragraph",
+                            "content": [
+                              {
+                                "type": "mention",
+                                "attrs": {
+                                  "id": "acct-0000-bravo",
+                                  "text": "@Bea Sample",
+                                  "accessLevel": ""
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "comment": {
+            "comments": [
+              {
+                "self": "https://example.atlassian.example/rest/api/3/issue/20001/comment/30001",
+                "id": "30001",
+                "author": {
+                  "self": "https://example.atlassian.example/rest/api/3/user?accountId=acct-0000-delta",
+                  "accountId": "acct-0000-delta",
+                  "displayName": "Dee Invented",
+                  "active": true,
+                  "timeZone": "Etc/UTC",
+                  "accountType": "atlassian"
+                },
+                "body": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Agreed with "
+                        },
+                        {
+                          "type": "mention",
+                          "attrs": {
+                            "id": "acct-0000-charlie",
+                            "text": "@Cal Placeholder",
+                            "accessLevel": ""
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": ", closing."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "updateAuthor": {
+                  "self": "https://example.atlassian.example/rest/api/3/user?accountId=acct-0000-delta",
+                  "accountId": "acct-0000-delta",
+                  "displayName": "Dee Invented",
+                  "active": true,
+                  "timeZone": "Etc/UTC",
+                  "accountType": "atlassian"
+                },
+                "created": "2024-03-08T10:00:00.000+0000",
+                "updated": "2024-03-08T10:00:00.000+0000",
+                "jsdPublic": true
+              }
+            ],
+            "self": "https://example.atlassian.example/rest/api/3/issue/20001/comment",
+            "maxResults": 1,
+            "total": 1,
+            "startAt": 0
+          },
+          "resolution": {
+            "self": "https://example.atlassian.example/rest/api/3/resolution/10000",
+            "id": "10000",
+            "description": "Work has been completed.",
+            "name": "Done"
+          },
+          "status": {
+            "self": "https://example.atlassian.example/rest/api/3/status/10001",
+            "description": "",
+            "name": "Done",
+            "id": "10001",
+            "statusCategory": {
+              "self": "https://example.atlassian.example/rest/api/3/statuscategory/3",
+              "id": 3,
+              "key": "done",
+              "colorName": "green",
+              "name": "Done"
+            }
+          },
+          "url": "https://example.atlassian.example/browse/ABC-1"
+        }
+      },
+      {
+        "input": "ABC-2",
+        "ok": true,
+        "data": {
+          "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+          "id": "20002",
+          "self": "https://example.atlassian.example/rest/api/3/issue/20002",
+          "key": "ABC-2",
+          "summary": "Still being argued about",
+          "issuetype": {
+            "self": "https://example.atlassian.example/rest/api/3/issuetype/10004",
+            "id": "10004",
+            "description": "An invented issue type.",
+            "name": "Story",
+            "subtask": false,
+            "avatarId": 10318,
+            "hierarchyLevel": 0
+          },
+          "created": "2024-03-04T09:00:00.000+0000",
+          "resolutiondate": null,
+          "description": null,
+          "comment": {
+            "comments": [],
+            "self": "https://example.atlassian.example/rest/api/3/issue/20002/comment",
+            "maxResults": 0,
+            "total": 0,
+            "startAt": 0
+          },
+          "resolution": null,
+          "status": {
+            "self": "https://example.atlassian.example/rest/api/3/status/10001",
+            "description": "",
+            "name": "In Progress",
+            "id": "10001",
+            "statusCategory": {
+              "self": "https://example.atlassian.example/rest/api/3/statuscategory/4",
+              "id": 4,
+              "key": "indeterminate",
+              "colorName": "yellow",
+              "name": "In Progress"
+            }
+          },
+          "url": "https://example.atlassian.example/browse/ABC-2"
+        }
+      },
+      {
+        "input": "ABC-3",
+        "ok": false,
+        "error": {
+          "message": "Issue was not returned by Jira bulkfetch"
+        }
+      }
+    ],
+    "summary": {
+      "requested": 3,
+      "returned": 2,
+      "succeeded": 2,
+      "failed": 1,
+      "omitted": 0,
+      "truncated": 0
+    }
+  },
+  "meta": {
+    "resourceClass": "entity",
+    "sourceMode": "native",
+    "resourceType": "jira.workitem",
+    "backend": "agg",
+    "meta": {
+      "resourceClass": "entity",
+      "sourceMode": "rest",
+      "apiVersion": "rest-v3",
+      "resourceType": "jira.workitem"
+    },
+    "partial": true,
+    "acquisition": {
+      "requested": 3,
+      "returned": 2,
+      "succeeded": 2,
+      "failed": 1,
+      "omitted": 0,
+      "truncated": 0
+    },
+    "evidence": {
+      "provenance": {
+        "source": "teamwork-graph"
+      },
+      "coverage": {
+        "status": "partial",
+        "covered": [
+          "jira:issue:ABC-1",
+          "jira:issue:ABC-2"
+        ],
+        "missing": [
+          "jira:issue:ABC-3"
+        ]
+      },
+      "truncation": {
+        "truncated": false
+      },
+      "gaps": [
+        {
+          "code": "unavailable",
+          "subject": "jira:issue:ABC-3",
+          "detail": "Issue was not returned by Jira bulkfetch"
+        }
+      ]
+    }
+  }
+}

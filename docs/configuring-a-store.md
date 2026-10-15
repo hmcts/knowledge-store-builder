@@ -20,7 +20,8 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_FEATURES_DIR` | `features/` | Feature-directory segment used to group Gherkin features |
 | `KSB_SENSITIVE_PATTERNS` | email address (the only shipped rule; estates declare their own formats) | Extra rules for mined commit text that must not be stored, as a JSON object of rule name → regex merged over the defaults: `KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'`. Anything matching a rule is replaced by a placeholder naming what was removed, and counted in the run report; a value left with only placeholders is not stored. Malformed JSON raises rather than emptying the rules — see [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record) |
 | `KSB_SECRET_PATTERNS` | the shipped secret shapes (private keys, SAS signatures, connection-string keys, bearer tokens, URL passwords and common token formats) | Extra value shapes masked out of the copies a headless extraction worker reads, as a JSON object of rule name → regex merged over the defaults: `KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'`. A rule with capturing groups masks the first that matched, one without masks its whole match, and a group named `guarded` is masked only when its value looks like a credential. Masking is pattern-based, so a secret in a shape no rule names is not masked — see [the headless route](../skills/knowledge-store-build/SKILL.md#the-headless-route-workers-extract) |
-| `KSB_TRACKER_BASE_URL` | none | Issue-tracker API root for the `fetch-tickets` stage, for example `https://tracker.example/jira`. The stage speaks **Jira Data Center or Server only**: Bearer authentication and `GET /rest/api/2/search`. Jira Cloud uses Basic authentication and has removed that endpoint, so it is not supported. Empty means the stage is not configured and does nothing |
+| `KSB_TRACKER_TRANSPORT` | `rest` | How `fetch-tickets` reaches the tracker. `rest` is Jira Data Center or Server over HTTP, using the two settings below. `twg` is Jira Cloud through the Atlassian TWG CLI, which signs in by itself, so it needs neither — see [Read Jira Cloud through the TWG CLI](#read-jira-cloud-through-the-twg-cli). Any other value stops the stage before it requests anything |
+| `KSB_TRACKER_BASE_URL` | none | Issue-tracker API root for the `rest` transport, for example `https://tracker.example/jira`: Bearer authentication and `GET /rest/api/2/search`, which Jira Cloud has removed. Empty means the `rest` transport is not configured and the stage does nothing |
 | `KSB_TRACKER_TOKEN` | none | Data Center personal access token, sent as `Authorization: Bearer`. Never written to an artefact, a summary line or an error message |
 | `KSB_TRACKER_PROJECTS` | none | Comma-separated ticket prefixes this store may read, for example `AAA,BBB`. Empty means none, which is not the same as all |
 | `KSB_TRACKER_DENY` | none | Prefixes that must never be requested, whatever the allowlist says. A deny entry wins, so an allowlist edit cannot re-enable a project somebody withdrew |
@@ -49,10 +50,10 @@ the date it was read, and a run requests it again once that date is
 `KSB_TICKET_REFRESH_DAYS` old, within the bounds described in
 [Refreshing open tickets](#refreshing-open-tickets).
 
-The stage speaks Jira Data Center or Server: a personal access token sent as a
-Bearer credential, and `GET /rest/api/2/search`. Against Jira Cloud the search
-request answers 404 or 410, and the run says so by name rather than printing the
-status alone.
+By default the stage speaks Jira Data Center or Server: a personal access token
+sent as a Bearer credential, and `GET /rest/api/2/search`. Against Jira Cloud that
+search answers 404 or 410, and the run says so by name and points at the `twg`
+transport rather than printing the status alone.
 
 Requests are batched into one search per `KSB_TRACKER_PAGE_SIZE` keys, with a
 single request in flight, `Retry-After` honoured, and a pause between pages. The
@@ -118,6 +119,52 @@ it as kept: a search omits tickets the token cannot browse, so an operator with
 narrower access would otherwise turn known text into a permanent `absent`.
 A ticket resolved by either a resolution name or a resolution date counts as
 resolved.
+
+### Read Jira Cloud through the TWG CLI
+
+Jira Cloud has removed the search endpoint the default transport uses. With the
+Atlassian TWG CLI installed and signed in, set the transport and run the stage as
+usual:
+
+```bash
+twg jira workitem get ABC-1 -o json      # confirms twg is on PATH and signed in
+export KSB_TRACKER_TRANSPORT=twg
+export KSB_TRACKER_PROJECTS=ABC
+knowledgestore fetch-tickets
+```
+
+If the first command does not print the ticket as JSON, the stage cannot read
+anything either; it records every page as failed, caches nothing, and says to
+check `twg`. No base URL or token is needed, and none passes through the library.
+
+Only the transport changes. The allowlist, deny list and undecided report, the
+field projection, redaction, the four outcomes, refresh and its bounds, and the
+cache writer are the same code on both routes. What the `twg` route adds:
+
+- **One `bulk-get` per page.** Each page of keys becomes one `twg jira workitem
+  bulk-get` asking for exactly the fields the projection asked for, so
+  descriptions and comments are requested only when their settings are on.
+- **Bodies flattened to text.** Cloud descriptions and comments are structured
+  documents. Each block — a paragraph, a heading, a list item, a table cell —
+  becomes one line.
+- **No names.** A mention is stored as `[~accountid:<id>]`, never as the display
+  name the document carries beside it, and a comment's author is dropped before
+  the stage sees the comment. An inline node the transport does not know renders
+  as nothing rather than being trusted to hold only text.
+- **The exit code is not the answer.** `twg` exits non-zero whenever a key in the
+  page was not returned, and still prints the full result; the stage reads that
+  output either way. Output it cannot read, or that leaves out a key it asked
+  about, is no answer: nothing is cached and the next run asks again.
+- **Moved tickets are followed once.** `bulk-get` reports a ticket moved to
+  another project as not returned. Each such key gets one `twg jira workitem
+  get`, which follows the move, and the ticket is filed under the key the
+  commits cite — but only when its new project is in `KSB_TRACKER_PROJECTS` and
+  not in `KSB_TRACKER_DENY`. A ticket that moved to an undecided project stays
+  absent.
+
+One limit to know: `bulk-get` returns a page of each ticket's most recent
+comments rather than the whole thread, so a ticket with a long thread is stored
+without its earliest comments on this route.
 
 ## Use BDD specifications
 

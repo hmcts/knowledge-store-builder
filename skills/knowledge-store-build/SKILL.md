@@ -783,7 +783,8 @@ store now ships.
 ### Ticket detail from the issue tracker: `fetch-tickets`
 
 Optional, and off unless the store has tracker credentials
-(`KSB_TRACKER_BASE_URL`, `KSB_TRACKER_TOKEN`). Run it after `intent`, which is
+(`KSB_TRACKER_BASE_URL`, `KSB_TRACKER_TOKEN`) or reads Jira Cloud through a
+signed-in TWG CLI (`KSB_TRACKER_TRANSPORT=twg`). Run it after `intent`, which is
 what discovers the tickets:
 
 ```bash
