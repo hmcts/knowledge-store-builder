@@ -4309,8 +4309,8 @@ MUTATIONS = (
     Mutation(
         "a squash-merged branch file reads as unlanded",
         "export_git_history.py",
-        '                if file["path"] in landed_paths:',
-        "                if False:",
+        '            if file["path"] in landed_paths:',
+        "            if False:",
         "a squash merge lands a branch's work without its commits, so the branch's files "
         "read as proposals though their content is on the default branch",
         ("test_export_git_history.ReachTest.test_a_squash_merged_branch_file_is_marked_landed",),
@@ -4342,8 +4342,8 @@ MUTATIONS = (
     Mutation(
         "a release line reached only by a tag reads as a proposal",
         "export_git_history.py",
-        "        elif sha in tagged:",
-        "        elif False:",
+        "    elif sha in reach.tagged:",
+        "    elif False:",
         "shipped work on a release line that never merged back was published as a proposed change",
         (
             "test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",
@@ -4353,8 +4353,8 @@ MUTATIONS = (
     Mutation(
         "a branch commit is recorded without the branch it was found on",
         "export_git_history.py",
-        '            record["ref"] = branch_name(source.strip())',
-        "            pass",
+        '        record["ref"] = branch_name(source.strip())',
+        "        pass",
         "an agent could not say which branch held a proposal",
         (
             "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
@@ -4390,8 +4390,8 @@ MUTATIONS = (
     Mutation(
         "a ticket landed through a branch file is still flagged as only proposed",
         "build_intent_index.py",
-        '                descriptions[ticket]["landed"] = True',
-        "                pass",
+        '            descriptions[ticket]["landed"] = True',
+        "            pass",
         "a squash-merged ticket's record said it had never landed",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",

@@ -9,6 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 from typing import Iterable, Iterator
 
 
@@ -261,7 +262,8 @@ def branch_blobs(repo_path: Path, ref: str | None) -> dict[str, list[tuple[str, 
     return written
 
 
-def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[dict[str, object]]:
+def _git_log_output(repo_path: Path) -> str:
+    """One `git log` pass over every ref, with the fields and numstat of each commit."""
     pretty_format = (
         FIELD_SEPARATOR.join(
             [
@@ -303,13 +305,95 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
         "--diff-merges=cc",
         f"--pretty=format:{RECORD_SEPARATOR}{pretty_format}",
     )
+    return output
 
+
+class _Reach(NamedTuple):
+    """What decides each commit's reach, computed once per repository."""
+
+    landed: frozenset[str]
+    tagged: frozenset[str]
+    written: dict[str, list[tuple[str, str]]]
+    on_default: frozenset[tuple[str, str]]
+
+
+def _repository_reach(repo_path: Path, default_branch: str | None) -> _Reach:
     ref, _ = resolve_default(repo_path, default_branch)
     landed, tagged = reach_sets(repo_path, ref)
     written = branch_blobs(repo_path, ref)
     on_default = landed_blobs(
         repo_path, ref, frozenset(path for pairs in written.values() for path, _ in pairs)
     )
+    return _Reach(landed, tagged, written, on_default)
+
+
+def _classify_reach(
+    record: dict[str, object], files: list[dict[str, object]], source: str, reach: _Reach
+) -> None:
+    """Set `reach` on a commit record, and for a branch-only commit its `ref` and
+    which of its files carry content that landed on the default branch."""
+    sha = record["sha"]
+    if sha in reach.landed:
+        record["reach"] = REACH_DEFAULT
+    elif sha in reach.tagged:
+        record["reach"] = REACH_TAG
+    else:
+        record["reach"] = REACH_BRANCH
+        record["ref"] = branch_name(source.strip())
+        landed_paths = {
+            path
+            for path, blob in reach.written.get(str(sha), ())
+            if (path, blob) in reach.on_default
+        }
+        for file in files:
+            if file["path"] in landed_paths:
+                file["landed"] = True
+
+
+def _commit_record(fields: list[str], files: list[dict[str, object]]) -> dict[str, object]:
+    """A commit's record from its twelve log fields, before reach is classified."""
+    (
+        sha,
+        parents,
+        author_date,
+        committer_date,
+        author_name,
+        author_email,
+        committer_name,
+        committer_email,
+        refs,
+        _source,
+        subject,
+        body,
+    ) = fields
+    return {
+        "sha": sha,
+        "short_sha": sha[:12],
+        "parents": parents.split() if parents else [],
+        "author_date": author_date,
+        "committer_date": committer_date,
+        "author": {
+            "name": author_name,
+            "email": author_email,
+        },
+        "committer": {
+            "name": committer_name,
+            "email": committer_email,
+        },
+        "refs": [name.strip() for name in refs.split(",") if name.strip()],
+        "subject": subject.strip(),
+        "body": normalise_message(body),
+        "files": files,
+        "file_count": len(files),
+        "additions": sum(f["additions"] for f in files if isinstance(f["additions"], int)),
+        "deletions": sum(f["deletions"] for f in files if isinstance(f["deletions"], int)),
+        "is_merge": len(parents.split()) > 1,
+    }
+
+
+def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[dict[str, object]]:
+    output = _git_log_output(repo_path)
+    reach = _repository_reach(repo_path, default_branch)
 
     for raw_record in output.split(RECORD_SEPARATOR):
         # Strip only newlines: Python's str.strip() treats \x1f/\x1e as
@@ -331,66 +415,9 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
             )
             continue
 
-        (
-            sha,
-            parents,
-            author_date,
-            committer_date,
-            author_name,
-            author_email,
-            committer_name,
-            committer_email,
-            refs,
-            source,
-            subject,
-            body,
-        ) = fields
-
         files = parse_numstat(numstat)
-
-        total_additions = sum(
-            file["additions"] for file in files if isinstance(file["additions"], int)
-        )
-        total_deletions = sum(
-            file["deletions"] for file in files if isinstance(file["deletions"], int)
-        )
-
-        record: dict[str, object] = {
-            "sha": sha,
-            "short_sha": sha[:12],
-            "parents": parents.split() if parents else [],
-            "author_date": author_date,
-            "committer_date": committer_date,
-            "author": {
-                "name": author_name,
-                "email": author_email,
-            },
-            "committer": {
-                "name": committer_name,
-                "email": committer_email,
-            },
-            "refs": [name.strip() for name in refs.split(",") if name.strip()],
-            "subject": subject.strip(),
-            "body": normalise_message(body),
-            "files": files,
-            "file_count": len(files),
-            "additions": total_additions,
-            "deletions": total_deletions,
-            "is_merge": len(parents.split()) > 1,
-        }
-        if sha in landed:
-            record["reach"] = REACH_DEFAULT
-        elif sha in tagged:
-            record["reach"] = REACH_TAG
-        else:
-            record["reach"] = REACH_BRANCH
-            record["ref"] = branch_name(source.strip())
-            landed_paths = {
-                path for path, blob in written.get(sha, ()) if (path, blob) in on_default
-            }
-            for file in files:
-                if file["path"] in landed_paths:
-                    file["landed"] = True
+        record = _commit_record(fields, files)
+        _classify_reach(record, files, fields[9], reach)
         yield record
 
 

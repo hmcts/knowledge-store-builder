@@ -540,23 +540,57 @@ def apply_commit(
     tickets = commit_tickets(commit, boilerplate)
     if not tickets:
         return False
-    date = commit["author_date"][:10]
     counts = None if redactions is None else redactions.by_rule
     subject_text = sensitive.redact(commit["subject"], counts)
     body = sensitive.redact(commit_body(commit), counts)
     description = stored_value(commit_description(subject_text, body, boilerplate), redactions)
     subject = stored_value(clean_description(subject_text), redactions)
     prose = stored_value(body_evidence(body, boilerplate), redactions)
+    _fold_tickets(
+        commit, tickets, descriptions, (description, subject, prose), omit_proposed, counts
+    )
+    _fold_files(commit, tickets, files, descriptions, omit_proposed)
+    return True
+
+
+def _fold_tickets(
+    commit: dict,
+    tickets: list[str],
+    descriptions: dict[str, dict],
+    texts: tuple[str, str, str],
+    omit_proposed: bool,
+    counts: Counter[str] | None,
+) -> None:
+    """Add one commit to each named ticket's pool: count, repository, dates, text,
+    and where it was found - landed, or the branch it sits on."""
+    is_landed = landed(commit)
+    date = commit["author_date"][:10]
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])
         _widen_range(info, date)
-        _pool_text(info, description, subject, prose)
+        _pool_text(info, *texts)
         if is_landed:
             info["landed"] = True
         elif commit.get("ref") and not omit_proposed:
             info["branches"].add(sensitive.redact(commit["ref"], counts))
+
+
+def _fold_files(
+    commit: dict,
+    tickets: list[str],
+    files: dict[str, dict],
+    descriptions: dict[str, dict],
+    omit_proposed: bool,
+) -> None:
+    """Link a commit's tickets to each file it touched, as landed or proposed.
+
+    A branch commit's file whose content landed counts as landed, and marks its
+    tickets landed too; under `omit` the other files of a branch commit are left out.
+    """
+    is_landed = landed(commit)
+    date = commit["author_date"][:10]
     for changed in commit.get("files", []):
         file_landed = is_landed or changed.get("landed")
         if omit_proposed and not file_landed:
@@ -564,11 +598,10 @@ def apply_commit(
         entry = files[changed["path"]]
         for ticket in tickets:
             entry["tickets" if file_landed else "proposed"][ticket] += 1
-        if not is_landed and changed.get("landed"):
-            for ticket in tickets:
-                descriptions[ticket]["landed"] = True
         _widen_range(entry, date)
-    return True
+    if not is_landed and any(f.get("landed") for f in commit.get("files", [])):
+        for ticket in tickets:
+            descriptions[ticket]["landed"] = True
 
 
 def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: BodyReport) -> None:
