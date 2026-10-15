@@ -196,6 +196,17 @@ class SourceUrls:
         }
         return cls(clone_urls, shas)
 
+    def base(self, repo: object) -> str | None:
+        """`https://github.com/<org>/<repo>/blob/<sha>/`, or None when `repo` gets no link.
+
+        The prefix every link `resolve` writes for this repository, so a reader that
+        joins it to an escaped repo-relative path and a line anchor holds the same
+        bytes as the node's `url`. The explorer page carries this, one per
+        repository, rather than a URL per row: every URL is unique, so a per-row
+        column could not be interned and would grow the page by about a third.
+        """
+        return self._bases.get(repo) if isinstance(repo, str) else None
+
     def resolve(
         self,
         repo: object,
@@ -211,7 +222,7 @@ class SourceUrls:
             return Resolution(None, NO_SOURCE_FILE)
         if not isinstance(repo, str) or not repo:
             return Resolution(None, NO_REPO)
-        base = self._bases.get(repo)
+        base = self.base(repo)
         if base is None:
             return Resolution(None, self._missing.get(repo, NOT_CONFIGURED))
         inside = repo_relative(repo, path, single_root)

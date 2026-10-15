@@ -119,6 +119,13 @@ const EXPECTED_ROWS = [
   ['pay-service (prd)', 'demo-deploy', 'ansible/group_vars/prd/pay-service_values.yaml.j2',
     'Payments', 'concept', 'PaymentService,prd', ''],
   ['prd', 'demo-deploy', '', 'Payments', 'concept', 'pay-service (prd)', ''],
+  // The single-root repository whose file names need escaping (#423). No label
+  // for community 5 in LABELS, so its community column is empty.
+  ['LedgerBook', 'demo-ledger', 'repositories/demo-ledger/src/odd names/Ledger (v2) #1 50%!*.ts',
+    '', 'code', 'LedgerLine', ''],
+  ['LedgerLine', 'demo-ledger',
+    'repositories/demo-ledger/src/caf\u00e9/it\'s \u00fc\u2603 <b>&"x".ts',
+    '', 'code', 'LedgerBook', ''],
 ];
 const flatten = (rows) => rows.map((r) => r.join('\u241f')).sort().join('\n');
 /** @param {any[][]} data */
@@ -637,6 +644,125 @@ try {
 } finally {
   rmSync(legacyDir, { recursive: true, force: true });
 }
+
+// --- every row opens its file at the build commit (#423) -------------------
+// The page carries one link base per repository in #config, and app.js joins it
+// to the row's own path and line. The graph already holds the link for every
+// node, written by the real `source-urls` stage in fixture.py, and the two must
+// be the same bytes: a page link that differs from the graph's `url` cites a
+// different file, or the same file under a second spelling.
+
+/** Record one comparison of what the page did against what it should have.
+ * @param {string} name the break this catches @param {unknown} observed
+ * @param {unknown} expected derived by hand */
+function expectSame(name, observed, expected) {
+  const got = JSON.stringify(observed);
+  const want = JSON.stringify(expected);
+  if (got === want) {
+    console.log(`ok    ${name}`);
+    return;
+  }
+  failures++;
+  console.error(`FAIL  ${name}`);
+  console.error(`      expected ${want}`);
+  console.error(`      observed ${got}`);
+}
+
+const graphNodes = JSON.parse(readFileSync(join(dirname(pagePath), 'graph.json'), 'utf-8')).nodes;
+// Catches: any row whose joined link is not the node's `url` - the base built a
+// second way, the single-root prefix kept, a path escaped differently from
+// Python's `quote`, a line anchor dropped or invented, or a link written for a
+// repository the graph links nothing in (another host, no recorded commit).
+// A row matches its node on label, repository and file, and each must match one.
+const linkMismatches = [];
+for (const row of api.DATA) {
+  const nodes = graphNodes.filter((n) => n.label === row[0] && (n.repo || '') === row[1]
+    && (n.source_file || '') === row[2]);
+  if (nodes.length !== 1) {
+    linkMismatches.push({ row: row[0], nodesMatched: nodes.length });
+    continue;
+  }
+  const link = api.sourceLink(row);
+  if (link !== (nodes[0].url || '')) {
+    linkMismatches.push({ row: row[0], page: link, graph: nodes[0].url || '' });
+  }
+}
+expectSame('links: every row links exactly where the graph url for its node does',
+  linkMismatches, []);
+
+// Not vacuous: the comparison above passes over a page that links nothing when
+// the graph links nothing too. Counted by hand from fixture.py: three rows each
+// in demo-app-a and demo-app-b, PaymentService, and both demo-ledger rows link;
+// the demo-e2e feature and scenario (not on github.com), the deployment and its
+// environment (no recorded commit) and the DEMO-1 ticket (no file) do not.
+expectSame('links: the rows with a link are the ones the fixture configures',
+  api.DATA.filter((e) => api.sourceLink(e)).map((e) => e[0]).sort(),
+  ['AddressEntryComponent', 'AddressFormComponent', 'AddressPipe', 'AddressPipe',
+    'CheckoutContainer', 'LedgerBook', 'LedgerLine', 'PayContainer', 'PaymentService']);
+
+// The links themselves, written out, so the comparison above cannot pass by the
+// graph and the page agreeing on something wrong. The escapes are Python's
+// `quote(path, safe="/")`; the single-root prefix is gone; the anchors are the
+// fixture's `source_location` values.
+const LEDGER = 'https://github.com/example-org/demo-ledger/blob/' + 'd'.repeat(40) + '/';
+const linkOf = (label) => api.DATA.filter((e) => e[0] === label).map(api.sourceLink).sort();
+expectSame('links: a single-root file with awkward characters links escaped, at its line',
+  linkOf('LedgerBook'),
+  [LEDGER + 'src/odd%20names/Ledger%20%28v2%29%20%231%2050%25%21%2A.ts#L3']);
+expectSame('links: non-ASCII and markup in a file name are percent-encoded',
+  linkOf('LedgerLine'),
+  [LEDGER + 'src/caf%C3%A9/it%27s%20%C3%BC%E2%98%83%20%3Cb%3E%26%22x%22.ts']);
+expectSame('links: a line range anchors as a range',
+  linkOf('PaymentService'),
+  ['https://github.com/example-org/demo-core/blob/' + 'c'.repeat(40)
+    + '/src/payment.service.ts#L5-L9']);
+
+// Catches: the link computed but never rendered, rendered without `rel` or
+// `target`, or the file name written raw - the fixture's carries `<b>`, `&` and
+// quotes, so an unescaped name injects markup into the card.
+api.q.value = 'LedgerLine';
+api.runSearch();
+const ledgerCard = api.out.innerHTML;
+expectSame('links: the search card renders the file as an escaped link opening a new tab',
+  ledgerCard.includes('<a href="' + LEDGER
+    + 'src/caf%C3%A9/it%27s%20%C3%BC%E2%98%83%20%3Cb%3E%26%22x%22.ts" target="_blank"'
+    + ' rel="noopener">repositories/demo-ledger/src/café/it\'s ü☃'
+    + ' &lt;b&gt;&amp;&quot;x&quot;.ts</a>'),
+  true);
+expectSame('links: no raw markup from a file name reaches the card',
+  ledgerCard.includes('<b>&"x"'), false);
+
+// Catches: a link rendered for a repository with no base. Each card's path line
+// is read on its own, so an anchor elsewhere in the results cannot mask one.
+/** @param {string} query @param {string} repo @returns {string[]} */
+function pathLines(query, repo) {
+  api.q.value = query;
+  api.runSearch();
+  return api.out.innerHTML.split('<div class="path">').slice(1)
+    .map((chunk) => chunk.split('</div>')[0])
+    .filter((line) => line.startsWith(repo + ' '));
+}
+for (const [query, repo] of [['Pay a fine online', 'demo-e2e'], ['pay-service', 'demo-deploy']]) {
+  const lines = pathLines(query, repo);
+  expectSame(`links: ${repo}'s card shows its file with no link`,
+    { cards: lines.length > 0, linked: lines.some((line) => line.includes('<a ')) },
+    { cards: true, linked: false });
+}
+
+// Catches: the "defined in" table of a which-repositories answer still printing
+// bare paths - the other place the page shows a file.
+api.q.value = 'which repositories implement AddressPipe?';
+api.runAsk();
+const repoTable = api.out.innerHTML;
+expectSame('links: the which-repositories table links each file it names',
+  [
+    'https://github.com/example-org/demo-app-a/blob/' + 'a'.repeat(40)
+      + '/src/pipes/address.pipe.ts#L12',
+    'https://github.com/example-org/demo-app-b/blob/' + 'b'.repeat(40)
+      + '/src/pipes/address.pipe.ts',
+  ].map((url) => repoTable.includes('<a href="' + url + '" target="_blank" rel="noopener">'
+    + 'src/pipes/address.pipe.ts</a>')),
+  [true, true]);
 
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);

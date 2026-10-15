@@ -4775,7 +4775,11 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
         ),
     ),
@@ -4790,6 +4794,7 @@ MUTATIONS = (
             "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
         ),
     ),
@@ -4802,6 +4807,7 @@ MUTATIONS = (
         "keeping the prefix links a path inside the repository that does not exist",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
             "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
         ),
@@ -4858,6 +4864,7 @@ MUTATIONS = (
         "a `#` in a file name turns the rest of the path into a fragment and a space ends "
         "the URL in most renderers, so the link opens a different file or none",
         (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
         ),
@@ -4870,6 +4877,7 @@ MUTATIONS = (
         "RFC 3986 allows `(` raw, and a consuming store's committed links encode it: a "
         "file written both ways is one citation that compares unequal across the two writers",
         (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
         ),
     ),
@@ -4881,6 +4889,7 @@ MUTATIONS = (
         "a repository listed under a local name that differs from its name on GitHub would "
         "link to a 404",
         (
+            "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
             "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
         ),
@@ -5024,6 +5033,65 @@ MUTATIONS = (
         "and the graph is of the default branch - so a ticket found only on a branch "
         "would be published as what changed this code, the reading the label exists to stop",
         ("test_build_explorer.NodeTicketsTest.test_proposed_tickets_stay_off_a_code_node",),
+    ),
+    Mutation(
+        "explorer source links: a base is guessed for a repository the graph cannot link",
+        "build_explorer.py",
+        "    bases = {repo: base for repo in repos if (base := urls.base(repo))}\n",
+        '    bases = {repo: urls.base(repo) or f"https://github.com/{repo}/blob/main/" '
+        "for repo in repos}\n",
+        "#423: rows of a repository on another host or with no recorded commit would link "
+        "a guessed file at a moving branch, where the rule is to write no link at all",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
+        ),
+    ),
+    Mutation(
+        "explorer source links: the single-root repositories are not named",
+        "build_explorer.py",
+        "    if single:\n",
+        "    if False:\n",
+        "#423: rows of a repository built by the single-root route would keep the "
+        "`repositories/<repo>/` prefix when joined, linking a path that does not exist",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
+        ),
+    ),
+    Mutation(
+        "explorer source links: rows lose their line anchor",
+        "build_explorer.py",
+        '    return line_anchor(location).removeprefix("#") if found.url else ""\n',
+        '    return ""\n',
+        "#423: every row would link the top of its file rather than the line the graph's "
+        "`url` names, so the page and the graph would cite one node two ways",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+        ),
+    ),
+    Mutation(
+        "explorer source links: a row that cannot be linked still carries its line",
+        "build_explorer.py",
+        '    return line_anchor(location).removeprefix("#") if found.url else ""\n',
+        '    return line_anchor(location).removeprefix("#")\n',
+        "#423: the anchor is the one per-row cost of linking, and every row the page will "
+        "never link would pay it for nothing",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+        ),
+    ),
+    Mutation(
+        "explorer source links: an unreadable repository list stops the page",
+        "build_explorer.py",
+        '    except ValueError as error:\n        print(\n            f"No source links',
+        '    except OSError as error:\n        print(\n            f"No source links',
+        "#423: a malformed `config/repositories.txt` would refuse the whole page over its "
+        "links, when the page is still worth having without them",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
+        ),
     ),
 )
 

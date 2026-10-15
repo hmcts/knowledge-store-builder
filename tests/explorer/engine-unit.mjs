@@ -587,6 +587,85 @@ assert('an unproposed ticket\'s row and strip chip in a "why" answer are unchang
     deepEqual(held, [[260, row], [200, 0]]), JSON.stringify(held));
 }
 
+// --- source links (#423) ----------------------------------------------------
+// The page joins a repository's base to the row's escaped path, and the result
+// must be the graph's `url` for the same node byte for byte. The graph's side is
+// Python: `quote(path, safe="/")` and `source_urls.repo_relative`. Every
+// expected value below was printed by those two functions on Python 3.13 and
+// pasted here as a literal, so this compares the port against its original
+// rather than against itself.
+
+// Catches: a `quotePath` built on `encodeURI` (leaves `#`, `?`, `&` raw - a `#`
+// in a file name then cuts the path into a fragment), on bare
+// `encodeURIComponent` (leaves `!'()*` raw, which Python encodes, so the link
+// differs from the graph's), or one that encodes `/` (the whole path one
+// segment), or skips UTF-8 for non-ASCII.
+const QUOTED = [
+  ['src/odd names/a b.ts', 'src/odd%20names/a%20b.ts'],
+  ['a#b', 'a%23b'],
+  ['Ledger (v2).ts', 'Ledger%20%28v2%29.ts'],
+  ['50%.ts', '50%25.ts'],
+  ['café/x.ts', 'caf%C3%A9/x.ts'],
+  ["it's", 'it%27s'],
+  ['!*', '%21%2A'],
+  ['~._-', '~._-'],
+  ['a+b=c&d?e', 'a%2Bb%3Dc%26d%3Fe'],
+  ['<b>"x"', '%3Cb%3E%22x%22'],
+  ['back\\slash', 'back%5Cslash'],
+  ['@:;,$', '%40%3A%3B%2C%24'],
+  ['☃', '%E2%98%83'],
+  ['😀.ts', '%F0%9F%98%80.ts'],
+  ['tab\there', 'tab%09here'],
+  ['%2F', '%252F'],
+];
+for (const [path, python] of QUOTED) {
+  const ported = context.quotePath(path);
+  assert('quotePath matches Python quote(safe="/") on ' + JSON.stringify(path),
+    ported === python, 'got ' + ported + ', Python wrote ' + python);
+}
+// Catches: a lone surrogate encoded as U+FFFD (TextEncoder's behaviour), which
+// would link a file whose name is not the one the row shows. Python's `quote`
+// raises on one, so the graph has no `url` for it and the page must have none.
+assert('quotePath refuses a path it cannot encode', context.quotePath('a\ud800b') === null);
+
+// Catches: a port of `repo_relative` that drifts from the original - stripping a
+// per-repository path that happens to begin `repositories/<repo>/`, accepting
+// another repository's prefix on the single-root route, or letting an absolute,
+// `..`, `.` or empty segment through to a link.
+const RELATIVE = [
+  [['r', 'src/a.ts', false], 'src/a.ts'],
+  [['r', '/abs/a.ts', false], null],
+  [['r', '../a.ts', false], null],
+  [['r', 'src/./a.ts', false], null],
+  [['r', 'src//a.ts', false], null],
+  [['r', 'src/a/', false], null],
+  [['r', '', false], null],
+  [['r', 'repositories/r/src/a.ts', false], 'repositories/r/src/a.ts'],
+  [['r', 'repositories/r/src/a.ts', true], 'src/a.ts'],
+  [['r', 'repositories/other/src/a.ts', true], null],
+  [['r', 'src/a.ts', true], null],
+  [['r', 'repositories/r/', true], null],
+  [['r', 'repositories/r/../x', true], null],
+];
+for (const [args, python] of RELATIVE) {
+  const ported = context.repoRelative(...args);
+  assert('repoRelative matches source_urls.repo_relative on ' + JSON.stringify(args),
+    ported === python, 'got ' + JSON.stringify(ported) + ', Python returned '
+      + JSON.stringify(python));
+}
+
+// Catches: a link written for a row whose repository has no base. This page's
+// #config carries no `sourceBases` - every page built before #423 reads that
+// way - so no row may link anywhere.
+assert('a page with no source bases links no row',
+  DATA.every((e) => context.sourceLink(e) === ''));
+// Catches: bases looked up on a plain object, where a repository named after an
+// Object.prototype member finds a function and links `function Object() ...`.
+assert('a repository named after a prototype member gets no link',
+  ['constructor', '__proto__', 'toString'].every(
+    (repo) => context.sourceLink(['X', repo, 'src/a.ts', '', 'code', 1, [], [], 0, '', 'L1']) === ''
+  ));
+
 if (failures) {
   console.error('\n' + failures + ' engine assertion(s) failed');
   process.exit(1);

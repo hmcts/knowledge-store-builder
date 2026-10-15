@@ -213,7 +213,7 @@ equal('the rank record for an unboosted question is untouched',
     evidence: 'code | demo-core | src/payment.service.ts | PaymentService',
     ranked: 1,
     shown: 1,
-    top: 216.2122,
+    top: 231.0491,
     runnerUp: 0,
     marginPct: 100,
   });

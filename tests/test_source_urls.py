@@ -225,6 +225,27 @@ class BuildingTheUrl(unittest.TestCase):
             f"https://github.com/example-org/example-repo/blob/{SHA}/db/Example%20Table%20%28Draft%29.sql",
         )
 
+    def test_the_base_is_the_prefix_every_link_for_the_repository_starts_with(self):
+        """Breaks if `base` is built a second way and drifts from the links `resolve`
+        writes, or offers a base where `resolve` would refuse the repository.
+
+        The explorer page carries the base once per repository and joins each row to
+        it (#423), so a base that is not the prefix of the node's `url` links every
+        row of that repository somewhere the graph does not.
+        """
+        urls = _builder()
+        self.assertEqual(
+            urls.base("example-repo"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/",
+        )
+        self.assertEqual(
+            urls.base("renamed-locally"),
+            f"https://github.com/example-org/upstream-name/blob/{OTHER_SHA}/",
+        )
+        for repo in ("hosted-elsewhere", "never-synced", "short-sha", "unconfigured", None, 3):
+            with self.subTest(repo=repo):
+                self.assertIsNone(urls.base(repo))
+
     def test_no_url_is_written_where_one_cannot_be_right(self):
         """Breaks if any missing input is papered over - a guessed host, an empty sha,
         or a repository the store never configured. Each says why."""
