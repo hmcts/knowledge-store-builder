@@ -4301,6 +4301,220 @@ MUTATIONS = (
         "secret in round 1 is handed them in round 2, and the report still says masked",
         ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
     ),
+    Mutation(
+        "source url: a clone URL on another host is linked as github.com",
+        "source_urls.py",
+        r"(?:git@|ssh://git@|https://|http://|git://)github\.com[:/]",
+        r"(?:git@|ssh://git@|https://|http://|git://)[\w.-]+[:/]",
+        "a repository hosted on GitLab or a self-hosted server would get a github.com link "
+        "naming a repository that does not exist there: a wrong link where the rule is to "
+        "write none",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
+        ),
+    ),
+    Mutation(
+        "source url: the link loses its line anchor",
+        "source_urls.py",
+        'quote(inside, safe=_PATH_SAFE) + line_anchor(source_location), "")',
+        'quote(inside, safe=_PATH_SAFE), "")',
+        "every node would link the top of its file rather than the line `source_location` "
+        "names, so a citation of one method in a long class sends the reader to find it",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
+        ),
+    ),
+    Mutation(
+        "source url: the single-root corpus prefix is kept",
+        "source_urls.py",
+        '        owner, _, path = path[len(CORPUS_PREFIX) :].partition("/")\n'
+        "        if owner != repo:\n"
+        "            return None\n",
+        "        pass\n",
+        "a store built by the single-root route writes `repositories/<repo>/<path>`, and "
+        "keeping the prefix links a path inside the repository that does not exist",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.TheRepositoryRelativePath.test_a_path_that_is_not_inside_its_own_repository_names_nothing",
+            "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
+        ),
+    ),
+    Mutation(
+        "source url: a corpus prefix naming another repository is stripped anyway",
+        "source_urls.py",
+        "        if owner != repo:\n",
+        "        if False:\n",
+        "a node whose `source_file` names a different repository's clone would be linked "
+        "under its own repository's name: a link to a file that is not there",
+        (
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.TheRepositoryRelativePath.test_a_path_that_is_not_inside_its_own_repository_names_nothing",
+        ),
+    ),
+    Mutation(
+        "source url: an empty or malformed sha is written into the link",
+        "source_urls.py",
+        "            elif not isinstance(sha, str) or not _SHA.match(sha):",
+        "            elif not isinstance(sha, str):",
+        "a repository with no recorded commit would get `.../blob//<path>`, which GitHub "
+        "does not resolve - a link that reads as a citation and opens nothing",
+        ("test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",),
+    ),
+    Mutation(
+        "source url: a path character that changes the URL is written raw",
+        "source_urls.py",
+        "base + quote(inside, safe=_PATH_SAFE) + line_anchor(source_location)",
+        "base + inside + line_anchor(source_location)",
+        "a `#` in a file name turns the rest of the path into a fragment and a space ends "
+        "the URL in most renderers, so the link opens a different file or none",
+        ("test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",),
+    ),
+    Mutation(
+        "source url: the local repository name stands in for the name on the host",
+        "source_urls.py",
+        'f"https://github.com/{org}/{name}/blob/{sha}/"',
+        'f"https://github.com/{org}/{repo}/blob/{sha}/"',
+        "a repository listed under a local name that differs from its name on GitHub would "
+        "link to a 404",
+        (
+            "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
+            "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
+        ),
+    ),
+    Mutation(
+        "source url: the escaping widens past the links stores already publish",
+        "source_urls.py",
+        '_PATH_SAFE = "/"\n',
+        '_PATH_SAFE = "/!$&\'()*+,;=:@-._~"\n',
+        "RFC 3986 allows `(` raw, and a consuming store's committed links encode it: a "
+        "file written both ways is one citation that compares unequal across the two writers",
+        (
+            "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
+        ),
+    ),
+    Mutation(
+        "source url stage: a link from an earlier build survives",
+        "build_source_urls.py",
+        '        node.pop("url", None)\n',
+        "",
+        "a repository that left the configuration or moved host keeps the link an earlier "
+        "build wrote, citing a commit this build did not read",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+        ),
+    ),
+    Mutation(
+        "source url stage: only the plain graph is rewritten",
+        "build_source_urls.py",
+        '    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:\n'
+        "        out.write(serialised)\n",
+        "",
+        "every store gitignores `graph.json` and commits `graph.json.gz`, so links written "
+        "only into the plain file never reach a reader and the stage still reports them",
+        (
+            "test_archive_writer_ordering.ArchiveWriterOrderingGuidanceTest.test_the_documented_stage_set_is_the_set_that_writes_the_archive",
+            "test_build_source_urls.SourceUrlsStageTest.test_both_graph_files_are_written_and_agree",
+        ),
+    ),
+    Mutation(
+        "source url stage: the stale-graph guard is skipped",
+        "build_source_urls.py",
+        "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)\n",
+        '    refusal = ""\n',
+        "the fourth stage that rewrites both graph files would overwrite the committed "
+        "archive from a stale `graph.json`, losing the newer clustering (#198)",
+        ("test_stale_graph_refusal.StaleRefusalTest.test_source_urls_refuses_and_writes_nothing",),
+    ),
+    Mutation(
+        "source url stage: an unreadable repository list reads as an empty estate",
+        "build_source_urls.py",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        return 1\n",
+        "        urls = SourceUrls({}, {})\n",
+        "one malformed line in `repositories.txt` would strip every link from the graph and exit 0",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_malformed_repository_list_is_refused_and_nothing_is_written",
+        ),
+    ),
+    Mutation(
+        "source url stage: skipped nodes are not reported",
+        "build_source_urls.py",
+        "            skipped[found.reason] += 1\n",
+        "            pass\n",
+        "a store with no provenance would print `0 of N linked` with no reason beside it, "
+        "which is the silent-zero shape this stage's report exists to prevent",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+        ),
+    ),
+    Mutation(
+        "source url stage is not registered",
+        "cli.py",
+        '    "source-urls": (\n'
+        '        "build_source_urls",\n'
+        '        "give each graph node a `url` to its file at the commit the store was built from",\n'
+        "    ),\n",
+        "",
+        "the documented `knowledgestore source-urls` would answer `unknown stage`, and no "
+        "store could produce the links its skill tells agents to cite",
+        (
+            "test_archive_writer_ordering.ArchiveWriterOrderingGuidanceTest.test_the_documented_stage_set_is_the_set_that_writes_the_archive",
+            "test_documented_stages.DocumentedStagesExist.test_every_documented_stage_is_a_real_stage",
+            "test_repo_list_and_sync.CliTest.test_stages_are_listed_in_pipeline_order",
+        ),
+    ),
+    Mutation(
+        "source url: deep dive top files carry no link",
+        "build_deep_dives.py",
+        "        url = urls.file_url(repo, path) if urls else None\n",
+        "        url = None\n",
+        "a dossier's author is handed bare corpus paths for the files it is most likely to "
+        "cite, and cites `repositories/...` again",
+        (
+            "test_build_deep_dives.ChurnTest.test_each_top_file_links_to_the_file_at_the_build_commit",
+            "test_build_deep_dives.ExtractTest.test_extract_writes_a_complete_bundle",
+        ),
+    ),
+    Mutation(
+        "source url: the deep dive extract never builds links",
+        "build_deep_dives.py",
+        '        "churn": churn_section(files, repo, _source_urls()),\n',
+        '        "churn": churn_section(files),\n',
+        "the section builds links when handed a builder and the extract never hands it "
+        "one: the wiring half, which a unit test of the section cannot see",
+        ("test_build_deep_dives.ExtractTest.test_extract_writes_a_complete_bundle",),
+    ),
+    Mutation(
+        "source url: the context file stops forbidding corpus citations",
+        "build_knowledge_context.py",
+        "Never cite `repositories/<repo>/...`: the corpus is not committed, so no\n"
+        "reader can open that path.\n",
+        "",
+        "every agent answering from a store reads the context file; without the rule it "
+        "cites the uncommitted corpus path a reader cannot open",
+        (
+            "test_build_knowledge_context.BuildOutputsTest.test_context_tells_agents_to_cite_a_link_and_never_the_corpus",
+        ),
+    ),
+    Mutation(
+        "source url: the question skill goes back to citing source_file",
+        "skills/knowledge-store/SKILL.md",
+        "- Cite a node's `url` for specific claims.",
+        "- Cite `source_file` / `source_location` for specific claims.",
+        "the skill is where an answering agent reads its rules (CLAUDE.md 3); the old line "
+        "is the one that produced `repositories/...` citations",
+        (
+            "test_source_urls.TheSkillCarriesTheCitationRule.test_the_question_skill_says_cite_the_url_and_never_the_corpus",
+        ),
+    ),
 )
 
 
