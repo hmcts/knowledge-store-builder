@@ -2,7 +2,10 @@
 
 Every fixture is forged in the shape of real Claude Code transcript lines and carries
 no real content: the questions, answers, paths and ids are invented, and the field
-names, nesting and line order are copied from real transcripts. Three fields are read
+names, nesting and line order are copied from real transcripts. Two shapes are
+inferred rather than copied, and say so where they are built: the resumed session
+(`test_a_resumed_session_counts_each_repeated_turn_once`) and the `!` shell line
+(`Transcript.shell`). Three fields are read
 for a meaning the transcript does not state, and each was confirmed against real
 sessions before it was relied on:
 
@@ -24,7 +27,9 @@ from __future__ import annotations
 import contextlib
 import io as _io
 import json
+import os
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
@@ -99,6 +104,25 @@ class Transcript:
             line.update(
                 {"permissionMode": "default", "promptSource": "typed", "origin": {"kind": "human"}}
             )
+
+    def interrupt(self) -> None:
+        """What the harness writes when the person stops a tool call: a user line of
+        text blocks with no `origin` and no `isMeta`. Shape confirmed against the one
+        such line found in real transcripts on the machine this was written on."""
+        line = self._line("user")
+        line["promptId"] = "forged-prompt"
+        line["message"] = {
+            "role": "user",
+            "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}],
+        }
+
+    def shell(self, text: str) -> None:
+        """A `!` shell line typed into the prompt. INFERRED: no real transcript on the
+        machine this was written on held one, so the shape is a prompt's, which is the
+        worst case - it carries nothing that marks it as anything else."""
+        line = self._line("user")
+        line["promptId"] = "forged-prompt"
+        line["message"] = {"role": "user", "content": text}
 
     def notification(self, text: str) -> None:
         """What the harness injects when a background agent finishes."""
@@ -295,6 +319,10 @@ class SplittingASession(AnswersStage):
         repeats the earlier lines, uuids and message ids included, before its own;
         read naively, Q_SUBMIT is answered twice and the resumed copy has no usage.
 
+        INFERRED shape: `cost` documents carried-over sessions repeating message ids,
+        but no real transcript found repeated lines across files - a headless
+        `--resume` appended to its own file - so that uuids are kept is an assumption.
+
         S3 carries Q_SUBMIT over and then asks Q_CANCEL: msg_04, 2 + 100 + 7,000 =
         7,102 input.
         """
@@ -327,6 +355,34 @@ class SplittingASession(AnswersStage):
         records = self._records([root], self._store())
         self.assertEqual([r["question"] for r in records], [Q_RETRY])
         self.assertEqual(records[0]["turns"], 2)
+
+    def test_an_interrupt_marker_is_not_a_prompt(self):
+        """Break: reading the harness's interrupt marker as a question. Every
+        interrupted answer then becomes two, and the empty second one's question
+        pairs with every other run's interrupt."""
+        root = self._dir()
+        t = Transcript(S1)
+        t.prompt(Q_RETRY)
+        t.tool("msg_03", _usage(4, 0, 6200, 7), "toolu_03", "Bash", {"command": "sleep 99"})
+        t.result("toolu_03", "forged")
+        t.interrupt()
+        t.text("msg_05", _usage(1, 0, 6300, 3), "Stopped.")
+        t.write(root / f"{S1}.jsonl")
+        records = self._records([root], self._store())
+        self.assertEqual([r["question"] for r in records], [Q_RETRY])
+        self.assertEqual(records[0]["turns"], 2)
+
+    def test_a_shell_line_is_not_a_prompt(self):
+        """Break: reading a `!` shell command and its output as two questions."""
+        root = self._dir()
+        t = Transcript(S1)
+        t.prompt(Q_RETRY)
+        t.text("msg_03", _usage(4, 0, 6200, 7), "Forged.")
+        t.shell("<bash-input>ls</bash-input>")
+        t.shell("<bash-stdout>forged</bash-stdout><bash-stderr></bash-stderr>")
+        t.write(root / f"{S1}.jsonl")
+        records = self._records([root], self._store())
+        self.assertEqual([r["question"] for r in records], [Q_RETRY])
 
 
 def gateway_session(root: Path, store: Path) -> None:
@@ -461,6 +517,33 @@ class StoreFiles(AnswersStage):
         )
         self.assertEqual(record["tool_calls"], {"Bash": 1, "Glob": 1, "Grep": 1, "Read": 2})
 
+    def _one_bash(self, store: Path, command: str, cwd: str = "") -> dict:
+        root = self._dir()
+        t = Transcript(S4, cwd=cwd or str(store))
+        t.prompt(Q_RETRY)
+        t.tool("m1", _usage(1, 0, 100, 1), "t1", "Bash", {"command": command})
+        t.write(root / f"{S4}.jsonl")
+        (record,) = self._records([root], store)
+        return record
+
+    def test_a_word_naming_another_user_s_home_does_not_stop_the_run(self):
+        """Break: expanding `~nosuchuser/x`, which raises RuntimeError and loses every
+        record in the run over one unusual word in one session."""
+        store = self._store()
+        (store / "notes.md").write_text("four", encoding="utf-8")
+        record = self._one_bash(store, "ls ~nosuchuser/x; cat notes.md")
+        self.assertEqual(record["store_files"], [{"path": "notes.md", "bytes": 4}])
+
+    def test_a_path_under_the_home_directory_is_expanded(self):
+        """Break: dropping `~/` expansion with the fix above, so a store under the
+        home directory named as `~/...` is never counted."""
+        store = self._store()
+        (store / "notes.md").write_text("four", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"HOME": str(store)}):
+            # A cwd outside the store, so only the expansion can reach the file.
+            record = self._one_bash(store, "cat ~/notes.md", cwd="/forged/cwd")
+        self.assertEqual(record["store_files"], [{"path": "notes.md", "bytes": 4}])
+
 
 CITING = (
     "`OrderService.submitOrder()` validates the basket "
@@ -468,7 +551,7 @@ CITING = (
     "It is defined in `repositories/shop-api/src/OrderService.java`. "
     "`OrderService.cancelEverything()` handles refunds, "
     "see https://github.com/example/shop-api/blob/main/src/OrderService.java. "
-    "Returns `null` when empty."
+    "Returns `null` when empty, and reads `orders.order_id`."
 )
 
 
@@ -499,6 +582,7 @@ class Citations(AnswersStage):
                 {"span": "repositories/shop-api/src/OrderService.java", "class": "corpus_path"},
                 {"span": "OrderService.cancelEverything()", "class": "unresolved"},
                 {"span": "null", "class": "skipped"},
+                {"span": "orders.order_id", "class": "column"},
                 {
                     "span": f"https://github.com/example/shop-api/blob/{SHA}/src/OrderService.java#L12",
                     "class": "pinned_url",
@@ -532,6 +616,14 @@ class AbsenceClaims(AnswersStage):
         """Break: matching "is not found" inside a backticked log message, which is
         the answer quoting code rather than stating that anything is absent."""
         record = self._claim("Checkout logs `order is not found` and retries three times.")
+        self.assertFalse(record["absence_claim"])
+        self.assertIsNone(record["absence_sentence"])
+
+    def test_a_code_span_holding_a_sentence_break_is_not_a_claim(self):
+        """Break: splitting sentences before code spans are masked. The span is cut at
+        its full stop, neither half is a span any more, and the quoted log message
+        reads as a claim that something is not found."""
+        record = self._claim("It logs `fail. not found here` and moves on.")
         self.assertFalse(record["absence_claim"])
         self.assertIsNone(record["absence_sentence"])
 
@@ -605,6 +697,20 @@ class CommandLine(AnswersStage):
         written = [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
         self.assertEqual([r["question"] for r in written], [Q_SUBMIT, Q_RETRY])
 
+    def test_each_summary_note_sits_on_its_own_quantity(self):
+        """Break: attaching the notes by line position, so reordering the token fields
+        puts "a floor" on a quantity that is exact and leaves output unqualified."""
+        root = self._dir()
+        session_one().write(root / f"{S1}.jsonl")
+        code, out = self._run(str(root), "--store", str(self._store()))
+        self.assertEqual(code, 0, out)
+        lines = {line.split()[0]: line for line in out.splitlines() if line.startswith("  ")}
+        self.assertIn("a floor", lines["output_floor"])
+        self.assertIn("cache reads", lines["input"])
+        for name in ("cache_read", "cache_write", "turns", "tool_calls"):
+            self.assertNotIn("a floor", lines[name])
+            self.assertNotIn("cache reads", lines[name])
+
     def test_reading_no_answer_exits_two(self):
         """Break: reporting zeroes as a measurement when no session was read."""
         root = self._dir()
@@ -654,6 +760,17 @@ class Comparing(AnswersStage):
         self.assertIn(Q_RETRY, out)
         self.assertIn(Q_CANCEL, out)
         self.assertTrue(out.rstrip().endswith(answers.LIMIT), out)
+
+    def test_a_malformed_record_file_is_refused_cleanly(self):
+        """Break: a record file missing a field raising a traceback out of --compare
+        instead of a refusal naming the file, with exit 2."""
+        before = self._write("before", [[(Q_SUBMIT, 99)]])
+        broken = self._dir() / "broken.jsonl"
+        broken.write_text(json.dumps({"question": Q_SUBMIT}) + "\n", encoding="utf-8")
+        code, out = self._run("--compare", str(before), str(broken))
+        self.assertEqual(code, 2, out)
+        self.assertIn("broken.jsonl", out)
+        self.assertNotIn("Traceback", out)
 
     def test_a_repeated_question_is_compared_as_its_median(self):
         """Break: comparing the first repetition only, or summing them.

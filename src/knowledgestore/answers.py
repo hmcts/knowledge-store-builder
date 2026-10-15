@@ -13,8 +13,9 @@ after a change can be compared.
 
 An answer runs from one prompt to the next. Three kinds of user-role line are not
 prompts: a tool's result, which comes back to the session as a user line; a line the
-harness injects (`isMeta`, a compaction summary, or an `origin` whose kind is not
-`human`, such as a background agent's completion notice); and any line of a subagent's
+harness injects (`isMeta`, a compaction summary, an `origin` whose kind is not
+`human` such as a background agent's completion notice, or text the harness writes in
+the person's voice - see `HARNESS_TEXT`); and any line of a subagent's
 transcript (`isSidechain`). The answer's text is the last assistant text block before
 the next prompt, from the session itself and never from a subagent.
 
@@ -34,8 +35,12 @@ is the largest `output_tokens` any line of a turn carried, summed over turns: tr
 lines under-report output, so it is a floor, never the output.
 
 A line already read in an earlier file - same `uuid` - is skipped, and a prompt read
-before opens no new answer: a resumed session repeats the lines it carried over, and
-reading them again would answer one question twice.
+before opens no new answer, so a session that carries earlier lines over cannot answer
+one question twice. That shape is INFERRED, not observed: `cost` documents copied,
+resumed and forked sessions repeating message ids, but no transcript on the machine
+this was written on repeated lines across files (a headless `--resume` appended to the
+same file). If a fork re-mints uuids, a carried-over prompt opens a second answer with
+no usage, since message-id de-duplication still holds its tokens at zero.
 
 No price is applied. `cost_usd` appears only when a headless result
 (`claude -p --output-format json`) is among the inputs, names the session, and the
@@ -91,7 +96,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config, graph_files
-from .check_citations import _FENCE, _SPAN, Vocabulary, citations, load_vocabulary, resolve
+from .check_citations import FENCE, SPAN, Vocabulary, citations, load_vocabulary, resolve
 from .cost import (
     RESULT_SUFFIXES,
     TRANSCRIPT_SUFFIXES,
@@ -104,6 +109,17 @@ from .cost import (
 LIMIT = (
     "These are measures of cost and citation hygiene, not of correctness; "
     "correctness still needs judging."
+)
+
+# User lines the harness writes in the person's voice: local command output, the
+# interrupt marker (confirmed on a real transcript: text blocks, no origin, no
+# isMeta), and `!` shell input and output (prefix only; no real sample was found).
+HARNESS_TEXT = (
+    "<local-command-",
+    "[Request interrupted",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
 )
 
 TOKEN_FIELDS = ("input", "cache_read", "cache_write", "output_floor")
@@ -193,7 +209,7 @@ def is_prompt(record: dict[str, Any]) -> bool:
     if isinstance(origin, dict) and origin.get("kind") != "human":
         return False
     text = _message_text(content).lstrip()
-    return not text.startswith("<local-command-")
+    return not text.startswith(HARNESS_TEXT)
 
 
 def question_sha(question: str) -> str:
@@ -296,7 +312,10 @@ class Reader:
             if not named or "\0" in named:
                 continue
             try:
-                candidate = (base / Path(named).expanduser()).resolve()
+                # Only `~` and `~/...`: `~name` expands another user's home, and
+                # raises when there is no such user.
+                word = Path(named).expanduser() if named == "~" or named.startswith("~/") else named
+                candidate = (base / word).resolve()
                 if candidate.is_relative_to(self.store) and candidate.is_file():
                     answer.files.add(candidate)
             except (OSError, ValueError):
@@ -333,7 +352,7 @@ def classify(span: str, vocabulary: Vocabulary) -> str:
 def cited(text: str) -> list[str]:
     """Backticked spans, then URLs and bare corpus paths outside them, de-duplicated."""
     found: dict[str, None] = dict.fromkeys(citations(text))
-    prose = _SPAN.sub(" ", _FENCE.sub("", text))
+    prose = SPAN.sub(" ", FENCE.sub("", text))
     for pattern in (_URL, _CORPUS):
         for match in pattern.finditer(prose):
             found.setdefault(match.group(0).rstrip(_TRAILING), None)
@@ -342,9 +361,17 @@ def cited(text: str) -> list[str]:
 
 def absence(text: str) -> str | None:
     """The first sentence stating that something is absent, ignoring code spans."""
-    for sentence in _SENTENCE.split(_FENCE.sub("", text)):
-        if _ABSENCE.search(_SPAN.sub(" ", sentence)):
-            return sentence.strip()
+    prose = FENCE.sub("", text)
+    # Mask spans before splitting: a span holding ". " would otherwise be cut in two,
+    # and neither half is a span any more. Same length, so offsets carry across.
+    masked = SPAN.sub(lambda match: " " * len(match.group(0)), prose)
+    edges = [0]
+    for gap in _SENTENCE.finditer(masked):
+        edges += [gap.start(), gap.end()]
+    edges.append(len(masked))
+    for start, end in zip(edges[::2], edges[1::2]):
+        if _ABSENCE.search(masked[start:end]):
+            return prose[start:end].strip()
     return None
 
 
@@ -456,6 +483,12 @@ def _shares(rows: Iterable[dict[str, Any]]) -> tuple[int, dict[str, float]]:
     return total, {name: (counts[name] / total if total else 0.0) for name in CLASSES}
 
 
+SUMMARY_NOTES = {
+    "input": " tokens (uncached + cache writes + cache reads)",
+    "output_floor": " - a floor: transcript lines under-report output",
+}
+
+
 def summarise(run: Run, rows: list[dict[str, Any]]) -> list[str]:
     folded = sum(row["subagents"] for row in rows)
     missing = sum(row["subagents_missing"] for row in rows)
@@ -466,10 +499,9 @@ def summarise(run: Run, rows: list[dict[str, Any]]) -> list[str]:
     for name in (*TOKEN_FIELDS, "turns", "tool_calls"):
         values = [_quantity(row, name) or 0.0 for row in rows]
         lines.append(
-            f"  {name:<13} median {_number(statistics.median(values))}, total {_number(sum(values))}"
+            f"  {name:<13} median {_number(statistics.median(values))}, "
+            f"total {_number(sum(values))}{SUMMARY_NOTES.get(name, '')}"
         )
-    lines[1] += " tokens (uncached + cache writes + cache reads)"
-    lines[4] += " - a floor: transcript lines under-report output"
     distinct = {f["path"]: f["bytes"] for row in rows for f in row["store_files"]}
     opened = [len(row["store_files"]) for row in rows]
     lines.append(
@@ -611,10 +643,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _main_compare(before: Path, after: Path) -> int:
     try:
         old, new = load(before), load(after)
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError) as error:
         print(f"Cannot read the records to compare: {error}", file=sys.stderr)
         return 2
-    for line in report_comparison(compare(old, new), before, after):
+    try:
+        lines = report_comparison(compare(old, new), before, after)
+    except (KeyError, TypeError, AttributeError) as error:
+        print(
+            f"Cannot compare {before} with {after}: a record is not one `answers --out` "
+            f"wrote (missing or malformed {error}).",
+            file=sys.stderr,
+        )
+        return 2
+    for line in lines:
         print(line)
     print(LIMIT)
     return 0

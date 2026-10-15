@@ -4323,6 +4323,7 @@ MUTATIONS = (
             "test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",
             "test_answers.SplittingASession.test_a_tool_result_does_not_open_an_answer",
             "test_answers.SplittingASession.test_a_turn_split_over_lines_is_counted_once",
+            "test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",
             "test_answers.SplittingASession.test_the_answer_text_is_the_last_text_before_the_next_prompt",
             "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
             "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
@@ -4400,11 +4401,69 @@ MUTATIONS = (
     Mutation(
         "answers: absence matched inside a code span",
         "answers.py",
-        '        if _ABSENCE.search(_SPAN.sub(" ", sentence)):',
-        "        if _ABSENCE.search(sentence):",
+        "        if _ABSENCE.search(masked[start:end]):",
+        "        if _ABSENCE.search(prose[start:end]):",
         "an answer quoting a log message such as `order is not found` is flagged as "
-        "claiming that something is absent",
-        ("test_answers.AbsenceClaims.test_absence_words_inside_a_code_span_are_not_a_claim",),
+        "claiming that something is absent - and a span holding a full stop was cut "
+        "in two by the sentence split before it could be masked, which the first "
+        "version of the masking missed",
+        (
+            "test_answers.AbsenceClaims.test_a_code_span_holding_a_sentence_break_is_not_a_claim",
+            "test_answers.AbsenceClaims.test_absence_words_inside_a_code_span_are_not_a_claim",
+        ),
+    ),
+    Mutation(
+        "answers: an interrupt marker read as a prompt",
+        "answers.py",
+        '    "[Request interrupted",\n',
+        "",
+        "the harness writes the interrupt marker as a user line of text with no "
+        "origin; read as a prompt, every interrupted answer becomes two and the empty "
+        "one pairs with every other run's interrupt",
+        ("test_answers.SplittingASession.test_an_interrupt_marker_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: a shell line read as a prompt",
+        "answers.py",
+        '    "<bash-input>",\n',
+        "",
+        "a `!` command typed at the prompt opens an answer of its own",
+        ("test_answers.SplittingASession.test_a_shell_line_is_not_a_prompt",),
+    ),
+    Mutation(
+        "answers: another user's home expanded",
+        "answers.py",
+        '                word = Path(named).expanduser() if named == "~" or named.startswith("~/") else named',
+        "                word = Path(named).expanduser()",
+        "`~nosuchuser/x` in any Bash command raises RuntimeError and loses every record in the run",
+        ("test_answers.StoreFiles.test_a_word_naming_another_user_s_home_does_not_stop_the_run",),
+    ),
+    Mutation(
+        "answers: a column citation classed unresolved",
+        "answers.py",
+        '    "column": "column",',
+        '    "column": "unresolved",',
+        "a `table.column` citation fails as code the graph lacks, though the graph "
+        "holds code and never schemas",
+        ("test_answers.Citations.test_each_citation_is_classed_once",),
+    ),
+    Mutation(
+        "answers: a summary note on the wrong quantity",
+        "answers.py",
+        '    "output_floor": " - a floor: transcript lines under-report output",',
+        '    "cache_write": " - a floor: transcript lines under-report output",',
+        "the summary calls an exact figure a floor and leaves output unqualified, "
+        "which is how notes placed by line position fail when the fields are reordered",
+        ("test_answers.CommandLine.test_each_summary_note_sits_on_its_own_quantity",),
+    ),
+    Mutation(
+        "answers: a malformed record file raises",
+        "answers.py",
+        "    except (KeyError, TypeError, AttributeError) as error:",
+        "    except () as error:",
+        "--compare over a file another tool wrote prints a traceback rather than "
+        "saying which file is not a record file",
+        ("test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",),
     ),
     Mutation(
         "answers: a carried-over prompt answered twice",
