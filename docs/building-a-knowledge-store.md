@@ -833,6 +833,10 @@ by message id exactly as `cost` does it, `input` means what it means there, and
 `output_floor` is a floor for the same reason. Dollars appear only when a
 headless result names a session holding exactly one answer.
 
+`store_files` counts what a `Read` opened and what a `Grep`, `Glob` or `Bash`
+call named. A path inside a script passed to an interpreter, such as
+`python -c "open('a.md')"`, is not counted.
+
 **Citations get one class each:** `resolves` against the store graph,
 `pinned_url` (a blob URL at a 40-hex commit), `corpus_path` (a
 `repositories/...` path, which no reader can open), `unresolved`, `column`, or

@@ -444,7 +444,7 @@ class StoreFiles(AnswersStage):
             u,
             "t3",
             "Bash",
-            {"command": f"grep -n retry docs/topics/retries.md {planted}", "description": "x"},
+            {"command": f"grep -n retry docs/topics/retries.md; cat {planted}", "description": "x"},
         )
         t.tool("m1", u, "t4", "Grep", {"pattern": "retry", "path": str(store / "docs")})
         t.tool("m1", u, "t5", "Glob", {"pattern": "**/*.md", "path": str(topics / "gone.md")})

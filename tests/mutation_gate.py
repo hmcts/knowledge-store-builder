@@ -4370,6 +4370,15 @@ MUTATIONS = (
         ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
     ),
     Mutation(
+        "answers: a Bash path read with its separator",
+        "answers.py",
+        "        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
+        "        lexer = shlex.shlex(command, posix=True)",
+        "`cat a.md; echo done` names `a.md;`, which is no file, so the commonest shell "
+        "form drops out of `store_files`; found by the first run over a real session",
+        ("test_answers.StoreFiles.test_only_files_under_the_store_are_counted",),
+    ),
+    Mutation(
         "answers: a corpus path classed by the graph",
         "answers.py",
         '    if text.removeprefix("./").startswith("repositories/"):\n'

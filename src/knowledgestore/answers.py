@@ -45,9 +45,10 @@ divided between several.
 ## Files and citations
 
 `store_files` lists the files under `--store` that a `Read` opened or that a `Grep`,
-`Glob` or `Bash` call named, with each file's size now. A path is resolved before it is
-tested, so `<store>/../elsewhere` is outside the store, and a relative path is read from
-the line's working directory.
+`Glob` or `Bash` call named, with each file's size now. A Bash command is split into
+shell words, so a path inside an interpreter's quoted script is not counted. A path is
+resolved before it is tested, so `<store>/../elsewhere` is outside the store, and a
+relative path is read from the line's working directory.
 
 Each citation in the answer - a backticked span, a URL, or a bare `repositories/...`
 path - gets one class:
@@ -206,8 +207,13 @@ def _named_paths(name: str, given: dict[str, Any]) -> list[str]:
         return [str(given.get("path") or "")]
     if name == "Bash":
         command = str(given.get("command") or "")
+        # Shell punctuation splits words: `cat a.md; echo` names `a.md`, not `a.md;`.
+        # A path inside an interpreter's script (`python -c "open('a.md')"`) is one
+        # quoted word and is not read - a known undercount, not a guess.
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
         try:
-            return shlex.split(command)
+            return list(lexer)
         except ValueError:
             return command.split()
     return []
