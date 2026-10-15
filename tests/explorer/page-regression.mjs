@@ -88,6 +88,11 @@ if (internedColumns.length) {
  * repositories and files, LABELS for the community names, INTENT for the
  * tickets, and `links` for the connections - ordered by degree descending then
  * by node id, which is what `entry_connections` documents.
+ *
+ * AddressEntryComponent's tickets are empty on purpose, and that is a ruling
+ * (#425): its file's only ticket, DEMO-4, sits under `proposed` in the intent
+ * index, and a node's list carries landed work only. A branch never changed the
+ * code this graph was extracted from.
  */
 const EXPECTED_ROWS = [
   ['AddressEntryComponent', 'demo-app-b', 'src/address/address-entry.component.ts',
@@ -224,6 +229,28 @@ check('DEMO-1', 'ticket lookup',
    'Show a formatted address on the payment confirmation',   // tracker: headline
    'description, from commit messages',                      // provenance named
    'Add address formatting to the payment confirmation screen']);  // mined: kept
+// Branch-only work (#425). DEMO-4's only commit sits on a branch, so the intent
+// stage wrote its record with `proposed: true` and the branch it was found on.
+// Without the label the lookup reads exactly like DEMO-1's: a ticket, a
+// description, a date range - an unmerged proposal presented as what the code
+// does. The wording is the knowledge-store skill's, so the page and an agent
+// reading the same store say the same thing.
+check('DEMO-4', 'ticket lookup',
+  ['proposed on branch feature/gazetteer-lookup',
+   'not confirmed on the default branch',
+   'Look up the street through the gazetteer before entry']);
+// DEMO-5 landed AND has a branch-only commit, so its record carries `branches`
+// without `proposed`. Catches the label keyed on `branches`: that would call
+// shipped work a proposal, the reverse of the defect above.
+check('DEMO-5', 'ticket lookup', ['Document the rollback runbook'], [],
+  { text: ['proposed', 'feature/runbook-appendix'] });
+// The other place a ticket is a search result: the evidence section of an
+// answer, found by the words its commits used. "gazetteer" is in DEMO-4's
+// commits and nowhere else, so this row is the only thing that can answer.
+// Catches the label drawn in the lookup but not where the ticket is found.
+check('which gazetteer does the lookup use?', 'commit evidence',
+  ['What the commits say about these words', 'DEMO-4',
+   'proposed on branch feature/gazetteer-lookup']);
 // business-first composition: prose leads, code sits behind the disclosure
 check('how are addresses handled?', 'topic brief',
   ['Addresses in the demo estate', 'Pre-written topic brief']);

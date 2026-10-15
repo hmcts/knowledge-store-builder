@@ -15,6 +15,7 @@ in two processes under different hash seeds and compares every file it wrote.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -240,6 +241,69 @@ TICKET_TRACKER = {
         "type": "Story",
     },
 }
+# Branch-only work, produced by the real intent stage rather than written out
+# here, so the page reads the record shape `build-intent-index` actually emits -
+# `proposed`, `branches`, and a file's `proposed` map. A hand-written record
+# would keep passing if the stage renamed a key the page reads.
+#
+# DEMO-4 exists only on a branch: no landed commit names it. DEMO-5 landed, and
+# also has a branch-only commit, so its record carries `branches` without
+# `proposed` - the shape that must NOT be labelled as a proposal. Neither touches
+# anything another fixture question asks about: "gazetteer" and "runbook" occur
+# nowhere else in this estate.
+BRANCH_HISTORY = [
+    {
+        "subject": "DEMO-4: Look up the street through the gazetteer before entry",
+        "author_date": "2024-05-10T09:00:00+00:00",
+        "files": [{"path": "src/address/address-entry.component.ts"}],
+        "reach": "branch",
+        "ref": "feature/gazetteer-lookup",
+    },
+    {
+        "subject": "DEMO-5: Document the rollback runbook",
+        "author_date": "2024-05-12T09:00:00+00:00",
+        "files": [{"path": "docs/runbook.md"}],
+        "reach": "default",
+    },
+    {
+        "subject": "DEMO-5: Draft the runbook appendix",
+        "author_date": "2024-05-13T09:00:00+00:00",
+        "files": [{"path": "docs/runbook-appendix.md"}],
+        "reach": "branch",
+        "ref": "feature/runbook-appendix",
+    },
+]
+
+
+def branch_evidence(work: Path) -> tuple[dict, dict]:
+    """`(file entries, ticket records)` for BRANCH_HISTORY, from the intent stage."""
+    from knowledgestore import build_intent_index
+
+    person = {"name": "A Person", "email": "a.person@example.example"}
+    ndjson = work / "commits.ndjson"
+    ndjson.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "repository": "demo-app-b",
+                    "is_merge": False,
+                    "body": "",
+                    "author": person,
+                    "committer": person,
+                    **commit,
+                }
+            )
+            + "\n"
+            for commit in BRANCH_HISTORY
+        ),
+        encoding="utf-8",
+    )
+    pool = build_intent_index.ticket_pool()
+    files, _ = build_intent_index.index_repository(ndjson, pool)
+    ndjson.unlink()
+    return files, {t: build_intent_index._ticket_record(info) for t, info in pool.items()}
+
+
 # Real tracker titles imported from a CSV export, as `ticket-titles` writes them.
 TICKET_TITLES = {"DEMO-3": "Retry the receipt email when the gateway times out"}
 SYNONYMS = {"payment": [["fine", 0.71], ["card", 0.63]]}
@@ -316,13 +380,21 @@ def main(argv: list[str] | None = None) -> int:
         # regression can prove the page escapes what it embeds.
         TICKET_BROWSE_URL='https://example.invalid/browse/?a=1&b="><img src=x onerror=alert(1)>&id=',
         MIN_ENTRY_DEGREE=1,
+        # Named rather than inherited: `omit` in the caller's environment would
+        # leave DEMO-4 out of the page entirely.
+        PROPOSED_LINKS="write",
     )
 
     io.write_json(config.GRAPH_PATH, GRAPH)
     io.write_json(config.LABELS_PATH, LABELS)
     io.write_json(config.SUMMARIES_PATH, SUMMARIES)
-    io.write_gzip_json(config.INTENT_INDEX_PATH, INTENT)
-    io.write_gzip_json(config.TICKET_DESCRIPTIONS_PATH, TICKET_DESCRIPTIONS)
+    branch_files, branch_records = branch_evidence(store)
+    # Merged by key, so a clash would silently replace a hand-written fixture.
+    if "demo-app-b" in INTENT or branch_records.keys() & TICKET_DESCRIPTIONS.keys():
+        print("fixture: branch evidence overlaps the hand-written intent", file=sys.stderr)
+        return 1
+    io.write_gzip_json(config.INTENT_INDEX_PATH, {**INTENT, "demo-app-b": branch_files})
+    io.write_gzip_json(config.TICKET_DESCRIPTIONS_PATH, {**TICKET_DESCRIPTIONS, **branch_records})
     io.write_gzip_json(config.TICKET_TRACKER_PATH, TICKET_TRACKER)
     io.write_gzip_json(config.TICKET_TITLES_PATH, TICKET_TITLES)
     io.write_gzip_json(config.SYNONYMS_PATH, SYNONYMS)
