@@ -4292,6 +4292,26 @@ MUTATIONS = (
         ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
     ),
     Mutation(
+        "a squash-merged branch file reads as unlanded",
+        "export_git_history.py",
+        '                if file["path"] in landed_paths:',
+        "                if False:",
+        "about a third of branches with branch-only ticket commits had been squash-merged; "
+        "their work read as proposals",
+        ("test_export_git_history.ReachTest.test_a_squash_merged_branch_file_is_marked_landed",),
+    ),
+    Mutation(
+        "the empty blob matches unrelated work as landed",
+        "export_git_history.py",
+        "            if blob not in (_NULL_BLOB, EMPTY_BLOB):",
+        "            if blob != _NULL_BLOB:",
+        "every empty file shares one blob, so an empty file on any branch read as landed",
+        (
+            "test_export_git_history.ReachTest.test_an_empty_file_never_counts_as_landed",
+            "test_export_git_history.ReachTest.test_raw_writes_drops_deletions_and_the_empty_blob",
+        ),
+    ),
+    Mutation(
         "reach is read from the remote default instead of the configured branch",
         "export_git_history.py",
         '        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):',

@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 
 FIELD_SEPARATOR = "\x1f"
@@ -194,6 +194,53 @@ def reach_sets(repo_path: Path, ref: str | None) -> tuple[frozenset[str], frozen
     return frozenset(landed.split()), frozenset(tagged.split())
 
 
+EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+_NULL_BLOB = "0" * 40
+
+
+def _raw_writes(output: str) -> Iterator[tuple[str, str, str]]:
+    """(commit, path, blob) for each file a commit wrote, from `--raw --format=%x1e%H`.
+
+    Deletions (the null blob) and the empty blob are dropped: a deleted file
+    wrote nothing, and every empty file shares one blob, so it matches unrelated
+    work.
+    """
+    for record in output.split(RECORD_SEPARATOR):
+        lines = record.strip("\n").splitlines()
+        if not lines:
+            continue
+        sha = lines[0].strip()
+        for line in lines[1:]:
+            if not line.startswith(":"):
+                continue
+            meta, _, path = line.partition("\t")
+            blob = meta.split()[3]
+            if blob not in (_NULL_BLOB, EMPTY_BLOB):
+                yield sha, path, blob
+
+
+_RAW = ("--raw", "--no-abbrev", "--no-renames", f"--format={RECORD_SEPARATOR}%H")
+
+
+def landed_blobs(repo_path: Path, ref: str | None) -> frozenset[tuple[str, str]]:
+    """Every (path, blob) written by a commit reachable from the default ref or a tag."""
+    revisions = [ref, "--tags"] if ref else ["--tags"]
+    output = run_git(repo_path, "log", *revisions, *_RAW)
+    return frozenset((path, blob) for _, path, blob in _raw_writes(output))
+
+
+def branch_blobs(repo_path: Path, ref: str | None) -> dict[str, list[tuple[str, str]]]:
+    """For each commit reachable only from a branch, the (path, blob) pairs it wrote."""
+    excluded = [ref, "--tags"] if ref else ["--tags"]
+    output = run_git(
+        repo_path, "log", "--exclude=refs/remotes/*/HEAD", "--all", "--not", *excluded, *_RAW
+    )
+    written: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for sha, path, blob in _raw_writes(output):
+        written[sha].append((path, blob))
+    return written
+
+
 def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[dict[str, object]]:
     pretty_format = (
         FIELD_SEPARATOR.join(
@@ -239,6 +286,8 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
 
     ref, _ = resolve_default(repo_path, default_branch)
     landed, tagged = reach_sets(repo_path, ref)
+    on_default = landed_blobs(repo_path, ref)
+    written = branch_blobs(repo_path, ref)
 
     for raw_record in output.split(RECORD_SEPARATOR):
         # Strip only newlines: Python's str.strip() treats \x1f/\x1e as
@@ -314,6 +363,12 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
         else:
             record["reach"] = REACH_BRANCH
             record["ref"] = branch_name(source.strip())
+            landed_paths = {
+                path for path, blob in written.get(sha, ()) if (path, blob) in on_default
+            }
+            for file in files:
+                if file["path"] in landed_paths:
+                    file["landed"] = True
         yield record
 
 

@@ -354,6 +354,59 @@ class ReachTest(SettingsIsolated):
         self.assertEqual(commits["AA-5: proposal"]["ref"], "team/proposal")
         self.assertNotIn("ref", commits["AA-1: base"])
 
+    def test_a_squash_merged_branch_file_is_marked_landed(self):
+        """Catches squash-merged work read as a proposal: the branch commit is
+        unreachable from main, but the file version it wrote is on main."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        squash = commits["AA-3: squash work"]
+        self.assertEqual(squash["reach"], "branch")
+        self.assertEqual([f.get("landed") for f in squash["files"]], [True])
+
+    def test_an_unmerged_branch_file_is_not_marked_landed(self):
+        """Catches a match on path alone: the proposal edits a.txt, which main
+        also has, but main never held the proposal's version of it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        proposal = commits["AA-5: proposal"]
+        self.assertEqual([f.get("landed") for f in proposal["files"]], [None])
+
+    def test_an_empty_file_never_counts_as_landed(self):
+        """Catches the empty blob matching across unrelated work: every empty
+        file in a repository has the same blob id."""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = self._fixture(Path(tmp))
+            self._git(work, "config", "user.email", "t@example.com")
+            self._git(work, "config", "user.name", "Test")
+            self._git(work, "checkout", "-q", "main")
+            self._commit(work, "e.txt", "", "empty on main")
+            self._git(work, "checkout", "-q", "-b", "empty-branch", "origin/team/proposal")
+            self._commit(work, "e.txt", "", "AA-9: empty on branch")
+            blobs = export.landed_blobs(work, "refs/heads/main")
+            commits = self._by_subject(work)
+        self.assertNotIn(("e.txt", export.EMPTY_BLOB), blobs)
+        self.assertEqual(
+            [f.get("landed") for f in commits["AA-9: empty on branch"]["files"]], [None]
+        )
+
+    def test_raw_writes_drops_deletions_and_the_empty_blob(self):
+        """Catches a deletion or an empty file read as content a commit wrote."""
+        real = "a" * 40
+        output = (
+            f"\x1e{'1' * 40}\n\n"
+            f":100644 100644 {'b' * 40} {real} M\tkept.txt\n"
+            f":100644 100644 {'b' * 40} {export.EMPTY_BLOB} M\tempty.txt\n"
+            f":100644 000000 {'b' * 40} {'0' * 40} D\tgone.txt\n"
+        )
+        self.assertEqual(list(export._raw_writes(output)), [("1" * 40, "kept.txt", real)])
+
+    def test_landed_commits_carry_no_landed_marks(self):
+        """Catches the mark applied outside branch commits, where reach already says it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commits = self._by_subject(self._fixture(Path(tmp)))
+        for subject in ("AA-1: base", "AA-4: release fix", "tidy c"):
+            self.assertTrue(all("landed" not in f for f in commits[subject]["files"]), subject)
+
     def test_a_release_line_reached_only_by_a_tag_is_tag(self):
         """Catches tag-only commits classed as branch: shipped work would read as
         a proposal."""
