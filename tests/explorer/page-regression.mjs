@@ -372,6 +372,22 @@ for (const [id, info] of Object.entries(TICKETS)) {
   }
 }
 
+// A thread the tracker returned only part of must say so where its comments
+// are shown (#431): the fixture marks DEMO-1's thread and leaves DEMO-2's
+// alone, so the note has to appear for one and not the other.
+const TRUNCATION_NOTE = 'earlier comments were not fetched';
+for (const [id, expected] of [['DEMO-1', true], ['DEMO-2', false]]) {
+  api.q.value = id;
+  api.runAsk();
+  const shown = norm(strip(api.out.innerHTML)).includes(TRUNCATION_NOTE);
+  if (shown === expected) {
+    console.log(`ok    ${id}: truncated-thread note ${expected ? 'shown' : 'absent'}`);
+  } else {
+    failures++;
+    console.error(`FAIL  ${id}: truncated-thread note ${expected ? 'missing' : 'shown without a mark'}`);
+  }
+}
+
 // Escaped payload text reads alarmingly - "&lt;img src=x onerror=alert(1)&gt;"
 // - and is inert, so the test asks two questions that are decidable by reading
 // the markup. First, does an opening img, script or iframe tag appear? The page

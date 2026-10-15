@@ -1228,13 +1228,21 @@ class FakeTwg:
     what the library actually asked for.
     """
 
-    def __init__(self, bulk: str, gets: dict[str, str] | None = None):
+    def __init__(
+        self,
+        bulk: str,
+        gets: dict[str, str] | None = None,
+        threads: dict[str, str] | None = None,
+    ):
         self.bulk = bulk
         self.gets = gets or {}
+        self.threads = threads or {}
         self.calls: list[list[str]] = []
 
     def __call__(self, arguments: list[str]) -> str:
         self.calls.append(list(arguments))
+        if arguments[2] == "get" and "--comments" in arguments:
+            return self.threads.get(arguments[-1], "")
         if arguments[2] == "get":
             return self.gets.get(arguments[-1], twg_fixture("get-missing.json"))
         return self.bulk
@@ -1770,3 +1778,113 @@ class TwgBoundaryTest(TwgTransportTestCase):
             cache = self._cache()
         self.assertEqual(code, 0, output)
         self.assertEqual(cache["ABC-1"]["summary"], "Sort the widgets �")
+
+
+def with_partial_thread() -> str:
+    """The captured `bulk-get` answer with ABC-1's thread reported as three
+    comments of which only the most recent came back - what `bulk-get` does
+    with a long thread."""
+    bulk = json.loads(twg_fixture("bulk-get.json"))
+    bulk["data"]["items"][0]["data"]["comment"]["total"] = 3
+    return json.dumps(bulk)
+
+
+WHOLE_THREAD = [
+    "Opened to track the widget ordering.",
+    "Asked [~accountid:acct-0000-foxtrot] to confirm the colours.",
+    "Agreed with [~accountid:acct-0000-charlie], closing.",
+]
+
+
+class TwgThreadTest(TwgTransportTestCase):
+    def test_a_partial_thread_is_completed_by_one_counted_follow_up(self):
+        """Breaks if a long thread is stored as only its most recent page - the
+        gap #431 names - or if completing it costs a call the run does not count.
+        One `get --comments` returns the whole thread."""
+        twg = FakeTwg(with_partial_thread(), threads={"ABC-1": twg_fixture("get-comments.json")})
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp, TRACKER_FETCH_COMMENTS=True)
+            _code, output = self._run_twg(twg)
+            cache = self._cache()
+        self.assertEqual(cache["ABC-1"]["comments"], WHOLE_THREAD)
+        self.assertNotIn("comments_truncated", cache["ABC-1"])
+        self.assertIn(
+            [
+                "jira",
+                "workitem",
+                "get",
+                "--fields",
+                "comment",
+                "--comments",
+                "-o",
+                "json",
+                "--output-summary",
+                "none",
+                "--",
+                "ABC-1",
+            ],
+            twg.calls,
+        )
+        self.assertIn("(3 requests", output, "bulk-get, the move check and the thread")
+        self.assertNotIn("Fen Untrue", json.dumps(cache))
+
+    def test_a_thread_left_partial_is_marked_truncated(self):
+        """Breaks if a thread that could not be completed - no follow-up budget
+        left - is stored as if it were whole. The stored comments would read as
+        the full conversation when its start is missing."""
+        twg = FakeTwg(with_partial_thread(), threads={"ABC-1": twg_fixture("get-comments.json")})
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp, TRACKER_FETCH_COMMENTS=True, TRACKER_FOLLOWUP_MAX=0)
+            self._run_twg(twg)
+            cache = self._cache()
+        self.assertEqual(cache["ABC-1"]["comments"], WHOLE_THREAD[-1:])
+        self.assertIs(cache["ABC-1"]["comments_truncated"], True)
+        self.assertFalse(any("--comments" in call for call in twg.calls))
+
+    def test_no_thread_is_fetched_unless_comments_are_requested(self):
+        """Breaks if thread completion runs with comments switched off, which
+        fetches narrative nobody enabled and spends follow-ups on it."""
+        twg = FakeTwg(with_partial_thread(), threads={"ABC-1": twg_fixture("get-comments.json")})
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp)
+            self._run_twg(twg)
+            record = self._cache()["ABC-1"]
+        self.assertFalse(any("--comments" in call for call in twg.calls))
+        self.assertNotIn("comments_truncated", record)
+
+
+class ThreadTruncationTest(FetchTicketsTestCase):
+    def test_a_thread_the_tracker_returned_part_of_is_marked_on_any_transport(self):
+        """Breaks if the stored comments can read as a whole thread when the
+        tracker said there were more. The mark is the library's, from the
+        tracker's own total, so it holds for the HTTP route as well."""
+        for total, marked in ((4, True), (1, False)):
+            fields = fields_for(
+                "First", comment={"comments": [{"body": "only one"}], "total": total}
+            )
+            with self.subTest(total=total), tempfile.TemporaryDirectory() as tmp:
+                self._store(tmp, ["AAA-1"], TRACKER_FETCH_COMMENTS=True)
+                self._run_stage(FakeTracker({"AAA-1": fields}))
+                record = self._cache()["AAA-1"]
+            self.assertEqual(record.get("comments_truncated", False), marked)
+            self.assertEqual(record["comments"], ["only one"])
+
+    def test_a_kept_longer_thread_keeps_its_own_mark(self):
+        """Breaks if the truncation mark describes the refreshed thread while
+        the record holds the longer stored one - the mark must describe the
+        comments actually kept."""
+        stored = {
+            "checked": "2025-12-01",
+            "comments": ["one", "two", "three"],
+            "status": "Open",
+            "summary": "s",
+        }
+        later = open_fields("s")
+        later["comment"] = {"comments": [{"body": "three"}], "total": 9}
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"], TRACKER_FETCH_COMMENTS=True)
+            pio.write_gzip_json(config.TICKET_TRACKER_PATH, {"AAA-1": stored})
+            self._run_stage(FakeTracker({"AAA-1": later}))
+            record = self._cache()["AAA-1"]
+        self.assertEqual(record["comments"], ["one", "two", "three"])
+        self.assertNotIn("comments_truncated", record)

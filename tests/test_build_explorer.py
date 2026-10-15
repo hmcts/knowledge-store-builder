@@ -754,6 +754,22 @@ class TrackerEvidenceTest(SettingsIsolated):
         )
         self.assertNotIn("c", merged["CCT-4"])
 
+    def test_a_partial_thread_is_marked_for_the_page(self):
+        """Breaks if the page loses the fetch stage's truncation mark, so a
+        thread the tracker returned only part of is shown as if it were whole
+        (#431). No mark without comments, and none on a whole thread."""
+        merged = explorer.merge_ticket_evidence(
+            mined={},
+            tracker={
+                "CCT-5": {"summary": "s", "comments": ["late note"], "comments_truncated": True},
+                "CCT-6": {"summary": "s", "comments": ["whole"]},
+                "CCT-7": {"summary": "s", "comments_truncated": True},
+            },
+        )
+        self.assertIs(merged["CCT-5"]["ct"], True)
+        self.assertNotIn("ct", merged["CCT-6"])
+        self.assertNotIn("ct", merged["CCT-7"])
+
     def test_a_ticket_known_only_to_the_tracker_still_appears(self):
         """Evidence can exist without a commit mentioning the id."""
         merged = explorer.merge_ticket_evidence(

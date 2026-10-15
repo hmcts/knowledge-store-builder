@@ -356,9 +356,10 @@ TRACKER_REFRESH_DAYS = _env_int("KSB_TRACKER_REFRESH_DAYS", 7)
 TRACKER_REFRESH_MAX = _env_int("KSB_TRACKER_REFRESH_MAX", 200)
 # Most follow-up calls the twg transport makes in one run. `bulk-get` answers a
 # page of keys in one call, but each key it does not return costs a `get` to
-# learn whether the ticket moved; past this many, the key is left for the next
-# run rather than turning one page into a hundred calls. The REST transport makes
-# none.
+# learn whether the ticket moved, and each comment thread it returns only part of
+# costs a `get --comments` to complete. Past this many, a key is left for the
+# next run and a thread is stored as returned and marked truncated, rather than
+# turning one page into a hundred calls. The REST transport makes none.
 TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 
 # --- identifiers redacted out of mined commit text ------------------------

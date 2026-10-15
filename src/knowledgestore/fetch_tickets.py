@@ -114,6 +114,8 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 
 # A record's date field: what the run knew, and when it knew it.
 CHECKED = "checked"
+# Set on a record whose comment thread the tracker returned only part of.
+COMMENTS_TRUNCATED = "comments_truncated"
 
 
 @dataclass(frozen=True)
@@ -385,6 +387,16 @@ def _comments(value: object, counts: Counter[str]) -> list[str]:
     return kept
 
 
+def thread_truncated(value: object) -> bool:
+    """Whether a comment field holds fewer comments than the tracker says the
+    thread has. Read before any comment is dropped as noise, so it measures what
+    the tracker delivered, not what this stage kept (#431)."""
+    if not isinstance(value, dict):
+        return False
+    total, comments = value.get("total"), value.get("comments")
+    return isinstance(total, int) and isinstance(comments, list) and total > len(comments)
+
+
 def projected_record(issue: dict, counts: Counter[str]) -> dict:
     """One cached ticket: the projected fields, redacted, key-sorted.
 
@@ -393,6 +405,9 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
     found rather than evidence that does not exist. `summary` always stays, so
     that a fetched record is never an empty mapping and cannot be mistaken for
     one of the other three outcomes.
+
+    A thread the tracker returned only part of is marked `comments_truncated`,
+    so the stored comments never read as the whole conversation when they are not.
     """
     fields = issue.get("fields")
     fields = fields if isinstance(fields, dict) else {}
@@ -406,6 +421,7 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
         record["description"] = _text(fields.get("description"), counts)
     if config.TRACKER_FETCH_COMMENTS:
         record["comments"] = _comments(fields.get("comment"), counts)
+        record[COMMENTS_TRUNCATED] = thread_truncated(fields.get("comment"))
     return {name: value for name, value in sorted(record.items()) if value or name == "summary"}
 
 
@@ -587,6 +603,10 @@ def merged(previous: dict, record: dict) -> dict:
         out["description"] = previous["description"]
     if len(previous.get("comments") or []) > len(out.get("comments") or []):
         out["comments"] = previous["comments"]
+        # The truncation mark describes a thread, so it travels with the one kept.
+        out.pop(COMMENTS_TRUNCATED, None)
+        if previous.get(COMMENTS_TRUNCATED):
+            out[COMMENTS_TRUNCATED] = True
     return dict(sorted(out.items()))
 
 

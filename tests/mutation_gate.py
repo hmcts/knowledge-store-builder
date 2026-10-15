@@ -4544,6 +4544,8 @@ MUTATIONS = (
             "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
             "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
             "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
         ),
     ),
     Mutation(
@@ -4568,6 +4570,8 @@ MUTATIONS = (
             "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
             "test_fetch_tickets.TwgPrivacyTest.test_an_emoji_and_a_link_card_render",
             "test_fetch_tickets.TwgPrivacyTest.test_no_node_s_attrs_text_reaches_the_flattened_text",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
         ),
     ),
     Mutation(
@@ -4591,6 +4595,8 @@ MUTATIONS = (
             "test_fetch_tickets.TwgPrivacyTest.test_an_emoji_and_a_link_card_render",
             "test_fetch_tickets.TwgPrivacyTest.test_no_node_s_attrs_text_reaches_the_flattened_text",
             "test_fetch_tickets.TwgPrivacyTest.test_the_transport_hands_the_library_no_comment_author",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
         ),
     ),
     Mutation(
@@ -4639,6 +4645,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
     Mutation(
@@ -4672,6 +4679,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
             "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
     Mutation(
@@ -4695,6 +4703,9 @@ MUTATIONS = (
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
             "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
             "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
+            "test_fetch_tickets.TwgThreadTest.test_no_thread_is_fetched_unless_comments_are_requested",
         ),
     ),
     Mutation(
@@ -5437,7 +5448,10 @@ MUTATIONS = (
         "        cache[key] = merged(previous, record)\n",
         "        cache[key] = record\n",
         "a refresh with descriptions off erases every stored description, and a transport returning a recent page of comments cuts a thread another fetch stored whole",
-        ("test_fetch_tickets.RefreshKeepsTest.test_a_refresh_never_leaves_a_record_holding_less",),
+        (
+            "test_fetch_tickets.RefreshKeepsTest.test_a_refresh_never_leaves_a_record_holding_less",
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_keeps_its_own_mark",
+        ),
     ),
     Mutation(
         "ticket refresh: refreshes are counted as new fetches",
@@ -5458,6 +5472,7 @@ MUTATIONS = (
         (
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_follow_up_is_counted_and_paced_like_a_request",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_refresh_counts_its_follow_ups_in_its_cost",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
     Mutation(
@@ -5540,6 +5555,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
             "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
     Mutation(
@@ -5561,6 +5577,69 @@ MUTATIONS = (
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
         ),
+    ),
+    Mutation(
+        "comment thread: a partial thread is not completed",
+        "twg_transport.py",
+        "            issue = self.completed(found, issue, fields)\n",
+        "",
+        "#431: bulk-get returns only the most recent page of a long thread, so a ticket's earliest comments - usually where the problem is stated - never reached the store",
+        (
+            "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
+        ),
+    ),
+    Mutation(
+        "comment thread: completion ignores the follow-up budget",
+        "twg_transport.py",
+        '        if "comment" not in fields or not partial_thread(issue) or self.followups <= 0:\n',
+        '        if "comment" not in fields or not partial_thread(issue):\n',
+        "a completion outside the budget is the unbounded per-ticket call the budget exists to stop",
+        ("test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",),
+    ),
+    Mutation(
+        "comment thread: completion runs with comments off",
+        "twg_transport.py",
+        '        if "comment" not in fields or not partial_thread(issue) or self.followups <= 0:\n',
+        "        if not partial_thread(issue) or self.followups <= 0:\n",
+        "a thread fetched with comments switched off is narrative nobody enabled, and spends follow-ups on it",
+        (
+            "test_fetch_tickets.TwgThreadTest.test_no_thread_is_fetched_unless_comments_are_requested",
+        ),
+    ),
+    Mutation(
+        "comment thread: a truncated thread is not marked",
+        "fetch_tickets.py",
+        '        record[COMMENTS_TRUNCATED] = thread_truncated(fields.get("comment"))\n',
+        "",
+        "#431: a thread stored as returned reads as the whole conversation when its start is missing",
+        (
+            "test_fetch_tickets.ThreadTruncationTest.test_a_thread_the_tracker_returned_part_of_is_marked_on_any_transport",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
+        ),
+    ),
+    Mutation(
+        "comment thread: the transport drops the thread total",
+        "twg_transport.py",
+        '    if isinstance(value.get("total"), int):\n        out["total"] = value["total"]\n',
+        "",
+        "without the tracker's total the library cannot tell a partial thread from a whole one, and the mark silently never appears on the twg route",
+        ("test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",),
+    ),
+    Mutation(
+        "comment thread: the mark describes the wrong thread",
+        "fetch_tickets.py",
+        "        out.pop(COMMENTS_TRUNCATED, None)\n",
+        "",
+        "a refresh that keeps the longer stored thread would otherwise carry the shorter refreshed thread's mark, describing comments the record does not hold",
+        ("test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_keeps_its_own_mark",),
+    ),
+    Mutation(
+        "comment thread: the page loses the mark",
+        "build_explorer.py",
+        '                entry["ct"] = True\n',
+        "                pass\n",
+        "#431: the explorer is where comments are read, and without the mark it shows a partial thread as if it were whole",
+        ("test_build_explorer.TrackerEvidenceTest.test_a_partial_thread_is_marked_for_the_page",),
     ),
 )
 

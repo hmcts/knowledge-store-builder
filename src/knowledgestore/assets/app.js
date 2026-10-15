@@ -41,7 +41,10 @@
  * `proposed` is true when no landed work names the ticket - it was found only on
  * a branch - and `branches` names up to five branches its branch-only commits
  * sat on. A landed ticket can carry `branches` too, without `proposed`.
+ * `c` is the tracker's comments, and `ct` is true when the tracker returned only
+ * part of the thread - so what is shown is not the whole conversation.
  * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string, c?: string[],
+ *            ct?: boolean,
  *            proposed?: boolean, branches?: string[],
  *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
@@ -308,6 +311,15 @@ function commentRows(comments, terms) {
   const shown = (wanted.length ? wanted : comments.slice(0, 1)).slice(0, 3);
   return shown.map((c) => '<div class="trow"><span class="tid">comment</span> '
     + esc(clipWords(c, 400)) + '</div>').join('');
+}
+
+/** Said beside a ticket's comments when the tracker returned only part of the
+ * thread (#431), so what is shown is not read as the whole conversation.
+ * @param {TicketInfo|undefined} info */
+function truncatedThreadNote(info) {
+  if (!info?.ct) return '';
+  return '<div class="trow"><span class="tid">comments</span> Earlier comments were not fetched:'
+    + ' the tracker returned only the most recent part of this thread.</div>';
 }
 
 /** Cut to at most limit characters, at a word boundary, without a regex.
@@ -1023,6 +1035,7 @@ function vTicket(id) {
       : '')
     + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
     + commentRows(info?.c, [])
+    + truncatedThreadNote(info)
     + evidenceRows(LABEL_DESCRIPTION, descriptions)
     + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, ...descriptions]))
     + bodyDetails(info?.b)

@@ -201,16 +201,30 @@ def requested(url: str) -> tuple[list[str], list[str]]:
 
 
 def _comment(value: object) -> object:
-    """Comment bodies flattened, authors dropped. The library reads only `body`."""
+    """Comment bodies flattened, authors dropped. The library reads only `body`,
+    and `total`, which is how it tells a partial thread from a whole one."""
     if not isinstance(value, dict) or not isinstance(value.get("comments"), list):
         return value
-    return {
+    out: dict = {
         "comments": [
             {"body": flatten(comment.get("body"))}
             for comment in value["comments"]
             if isinstance(comment, dict)
         ]
     }
+    if isinstance(value.get("total"), int):
+        out["total"] = value["total"]
+    return out
+
+
+def partial_thread(issue: dict) -> bool:
+    """Whether `bulk-get` returned fewer comments than the ticket has. It
+    returns only the most recent page of a long thread (#431)."""
+    comment = issue.get("comment")
+    if not isinstance(comment, dict):
+        return False
+    total, comments = comment.get("total"), comment.get("comments")
+    return isinstance(total, int) and isinstance(comments, list) and total > len(comments)
 
 
 def projected(issue: dict, fields: Sequence[str]) -> dict:
@@ -331,6 +345,27 @@ class Session:
             return ABSENT
         return UNANSWERED
 
+    def completed(self, key: str, issue: dict, fields: Sequence[str]) -> dict:
+        """The issue with its whole comment thread, when `bulk-get` returned
+        part of it: one `get --comments`, which returns the complete thread,
+        from the same follow-up budget. Anything short of a longer thread -
+        no budget, unreadable output, an error - leaves the issue as it was,
+        and the library marks the thread truncated."""
+        if "comment" not in fields or not partial_thread(issue) or self.followups <= 0:
+            return issue
+        self.followups -= 1
+        payload = _parsed(self.run(_arguments("get", [key], ["comment"], "--comments")))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        whole = (
+            data[0].get("comment")
+            if isinstance(data, list) and data and isinstance(data[0], dict)
+            else None
+        )
+        held = issue["comment"].get("comments") or []
+        if isinstance(whole, dict) and len(whole.get("comments") or []) > len(held):
+            return {**issue, "comment": whole}
+        return issue
+
     def answer(self, url: str) -> tuple[str, list[str]]:
         """The v2 search body for one page the library asked for, and the keys
         it has no answer for.
@@ -365,5 +400,6 @@ class Session:
             found = str(issue.get("key") or key)
             if found.upper() != key.upper() and not self.may_read(found):
                 continue
+            issue = self.completed(found, issue, fields)
             issues.append({"key": key, "fields": projected(issue, fields)})
         return json.dumps({"issues": issues}), unanswered

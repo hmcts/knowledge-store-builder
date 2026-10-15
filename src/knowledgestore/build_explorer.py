@@ -165,7 +165,8 @@ def merge_ticket_evidence(mined: dict, tracker: dict) -> dict:
     Comments are excluded deliberately - see config.TICKET_DETAIL_CHARS.
 
     Keys are terse because this dictionary is embedded in the page: `d` mined
-    evidence, `t` tracker title, `x` tracker description extract.
+    evidence, `t` tracker title, `x` tracker description extract, `c` tracker
+    comments, and `ct` when the tracker returned only part of that thread.
     """
     merged: dict[str, dict] = {ticket: dict(record) for ticket, record in mined.items()}
     for ticket, record in tracker.items():
@@ -186,6 +187,10 @@ def merge_ticket_evidence(mined: dict, tracker: dict) -> dict:
         comments = [c for c in (record.get("comments") or []) if isinstance(c, str) and c.strip()]
         if comments:
             entry["c"] = comments
+            # The tracker returned part of the thread (#431): say so beside it,
+            # so the shown comments are not read as the whole conversation.
+            if record.get("comments_truncated"):
+                entry["ct"] = True
     return merged
 
 
