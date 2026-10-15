@@ -4313,6 +4313,7 @@ MUTATIONS = (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.ParsingALink.test_a_link_names_the_configured_repository_whatever_its_local_name",
             "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
         ),
     ),
@@ -4328,6 +4329,7 @@ MUTATIONS = (
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
             "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
     ),
     Mutation(
@@ -4339,6 +4341,7 @@ MUTATIONS = (
         "keeping the prefix links a path inside the repository that does not exist",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_real_file_at_the_build_commit_resolves",
             "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
             "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
         ),
@@ -4397,6 +4400,7 @@ MUTATIONS = (
         (
             "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
     ),
     Mutation(
@@ -4419,6 +4423,7 @@ MUTATIONS = (
         "link to a 404",
         (
             "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
             "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
         ),
     ),
