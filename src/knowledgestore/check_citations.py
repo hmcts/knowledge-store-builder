@@ -358,6 +358,37 @@ def _resolve_path(span: str, vocabulary: Vocabulary) -> Verdict:
     return Verdict("unresolved", vocabulary.files[close] if close else "")
 
 
+def _ask_clones(
+    link: BlobUrl, repos: tuple[str, ...], vocabulary: Vocabulary, urls: SourceUrls
+) -> tuple[set[str], set[str]]:
+    """A file no node names: each clone answers, at the commit the store read.
+
+    The repositories whose clone holds it, and the states that left it undecided.
+    """
+    holding: set[str] = set()
+    undecided: set[str] = set()
+    for r in repos:
+        state = vocabulary.clone_holds(r, urls.build_sha(r), link.path)
+        if state == HELD:
+            holding.add(r)
+        elif state != ABSENT:
+            undecided.add(state)
+    return holding, undecided
+
+
+def _nearest_file(link: BlobUrl, repos: tuple[str, ...], vocabulary: Vocabulary) -> str:
+    """The file the graph holds for these repositories that the cited path most resembles."""
+    pool = sorted(set().union(*(vocabulary.repository_files(r) for r in repos)))
+    return _nearest(link.path, pool)
+
+
+def _sha_reason(repos: tuple[str, ...], urls: SourceUrls) -> str:
+    read = sorted({urls.build_sha(r) for r in repos} - {""})
+    if read:
+        return f"{DIFFERENT_SHA}: the store read {', '.join(read)}"
+    return f"{DIFFERENT_SHA}: the store records no commit for {', '.join(repos)}"
+
+
 def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
     urls = vocabulary.urls
     repos = urls.repositories_at(link.org, link.repo) if urls else ()
@@ -367,13 +398,7 @@ def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
     built = {r for r in repos if urls.build_sha(r) == link.sha}
     undecided: set[str] = set()
     if not holding:
-        # A file no node names: the clone answers, at the commit the store read.
-        for r in repos:
-            state = vocabulary.clone_holds(r, urls.build_sha(r), link.path)
-            if state == HELD:
-                holding.add(r)
-            elif state != ABSENT:
-                undecided.add(state)
+        holding, undecided = _ask_clones(link, repos, vocabulary, urls)
     if holding & built:
         return Verdict("resolved")
     if not holding and undecided and built:
@@ -383,15 +408,9 @@ def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
     # and a slashed branch also shifts the path, so the file claim says nothing.
     if not holding and not undecided and is_full_sha(link.sha):
         reasons.append(f"{UNKNOWN_FILE} in {', '.join(repos)}")
-        pool = sorted(set().union(*(vocabulary.repository_files(r) for r in repos)))
-        nearest = _nearest(link.path, pool)
+        nearest = _nearest_file(link, repos, vocabulary)
     if not built:
-        read = sorted({urls.build_sha(r) for r in repos} - {""})
-        reasons.append(
-            f"{DIFFERENT_SHA}: the store read {', '.join(read)}"
-            if read
-            else f"{DIFFERENT_SHA}: the store records no commit for {', '.join(repos)}"
-        )
+        reasons.append(_sha_reason(repos, urls))
     if not reasons:
         # Duplicate entries for one origin: one holds the file, another the commit.
         reasons.append(f"{DIFFERENT_SHA}: no single repository holds the file at it")
@@ -508,20 +527,10 @@ def check(files: list[Path], vocabulary: Vocabulary) -> Report:
     return report
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="knowledgestore check-citations",
-        description="Fail if a published answer cites code the graph does not hold.",
-    )
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        help="answer files or directories (default: docs/topics and docs/deep-dives)",
-    )
-    parser.add_argument("--graph", type=Path, help="default: this store's graph")
-    arguments = parser.parse_args(argv)
-
+def _inputs(
+    arguments: argparse.Namespace,
+) -> tuple[Path, list[Path], SourceUrls] | int:
+    """The graph, the answers and the store's link map - or the exit code refusing."""
     graph = arguments.graph if arguments.graph else graph_files.graph_to_read(config.GRAPH_PATH)
     if graph is None or not graph.is_file():
         print(
@@ -555,8 +564,11 @@ def main(argv: list[str] | None = None) -> int:
         # Read as an empty estate, it would turn every source link into an unchecked one.
         print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)
         return 2
+    return graph, files, urls
 
-    report = check(files, load_vocabulary(graph, urls, config.REPOSITORIES_DIR))
+
+def _print_summary(files: list[Path], graph: Path, report: Report) -> None:
+    """The counts, then the two lists that never change the exit code."""
     checked = report.resolved + len(report.unresolved)
     print(
         f"{len(files):,} answer files against {graph.name}: {checked:,} citations checked, "
@@ -584,8 +596,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         for path, span in report.unchecked:
             print(f"  {path}  `{span}`  {report.reasons.get(span, '')}".rstrip())
-    if not report.unresolved:
-        return 0
+
+
+def _print_unresolved(report: Report) -> None:
     print("\nCited but not in the graph:", file=sys.stderr)
     for path, span, nearest in report.unresolved:
         hint = f"  nearest: {nearest}" if nearest else "  no near match"
@@ -593,6 +606,30 @@ def main(argv: list[str] | None = None) -> int:
         if reason:
             hint = f"  {reason}" + (f"  nearest: {nearest}" if nearest else "")
         print(f"  {path}  `{span}`{hint}", file=sys.stderr)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore check-citations",
+        description="Fail if a published answer cites code the graph does not hold.",
+    )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="answer files or directories (default: docs/topics and docs/deep-dives)",
+    )
+    parser.add_argument("--graph", type=Path, help="default: this store's graph")
+    found = _inputs(parser.parse_args(argv))
+    if isinstance(found, int):
+        return found
+    graph, files, urls = found
+
+    report = check(files, load_vocabulary(graph, urls, config.REPOSITORIES_DIR))
+    _print_summary(files, graph, report)
+    if not report.unresolved:
+        return 0
+    _print_unresolved(report)
     return 1
 
 

@@ -319,7 +319,7 @@ class SourceLinkBed(Bed):
             }
         )
 
-    def vocabulary(self) -> check_citations.Vocabulary:
+    def _vocabulary(self) -> check_citations.Vocabulary:
         return check_citations.load_vocabulary(
             self.graph, source_urls.SourceUrls.from_store(), config.REPOSITORIES_DIR
         )
@@ -328,7 +328,7 @@ class SourceLinkBed(Bed):
 class VerdictsOnSourceLinks(SourceLinkBed):
     def setUp(self) -> None:
         super().setUp()
-        self.loaded = self.vocabulary()
+        self.loaded = self._vocabulary()
 
     def verdict(self, span: str) -> check_citations.Verdict:
         return check_citations.resolve(span, self.loaded)
@@ -524,7 +524,7 @@ class LinksToFilesNoNodeNames(SourceLinkBed):
                 "other-repo": {"sha": BUILD_SHA, "branch": "main", "committed": ""},
             }
         )
-        self.loaded = self.vocabulary()
+        self.loaded = self._vocabulary()
 
     def link(self, path: str, sha: str = "", repo: str = "example-repo") -> str:
         return f"https://github.com/example-org/{repo}/blob/{sha or self.build}/{path}#L1"
@@ -591,7 +591,7 @@ class LinksToFilesNoNodeNames(SourceLinkBed):
 class AskingTheClone(LinksToFilesNoNodeNames):
     """What reaches git, read at the seam: the argv of every call, run for real."""
 
-    def recorded(self) -> tuple[list[list[str]], check_citations.Vocabulary]:
+    def _recorded(self) -> tuple[list[list[str]], check_citations.Vocabulary]:
         calls: list[list[str]] = []
 
         def run(arguments: list[str]) -> str:
@@ -606,7 +606,7 @@ class AskingTheClone(LinksToFilesNoNodeNames):
     def test_the_question_carries_end_of_options_where_git_honours_it(self):
         """Breaks if the revision is passed without `--end-of-options` on a git that
         honours it, which is every git CI runs (the clone here has a HEAD)."""
-        calls, loaded = self.recorded()
+        calls, loaded = self._recorded()
         check_citations.resolve(self.link("docs/RUNBOOK.md"), loaded)
         self.assertIn(
             ["--end-of-options", f"{self.build}:docs/RUNBOOK.md"], [c[-2:] for c in calls]
@@ -617,7 +617,7 @@ class AskingTheClone(LinksToFilesNoNodeNames):
         text from a published answer would reach a subprocess's argv for nothing,
         since a link with no build sha to match fails on the sha anyway."""
         provenance.write({"other-repo": {"sha": BUILD_SHA, "branch": "main", "committed": ""}})
-        calls, loaded = self.recorded()
+        calls, loaded = self._recorded()
         for ref in (self.build, "--help"):
             with self.subTest(ref=ref):
                 got = check_citations.resolve(self.link("docs/RUNBOOK.md", ref), loaded)
@@ -636,7 +636,7 @@ class AskingTheClone(LinksToFilesNoNodeNames):
     def test_a_path_climbing_with_dot_dot_is_never_asked(self):
         """Breaks if a `..` path reaches git, which prints `fatal: ... outside
         repository` for it; the path names no file in a repository either way."""
-        calls, loaded = self.recorded()
+        calls, loaded = self._recorded()
         for path in ("../secret.txt", "docs/../docs/RUNBOOK.md"):
             with self.subTest(path=path):
                 got = check_citations.resolve(self.link(path), loaded)

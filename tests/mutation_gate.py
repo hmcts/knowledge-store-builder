@@ -5066,8 +5066,8 @@ MUTATIONS = (
     Mutation(
         "citation link: a file no node names is not asked of the clone",
         "check_citations.py",
-        "            if state == HELD:\n",
-        "            if False:\n",
+        "        if state == HELD:\n",
+        "        if False:\n",
         "every link to a corpus-search match fails as an unknown file, though the "
         "repository holds it - the links the question skill tells an agent to build",
         (

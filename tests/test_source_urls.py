@@ -284,7 +284,7 @@ class ParsingALink(unittest.TestCase):
                 assert url is not None
                 got = source_urls.parse_blob_url(url)
                 assert got is not None
-                self.assertEqual((got.org, got.repo, got.sha, got.path, got.anchor), expected)
+                self.assertEqual(got, source_urls.BlobUrl(*expected))
 
     def test_only_a_github_blob_link_is_parsed(self):
         """Breaks if the parser accepts a link the gate cannot check against the
@@ -319,7 +319,9 @@ class ParsingALink(unittest.TestCase):
                     f"https://github.com/example-org/example-repo/blob/{ref}/src/a.py#L4"
                 )
                 assert got is not None
-                self.assertEqual((got.sha, got.path, got.anchor), (ref, "src/a.py", "L4"))
+                self.assertEqual(
+                    got, source_urls.BlobUrl("example-org", "example-repo", ref, "src/a.py", "L4")
+                )
 
     def test_a_link_names_the_configured_repository_whatever_its_local_name(self):
         """Breaks if the host's name is looked up as the local name, or case
