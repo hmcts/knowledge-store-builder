@@ -46,6 +46,7 @@ SELF_PARSING = frozenset(
         "gaps",
         "size-cuts",
         "cost",
+        "answers",
     }
 )
 
@@ -194,6 +195,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "cost": (
         "cost",
         "report what a run consumed, from result files and transcripts (de-duplicated)",
+    ),
+    "answers": (
+        "answers",
+        "report what each answer in a session cost and cited, or compare two runs by question",
     ),
     "check-install-docs": (
         "check_install_docs",

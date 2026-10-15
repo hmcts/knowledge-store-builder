@@ -809,6 +809,43 @@ was about 1.7–2.2 billion, more than 30 times higher, and nothing showed the
 gap until someone measured. Mark any figure in a runbook that was not measured
 as an estimate, and give the date it was last measured.
 
+### Measuring what each answer cost
+
+Compare a store's answers before and after a change, per question, without
+running a full evaluation.
+
+```bash
+# Ask the same questions before and after the change, then read the sessions.
+knowledgestore answers ~/.claude/projects/<project>/ --store . --out before.jsonl
+knowledgestore answers ~/.claude/projects/<project>/ --store . --out after.jsonl
+knowledgestore answers --compare before.jsonl after.jsonl
+```
+
+`answers` reads Claude Code transcripts after the session, and needs the store's
+graph to class citations: without one it exits 2. Without `--out` it prints a
+summary and writes nothing. It exits 2 if no session held a prompt.
+
+**One record per answer.** An answer runs from one prompt to the next; a tool
+result or a background agent's notice does not open a new one. Subagents the
+answer dispatched are folded into it, and a linked subagent transcript that is
+missing is counted, because that answer then reads low. Usage is de-duplicated
+by message id exactly as `cost` does it, `input` means what it means there, and
+`output_floor` is a floor for the same reason. Dollars appear only when a
+headless result names a session holding exactly one answer.
+
+**Citations get one class each:** `resolves` against the store graph,
+`pinned_url` (a blob URL at a 40-hex commit), `corpus_path` (a
+`repositories/...` path, which no reader can open), `unresolved`, `column`, or
+`skipped`. An answer that states something is absent has the sentence quoted,
+so a reader can overrule it.
+
+**`--compare` pairs by exact question text.** A question asked in only one run
+is listed under that run. A question asked several times in one run is
+compared as the median of its repetitions, and the repetitions are listed.
+
+These are measures of cost and citation hygiene. A cheaper, better-cited answer
+can still be wrong: correctness needs judging.
+
 ## 8. Keeping a store honest
 
 - **Never state a count in prose.** Repository, node and coverage figures are
