@@ -513,7 +513,11 @@ def apply_commit(
     if commit.get("is_merge"):
         return False
     is_landed = landed(commit)
-    if not is_landed and config.PROPOSED_LINKS == "omit":
+    # Under `omit` a branch commit is kept only for the files whose content
+    # landed (a squash merge leaves its work on the default branch under other
+    # commits); the rest of it is a proposal, which `omit` leaves out entirely.
+    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"
+    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):
         return False
     tickets = commit_tickets(commit, boilerplate)
     if not tickets:
@@ -533,11 +537,13 @@ def apply_commit(
         _pool_text(info, description, subject, prose)
         if is_landed:
             info["landed"] = True
-        elif commit.get("ref"):
-            info["branches"].add(commit["ref"])
+        elif commit.get("ref") and not omit_proposed:
+            info["branches"].add(sensitive.redact(commit["ref"], counts))
     for changed in commit.get("files", []):
-        entry = files[changed["path"]]
         file_landed = is_landed or changed.get("landed")
+        if omit_proposed and not file_landed:
+            continue
+        entry = files[changed["path"]]
         for ticket in tickets:
             entry["tickets" if file_landed else "proposed"][ticket] += 1
         if not is_landed and changed.get("landed"):

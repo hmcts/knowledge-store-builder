@@ -246,10 +246,12 @@ Two layers connect code to intent:
    ticket's `branches` from `ticket-descriptions.json.gz`, and check the
    checked-out code before saying what the code does or does not do: a squash
    merge can land a branch's work without its commits. A ticket record carrying
-   `"proposed": true` has no confirmed landing anywhere in the estate.
+   `"proposed": true` has no confirmed landing anywhere in the estate. A file
+   touched only on a branch has an empty `tickets` and a filled `proposed`, and
+   a file's `first` and `last` span both its landed and its proposed commits.
 
-   `ticket-descriptions.json.gz` holds, per ticket, three views of what its
-   commits said:
+   `ticket-descriptions.json.gz` holds, per ticket, three text views of what its
+   commits said (`d`, `s`, `b`) and two flags about where they were found:
 
    | Field | What it is |
    |---|---|

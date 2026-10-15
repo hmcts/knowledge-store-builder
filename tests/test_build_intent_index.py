@@ -1535,6 +1535,47 @@ class ProposedLinksTest(SettingsIsolated):
         self.assertNotIn("proposed", records["AA-9"])
         self.assertEqual(records["AA-9"]["branches"], ["team/s"])
 
+    def test_omit_keeps_a_branch_file_whose_content_landed(self):
+        """Catches KSB_PROPOSED_LINKS=omit dropping squash-merged work, which lives
+        only on a branch commit but is on the default branch."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = self._index(
+            [
+                self._commit("AA-9: squashed", "branch", "team/s", landed=True),
+                self._commit("AA-9: unmerged", "branch", "team/s", path="src/y.ts"),
+            ]
+        )
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-9": 1})
+        self.assertNotIn("src/y.ts", index)
+        self.assertNotIn("proposed", records["AA-9"])
+        self.assertNotIn("branches", records["AA-9"])
+
+    def test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out(self):
+        """Catches `omit` publishing a proposal because it shares a commit with
+        squash-landed work."""
+        config.configure(PROPOSED_LINKS="omit")
+        commit = self._commit("AA-9: mixed", "branch", "team/s", landed=True)
+        commit["files"].append({"path": "src/y.ts"})
+        index, _ = self._index([commit])
+        self.assertEqual(index["src/x.ts"]["tickets"], {"AA-9": 1})
+        self.assertNotIn("src/y.ts", index)
+
+    def test_the_setting_is_normalised_however_it_arrives(self):
+        """Catches `configure(PROPOSED_LINKS="OMIT")` silently behaving as write."""
+        config.configure(PROPOSED_LINKS=" OMIT ")
+        self.assertEqual(config.PROPOSED_LINKS, "omit")
+
+    def test_a_branch_name_is_redacted_before_it_is_stored(self):
+        """Catches a branch name carrying a person's identifier published in the
+        ticket record, which the explorer page embeds."""
+        _, records = self._index(
+            [self._commit("AA-5: p", "branch", "team/jane.doe@example.example-fix")]
+        )
+        stored = records["AA-5"]["branches"]
+        self.assertEqual(len(stored), 1)
+        self.assertNotIn("jane.doe@example.example", stored[0])
+        self.assertIn("withheld", stored[0])
+
 
 if __name__ == "__main__":
     unittest.main()

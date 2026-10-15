@@ -4413,11 +4413,13 @@ MUTATIONS = (
     Mutation(
         "proposed links are published although the store opted out",
         "build_intent_index.py",
-        '    if not is_landed and config.PROPOSED_LINKS == "omit":',
-        "    if False:",
+        '    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"',
+        "    omit_proposed = False",
         "KSB_PROPOSED_LINKS=omit had no effect",
         (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_out_branch_only_material_entirely",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
         ),
     ),
     Mutation(
@@ -4442,6 +4444,57 @@ MUTATIONS = (
         "agents read a branch-only link as an ordinary ticket link",
         (
             "test_build_knowledge_context.BuildOutputsTest.test_context_says_a_proposed_link_is_not_the_code",
+        ),
+    ),
+    Mutation(
+        "omit drops a branch commit whose files landed",
+        "build_intent_index.py",
+        '    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):',
+        "    if omit_proposed:",
+        "KSB_PROPOSED_LINKS=omit discarded squash-merged work along with the proposals",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still publishes the unlanded files of a branch commit",
+        "build_intent_index.py",
+        "        if omit_proposed and not file_landed:",
+        "        if False:",
+        "a store that opted out of proposals still got them from a commit that was partly landed",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+        ),
+    ),
+    Mutation(
+        "omit still records the branch of a landed branch commit",
+        "build_intent_index.py",
+        '        elif commit.get("ref") and not omit_proposed:',
+        '        elif commit.get("ref"):',
+        "a store that opted out of proposals still published branch names",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+        ),
+    ),
+    Mutation(
+        "a branch name is stored unredacted",
+        "build_intent_index.py",
+        '            info["branches"].add(sensitive.redact(commit["ref"], counts))',
+        '            info["branches"].add(commit["ref"])',
+        "a branch named after a person was embedded in the explorer page",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_a_branch_name_is_redacted_before_it_is_stored",
+        ),
+    ),
+    Mutation(
+        "configure leaves PROPOSED_LINKS as given",
+        "config.py",
+        '    "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",',
+        '    "PROPOSED_LINKS": lambda given: given,',
+        "configure(PROPOSED_LINKS='OMIT') behaved as write",
+        (
+            "test_build_intent_index.ProposedLinksTest.test_the_setting_is_normalised_however_it_arrives",
         ),
     ),
 )

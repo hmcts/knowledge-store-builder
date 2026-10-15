@@ -280,7 +280,10 @@ def _browse_url(value: str) -> str:
 TICKET_BROWSE_URL = _browse_url(os.environ.get("KSB_TICKET_BROWSE_URL", ""))
 
 # Settings whose value is normalised however it arrives.
-_NORMALISERS = {"TICKET_BROWSE_URL": _browse_url}
+_NORMALISERS = {
+    "TICKET_BROWSE_URL": _browse_url,
+    "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",
+}
 
 # --- asking the tracker what a ticket is (the `fetch-tickets` stage) ------
 # Every setting here is empty or off by default, because the stage is opt-in:
