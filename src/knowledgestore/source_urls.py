@@ -79,7 +79,9 @@ _SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 # on purpose for byte parity with the links it has published: a reversed range
 # `L20-L12` stays reversed, `host:8080` reads as line 8080 and `1.2.3` as line 1.
 # Do not tidy it without changing that store's links in the same release.
-_LINE = re.compile(r"(?:(?:^(?:lines?\s+)?)|:)L?(\d+)(?:\s*-\s*L?(\d+))?")
+# Sonar S5850: the `^` anchors only the first alternative on purpose - a line is
+# either at the start (optionally after "line"/"lines") or straight after a colon.
+_LINE = re.compile(r"(?:^(?:lines?\s+)?|:)L?(\d+)(?:\s*-\s*L?(\d+))?")  # NOSONAR(S5850)
 # Only the separator is kept raw. Narrower than RFC 3986 needs - `(` would be safe -
 # and deliberately so: it is the escaping the consuming store's links already use,
 # and two spellings of one link would make the same citation compare unequal.
