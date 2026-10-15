@@ -820,6 +820,10 @@ MUTATIONS = (
         "archive there reports on the graph the run has already superseded - the "
         "rebuild case an operator reported when three stages refused in sequence",
         (
+            "test_answers.CommandLine.test_out_writes_one_record_per_answer",
+            "test_answers.CommandLine.test_without_out_it_prints_a_summary_and_writes_nothing",
+            "test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",
+            "test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
             "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
@@ -4353,6 +4357,7 @@ MUTATIONS = (
         (
             "test_answers.SubagentsAreFolded.test_a_linked_subagent_that_is_missing_is_counted",
             "test_answers.SubagentsAreFolded.test_a_subagent_s_usage_is_part_of_the_answer_that_dispatched_it",
+            "test_answers.SubagentsAreFolded.test_the_subagent_s_text_is_not_the_answer",
         ),
     ),
     Mutation(
