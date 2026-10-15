@@ -95,7 +95,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config, graph_files
+from . import config, graph_files, io
 from .check_citations import FENCE, SPAN, Vocabulary, citations, load_vocabulary, resolve
 from .cost import (
     RESULT_SUFFIXES,
@@ -244,6 +244,20 @@ class Reader:
         self.seen_lines: set[str] = set()
         self.folded: set[Path] = set()
 
+    def first_reading(self, record: dict[str, Any]) -> bool:
+        """Whether this line is read here for the first time; marks it read.
+
+        A line already read in an earlier file - same `uuid` - is a copy carried over,
+        and was counted where it was first read.
+        """
+        uuid = record.get("uuid")
+        if not isinstance(uuid, str):
+            return True
+        if uuid in self.seen_lines:
+            return False
+        self.seen_lines.add(uuid)
+        return True
+
     def session(self, path: Path) -> list[Answer]:
         answers: list[Answer] = []
         current: Answer | None = None
@@ -251,14 +265,11 @@ class Reader:
             prompt = is_prompt(record)
             if not prompt and current is None:
                 continue
-            uuid = record.get("uuid")
-            if isinstance(uuid, str):
-                if uuid in self.seen_lines:
-                    if prompt:
-                        # Carried over from a session already read: it was answered there.
-                        current = None
-                    continue
-                self.seen_lines.add(uuid)
+            if not self.first_reading(record):
+                if prompt:
+                    # Carried over from a session already read: it was answered there.
+                    current = None
+                continue
             if prompt:
                 text = _message_text((record.get("message") or {}).get("content"))
                 current = Answer(path.stem, len(answers), text)
@@ -284,15 +295,7 @@ class Reader:
     def _assistant(self, record: dict[str, Any], message: dict[str, Any], answer: Answer) -> None:
         usage = message.get("usage")
         if isinstance(usage, dict) and self.ledger.sight(message):
-            answer.turns += 1
-            answer.input += input_tokens(usage)
-            answer.cache_read += int(usage.get("cache_read_input_tokens") or 0)
-            answer.cache_write += int(usage.get("cache_creation_input_tokens") or 0)
-            message_id = message.get("id")
-            if isinstance(message_id, str):
-                answer.message_ids.append(message_id)
-            else:
-                answer.unidentified_output += int(usage.get("output_tokens") or 0)
+            _count_turn(message, usage, answer)
         content = message.get("content")
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
@@ -300,11 +303,14 @@ class Reader:
             if block.get("type") == "text" and not record.get("isSidechain"):
                 answer.text = str(block.get("text") or "")
             elif block.get("type") == "tool_use":
-                name = str(block.get("name") or "")
-                answer.tool_calls[name] += 1
-                given = block.get("input")
-                if isinstance(given, dict):
-                    self._files(name, given, str(record.get("cwd") or ""), answer)
+                self._tool_use(block, record, answer)
+
+    def _tool_use(self, block: dict[str, Any], record: dict[str, Any], answer: Answer) -> None:
+        name = str(block.get("name") or "")
+        answer.tool_calls[name] += 1
+        given = block.get("input")
+        if isinstance(given, dict):
+            self._files(name, given, str(record.get("cwd") or ""), answer)
 
     def _files(self, name: str, given: dict[str, Any], cwd: str, answer: Answer) -> None:
         base = Path(cwd) if cwd else self.store
@@ -331,12 +337,21 @@ class Reader:
         self.folded.add(resolved)
         answer.subagents += 1
         for record in _lines(path):
-            uuid = record.get("uuid")
-            if isinstance(uuid, str):
-                if uuid in self.seen_lines:
-                    continue
-                self.seen_lines.add(uuid)
-            self.fold(record, answer, session)
+            if self.first_reading(record):
+                self.fold(record, answer, session)
+
+
+def _count_turn(message: dict[str, Any], usage: dict[str, Any], answer: Answer) -> None:
+    """Add one turn's usage to its answer, the first time its message is sighted."""
+    answer.turns += 1
+    answer.input += input_tokens(usage)
+    answer.cache_read += int(usage.get("cache_read_input_tokens") or 0)
+    answer.cache_write += int(usage.get("cache_creation_input_tokens") or 0)
+    message_id = message.get("id")
+    if isinstance(message_id, str):
+        answer.message_ids.append(message_id)
+    else:
+        answer.unidentified_output += int(usage.get("output_tokens") or 0)
 
 
 def classify(span: str, vocabulary: Vocabulary) -> str:
@@ -440,11 +455,22 @@ def measure(paths: Iterable[Path], store: Path, vocabulary: Vocabulary) -> Run:
                 run.sessions += 1
                 run.answers.extend(found)
         elif path.suffix in RESULT_SUFFIXES:
-            result = headless_result(path)
-            if result is not None:
-                run.results += 1
-                session = str(result.get("session_id") or "")
-                results.setdefault(session, []).append(float(result.get("total_cost_usd") or 0.0))
+            _read_result(path, run, results)
+    _price(run, results)
+    return run
+
+
+def _read_result(path: Path, run: Run, results: dict[str, list[float]]) -> None:
+    """Keep a headless result's cost under the session it names."""
+    result = headless_result(path)
+    if result is not None:
+        run.results += 1
+        session = str(result.get("session_id") or "")
+        results.setdefault(session, []).append(float(result.get("total_cost_usd") or 0.0))
+
+
+def _price(run: Run, results: dict[str, list[float]]) -> None:
+    """Put each result's cost on its session's answer, where there is exactly one."""
     by_session: dict[str, list[Answer]] = {}
     for answer in run.answers:
         by_session.setdefault(answer.session, []).append(answer)
@@ -454,7 +480,6 @@ def measure(paths: Iterable[Path], store: Path, vocabulary: Vocabulary) -> Run:
             owned[0].cost_usd = dollars[0]
         else:
             run.results_unmatched += len(dollars)
-    return run
 
 
 def _number(value: float) -> str:
@@ -536,7 +561,9 @@ def summarise(run: Run, rows: list[dict[str, Any]]) -> list[str]:
 def load(path: Path) -> list[dict[str, Any]]:
     """The records an earlier run wrote with --out."""
     rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # Sonar S8707, on the grounds stated in `build_community_summaries.merge`:
+    # reading the record file the operator named with --compare is the flag's purpose.
+    for line in path.read_text(encoding="utf-8").splitlines():  # NOSONAR(S8707)
         if line.strip():
             rows.append(json.loads(line))
     return rows
@@ -693,8 +720,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     rows = run.records()
     if arguments.out:
+        try:
+            io.checked_write_target(arguments.out)
+        except ValueError as error:
+            print(f"Not writing --out: {error}", file=sys.stderr)
+            return 2
         arguments.out.parent.mkdir(parents=True, exist_ok=True)
-        arguments.out.write_text(
+        arguments.out.write_text(  # NOSONAR(S2083, S8707) - validated by checked_write_target
             "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8"
         )
         print(f"Wrote {len(rows):,} records to {arguments.out}")

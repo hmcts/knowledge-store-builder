@@ -711,6 +711,16 @@ class CommandLine(AnswersStage):
             self.assertNotIn("a floor", lines[name])
             self.assertNotIn("cache reads", lines[name])
 
+    def test_an_out_path_that_climbs_upward_is_refused(self):
+        """Break: writing --out through a `..` component, which no caller in this
+        library needs and the write policy (`io.checked_write_target`) refuses."""
+        root = self._dir()
+        session_one().write(root / f"{S1}.jsonl")
+        target = root / "out" / ".." / "climbed.jsonl"
+        code, out = self._run(str(root), "--store", str(self._store()), "--out", str(target))
+        self.assertEqual(code, 2, out)
+        self.assertFalse((root / "climbed.jsonl").exists())
+
     def test_reading_no_answer_exits_two(self):
         """Break: reporting zeroes as a measurement when no session was read."""
         root = self._dir()

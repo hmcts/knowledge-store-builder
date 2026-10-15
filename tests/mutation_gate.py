@@ -4470,8 +4470,8 @@ MUTATIONS = (
     Mutation(
         "answers: a carried-over prompt answered twice",
         "answers.py",
-        "                if uuid in self.seen_lines:\n                    if prompt:",
-        "                if False:\n                    if prompt:",
+        "            if not self.first_reading(record):\n                if prompt:",
+        "            if False:\n                if prompt:",
         "a resumed session repeats the lines it carried over; read again, each earlier "
         "question is answered a second time at no cost and drags the medians down",
         ("test_answers.SplittingASession.test_a_resumed_session_counts_each_repeated_turn_once",),
