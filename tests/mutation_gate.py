@@ -4468,6 +4468,116 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "citation link: the sha is not checked",
+        "check_citations.py",
+        "    built = {r for r in repos if urls.build_sha(r) == link.sha}\n",
+        "    built = set(repos)\n",
+        "a link pinned to a commit the store never read, or to a branch, passes the "
+        "publish gate as a citation of this build and drifts off the line it cites",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_at_another_commit_fails_and_says_it_is_the_sha",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+        ),
+    ),
+    Mutation(
+        "citation link: a path is resolved across the estate",
+        "check_citations.py",
+        "    holding = {r for r in repos if link.path in vocabulary.repository_files(r)}\n",
+        "    holding = {\n"
+        "        r\n"
+        "        for r in repos\n"
+        "        if any(link.path in vocabulary.repository_files(o) for o in vocabulary.sources)\n"
+        "    }\n",
+        "a link naming a file that only another repository holds passes, though it opens "
+        "a 404 in the repository it names",
+        (
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
+        ),
+    ),
+    Mutation(
+        "citation link: only backticked spans are read",
+        "check_citations.py",
+        "        if parse_blob_url(link) is not None:\n",
+        "        if False:\n",
+        "answers cite a link as a markdown link or bare, so a made-up one there is never "
+        "looked at and the gate's silence is about text it did not read",
+        (
+            "test_check_citations.TheLinksOfAnAnswer.test_a_link_is_a_citation_however_it_is_written",
+            "test_check_citations.TheStageOnSourceLinks.test_a_clean_answer_citing_links_passes",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
+        "citation link: the cited path is compared still percent-encoded",
+        "source_urls.py",
+        '        unquote(match.group("path")),\n',
+        '        match.group("path"),\n',
+        "a real link to a file whose name holds a space, `#` or bracket reads as a file the "
+        "store does not hold, failing an honest answer",
+        ("test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",),
+    ),
+    Mutation(
+        "citation link: an unpinned link is not parsed",
+        "source_urls.py",
+        r"/blob/(?P<sha>[^/?#\s]+)",
+        r"/blob/(?P<sha>[0-9a-f]{40})",
+        "a link to `blob/main/...` or an abbreviated sha falls back to being skipped, which "
+        "is the hole the gate closes: it passes unchecked",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_at_another_commit_fails_and_says_it_is_the_sha",
+            "test_source_urls.ParsingALink.test_a_link_pinned_to_a_branch_still_parses",
+        ),
+    ),
+    Mutation(
+        "citation link: the single-root prefix is kept on the graph's side",
+        "check_citations.py",
+        "                inside = (repo_relative(name, p, name in single_root) for p in paths)\n",
+        "                inside = (repo_relative(name, p, False) for p in paths)\n",
+        "on a store built by the single-root route every correct link reads as an unknown "
+        "file, so the gate is red for answers that are right",
+        (
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_real_file_at_the_build_commit_resolves",
+        ),
+    ),
+    Mutation(
+        "citation link: a link outside the estate fails the gate",
+        "check_citations.py",
+        '    if urls is None or not repos:\n        return Verdict("unchecked")\n',
+        '    if urls is None or not repos:\n        return Verdict("unresolved")\n',
+        "a store whose answers cite a third-party library's source could never go green, "
+        "so it would stop running the gate",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_repository_the_store_does_not_build_is_neither_passed_nor_failed",
+            "test_check_citations.VerdictsOnSourceLinks.test_without_the_store_files_a_link_is_unchecked_not_passed",
+        ),
+    ),
+    Mutation(
+        "citation link: an unreadable repository list is read as an empty estate",
+        "check_citations.py",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        return 2\n",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        urls = None\n",
+        "every source link becomes unchecked and the gate passes over all of them, exit 0",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_an_unreadable_repository_list_stops_the_gate",
+        ),
+    ),
+    Mutation(
+        "citation link: the report does not say which claim is wrong",
+        "check_citations.py",
+        "        if reason:\n",
+        "        if False:\n",
+        "an operator told only that a link does not resolve cannot tell whether to fix the "
+        "path or re-pin the commit",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
         "source url stage: only the plain graph is rewritten",
         "build_source_urls.py",
         '    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:\n'
