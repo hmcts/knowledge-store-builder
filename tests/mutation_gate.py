@@ -2451,6 +2451,8 @@ MUTATIONS = (
         (
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_fell_to_zero_is_a_warning_not_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_measurement_that_merely_fell_stays_a_statistic",
             "test_telemetry.TelemetryRecordTest.test_a_metric_that_was_zero_and_is_not_reads_as_recovery",
@@ -2483,6 +2485,8 @@ MUTATIONS = (
         "nothing - a mechanism that reads green and measures nothing, which is the class "
         "this gate exists for",
         (
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
         ),
     ),
@@ -2701,6 +2705,7 @@ MUTATIONS = (
         "read as a smaller estate; nothing but its predecessor contradicts it",
         (
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
     ),
@@ -4306,8 +4311,8 @@ MUTATIONS = (
         "export_git_history.py",
         '                if file["path"] in landed_paths:',
         "                if False:",
-        "about a third of branches with branch-only ticket commits had been squash-merged; "
-        "their work read as proposals",
+        "a squash merge lands a branch's work without its commits, so the branch's files "
+        "read as proposals though their content is on the default branch",
         ("test_export_git_history.ReachTest.test_a_squash_merged_branch_file_is_marked_landed",),
     ),
     Mutation(
@@ -4366,6 +4371,8 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
             "test_build_intent_index.ProposedLinksTest.test_proposed_values_are_counts_never_branch_names",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
     ),
     Mutation(
@@ -4376,6 +4383,8 @@ MUTATIONS = (
         "squash-merged work, whose commits are on no default-branch path, read as a proposal",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
         ),
     ),
     Mutation(
@@ -4386,6 +4395,7 @@ MUTATIONS = (
         "a squash-merged ticket's record said it had never landed",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
         ),
     ),
     Mutation(
@@ -4417,6 +4427,7 @@ MUTATIONS = (
             "test_build_intent_index.IndexRepositoryTest.test_end_to_end_over_ndjson",
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
             "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
     ),
@@ -4443,7 +4454,9 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
+            "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
         ),
     ),
     Mutation(

@@ -258,8 +258,8 @@ Two layers connect code to intent:
    | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
    | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
    | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
-   | `proposed` | `true` when no commit that landed names the ticket; omitted otherwise |
-   | `branches` | up to five branches the ticket's branch-only commits were found on; omitted when there are none |
+   | `proposed` | `true` when no landed work names the ticket; omitted otherwise |
+   | `branches` | up to five branches the ticket's branch-only commits were found on, across every repository in `repos`, so check the branch exists in the file's repository; omitted when there are none |
 
    Every one of the three is a **list of strings**. Quote an element, never the
    field: `record['d']` is a list, and printing it puts brackets and quotes into

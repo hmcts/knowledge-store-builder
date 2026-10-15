@@ -418,6 +418,24 @@ def landed(commit: dict) -> bool:
     return commit.get("reach", "default") != "branch"
 
 
+def lacks_reach(ndjson: Path) -> bool:
+    """Whether a history dataset has commits and none of them records `reach`.
+
+    Such a dataset was exported before reach existed, so `landed` reads all of it
+    as landed. Stops at the first record that carries the field, so a current
+    dataset costs one line.
+    """
+    seen = False
+    with ndjson.open(encoding="utf-8") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            seen = True
+            if "reach" in json.loads(line):
+                return False
+    return seen
+
+
 def ticket_pool() -> defaultdict[str, dict]:
     """The per-ticket accumulator `apply_commit` folds commits into.
 
@@ -802,9 +820,24 @@ def main() -> int:
     )
     report_redactions(redactions)
 
+    without_reach = sum(1 for ndjson in ndjson_files if lacks_reach(ndjson))
+    print(
+        f"Repositories whose history predates reach: {without_reach:,}"
+        + (
+            "; their branch-only links still read as landed - "
+            "re-run export-history to separate proposed links."
+            if without_reach
+            else "."
+        )
+    )
     # Merges with the record `summarise` writes next, not replaces it.
     telemetry.record(
-        {"intent.tickets_proposed_only": sum(1 for t in ticket_out.values() if t.get("proposed"))}
+        {
+            "intent.tickets_proposed_only": sum(
+                1 for t in ticket_out.values() if t.get("proposed")
+            ),
+            "intent.repositories_without_reach": without_reach,
+        }
     )
     telemetry.record(summarise(index, commits_seen, report))
     return 0

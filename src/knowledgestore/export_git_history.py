@@ -229,8 +229,14 @@ def landed_blobs(
 
     `paths` keeps only those paths: on a very large repository the unfiltered
     set runs to hundreds of MB. Paths in rename or copy notation never match,
-    which leans towards proposed and is deliberate.
+    which leans towards proposed and is deliberate. The one case that leans
+    towards landed: a branch commit restoring an earlier default-branch version
+    of a file (a revert proposal) matches that old blob and is marked landed.
+
+    No paths means nothing can match, so the walk is skipped.
     """
+    if paths is not None and not paths:
+        return frozenset()
     revisions = [ref, "--tags"] if ref else ["--tags"]
     output = run_git(repo_path, "log", *revisions, *_RAW)
     return frozenset(
