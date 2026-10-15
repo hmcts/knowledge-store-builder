@@ -9,6 +9,20 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 
+/** The text of an HTML fragment: everything outside its tags. A scan, not a
+ * regular expression, so it cannot backtrack (Sonar S8786).
+ * @param {string} html */
+function textOf(html) {
+  let text = '';
+  let inTag = false;
+  for (const c of html) {
+    if (c === '<') inTag = true;
+    else if (c === '>') inTag = false;
+    else if (!inTag) text += c;
+  }
+  return text;
+}
+
 // [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets, communityId]
 const DATA = [
   ['AddressPipe', 'repo-a', 'src/pipes/address.pipe.ts', 'Address Handling', 'code', 9, [], ['CRC-12016'], 1],
@@ -465,7 +479,7 @@ documentStub.querySelectorAll = (sel) => (sel === '.k' ? [{ checked: true, value
 context.q.value = 'amend';
 context.runSearch();
 assert('a search result card labels its proposed ticket',
-  context.out.innerHTML.replaceAll(/<[^>]*>/g, '')
+  textOf(context.out.innerHTML)
     .includes('DD-1 proposed on branches team/amend-address, team/amend-retry'),
   context.out.innerHTML.slice(0, 400));
 
@@ -491,7 +505,7 @@ const realTickets = context.DATA[amendRow][7];
 context.DATA[amendRow][7] = ['CRC-12016', 'DD-1'];
 context.runSearch();
 assert('a proposed ticket second on a card still shows its full label',
-  context.out.innerHTML.replaceAll(/<[^>]*>/g, '')
+  textOf(context.out.innerHTML)
     .includes('DD-1 proposed on branches team/amend-address, team/amend-retry'),
   context.out.innerHTML.slice(0, 600));
 context.DATA[amendRow][7] = realTickets;
@@ -505,7 +519,7 @@ context.q.value = 'why does the Amend defendant address feature exist?';
 context.runAsk();
 {
   const html = context.out.innerHTML;
-  const text = html.replaceAll(/<[^>]*>/g, '');
+  const text = textOf(html);
   assert('a business-intent ticket row labels its proposed ticket',
     text.includes('DD-1 proposed on branches team/amend-address, team/amend-retry Amend the'),
     context.meta.textContent + ' | ' + html.slice(0, 600));
