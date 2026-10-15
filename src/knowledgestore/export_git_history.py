@@ -138,7 +138,63 @@ def get_commit_files(repo_path: Path, commit_sha: str) -> list[dict[str, object]
     return parse_numstat(output)
 
 
-def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
+REACH_DEFAULT = "default"
+REACH_TAG = "tag"
+REACH_BRANCH = "branch"
+_REF_PREFIXES = ("refs/remotes/origin/", "refs/heads/")
+
+
+def branch_name(source: str) -> str:
+    """The branch a `--source` ref names, without its remote or local prefix."""
+    for prefix in _REF_PREFIXES:
+        if source.startswith(prefix):
+            return source[len(prefix) :]
+    return source
+
+
+def _verified(repo_path: Path, ref: str) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
+def resolve_default(repo_path: Path, default_branch: str | None) -> tuple[str | None, str | None]:
+    """The ref reach is measured against, and a warning when it is not the configured one.
+
+    The configured branch wins over `origin/HEAD`, which in some repositories names
+    a ticket or version branch. A stale configuration falls back to `origin/HEAD`
+    rather than classing every commit as a branch, and says so.
+    """
+    if default_branch:
+        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):
+            if _verified(repo_path, ref):
+                return ref, None
+    configured = default_branch or "(none configured)"
+    if _verified(repo_path, "refs/remotes/origin/HEAD"):
+        return "refs/remotes/origin/HEAD", (
+            f"{repo_path.name}: default branch {configured} not found; reach measured "
+            "against origin/HEAD"
+        )
+    return None, (
+        f"{repo_path.name}: default branch {configured} not found and no origin/HEAD; "
+        "every commit is classed as branch"
+    )
+
+
+def reach_sets(repo_path: Path, ref: str | None) -> tuple[frozenset[str], frozenset[str]]:
+    """SHAs reachable from the default ref, and SHAs reachable only from tags."""
+    if ref is None:
+        tagged = run_git(repo_path, "rev-list", "--tags")
+        return frozenset(), frozenset(tagged.split())
+    landed = run_git(repo_path, "rev-list", ref)
+    tagged = run_git(repo_path, "rev-list", "--tags", "--not", ref)
+    return frozenset(landed.split()), frozenset(tagged.split())
+
+
+def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[dict[str, object]]:
     pretty_format = (
         FIELD_SEPARATOR.join(
             [
@@ -151,6 +207,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
                 "%cn",  # committer name
                 "%ce",  # committer email
                 "%D",  # refs
+                "%S",  # the ref --source reached the commit by
                 "%s",  # subject
                 "%b",  # body
             ]
@@ -167,7 +224,9 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
     output = run_git(
         repo_path,
         "log",
+        "--exclude=refs/remotes/*/HEAD",
         "--all",
+        "--source",
         "--topo-order",
         "--date-order",
         "--no-show-signature",
@@ -177,6 +236,9 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         "--diff-merges=cc",
         f"--pretty=format:{RECORD_SEPARATOR}{pretty_format}",
     )
+
+    ref, _ = resolve_default(repo_path, default_branch)
+    landed, tagged = reach_sets(repo_path, ref)
 
     for raw_record in output.split(RECORD_SEPARATOR):
         # Strip only newlines: Python's str.strip() treats \x1f/\x1e as
@@ -190,10 +252,10 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
         metadata, _, numstat = raw_record.partition(STAT_SEPARATOR)
         fields = metadata.split(FIELD_SEPARATOR)
 
-        if len(fields) != 11:
+        if len(fields) != 12:
             print(
                 f"Skipping malformed Git record in {repo_path}: "
-                f"expected 11 fields, found {len(fields)}",
+                f"expected 12 fields, found {len(fields)}",
                 file=sys.stderr,
             )
             continue
@@ -208,6 +270,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
             committer_name,
             committer_email,
             refs,
+            source,
             subject,
             body,
         ) = fields
@@ -221,7 +284,7 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
             file["deletions"] for file in files if isinstance(file["deletions"], int)
         )
 
-        yield {
+        record: dict[str, object] = {
             "sha": sha,
             "short_sha": sha[:12],
             "parents": parents.split() if parents else [],
@@ -244,6 +307,14 @@ def get_commits(repo_path: Path) -> Iterable[dict[str, object]]:
             "deletions": total_deletions,
             "is_merge": len(parents.split()) > 1,
         }
+        if sha in landed:
+            record["reach"] = REACH_DEFAULT
+        elif sha in tagged:
+            record["reach"] = REACH_TAG
+        else:
+            record["reach"] = REACH_BRANCH
+            record["ref"] = branch_name(source.strip())
+        yield record
 
 
 def write_ndjson(
@@ -402,6 +473,18 @@ def write_index(
         assert isinstance(author, dict)
         authors[str(author["name"])] += 1
 
+    by_reach: dict[str, int] = defaultdict(int)
+    branches: set[str] = set()
+    for commit in commits:
+        by_reach[str(commit.get("reach", REACH_DEFAULT))] += 1
+        if commit.get("ref"):
+            branches.add(str(commit["ref"]))
+    scope = (
+        f"default branch `{repository.default_branch}`: {by_reach[REACH_DEFAULT]} commits; "
+        f"tags only: {by_reach[REACH_TAG]}; "
+        f"branches only: {by_reach[REACH_BRANCH]} across {len(branches)} branches"
+    )
+
     top_authors = sorted(
         authors.items(),
         key=lambda item: (-item[1], item[0].lower()),
@@ -415,7 +498,7 @@ def write_index(
         f"- **Current HEAD:** `{head_sha}`",
         f"- **Current HEAD date:** {head_date}",
         f"- **Total commits:** {len(commits)}",
-        "- **History scope:** all locally fetched branches and tags",
+        f"- **History scope:** {scope}",
         "",
         "## History files",
         "",
@@ -472,7 +555,10 @@ def export_repository(
     output_dir = output_root / repository.name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    commits = list(get_commits(repo_path))
+    _, warning = resolve_default(repo_path, repository.default_branch)
+    if warning:
+        print(f"  {warning}", file=sys.stderr)
+    commits = list(get_commits(repo_path, repository.default_branch))
 
     write_ndjson(
         output_dir / "commits.ndjson",

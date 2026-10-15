@@ -4291,6 +4291,38 @@ MUTATIONS = (
         "secret in round 1 is handed them in round 2, and the report still says masked",
         ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
     ),
+    Mutation(
+        "reach is read from the remote default instead of the configured branch",
+        "export_git_history.py",
+        '        for ref in (f"refs/remotes/origin/{default_branch}", f"refs/heads/{default_branch}"):',
+        "        for ref in ():",
+        "a repository whose origin/HEAD names a ticket branch classed that branch's "
+        "proposals as landed and the real default's work as proposed",
+        (
+            "test_export_git_history.ExportRepositoryEndToEndTest.test_export_repository_produces_dataset_files",
+            "test_export_git_history.ReachTest.test_a_branch_that_exists_only_locally_still_resolves",
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+        ),
+    ),
+    Mutation(
+        "a release line reached only by a tag reads as a proposal",
+        "export_git_history.py",
+        "        elif sha in tagged:",
+        "        elif False:",
+        "shipped work on a release line that never merged back was published as a proposed change",
+        ("test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",),
+    ),
+    Mutation(
+        "a branch commit is recorded without the branch it was found on",
+        "export_git_history.py",
+        '            record["ref"] = branch_name(source.strip())',
+        "            pass",
+        "an agent could not say which branch held a proposal",
+        (
+            "test_export_git_history.ReachTest.test_each_commit_is_classed_against_the_configured_branch",
+            "test_export_git_history.ReachTest.test_squashed_branch_commits_are_branch_and_name_their_branch",
+        ),
+    ),
 )
 
 
