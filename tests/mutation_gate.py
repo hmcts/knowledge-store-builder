@@ -4076,6 +4076,16 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a templated URL host is masked as a secret",
+        "secret_mask.py",
+        "    value = deploy_values." + "strip_template(value)\n    scheme = _URL_SCHEME",
+        "    scheme = _URL_SCHEME",
+        "`S2S_AUTH: http://auth-{{ .Values.env }}.internal` in a Helm values template "
+        "was masked whole, because the spaces inside the interpolation read as text "
+        "rather than as the placeholder the template stands for",
+        ("test_secret_mask.PointersAreNotSecrets.test_a_url_or_terraform_reference_is_unchanged",),
+    ),
+    Mutation(
         "a Terraform reference is masked as a secret",
         "secret_mask.py",
         "    return head is not None and _HCL_TAIL.fullmatch(value, head.end()) is not None",

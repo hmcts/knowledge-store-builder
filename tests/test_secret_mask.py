@@ -742,6 +742,9 @@ class PointersAreNotSecrets(SettingsIsolated):
         # The same pointers in the syntax that names the key on another line.
         "env:\n  - name: S2S_AUTH\n    value: http://service-auth-provider:4502\n",
         "env:\n  - name: DB_PASSWORD\n    value: var.admin_password\n",
+        # A Helm-templated host: the spaces inside `{{ }}` are the template's.
+        "java:\n  environment:\n    S2S_AUTH: http://auth-provider-{{ .Values.env }}"
+        ".service.core-{{ .Values.env }}.internal\n",
     ]
 
     CASES = [
@@ -755,6 +758,12 @@ class PointersAreNotSecrets(SettingsIsolated):
             "S2S_AUTH: https://auth.example/cb?db_token=fake-tk\n",
             "S2S_AUTH: https://auth.example/cb?db_token=[masked]\n",
             "key-name",
+        ),
+        # A template in the host does not hide a password beside it.
+        (
+            "S2S_AUTH: http://app:fake-pw@auth-{{ .Values.env }}.example\n",
+            "S2S_AUTH: http://app:[masked]@auth-{{ .Values.env }}.example\n",
+            "url-credential",
         ),
         # Dotted, but not a Terraform reference.
         ("password = varx.admin\n", "password = [masked]\n", "key-name"),
