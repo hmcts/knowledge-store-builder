@@ -4434,6 +4434,16 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
         ),
     ),
+    Mutation(
+        "the context stops explaining what a proposed link means",
+        "build_knowledge_context.py",
+        "A ticket listed under `proposed` in the intent index",
+        "A ticket in the intent index",
+        "agents read a branch-only link as an ordinary ticket link",
+        (
+            "test_build_knowledge_context.BuildOutputsTest.test_context_says_a_proposed_link_is_not_the_code",
+        ),
+    ),
 )
 
 

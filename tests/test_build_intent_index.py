@@ -787,8 +787,10 @@ ARTEFACT = "ticket-descriptions.json.gz"
 TEXT_VIEWS = ("d", "s", "b")
 # A list of strings the record carries that is not one of the commit-text views,
 # so a fourth view arriving is not read as this one. `repos` is a list of
-# repository names; the table documents what the commits said.
-NOT_A_TEXT_VIEW = frozenset({"repos"})
+# repository names; the table documents what the commits said. `proposed` and
+# `branches` are rows of that table that say where the ticket landed, not what
+# its commits said, so neither is a view with a cap to compare.
+NOT_A_TEXT_VIEW = frozenset({"repos", "proposed", "branches"})
 
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
 FIELD_ROW = re.compile(r"^\s*\|\s*`([a-z]+)`\s*\|(.+?)\|\s*$", re.MULTILINE)
@@ -820,6 +822,8 @@ def documented_shape(text: str) -> dict:
     block = documented_block(text)
     caps: dict[str, int | None] = {}
     for field, description in FIELD_ROW.findall(block):
+        if field in NOT_A_TEXT_VIEW:
+            continue
         stated = STATED_CAP.search(description)
         word = stated.group(1) if stated else ""
         caps[field] = NUMBER_WORDS.get(word, int(word) if word.isdigit() else None)

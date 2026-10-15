@@ -236,8 +236,17 @@ Two layers connect code to intent:
    ```python
    import gzip, json
    index = json.load(gzip.open('knowledge/intent/file-tickets.json.gz', 'rt'))
-   index['<repo>']['<source file>']
+   entry = index['<repo>']['<source file>']
+   entry['tickets']             # work that landed on the default branch or a tag
+   entry.get('proposed', {})    # found on a branch, not confirmed on the default branch
    ```
+
+   A ticket under `proposed` was found on a branch, and its work is not
+   confirmed on the default branch. Say "proposed on branch X", using the
+   ticket's `branches` from `ticket-descriptions.json.gz`, and check the
+   checked-out code before saying what the code does or does not do: a squash
+   merge can land a branch's work without its commits. A ticket record carrying
+   `"proposed": true` has no confirmed landing anywhere in the estate.
 
    `ticket-descriptions.json.gz` holds, per ticket, three views of what its
    commits said:
@@ -247,6 +256,8 @@ Two layers connect code to intent:
    | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
    | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
    | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
+   | `proposed` | `true` when no commit that landed names the ticket; omitted otherwise |
+   | `branches` | up to five branches the ticket's branch-only commits were found on; omitted when there are none |
 
    Every one of the three is a **list of strings**. Quote an element, never the
    field: `record['d']` is a list, and printing it puts brackets and quotes into

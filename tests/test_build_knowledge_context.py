@@ -70,6 +70,19 @@ class BuildOutputsTest(SettingsIsolated):
         self.assertIn("source of truth", content)
         self.assertIn("commits.ndjson", content)
 
+    def test_context_says_a_proposed_link_is_not_the_code(self):
+        """Catches the rule dropped from the generated context: agents would read
+        `proposed` as an ordinary ticket link."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            repo_dir = make_history(tmp)
+            self._patch_paths(tmp)
+            context.build_context([repo_dir])
+            content = config.CONTEXT_PATH.read_text(encoding="utf-8")
+        self.assertIn("`proposed`", content)
+        self.assertIn("proposed on branch", content)
+        self.assertIn("not confirmed on the default branch", content)
+
     def test_manifest_includes_provenance_when_recorded(self):
         # arrange a history dir with one repo and a provenance file
         with tempfile.TemporaryDirectory() as tmp:
