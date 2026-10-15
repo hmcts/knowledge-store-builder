@@ -382,6 +382,8 @@ class ReachTest(SettingsIsolated):
         self.assertEqual(commits["AA-1: base"]["reach"], "default")
 
     def test_a_branch_that_exists_only_locally_still_resolves(self):
+        """Catches resolution that only looks under the remote: a configured
+        branch with no remote copy would fall through to the warning path."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self._fixture(Path(tmp))
             self._git(work, "branch", "local-only", "origin/team/proposal")
@@ -389,19 +391,24 @@ class ReachTest(SettingsIsolated):
         self.assertEqual(ref, "refs/heads/local-only")
         self.assertIsNone(warning)
 
-    def test_a_repository_with_no_remote_classes_everything_as_branch(self):
-        """Catches a crash on a local-only clone, where nothing resolves."""
+    def test_with_nothing_to_resolve_untagged_commits_are_branch_and_tagged_ones_stay_tag(self):
+        """Catches a crash on a local-only clone, where nothing resolves, and
+        catches the tag set being dropped there: shipped work would read as a
+        proposal."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             self._git(repo, "init", "-q", "-b", "main")
             self._git(repo, "config", "user.email", "t@example.com")
             self._git(repo, "config", "user.name", "Test")
-            self._commit(repo, "a.txt", "1\n", "AA-1: only")
+            self._commit(repo, "a.txt", "1\n", "AA-1: tagged")
+            self._git(repo, "tag", "v1")
+            self._commit(repo, "a.txt", "2\n", "AA-2: untagged")
             ref, warning = export.resolve_default(repo, "trunk")
-            commits = list(export.get_commits(repo, "trunk"))
+            commits = self._by_subject(repo, "trunk")
         self.assertIsNone(ref)
         self.assertIn("trunk", warning)
-        self.assertEqual([c["reach"] for c in commits], ["branch"])
+        self.assertEqual(commits["AA-1: tagged"]["reach"], "tag")
+        self.assertEqual(commits["AA-2: untagged"]["reach"], "branch")
 
     def test_two_exports_of_one_repository_are_identical(self):
         """Catches non-determinism in which ref --source names (CLAUDE.md 1.3)."""
@@ -412,9 +419,41 @@ class ReachTest(SettingsIsolated):
         self.assertEqual(first, second)
 
     def test_branch_name_strips_ref_prefixes(self):
+        """Catches a recorded ref that keeps its remote or local prefix, or a
+        non-branch ref being mangled."""
         self.assertEqual(export.branch_name("refs/remotes/origin/team/x"), "team/x")
         self.assertEqual(export.branch_name("refs/heads/team/x"), "team/x")
         self.assertEqual(export.branch_name("refs/stash"), "refs/stash")
+
+    def test_a_commit_record_without_reach_counts_as_default_in_the_scope_line(self):
+        """Catches the missing-reach fallback becoming branch: records written
+        before reach existed would be reported as unmerged proposals."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo-a"
+            repo.mkdir()
+            self._git(repo, "init", "-q", "-b", "main")
+            self._git(repo, "config", "user.email", "t@example.com")
+            self._git(repo, "config", "user.name", "Test")
+            (repo / "a.txt").write_text("one\n")
+            self._git(repo, "add", "a.txt")
+            self._git(repo, "commit", "-q", "-m", "DD-1: first")
+            index = root / "index.md"
+            export.write_index(
+                index,
+                export.RepositoryConfig(
+                    name="repo-a", clone_url="git@example.com:o/repo-a.git", default_branch="main"
+                ),
+                [{"author": {"name": "Test", "email": "t@example.com"}}],
+                {"2026": 1},
+                repo,
+            )
+            text = index.read_text(encoding="utf-8")
+        self.assertIn(
+            "**History scope:** default branch `main`: 1 commits; tags only: 0; "
+            "branches only: 0 across 0 branches",
+            text,
+        )
 
 
 if __name__ == "__main__":

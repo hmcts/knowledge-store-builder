@@ -180,7 +180,7 @@ def resolve_default(repo_path: Path, default_branch: str | None) -> tuple[str | 
         )
     return None, (
         f"{repo_path.name}: default branch {configured} not found and no origin/HEAD; "
-        "every commit is classed as branch"
+        "every commit not reached by a tag is classed as branch"
     )
 
 
@@ -298,7 +298,7 @@ def get_commits(repo_path: Path, default_branch: str | None = None) -> Iterable[
                 "name": committer_name,
                 "email": committer_email,
             },
-            "refs": [ref.strip() for ref in refs.split(",") if ref.strip()],
+            "refs": [name.strip() for name in refs.split(",") if name.strip()],
             "subject": subject.strip(),
             "body": normalise_message(body),
             "files": files,

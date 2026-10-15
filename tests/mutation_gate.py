@@ -4310,7 +4310,10 @@ MUTATIONS = (
         "        elif sha in tagged:",
         "        elif False:",
         "shipped work on a release line that never merged back was published as a proposed change",
-        ("test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",),
+        (
+            "test_export_git_history.ReachTest.test_a_release_line_reached_only_by_a_tag_is_tag",
+            "test_export_git_history.ReachTest.test_with_nothing_to_resolve_untagged_commits_are_branch_and_tagged_ones_stay_tag",
+        ),
     ),
     Mutation(
         "a branch commit is recorded without the branch it was found on",
