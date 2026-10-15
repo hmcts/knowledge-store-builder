@@ -264,22 +264,29 @@ Two layers connect code to intent:
    a file's `first` and `last` span both its landed and its proposed commits.
 
    `ticket-descriptions.json.gz` holds, per ticket, three text views of what its
-   commits said (`d`, `s`, `b`) and two flags about where they were found:
+   commits said (`d`, `s`, `b`), two more for a landed ticket's branch-only
+   commits (`ps`, `pb`), and two flags about where they were found:
 
    | Field | What it is |
    |---|---|
    | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
    | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
    | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
+   | `ps` | up to three subjects from a landed ticket's branch-only commits, kept out of `d` and `s` |
+   | `pb` | up to two body-prose extracts from a landed ticket's branch-only commits, kept out of `b` |
    | `proposed` | `true` when no landed work names the ticket; omitted otherwise |
    | `branches` | up to five branches the ticket's branch-only commits were found on, across every repository in `repos`, so check the branch exists in the file's repository; omitted when there are none |
 
-   Every one of the three is a **list of strings**. Quote an element, never the
+   Every one of the five is a **list of strings**. Quote an element, never the
    field: `record['d']` is a list, and printing it puts brackets and quotes into
    an answer. `d` is always present and is `[]` on a ticket whose commits
    offered nothing usable; `s` and `b` are each **omitted** when their own pool
-   is empty, so read those two with `.get(..., [])`. Real tracker titles, if
-   imported, are in `ticket-titles.json.gz`.
+   is empty, so read those two with `.get(..., [])`. `ps` and `pb` are
+   **omitted** on a ticket with no branch-only text, and on a `proposed` ticket,
+   whose branch text is in `d`, `s` and `b` because it has no other. Text in
+   `ps` or `pb` is not confirmed on the default branch: say it came from a
+   branch-only commit, never quote it as what the ticket changed. Real tracker
+   titles, if imported, are in `ticket-titles.json.gz`.
 
 Recipe: graph neighbourhood of X → linked features (business language) →
 intent-index tickets for X's source files → what their commits said. Read `d`

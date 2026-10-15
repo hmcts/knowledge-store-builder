@@ -51,8 +51,10 @@ def make_commit(
     path="src/x.ts",
     author=None,
     committer=None,
+    reach=None,
+    ref=None,
 ):
-    return {
+    commit = {
         "repository": repo,
         "subject": subject,
         "is_merge": False,
@@ -62,6 +64,13 @@ def make_commit(
         "committer": committer or author or HUMAN,
         "files": [{"path": path}],
     }
+    # Only when asked: history exported before reach existed carries neither
+    # field, and most tests here describe that history.
+    if reach:
+        commit["reach"] = reach
+    if ref:
+        commit["ref"] = ref
+    return commit
 
 
 def write_ndjson(directory, commits):
@@ -784,7 +793,7 @@ SKILL = ROOT / "skills/knowledge-store/SKILL.md"
 # discovered: the block is found by the filename the skill quotes, and the
 # floor below fails if that stops locating anything.
 ARTEFACT = "ticket-descriptions.json.gz"
-TEXT_VIEWS = ("d", "s", "b")
+TEXT_VIEWS = ("d", "s", "b", "ps", "pb")
 # A list of strings the record carries that is not one of the commit-text views,
 # so a fourth view arriving is not read as this one. `repos` is a list of
 # repository names; the table documents what the commits said. `proposed` and
@@ -837,7 +846,8 @@ def observed_shape() -> dict:
 
     Two runs, because the two claims need different commits: one ticket with
     more distinct text than any cap allows, and one whose commits offered
-    nothing worth keeping.
+    nothing worth keeping. The rich ticket landed and also has branch-only
+    commits, because only that shape writes `ps` and `pb` (#429).
     """
     subjects = [
         "widen the address field to thirty-five characters",
@@ -846,9 +856,12 @@ def observed_shape() -> dict:
         "align the hearing list with the downstream schema",
     ]
     bodies = [f"Body prose number {i} about the address entry rules." for i in range(4)]
-    rich = run_stage([make_commit(f"DD-1: {s}", body=b) for s, b in zip(subjects, bodies)])[0][
-        "DD-1"
+    landed_commits = [make_commit(f"DD-1: {s}", body=b) for s, b in zip(subjects, bodies)]
+    branch_commits = [
+        make_commit(f"DD-1: draft {s}", body=f"Draft {b}", reach="branch", ref="team/draft")
+        for s, b in zip(subjects, bodies)
     ]
+    rich = run_stage(landed_commits + branch_commits)[0]["DD-1"]
     empty = run_stage([make_commit("DD-2")])[0]["DD-2"]
     text_views = {
         field
@@ -918,10 +931,13 @@ commits said:
 | `d` | up to two curated descriptions |
 | `s` | up to three commit subjects as written |
 | `b` | up to two body-prose extracts |
+| `ps` | up to three subjects from branch-only commits |
+| `pb` | up to two body-prose extracts from branch-only commits |
 
-Every one of the three is a list of strings. `d` is always present and is `[]`
+Every one of the five is a list of strings. `d` is always present and is `[]`
 on a ticket whose commits offered nothing usable; `s` and `b` are each
 **omitted** when their own pool is empty, so read those two with `.get`.
+`ps` and `pb` are omitted on a ticket with no branch-only text.
 
 ## The next heading, which bounds the block
 """
@@ -967,14 +983,16 @@ class DocumentedRecordShapeTest(SettingsIsolated):
 
     def test_the_caps_are_the_hand_derived_ones_on_both_sides(self):
         # Derived by hand from the stage: `d` slices at two, SUBJECT_LIMIT is
-        # three, BODY_LIMIT is two. Asserted of the run and of the prose, so
+        # three, BODY_LIMIT is two, and the branch-only views take the same caps
+        # as the views they sit beside. Asserted of the run and of the prose, so
         # neither side is checked only against the other.
-        self.assertEqual(self.observed["caps"], {"d": 2, "s": 3, "b": 2})
-        self.assertEqual(documented_shape(self.skill)["caps"], {"d": 2, "s": 3, "b": 2})
+        caps = {"d": 2, "s": 3, "b": 2, "ps": 3, "pb": 2}
+        self.assertEqual(self.observed["caps"], caps)
+        self.assertEqual(documented_shape(self.skill)["caps"], caps)
 
     def test_only_d_is_written_on_a_ticket_with_nothing_to_store(self):
         self.assertEqual(self.observed["always_present"], {"d"})
-        self.assertEqual(self.observed["omitted"], {"s", "b"})
+        self.assertEqual(self.observed["omitted"], {"s", "b", "ps", "pb"})
 
     def test_the_skill_agrees_with_the_record_it_documents(self):
         problems = shape_problems(self.skill, self.observed)
@@ -1102,6 +1120,27 @@ class RedactedValuesTest(EstateRulesDeclared):
         self.assertEqual(ticket["s"], [f"cannot open the record for {CASE_GONE}"])
         self.assertEqual(
             ticket["b"], [f"{CASE_GONE} - the second entry is missing from the export."]
+        )
+        self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
+
+    def test_branch_only_text_is_redacted_like_landed_text(self):
+        """Catches `ps` and `pb` written from the unredacted commit (#429): they
+        reach the same page as `s` and `b`, so they take the same rules."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit("DD-1: widen the address field to thirty-five characters"),
+                make_commit(
+                    f"DD-1: cannot open the record for {CASE_REFERENCE}",
+                    body=f"{CASE_REFERENCE} - the second entry is missing from the export.",
+                    reach="branch",
+                    ref="team/draft",
+                ),
+            ]
+        )
+        ticket = tickets["DD-1"]
+        self.assertEqual(ticket["ps"], [f"cannot open the record for {CASE_GONE}"])
+        self.assertEqual(
+            ticket["pb"], [f"{CASE_GONE} - the second entry is missing from the export."]
         )
         self.assertNotIn(CASE_REFERENCE, json.dumps(tickets))
 
@@ -1350,6 +1389,18 @@ class CheckEvidenceStageTest(EstateRulesDeclared):
         self.assertIn("field b", output)
         self.assertIn("case-reference", output)
 
+    def test_branch_only_text_is_checked_too(self):
+        """Catches the gate reading only `d`, `s` and `b` (#429): a committed
+        artefact's branch-only text reaches the page like the rest, so a gate
+        blind to it passes a file the page then publishes."""
+        for field in ("ps", "pb"):
+            with self.subTest(field=field):
+                code, output = self._check(
+                    {"DD-1": {"d": [], field: [f"cannot open the record for {CASE_REFERENCE}"]}}
+                )
+                self.assertEqual(code, 1)
+                self.assertIn(f"field {field}", output)
+
     def test_the_gate_never_prints_the_value_it_matched(self):
         _, output = self._check(
             {
@@ -1575,6 +1626,107 @@ class ProposedLinksTest(SettingsIsolated):
         self.assertEqual(len(stored), 1)
         self.assertNotIn("jane.doe@example.example", stored[0])
         self.assertIn("withheld", stored[0])
+
+
+def branch_commit(subject, body="", path="src/x.ts", ref="team/draft"):
+    """A commit found only on a branch, as `export-history` records one."""
+    return make_commit(subject, body=body, path=path, reach="branch", ref=ref)
+
+
+class BranchTextTest(SettingsIsolated):
+    """A landed ticket's branch-only text is kept apart from its landed text (#429).
+
+    The break: the stage pooled every commit's text into `d`, `s` and `b`, so a
+    landed ticket's evidence quoted a branch commit's subject - work nobody can
+    confirm reached the default branch - as ordinary commit evidence. The page
+    and an agent reading the store then state an unmerged draft as what the
+    ticket changed. Driven through the real stage, so the assertions land on the
+    artefact a store commits.
+    """
+
+    LANDED = "widen the address field to thirty-five characters"
+    DRAFT = "draft a second address line for overseas entries"
+    DRAFT_BODY = "Overseas addresses need a second line before the postcode."
+
+    def test_a_landed_tickets_branch_text_is_kept_apart(self):
+        tickets, _, _ = run_stage(
+            [
+                make_commit(f"DD-1: {self.LANDED}", reach="default"),
+                branch_commit(f"DD-1: {self.DRAFT}", body=self.DRAFT_BODY),
+            ]
+        )
+        record = tickets["DD-1"]
+        self.assertEqual(record["d"], [self.LANDED])
+        self.assertEqual(record["s"], [self.LANDED])
+        self.assertNotIn("b", record)
+        self.assertEqual(record["ps"], [self.DRAFT])
+        self.assertEqual(record["pb"], [self.DRAFT_BODY])
+        self.assertNotIn("proposed", record)
+
+    def test_a_proposed_only_ticket_keeps_its_text_in_the_main_fields(self):
+        """Catches a wholly proposed ticket left with an empty `d`: it is labelled
+        as a proposal already, and its text is the only evidence it has."""
+        tickets, _, _ = run_stage([branch_commit(f"DD-2: {self.DRAFT}", body=self.DRAFT_BODY)])
+        record = tickets["DD-2"]
+        self.assertEqual(record["d"], [self.DRAFT])
+        self.assertEqual(record["s"], [self.DRAFT])
+        self.assertEqual(record["b"], [self.DRAFT_BODY])
+        self.assertNotIn("ps", record)
+        self.assertNotIn("pb", record)
+        self.assertTrue(record["proposed"])
+
+    def test_branch_text_that_also_landed_is_not_called_branch_only(self):
+        """Catches a rebased branch's stale commits labelling landed words as
+        branch-only: a branch left behind after a rebase repeats the subjects the
+        default branch carries."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(f"DD-3: {self.LANDED}", body=self.DRAFT_BODY, reach="default"),
+                branch_commit(f"DD-3: {self.LANDED}", body=self.DRAFT_BODY),
+                branch_commit(f"DD-3: {self.DRAFT}"),
+            ]
+        )
+        record = tickets["DD-3"]
+        self.assertEqual(record["s"], [self.LANDED])
+        self.assertEqual(record["b"], [self.DRAFT_BODY])
+        self.assertEqual(record["ps"], [self.DRAFT])
+        self.assertNotIn("pb", record)
+
+    def test_a_branch_commit_whose_content_landed_is_landed_text(self):
+        """Catches squash-merged work's own words labelled as branch-only, when
+        the stage already counts its content as landed."""
+        squashed = branch_commit(f"DD-4: {self.DRAFT}")
+        squashed["files"][0]["landed"] = True
+        tickets, _, _ = run_stage([make_commit(f"DD-4: {self.LANDED}", reach="default"), squashed])
+        record = tickets["DD-4"]
+        self.assertEqual(record["s"], [self.DRAFT, self.LANDED])
+        self.assertNotIn("ps", record)
+
+    def test_a_ticket_with_no_branch_commits_is_unchanged(self):
+        """Catches the separation changing what a store without branch history
+        commits. Literals hand-derived from the stage's rules: two descriptions,
+        ranked by count then length, subjects by count then text."""
+        tickets, _, _ = run_stage(
+            [
+                make_commit(f"DD-5: {self.LANDED}", body=self.DRAFT_BODY, reach="default"),
+                make_commit(f"DD-5: {self.LANDED}"),
+                make_commit(f"DD-5: {self.DRAFT}"),
+            ]
+        )
+        self.assertEqual(
+            json.dumps(tickets["DD-5"]),
+            json.dumps(
+                {
+                    "d": [self.LANDED, self.DRAFT],
+                    "s": [self.LANDED, self.DRAFT],
+                    "b": [self.DRAFT_BODY],
+                    "first": "2024-05-01",
+                    "last": "2024-05-01",
+                    "repos": ["repo-a"],
+                    "n": 3,
+                }
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -447,6 +447,12 @@ def ticket_pool() -> defaultdict[str, dict]:
             "descriptions": defaultdict(int),
             "subjects": defaultdict(int),
             "bodies": defaultdict(int),
+            # The same three pools for commits whose work is on a branch only.
+            # Kept apart so a landed ticket's evidence never quotes a draft as
+            # what it changed (#429); `_ticket_record` decides where they go.
+            "proposed_descriptions": defaultdict(int),
+            "proposed_subjects": defaultdict(int),
+            "proposed_bodies": defaultdict(int),
             "repos": set(),
             "first": None,
             "last": None,
@@ -457,15 +463,19 @@ def ticket_pool() -> defaultdict[str, dict]:
     )
 
 
-def _pool_text(info: dict, description: str, subject: str, prose: str) -> None:
+def _pool_text(
+    info: dict, description: str, subject: str, prose: str, text_landed: bool = True
+) -> None:
     """Add one commit's text to a ticket's pools, skipping what it does not have.
 
     Counted per ticket, not per commit: a commit naming two tickets is evidence
-    about both, and the counts are what ranks the text within each ticket.
+    about both, and the counts are what ranks the text within each ticket. Text
+    from a commit whose work did not land goes to the `proposed_` pools.
     """
+    prefix = "" if text_landed else "proposed_"
     for pool, text in (("descriptions", description), ("subjects", subject), ("bodies", prose)):
         if text:
-            info[pool][text] += 1
+            info[prefix + pool][text] += 1
 
 
 def stored_value(text: str, report: RedactionReport | None = None) -> str:
@@ -562,15 +572,20 @@ def _fold_tickets(
     counts: Counter[str] | None,
 ) -> None:
     """Add one commit to each named ticket's pool: count, repository, dates, text,
-    and where it was found - landed, or the branch it sits on."""
+    and where it was found - landed, or the branch it sits on.
+
+    A branch commit with a file whose content landed is landed text, as
+    `_fold_files` makes its tickets landed: a squash merge put that work on the
+    default branch, and its message is the account of it."""
     is_landed = landed(commit)
+    text_landed = is_landed or any(f.get("landed") for f in commit.get("files", []))
     date = commit["author_date"][:10]
     for ticket in tickets:
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])
         _widen_range(info, date)
-        _pool_text(info, *texts)
+        _pool_text(info, *texts, text_landed=text_landed)
         if is_landed:
             info["landed"] = True
         elif commit.get("ref") and not omit_proposed:
@@ -681,6 +696,30 @@ def _ranked(pool: dict[str, int], limit: int) -> list[str]:
     return [text for text, _ in sorted(pool.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
 
 
+def _text_pools(info: dict) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
+    """`(main, branch_only)` text pools for one ticket, keyed by pool name.
+
+    A ticket that never landed keeps its branch text in the main pools: the whole
+    record is labelled a proposal already, and that text is all it has. Merged by
+    summing counts, so its fields rank exactly as one pool would have ranked them.
+
+    A landed ticket keeps branch text apart, less whatever the landed commits also
+    said: a branch left behind by a rebase repeats subjects the default branch
+    carries, and those words are not branch-only.
+    """
+    names = ("descriptions", "subjects", "bodies")
+    main = {name: dict(info[name]) for name in names}
+    branch = {name: dict(info["proposed_" + name]) for name in names}
+    if info["landed"]:
+        for name in names:
+            branch[name] = {t: n for t, n in branch[name].items() if t not in main[name]}
+        return main, branch
+    for name in names:
+        for text, count in branch[name].items():
+            main[name][text] = main[name].get(text, 0) + count
+    return main, {name: {} for name in names}
+
+
 def _ticket_record(info: dict) -> dict:
     """One ticket's entry in the committed artefact.
 
@@ -694,18 +733,25 @@ def _ticket_record(info: dict) -> dict:
     already read. `s` and `b` are omitted when there is nothing to store: most
     tickets have no body prose at all, and a field present but empty reads as
     evidence that was found rather than evidence that does not exist.
+
+    `ps` and `pb` are the subjects and bodies of a landed ticket's branch-only
+    commits, omitted on the same rule, and written after `b` so a ticket without
+    them serialises byte for byte as it did before they existed (#429).
     """
+    main, branch = _text_pools(info)
     record: dict = {
         "d": [
             d
-            for d, _ in sorted(info["descriptions"].items(), key=lambda kv: (-kv[1], -len(kv[0])))[
+            for d, _ in sorted(main["descriptions"].items(), key=lambda kv: (-kv[1], -len(kv[0])))[
                 :2
             ]
         ]
     }
     for name, texts in (
-        ("s", _ranked(info["subjects"], SUBJECT_LIMIT)),
-        ("b", _ranked(info["bodies"], BODY_LIMIT)),
+        ("s", _ranked(main["subjects"], SUBJECT_LIMIT)),
+        ("b", _ranked(main["bodies"], BODY_LIMIT)),
+        ("ps", _ranked(branch["subjects"], SUBJECT_LIMIT)),
+        ("pb", _ranked(branch["bodies"], BODY_LIMIT)),
     ):
         if texts:
             record[name] = texts

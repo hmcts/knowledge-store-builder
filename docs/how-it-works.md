@@ -117,6 +117,14 @@ the terse subjects a description filter rejects, and the bodies that sit behind 
 perfectly serviceable subject, reachable at all — both are primary evidence, and
 neither survives being collapsed into a single field.
 
+A ticket that landed can also have commits found only on a branch. Their subjects
+and bodies go into two more fields, `ps` and `pb`, and never into the three above,
+so a draft nobody merged cannot be quoted as what the ticket changed. Branch text
+the landed commits also carry stays in the landed fields, because a branch left
+behind by a rebase repeats subjects the default branch already holds. A ticket
+found only on a branch keeps its text in the three main fields: the whole record
+is marked `proposed`, and that text is all the evidence it has.
+
 A body is reduced to prose before it is read: separators, a merge's list of
 commits, git trailers, anything an automated author wrote, and each repository's
 own recurring template lines are discarded, because none of them evidences
@@ -302,7 +310,9 @@ a question already costs. What matches is shown as an additional section, never
 in place of the composed answer, and each piece of evidence appears under the
 name of the field it came from: a reader has to be able to tell a tracker title
 from a commit subject from a commit body, because the store's grounding contract
-turns on which of the three a statement came from.
+turns on which of the three a statement came from. A landed ticket's branch-only
+subjects and bodies are searched too, and shown under a label saying they came
+from branch-only commits.
 
 **Which tickets it returns is decided by how much each matched word tells you.**
 Counting matched words ranks the generic above the distinctive — the same defect

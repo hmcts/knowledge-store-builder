@@ -91,7 +91,7 @@ function readerSees(question) {
   return {
     // `vWhichRepos`'s own answer line for this fixture: the graph route composed
     // an answer and rendered it.
-    composedFromGraph: text.includes('PaymentService appears in 1 repositories'),
+    composedFromGraph: text.includes('PaymentService appears in 1 repository'),
     // `reportUnevidenced`'s card, which it renders as the WHOLE answer.
     abstained: text.includes('No evidence in this estate'),
     text,
