@@ -21,12 +21,14 @@ from knowledgestore import build_source_urls, config, provenance
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 BASE = f"https://github.com/example-org/example-repo/blob/{SHA}/"
+SINGLE_ROOT_BASE = f"https://github.com/example-org/single-root-repo/blob/{SHA}/"
 
 REPOSITORIES_TXT = """\
 # Generated from the example-org organisation repository listing
 # Filtered by config/repository-filters.txt (archived always excluded)
 # Format: name|clone-url|default-branch
 example-repo|git@github.com:example-org/example-repo.git|main
+single-root-repo|git@github.com:example-org/single-root-repo.git|main
 hosted-elsewhere|git@gitlab.example.com:example-org/hosted-elsewhere.git|main
 """
 
@@ -56,12 +58,36 @@ def _graph():
             _code_node("src_case_caseservice", "CaseService", "src/case/CaseService.java", "L12"),
             _code_node("charts_values", "values.yaml", "charts/values.yaml", "values.yaml:149"),
             _code_node("readme", "README.md", "README.md", None),
-            # The single-root route's form of the same repository's file.
+            # A per-repository repository that really holds a top-level
+            # `repositories/` directory. Its other nodes are repo-relative, so these
+            # paths are files in the repository, not a corpus prefix.
+            _code_node(
+                "repositories_other_repo_notes",
+                "notes.md",
+                "repositories/other-repo/notes.md",
+                None,
+            ),
+            _code_node(
+                "repositories_example_repo_index",
+                "index.md",
+                "repositories/example-repo/index.md",
+                None,
+            ),
+            # A repository built by the single-root route: every file-bearing node
+            # carries its own corpus prefix.
             _code_node(
                 "src_case_caseservice_open",
                 "open()",
-                "repositories/example-repo/src/case/CaseService.java",
+                "repositories/single-root-repo/src/case/CaseService.java",
                 "L30-L41",
+                repo="single-root-repo",
+            ),
+            _code_node(
+                "readme",
+                "README.md",
+                "repositories/single-root-repo/README.md",
+                None,
+                repo="single-root-repo",
             ),
             _code_node("ci", "ci.yml", ".gitlab-ci.yml", "L1", repo="hosted-elsewhere"),
             # A Java package-hierarchy node: neither label nor source_file (CLAUDE.md 6.4).
@@ -102,6 +128,7 @@ class SourceUrlsStageTest(SettingsIsolated):
         provenance.write(
             {
                 "example-repo": {"sha": SHA, "branch": "main", "committed": "2026-01-02T03:04:05Z"},
+                "single-root-repo": {"sha": SHA, "branch": "main", "committed": ""},
                 "hosted-elsewhere": {"sha": SHA, "branch": "main", "committed": ""},
             }
         )
@@ -142,9 +169,28 @@ class SourceUrlsStageTest(SettingsIsolated):
         prefix, which names a path that exists in no repository."""
         self._write_graph(_graph())
         self._run()
+        nodes = self._nodes()
         self.assertEqual(
-            self._nodes()["example-repo::src_case_caseservice_open"]["url"],
-            BASE + "src/case/CaseService.java#L30-L41",
+            nodes["single-root-repo::src_case_caseservice_open"]["url"],
+            SINGLE_ROOT_BASE + "src/case/CaseService.java#L30-L41",
+        )
+        self.assertEqual(nodes["single-root-repo::readme"]["url"], SINGLE_ROOT_BASE + "README.md")
+
+    def test_a_real_repositories_directory_is_not_read_as_the_corpus_prefix(self):
+        """Breaks if the route is decided per path. A repository whose files are
+        repo-relative and which holds a `repositories/` directory would have its own
+        `repositories/example-repo/...` stripped to a different file, and its
+        `repositories/other-repo/...` refused."""
+        self._write_graph(_graph())
+        self._run()
+        nodes = self._nodes()
+        self.assertEqual(
+            nodes["example-repo::repositories_other_repo_notes"]["url"],
+            BASE + "repositories/other-repo/notes.md",
+        )
+        self.assertEqual(
+            nodes["example-repo::repositories_example_repo_index"]["url"],
+            BASE + "repositories/example-repo/index.md",
         )
 
     def test_a_node_that_cannot_be_linked_correctly_has_no_url(self):
@@ -172,10 +218,12 @@ class SourceUrlsStageTest(SettingsIsolated):
 
     def test_the_report_counts_what_was_linked_and_why_the_rest_was_not(self):
         """Breaks if the report drops a reason or miscounts. Every node is accounted
-        for: 4 linked, and 5 skipped across four named reasons."""
+        for: 7 linked, and 5 skipped across four named reasons; and the one link an
+        earlier build wrote that this run could not rebuild is counted as removed."""
         self._write_graph(_graph())
         _, report = self._run()
-        self.assertIn("Source URLs: 4 of 9 nodes linked (3 with a line anchor)", report)
+        self.assertIn("Source URLs: 7 of 12 nodes linked (3 with a line anchor)", report)
+        self.assertIn("removed 1 links an earlier build wrote", report)
         self.assertIn("2 no source_file", report)
         self.assertIn("1 no repo", report)
         self.assertIn("1 clone URL is not on github.com", report)
@@ -184,12 +232,15 @@ class SourceUrlsStageTest(SettingsIsolated):
     def test_a_rerun_is_byte_identical(self):
         """Breaks if a second run reorders keys or rewrites links differently - two
         runs on the same inputs must produce the same bytes (CLAUDE.md 1.3)."""
+        archive = config.GRAPH_PATH.with_name("graph.json.gz")
         self._write_graph(_graph())
         self._run()
-        first = config.GRAPH_PATH.read_bytes()
+        first, first_archive = config.GRAPH_PATH.read_bytes(), archive.read_bytes()
         code, _ = self._run()
         self.assertEqual(code, 0)
         self.assertEqual(config.GRAPH_PATH.read_bytes(), first)
+        # The archive is what a store commits, so it is the copy that must not churn.
+        self.assertEqual(archive.read_bytes(), first_archive)
 
     def test_a_missing_graph_is_refused(self):
         """Breaks if the stage reports success with no graph to annotate."""
@@ -198,10 +249,14 @@ class SourceUrlsStageTest(SettingsIsolated):
         self.assertIn("Graph not found", report)
 
     def test_a_malformed_repository_list_is_refused_and_nothing_is_written(self):
-        """Breaks if a list the stage cannot read is treated as an empty estate, which
-        strips every link from the graph and exits 0."""
+        """Breaks if a list the stage cannot read is treated as an estate of nothing.
+
+        The graph carries no link here on purpose. With one, the stage's "would link
+        none" refusal also fires and this test could not tell the two guards apart;
+        without one, a stage reading the list as empty proceeds to rewrite both files
+        and exits 0, so this refusal is the only thing that stops it."""
         graph = _graph()
-        graph["nodes"][0]["url"] = BASE + "src/case/CaseService.java#L12"
+        graph["nodes"] = [node for node in graph["nodes"] if "url" not in node]
         self._write_graph(graph)
         before = config.GRAPH_PATH.read_bytes()
         config.REPOSITORIES_CONFIG.write_text("example-repo|only-two-fields\n", encoding="utf-8")
@@ -209,3 +264,57 @@ class SourceUrlsStageTest(SettingsIsolated):
         self.assertEqual(code, 1)
         self.assertIn("repositories.txt", report)
         self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
+
+    # --- refusing to strip an estate's links --------------------------------
+
+    def _write_linked_pair(self):
+        """A graph that already carries links, in both files, as a store commits it."""
+        graph = _graph()
+        graph["nodes"][0]["url"] = BASE + "src/case/CaseService.java#L12"
+        serialised = json.dumps(graph)
+        config.GRAPH_PATH.write_text(serialised, encoding="utf-8")
+        with gzip.open(config.GRAPH_PATH.with_name("graph.json.gz"), "wt", encoding="utf-8") as f:
+            f.write(serialised)
+        return config.GRAPH_PATH.read_bytes(), config.GRAPH_PATH.with_name(
+            "graph.json.gz"
+        ).read_bytes()
+
+    def _assert_nothing_written(self, before):
+        self.assertEqual(
+            (
+                config.GRAPH_PATH.read_bytes(),
+                config.GRAPH_PATH.with_name("graph.json.gz").read_bytes(),
+            ),
+            before,
+            "a refusal must leave both graph files as they were",
+        )
+
+    def test_missing_provenance_is_refused_and_nothing_is_written(self):
+        """Breaks if a machine without `knowledge/provenance.json` strips every
+        published link and exits 0: every node would fall to "no provenance sha"."""
+        before = self._write_linked_pair()
+        config.PROVENANCE_PATH.unlink()
+        code, report = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn("provenance.json is missing or records no repository", report)
+        self._assert_nothing_written(before)
+
+    def test_provenance_recording_no_repository_is_refused(self):
+        """Breaks if an empty provenance file is read as permission to unlink everything."""
+        before = self._write_linked_pair()
+        config.PROVENANCE_PATH.write_text(json.dumps({"repositories": {}}), encoding="utf-8")
+        code, _ = self._run()
+        self.assertEqual(code, 1)
+        self._assert_nothing_written(before)
+
+    def test_a_run_that_would_remove_every_link_is_refused(self):
+        """Breaks if a store whose repository list is missing - provenance present -
+        loses every link it published. Nothing can be linked, the graph carried links,
+        so the stage refuses and says why rather than writing."""
+        before = self._write_linked_pair()
+        config.REPOSITORIES_CONFIG.unlink()
+        code, report = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn("would link none", report)
+        self.assertIn("repository not in config/repositories.txt", report)
+        self._assert_nothing_written(before)

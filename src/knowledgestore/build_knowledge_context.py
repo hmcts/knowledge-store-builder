@@ -142,20 +142,27 @@ It combines:
 
 ## Source-of-truth rules
 
-The checked-out code under `repositories/` is the source of truth for the
-current implementation.
+For whoever holds the corpus, the checked-out code under `repositories/` is
+the source of truth for the current implementation. The corpus is not
+committed, so it is never what a citation points at.
 
-Cite a file as a link pinned to the commit the store was built from:
+In an answer or an exported finding, cite a file as a link pinned to the
+commit the store was built from:
 
     https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>
 
-Graph nodes carry this link in their `url` field: copy it. Where a node has
-none, build the same form from the repository's github.com clone URL in
-`config/repositories.txt` and its sha in `knowledge/provenance.json`, and
-leave off `#L<line>` when no line is known. If neither gives a link, cite the
-repository and its repo-relative path and say no link is available.
-Never cite `repositories/<repo>/...`: the corpus is not committed, so no
-reader can open that path.
+Graph nodes carry this link in their `url` field: copy it. In a store where
+nodes carry `url`, a node without one was refused a link for a reason (another
+host, no recorded commit, a path outside its repository): cite its repository
+and repo-relative path, and say no link is available. Build the form yourself
+only for a file no node names, such as a corpus-search match, or in a store
+where no node carries `url`, from the repository's github.com clone URL in
+`config/repositories.txt` and its sha in `knowledge/provenance.json`; leave
+off `#L<line>` when no line is known. Never cite `repositories/<repo>/...`:
+no reader can open that path.
+
+Authored topic briefs and deep dives keep file paths in backticks instead:
+the page renderer links them, and renders no hand-written link.
 
 The files under `knowledge/git-history/` describe how the implementation
 changed over time. Historical commit messages may be incomplete, outdated

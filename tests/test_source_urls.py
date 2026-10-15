@@ -96,24 +96,57 @@ class TheRepositoryRelativePath(unittest.TestCase):
         `repositories/<repo>/...` inside the repository, which does not exist."""
         self.assertEqual(source_urls.repo_relative("example-repo", "src/app.py"), "src/app.py")
         self.assertEqual(
-            source_urls.repo_relative("example-repo", "repositories/example-repo/src/app.py"),
+            source_urls.repo_relative(
+                "example-repo", "repositories/example-repo/src/app.py", single_root=True
+            ),
             "src/app.py",
         )
 
+    def test_a_per_repository_path_beginning_repositories_is_a_real_path(self):
+        """Breaks if a repository that really holds a `repositories/` directory has
+        its paths read as the corpus prefix: its own name stripped to a different
+        file, another name refused."""
+        for path in ("repositories/example-repo/index.md", "repositories/other-repo/notes.md"):
+            with self.subTest(path=path):
+                self.assertEqual(source_urls.repo_relative("example-repo", path), path)
+
     def test_a_path_that_is_not_inside_its_own_repository_names_nothing(self):
-        """Breaks if a prefix naming a different repository is stripped anyway,
-        which would link one repository's file under another's name."""
+        """Breaks if a single-root path naming a different repository is stripped
+        anyway, which would link one repository's file under another's name."""
         for path in (
             "repositories/other-repo/src/app.py",
             "repositories/example-repo",
             "repositories/example-repo/",
+            "src/app.py",
+        ):
+            with self.subTest(path=path, route="single-root"):
+                self.assertIsNone(source_urls.repo_relative("example-repo", path, single_root=True))
+        for path in (
             "/home/build/store/repositories/example-repo/src/app.py",
             "../example-repo/src/app.py",
             "src/../../escape.py",
             "",
         ):
-            with self.subTest(path=path):
+            with self.subTest(path=path, route="per-repository"):
                 self.assertIsNone(source_urls.repo_relative("example-repo", path))
+
+
+class TheBuildRoute(unittest.TestCase):
+    def test_a_repository_is_single_root_only_when_every_file_carries_its_prefix(self):
+        """Breaks if one prefixed path is enough to call a repository single-root,
+        which is the per-path misreading: a real `repositories/` directory in a
+        per-repository build would have its paths stripped."""
+        nodes = [
+            {"repo": "single", "source_file": "repositories/single/a.py"},
+            {"repo": "single", "source_file": "repositories/single/b/c.py"},
+            {"repo": "single"},  # a package node with no file decides nothing
+            {"repo": "mixed", "source_file": "repositories/mixed/a.py"},
+            {"repo": "mixed", "source_file": "src/b.py"},
+            {"repo": "plain", "source_file": "src/a.py"},
+            {"repo": "foreign", "source_file": "repositories/other/a.py"},
+            {"repo": "", "source_file": "repositories/x/a.py"},
+        ]
+        self.assertEqual(source_urls.single_root_repositories(nodes), {"single"})
 
 
 def _builder() -> source_urls.SourceUrls:
@@ -124,12 +157,14 @@ def _builder() -> source_urls.SourceUrls:
             "hosted-elsewhere": "git@gitlab.example.com:example-org/hosted-elsewhere.git",
             "never-synced": "git@github.com:example-org/never-synced.git",
             "bad-sha": "git@github.com:example-org/bad-sha.git",
+            "short-sha": "git@github.com:example-org/short-sha.git",
         },
         shas={
             "example-repo": SHA,
             "renamed-locally": OTHER_SHA,
             "hosted-elsewhere": SHA,
             "bad-sha": "",
+            "short-sha": "0123abc",
             "unconfigured": SHA,
         },
     )
@@ -151,7 +186,9 @@ class BuildingTheUrl(unittest.TestCase):
         """Breaks if the single-root route gets a different (wrong) link."""
         urls = _builder()
         self.assertEqual(
-            urls.resolve("example-repo", "repositories/example-repo/src/a.py").url,
+            urls.resolve(
+                "example-repo", "repositories/example-repo/src/a.py", single_root=True
+            ).url,
             urls.resolve("example-repo", "src/a.py").url,
         )
 
@@ -184,8 +221,8 @@ class BuildingTheUrl(unittest.TestCase):
         the consuming store's committed links encode it, and one file spelled two
         ways makes the same citation compare unequal across the two writers."""
         self.assertEqual(
-            _builder().file_url("example-repo", "sql/Static (Add Keys).sql"),
-            f"https://github.com/example-org/example-repo/blob/{SHA}/sql/Static%20%28Add%20Keys%29.sql",
+            _builder().file_url("example-repo", "db/Example Table (Draft).sql"),
+            f"https://github.com/example-org/example-repo/blob/{SHA}/db/Example%20Table%20%28Draft%29.sql",
         )
 
     def test_no_url_is_written_where_one_cannot_be_right(self):
@@ -196,8 +233,11 @@ class BuildingTheUrl(unittest.TestCase):
             ("hosted-elsewhere", "src/a.py"): source_urls.NOT_GITHUB,
             ("never-synced", "src/a.py"): source_urls.NO_SHA,
             ("bad-sha", "src/a.py"): source_urls.NO_SHA,
+            # Its own reason: "no sha" beside a provenance file that has one sends an
+            # operator to look in the wrong place.
+            ("short-sha", "src/a.py"): source_urls.MALFORMED_SHA,
             ("unconfigured", "src/a.py"): source_urls.NOT_CONFIGURED,
-            ("example-repo", "repositories/other-repo/a.py"): source_urls.OUTSIDE_REPOSITORY,
+            ("example-repo", "../a.py"): source_urls.OUTSIDE_REPOSITORY,
         }
         for (repo, path), reason in cases.items():
             with self.subTest(repo=repo, path=path):
@@ -254,7 +294,8 @@ class TheSkillCarriesTheCitationRule(unittest.TestCase):
         """Breaks if the skill goes back to telling agents to cite `source_file`
         alone, which in a single-root store is a `repositories/...` corpus path."""
         text = " ".join(self.SKILL.read_text(encoding="utf-8").split())
-        self.assertIn("Cite a node's `url` for specific claims", text)
+        self.assertIn("In an answer or an exported finding, cite a node's `url`", text)
+        self.assertIn("Build the form yourself only for a file no node names", text)
         self.assertIn("https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>", text)
         self.assertIn("**Never cite `repositories/<repo>/...`**", text)
         self.assertNotIn("Cite `source_file` / `source_location` for specific claims", text)

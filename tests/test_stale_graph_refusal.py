@@ -177,10 +177,13 @@ class StaleRefusalTest(SettingsIsolated):
     def test_source_urls_refuses_and_writes_nothing(self):
         """Breaks if the fourth stage that rewrites both graph files is left unguarded.
 
-        It reads nothing else the fixture lacks - with no repository list it links no
-        node and proceeds to the write - so the refusal is the only thing standing
-        between it and the archive."""
+        Provenance is recorded so the stage's own provenance refusal cannot stand in
+        for this one: with it, a graph carrying no links proceeds to the write, so the
+        stale-graph refusal is the only thing between it and the archive."""
         self.write_pair(agree=False)
+        from knowledgestore import provenance
+
+        provenance.write({"a": {"sha": "0" * 40, "branch": "main", "committed": ""}})
         from knowledgestore import build_source_urls
 
         self._assert_stage_refuses(build_source_urls.main)

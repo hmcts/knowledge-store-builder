@@ -24,10 +24,19 @@ or malformed sha, a repository the store never configured, or a path that is not
 inside its own repository gets no URL, and `resolve` says which of those it was.
 The reasons are reported, never guessed around.
 
-Both build routes are accepted. The per-repository route writes repo-relative
-`source_file`s; the single-root route writes `repositories/<repo>/<path>`, which
-`io.report_join_cardinality` describes. The prefix is stripped only when it names
-the node's own repository.
+Both build routes are accepted, and which one a repository came through is
+decided per repository, never per path. The per-repository route writes
+repo-relative `source_file`s; the single-root route writes
+`repositories/<repo>/<path>`, which `io.report_join_cardinality` describes. A
+repository is read as single-root only when every one of its nodes with a
+`source_file` carries its own prefix (`single_root_repositories`). Deciding per
+path misread a repository that really holds a top-level `repositories/`
+directory: its own files were stripped to a different path, and its files under
+another name were refused.
+
+**The sha is the synced head.** `sync` records it, so a refresh that syncs a
+repository without re-extracting it pins the old graph's line numbers to the new
+commit. Re-extract after a sync before trusting a line anchor.
 """
 
 from __future__ import annotations
@@ -47,6 +56,7 @@ NO_REPO = "no repo"
 NOT_CONFIGURED = "repository not in config/repositories.txt"
 NOT_GITHUB = "clone URL is not on github.com"
 NO_SHA = "no provenance sha"
+MALFORMED_SHA = "malformed provenance sha"
 OUTSIDE_REPOSITORY = "source_file is not a path inside its repository"
 
 # The host is anchored on both sides: `notgithub.com` and `github.com.example.com`
@@ -65,6 +75,10 @@ _SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 # The first line a `source_location` names, and a range end directly after it.
 # graphify writes `L26`, `L5-L9`, `values.yaml:149`, `a.sql:1-19`, `lines 75, 109`
 # and `1-9`; a location naming no line (`variables.tf`, `apps[3]`) gets no anchor.
+# This is the consuming store's regex verbatim, quirks included, and they are kept
+# on purpose for byte parity with the links it has published: a reversed range
+# `L20-L12` stays reversed, `host:8080` reads as line 8080 and `1.2.3` as line 1.
+# Do not tidy it without changing that store's links in the same release.
 _LINE = re.compile(r"(?:^(?:lines?\s+)?|:)L?(\d+)(?:\s*-\s*L?(\d+))?")
 # Only the separator is kept raw. Narrower than RFC 3986 needs - `(` would be safe -
 # and deliberately so: it is the escaping the consuming store's links already use,
@@ -89,19 +103,38 @@ def line_anchor(source_location: object) -> str:
     return f"#L{start}-L{end}" if end and end != start else f"#L{start}"
 
 
-def repo_relative(repo: str, path: str) -> str | None:
-    """The path inside `repo`, from either build route's form, or None.
+def single_root_repositories(nodes) -> set[str]:
+    """Repositories every one of whose file-bearing nodes carries its own corpus prefix.
 
-    None for anything that does not name a file inside this repository: a corpus
-    prefix naming a different repository, an absolute (in-flight) path, or a path
-    climbing out with `..`. Linking any of those would name the wrong file.
+    That is the single-root route's signature. A repository with even one node whose
+    `source_file` lacks `repositories/<repo>/` came through the per-repository route,
+    and a path in it that begins `repositories/` is a real directory in the repository.
+    """
+    prefixed: dict[str, bool] = {}
+    for node in nodes:
+        repo, path = node.get("repo"), node.get("source_file")
+        if not (isinstance(repo, str) and repo and isinstance(path, str) and path):
+            continue
+        own = path.startswith(f"{CORPUS_PREFIX}{repo}/")
+        prefixed[repo] = prefixed.get(repo, True) and own
+    return {repo for repo, every in prefixed.items() if every}
+
+
+def repo_relative(repo: str, path: str, single_root: bool = False) -> str | None:
+    """The path inside `repo`, or None when it names no file inside it.
+
+    `single_root` says which route the repository came through, from
+    `single_root_repositories`. Only then is `repositories/<repo>/` stripped; on the
+    per-repository route the path is already repo-relative, whatever it begins with.
+    None for an absolute (in-flight) path or one climbing out with `..`.
     """
     if not path or path.startswith("/"):
         return None
-    if path.startswith(CORPUS_PREFIX):
-        owner, _, path = path[len(CORPUS_PREFIX) :].partition("/")
-        if owner != repo:
+    if single_root:
+        own = f"{CORPUS_PREFIX}{repo}/"
+        if not path.startswith(own):
             return None
+        path = path[len(own) :]
     segments = path.split("/")
     if not path or any(segment in ("", ".", "..") for segment in segments):
         return None
@@ -131,8 +164,10 @@ class SourceUrls:
             sha = shas.get(repo)
             if origin is None:
                 self._missing[repo] = NOT_GITHUB
-            elif not isinstance(sha, str) or not _SHA.match(sha):
+            elif not isinstance(sha, str) or not sha:
                 self._missing[repo] = NO_SHA
+            elif not _SHA.match(sha):
+                self._missing[repo] = MALFORMED_SHA
             else:
                 org, name = origin
                 self._bases[repo] = f"https://github.com/{org}/{name}/blob/{sha}/"
@@ -159,8 +194,17 @@ class SourceUrls:
         }
         return cls(clone_urls, shas)
 
-    def resolve(self, repo: object, path: object, source_location: object = None) -> Resolution:
-        """The URL for one file, anchored at `source_location`'s line where it names one."""
+    def resolve(
+        self,
+        repo: object,
+        path: object,
+        source_location: object = None,
+        single_root: bool = False,
+    ) -> Resolution:
+        """The URL for one file, anchored at `source_location`'s line where it names one.
+
+        `single_root` is the repository's route, from `single_root_repositories`.
+        """
         if not isinstance(path, str) or not path:
             return Resolution(None, NO_SOURCE_FILE)
         if not isinstance(repo, str) or not repo:
@@ -168,7 +212,7 @@ class SourceUrls:
         base = self._bases.get(repo)
         if base is None:
             return Resolution(None, self._missing.get(repo, NOT_CONFIGURED))
-        inside = repo_relative(repo, path)
+        inside = repo_relative(repo, path, single_root)
         if inside is None:
             return Resolution(None, OUTSIDE_REPOSITORY)
         return Resolution(base + quote(inside, safe=_PATH_SAFE) + line_anchor(source_location), "")

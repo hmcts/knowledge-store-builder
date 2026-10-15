@@ -12,13 +12,20 @@ so an agent answering from the graph copies a link rather than assembling one.
 **Every node is accounted for.** The report names how many nodes were linked and
 how many were not, by reason: a node with no `source_file` (a Java package
 node, a module referenced from outside the estate), no `repo`, a repository on
-another host, one the store does not configure or holds no provenance sha for,
-or a path that is not inside its own repository. A store whose provenance is
-missing reads as "0 linked" with the reason beside it, never as success.
+another host, one the store does not configure, a missing or malformed
+provenance sha, or a path that is not inside its own repository.
 
-**A node that cannot be linked correctly loses any link it had.** A repository
-that has left the configuration, or moved host, still carries the link an
-earlier build wrote; leaving it would cite a commit this build did not read.
+**A node that cannot be linked correctly loses any link it had, and the loss is
+counted.** A repository that has left the configuration, or moved host, still
+carries the link an earlier build wrote; leaving it would cite a commit this build
+did not read. Per node that is right. Across the estate it is not: a missing
+local file must not strip every link a store has published and exit 0. So:
+
+- removed links are printed on their own line, never folded into the skip counts;
+- the stage refuses, writing nothing, when `knowledge/provenance.json` is missing
+  or records no repository - every node would fall to "no provenance sha";
+- it refuses, writing nothing, when the graph carried links and this run would
+  link none, whatever the reason.
 
 Run after `gherkin`, `packages` and `deployments`, so the nodes they add are
 linked too, and before clustering: like them it rewrites both graph files, and
@@ -31,34 +38,58 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
+from dataclasses import dataclass, field
 
-from . import config, graph_files, io
-from .source_urls import SourceUrls
+from . import config, graph_files, io, provenance
+from .source_urls import SourceUrls, single_root_repositories
 
 
-def annotate(graph: dict, urls: SourceUrls) -> tuple[int, int, Counter]:
-    """Set or clear `url` on every node; return (linked, anchored, skipped by reason)."""
-    linked = anchored = 0
-    skipped: Counter = Counter()
-    for node in graph["nodes"]:
+@dataclass
+class Outcome:
+    """What one pass did to the graph's links."""
+
+    total: int = 0
+    linked: int = 0
+    anchored: int = 0
+    carried: int = 0  # nodes that held a `url` before this pass
+    removed: int = 0  # of those, the ones left without one
+    skipped: Counter = field(default_factory=Counter)
+
+
+def annotate(graph: dict, urls: SourceUrls) -> Outcome:
+    """Set or clear `url` on every node, and account for each one."""
+    nodes = graph["nodes"]
+    single_root = single_root_repositories(nodes)
+    outcome = Outcome(total=len(nodes))
+    for node in nodes:
         # Popped first so a link lands in the same key position on every run.
-        node.pop("url", None)
-        found = urls.resolve(node.get("repo"), node.get("source_file"), node.get("source_location"))
+        had = node.pop("url", None) is not None
+        outcome.carried += had
+        repo = node.get("repo")
+        found = urls.resolve(
+            repo, node.get("source_file"), node.get("source_location"), repo in single_root
+        )
         if found.url is None:
-            skipped[found.reason] += 1
+            outcome.skipped[found.reason] += 1
+            outcome.removed += had
             continue
         node["url"] = found.url
-        linked += 1
-        anchored += "#L" in found.url
-    return linked, anchored, skipped
+        outcome.linked += 1
+        outcome.anchored += "#L" in found.url
+    return outcome
 
 
-def report(total: int, linked: int, anchored: int, skipped: Counter) -> str:
-    lines = [f"Source URLs: {linked} of {total} nodes linked ({anchored} with a line anchor)"]
-    if skipped:
-        lines.append(f"  not linked: {sum(skipped.values())}")
+def report(outcome: Outcome) -> str:
+    lines = [
+        f"Source URLs: {outcome.linked} of {outcome.total} nodes linked "
+        f"({outcome.anchored} with a line anchor)"
+    ]
+    if outcome.removed:
+        lines.append(f"  removed {outcome.removed} links an earlier build wrote")
+    if outcome.skipped:
+        lines.append(f"  not linked: {sum(outcome.skipped.values())}")
         # Largest first, then by name, so two runs print the same lines.
-        for reason, count in sorted(skipped.items(), key=lambda kv: (-kv[1], kv[0])):
+        for reason, count in sorted(outcome.skipped.items(), key=lambda kv: (-kv[1], kv[0])):
             lines.append(f"    {count} {reason}")
     return "\n".join(lines)
 
@@ -71,6 +102,14 @@ def main() -> int:
     if refusal:
         print(refusal, file=sys.stderr)
         return 1
+    if not provenance.read():
+        print(
+            f"Refusing to run: {config.PROVENANCE_PATH} is missing or records no "
+            "repository, so no node can be linked and every link the graph carries "
+            "would be removed. Run `knowledgestore sync`, which records it, then re-run.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         urls = SourceUrls.from_store()
     except ValueError as error:
@@ -79,14 +118,24 @@ def main() -> int:
         return 1
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
-    linked, anchored, skipped = annotate(graph, urls)
+    outcome = annotate(graph, urls)
+    if outcome.carried and not outcome.linked:
+        # Flushed so the reasons land above the refusal that points at them.
+        print(report(outcome), flush=True)
+        print(
+            f"Refusing to write: the graph carried {outcome.carried} links and this run "
+            "would link none, so every one would be removed. Nothing was written; the "
+            "reasons above say why no node could be linked.",
+            file=sys.stderr,
+        )
+        return 1
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:
         out.write(serialised)
 
-    print(report(len(graph["nodes"]), linked, anchored, skipped))
+    print(report(outcome))
     return 0
 
 

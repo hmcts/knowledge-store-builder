@@ -85,6 +85,10 @@ class BuildOutputsTest(SettingsIsolated):
         )
         self.assertIn("their `url` field", content)
         self.assertIn("Never cite `repositories/<repo>/...`", content)
+        self.assertIn("In an answer or an exported finding, cite a file as a link", content)
+        # The corpus is authoritative only for whoever holds it; an unqualified
+        # "source of truth" beside "never cite it" reads as a contradiction.
+        self.assertIn("For whoever holds the corpus, the checked-out code", content)
 
     def test_manifest_includes_provenance_when_recorded(self):
         # arrange a history dir with one repo and a provenance file
