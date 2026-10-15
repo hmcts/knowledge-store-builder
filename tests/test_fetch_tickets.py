@@ -395,6 +395,280 @@ class OutcomeTest(FetchTicketsTestCase):
         self.assertIn("1 failed", output)
 
 
+def open_fields(summary: str, status: str = "In Progress") -> dict:
+    """A search-response `fields` object for a ticket nobody has resolved."""
+    return {
+        "summary": summary,
+        "issuetype": {"name": "Bug"},
+        "status": {"name": status},
+        "resolution": None,
+        "created": "2025-01-05T08:00:00.000+0000",
+        "resolutiondate": None,
+    }
+
+
+# Seven days after TODAY, the shipped default interval, and the day before it.
+A_WEEK_LATER = "2026-01-09"
+SIX_DAYS_LATER = "2026-01-08"
+
+
+class RefreshTest(FetchTicketsTestCase):
+    """An open ticket's record is asked about again once it is old enough (#421).
+
+    A resolved ticket is history and is never re-requested. An unresolved one is
+    still changing, so a record fetched while it was open freezes its status,
+    description and comments at that moment unless a later run asks again.
+    """
+
+    def test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old(self):
+        """Breaks if a fetched record is final again, which is the defect: the
+        ticket resolved in the tracker and the store still says In Progress,
+        for ever. Also pins the shipped seven-day default, since this test
+        configures no interval."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": open_fields("Still open")}))
+            first = self._cache()["AAA-1"]
+            later = FakeTracker({"AAA-1": fields_for("Now finished")})
+            code, output = self._run_stage(later, today=A_WEEK_LATER)
+            record = self._cache()["AAA-1"]
+        self.assertEqual(first["checked"], TODAY, "an open record carries the day it was read")
+        self.assertEqual(code, 0)
+        self.assertEqual(later.keys_requested, ["AAA-1"])
+        self.assertEqual(
+            record,
+            {
+                "created": "2024-03-04",
+                "resolution": "Fixed",
+                "resolved": "2024-03-09",
+                "status": "Done",
+                "summary": "Now finished",
+                "type": "Story",
+            },
+            "a resolved record is final, so it carries no checked date",
+        )
+        self.assertIn("refreshed 1 of 1 due, with 0 left for later runs, in 1 requests", output)
+
+    def test_an_open_ticket_is_not_fetched_again_inside_the_interval(self):
+        """Breaks if the minimum age is ignored, so every run re-requests every
+        open ticket - on a large estate that is most of a first run's traffic
+        again on every build, for answers that rarely changed overnight."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": open_fields("Still open")}))
+            later = FakeTracker({"AAA-1": fields_for("Now finished")})
+            code, output = self._run_stage(later, today=SIX_DAYS_LATER)
+            record = self._cache()["AAA-1"]
+        self.assertEqual(code, 0)
+        self.assertEqual(later.urls, [])
+        self.assertEqual(record["summary"], "Still open")
+        self.assertIn("refreshed 0 of 0 due", output, "reported at zero too")
+
+    def test_a_resolved_ticket_is_never_fetched_again(self):
+        """Breaks if the refresh stops telling resolved from unresolved and
+        re-requests the whole cache once it ages - historic tickets do not
+        change, and a refresh of every one of them is a first run every week."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": fields_for("Long finished")}))
+            later = FakeTracker({"AAA-1": fields_for("Edited since")})
+            self._run_stage(later, today="2027-06-01")
+            record = self._cache()["AAA-1"]
+        self.assertEqual(later.urls, [])
+        self.assertEqual(record["summary"], "Long finished")
+        self.assertNotIn("checked", record)
+
+    def test_a_ticket_resolved_without_a_resolution_name_is_still_resolved(self):
+        """Breaks if only the resolution name counts. A workflow can set the
+        resolution date without a named resolution, and that ticket is as
+        finished as any other."""
+        dated = {**open_fields("Closed by date"), "resolutiondate": "2024-03-09T17:30:00.000+0000"}
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            self._run_stage(FakeTracker({"AAA-1": dated}))
+            later = FakeTracker({"AAA-1": dated})
+            self._run_stage(later, today="2027-06-01")
+        self.assertEqual(later.urls, [])
+
+    def test_the_interval_is_read_from_its_setting(self):
+        """Breaks if `KSB_TICKET_REFRESH_DAYS` is not what decides the age - an
+        estate that wants daily status could not have it, and one on a strict
+        rate limit could not lengthen it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"], TICKET_REFRESH_DAYS=1)
+            self._run_stage(FakeTracker({"AAA-1": open_fields("Still open")}))
+            later = FakeTracker({"AAA-1": open_fields("Still open", status="In Review")})
+            self._run_stage(later, today="2026-01-03")
+            record = self._cache()["AAA-1"]
+        self.assertEqual(later.keys_requested, ["AAA-1"])
+        self.assertEqual(record["status"], "In Review")
+        self.assertEqual(record["checked"], "2026-01-03", "the date moves with the refresh")
+
+    def test_an_open_record_with_no_checked_date_is_due(self):
+        """Breaks if a record written before refresh existed counts as fresh.
+        Every open record in a cache committed by an older release has no date,
+        and treating "no date" as "just read" would leave exactly those records
+        frozen - the defect, surviving the fix."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"])
+            pio.write_gzip_json(
+                config.TICKET_TRACKER_PATH, {"AAA-1": {"status": "Open", "summary": "Old"}}
+            )
+            tracker = FakeTracker({"AAA-1": fields_for("Now finished")})
+            self._run_stage(tracker)
+            record = self._cache()["AAA-1"]
+        self.assertEqual(tracker.keys_requested, ["AAA-1"])
+        self.assertEqual(record["summary"], "Now finished")
+
+    def test_a_refresh_the_tracker_does_not_answer_keeps_the_earlier_record(self):
+        """Breaks if a refresh can downgrade what the store knows. A search
+        omits tickets the token cannot browse, so a run by someone with narrower
+        access sees a fetched ticket as missing; cached as absent, it would never
+        be asked about again and its text would be gone. A denial is the same
+        loss by another route."""
+        for name, later in (
+            ("missing from the reply", FakeTracker({})),
+            ("denied", FakeTracker({}, statuses=[403])),
+        ):
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                self._store(tmp, ["AAA-1"])
+                self._run_stage(FakeTracker({"AAA-1": open_fields("Still open")}))
+                before = self._cache()["AAA-1"]
+                code, output = self._run_stage(later, today=A_WEEK_LATER)
+                after = self._cache()["AAA-1"]
+            self.assertEqual(code, 0)
+            self.assertEqual(later.keys_requested, ["AAA-1"])
+            self.assertEqual(after, before)
+            self.assertIn("1 kept their earlier record", output)
+
+
+def open_record(summary: str, checked: str | None = None) -> dict:
+    """A cached open ticket as `fetch-tickets` writes it, `checked` optional."""
+    record = {"status": "Open", "summary": summary}
+    if checked is not None:
+        record["checked"] = checked
+    return record
+
+
+class RefreshBoundsTest(FetchTicketsTestCase):
+    """Refreshing open tickets must not inflate a run's cost or time.
+
+    Four bounds: age, a per-run cap taken oldest first, batching through the
+    same paged request, and candidates limited to tickets the store still cites.
+    """
+
+    def _seed(self, records: dict) -> None:
+        pio.write_gzip_json(config.TICKET_TRACKER_PATH, records)
+
+    def test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over(self):
+        """Breaks if the cap is ignored, so every due record refreshes in one
+        run. A store upgrading from a release without refresh has every open
+        record due at once, and that whole backlog would land on one build.
+        Also pins the three telemetry measurements."""
+        keys = [f"AAA-{n}" for n in range(1, 6)]
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, keys, TICKET_REFRESH_MAX=2)
+            self._seed({key: open_record(key, "2025-12-01") for key in keys})
+            first = FakeTracker({key: open_fields(key) for key in keys})
+            _code, output = self._run_stage(first)
+            measured = json.loads(config.TELEMETRY_PATH.read_text(encoding="utf-8"))
+            second = FakeTracker({key: open_fields(key) for key in keys})
+            self._run_stage(second)
+        self.assertEqual(first.keys_requested, ["AAA-1", "AAA-2"])
+        self.assertIn("refreshed 2 of 5 due, with 3 left for later runs, in 1 requests", output)
+        self.assertEqual(second.keys_requested, ["AAA-3", "AAA-4"], "the rest drain next run")
+        self.assertEqual(
+            {k: v for k, v in measured["measurements"].items() if k.startswith("tickets.")},
+            {"tickets.refresh_due": 5, "tickets.refresh_requests": 1, "tickets.refreshed": 2},
+        )
+
+    def test_the_oldest_records_are_refreshed_first(self):
+        """Breaks if the cap takes records in key order, or newest first: an old
+        record could then wait behind fresher ones indefinitely while the cap
+        keeps refreshing the same few. No date counts as the oldest of all."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3", "AAA-4"], TICKET_REFRESH_MAX=2)
+            self._seed(
+                {
+                    "AAA-1": open_record("one", "2025-12-20"),
+                    "AAA-2": open_record("two", "2025-11-01"),
+                    "AAA-3": open_record("three", "2025-12-01"),
+                    "AAA-4": open_record("four"),
+                }
+            )
+            tracker = FakeTracker({f"AAA-{n}": open_fields(str(n)) for n in range(1, 5)})
+            self._run_stage(tracker)
+        self.assertEqual(tracker.keys_requested, ["AAA-4", "AAA-2"])
+
+    def test_the_selection_is_the_same_whatever_order_keys_arrive_in(self):
+        """Breaks if two records read on the same day are chosen by the order
+        the keys happened to arrive in rather than by key. The selection decides
+        which records change in a committed artefact, so it must not depend on
+        iteration order. Called directly, because the stage hands it keys that
+        are already sorted, which would hide a missing tiebreak."""
+        cache = {key: open_record(key, "2025-12-01") for key in ("AAA-1", "AAA-2", "AAA-3")}
+        config.configure(TICKET_REFRESH_DAYS=7, TICKET_REFRESH_MAX=2)
+        forwards = fetch_tickets.refresh_plan(["AAA-1", "AAA-2", "AAA-3"], cache, TODAY)
+        backwards = fetch_tickets.refresh_plan(["AAA-3", "AAA-2", "AAA-1"], cache, TODAY)
+        self.assertEqual(forwards, (["AAA-1", "AAA-2"], 3))
+        self.assertEqual(backwards, forwards)
+
+    def test_zero_days_turns_refresh_off(self):
+        """Breaks if 0 means "every run" instead of off. 0 is the documented way
+        back to the behaviour before refresh existed, and reading it as the
+        opposite would make the escape hatch the most expensive setting."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1"], TICKET_REFRESH_DAYS=0)
+            self._seed({"AAA-1": open_record("Still open")})
+            tracker = FakeTracker({"AAA-1": open_fields("Changed")})
+            _code, output = self._run_stage(tracker)
+            record = self._cache()["AAA-1"]
+        self.assertEqual(tracker.urls, [])
+        self.assertEqual(record["summary"], "Still open")
+        self.assertIn("refreshed 0 of 0 due", output)
+        self.assertIn("refresh is off", output)
+
+    def test_refreshes_are_batched_into_pages_of_their_own(self):
+        """Breaks if a refresh costs a request per ticket rather than sharing
+        the paged search - three due records must be one request, not three -
+        or if refresh requests stop being counted apart from new fetches."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp, ["AAA-1", "AAA-2", "AAA-3", "AAA-4"])
+            self._seed({f"AAA-{n}": open_record(str(n), "2025-12-01") for n in (1, 2, 3)})
+            tracker = FakeTracker({f"AAA-{n}": open_fields(str(n)) for n in range(1, 5)})
+            _code, output = self._run_stage(tracker)
+        self.assertEqual(
+            [requested_keys(url) for url in tracker.urls],
+            [["AAA-4"], ["AAA-1", "AAA-2", "AAA-3"]],
+            "new tickets first, then one page of refreshes",
+        )
+        self.assertIn("in 1 requests", output)
+        self.assertIn("(2 requests", output)
+
+    def test_a_ticket_the_store_no_longer_cites_is_not_refreshed(self):
+        """Breaks if refresh candidates are drawn from the cache rather than
+        from the tickets the intent stage found this time. A ticket no commit
+        cites any more costs a request and changes nothing anyone can reach,
+        and a prefix withdrawn into the deny list must not be read again by
+        the back door."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(
+                tmp, ["AAA-1", "BBB-1"], TRACKER_PROJECTS={"AAA", "BBB"}, TRACKER_DENY={"BBB"}
+            )
+            self._seed(
+                {
+                    "AAA-1": open_record("cited", "2025-12-01"),
+                    "AAA-9": open_record("orphaned", "2025-12-01"),
+                    "BBB-1": open_record("withdrawn", "2025-12-01"),
+                }
+            )
+            tracker = FakeTracker({k: open_fields(k) for k in ("AAA-1", "AAA-9", "BBB-1")})
+            self._run_stage(tracker)
+            cache = self._cache()
+        self.assertEqual(tracker.keys_requested, ["AAA-1"])
+        self.assertEqual(cache["AAA-9"]["summary"], "orphaned", "kept, just not paid for")
+
+
 class RateLimitTest(FetchTicketsTestCase):
     def test_retry_after_is_honoured_before_the_page_is_retried(self):
         """Breaks if a 429 is treated as a failure, or retried immediately.
@@ -523,6 +797,7 @@ class ProjectionTest(FetchTicketsTestCase):
         self.assertEqual(
             record,
             {
+                "checked": TODAY,
                 "created": "2025-01-05",
                 "status": "In Progress",
                 "summary": "Still open",

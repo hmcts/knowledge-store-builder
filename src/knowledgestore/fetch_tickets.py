@@ -1,11 +1,15 @@
-"""Ask the issue tracker what each discovered ticket is, once per ticket ever.
+"""Ask the issue tracker what each discovered ticket is.
 
 The `intent` stage finds ticket ids in commit messages; it cannot say what those
 tickets were about beyond what the commits said. This stage asks the tracker, and
-commits the answer to `knowledge/intent/ticket-tracker.json.gz`. Historic tickets
-do not change, so a ticket that has been fetched is never fetched again - the
-cache is the artefact, and a later build with no credentials reads it rather than
-degrading.
+commits the answer to `knowledge/intent/ticket-tracker.json.gz`. Resolved tickets
+do not change, so a resolved ticket that has been fetched is never fetched again -
+the cache is the artefact, and a later build with no credentials reads it rather
+than degrading. An unresolved ticket is still changing: its record carries the
+day it was read, and is asked about again once it is `KSB_TICKET_REFRESH_DAYS`
+old (#421). Refresh is bounded so it cannot inflate a run: at most
+`KSB_TICKET_REFRESH_MAX` records per run, oldest first, in their own batched
+pages, and only for tickets the store still cites.
 
     knowledgestore fetch-tickets
 
@@ -68,9 +72,9 @@ import urllib.request
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from . import __version__, config, io, sensitive
+from . import __version__, config, io, sensitive, telemetry
 from .build_intent_index import truncate
 
 
@@ -358,16 +362,77 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
     return {name: value for name, value in sorted(record.items()) if value or name == "summary"}
 
 
-def needs_request(record: object) -> bool:
-    """Whether a cached record should be asked about again.
+def is_fetched(record: object) -> bool:
+    """Whether a cached record holds what the tracker said about the ticket.
 
-    Fetched and absent are final. Denied is not: it records what one token could
-    read, and a later run may hold broader permissions. Anything that is not a
-    mapping is a cache written by another version, and is re-fetched.
+    `projected_record` always keeps `summary`, and no other outcome has one."""
+    return isinstance(record, dict) and "summary" in record
+
+
+def is_resolved(record: dict) -> bool:
+    """Whether the tracker had finished with the ticket when it was read.
+
+    Either field is enough: a workflow can stamp the resolution date without
+    naming a resolution, and that ticket is as finished as any other."""
+    return bool(record.get("resolution") or record.get("resolved"))
+
+
+def _age_in_days(checked: object, today: str) -> int | None:
+    """Days between a record's `checked` date and today; None if unreadable."""
+    try:
+        return (date.fromisoformat(today) - date.fromisoformat(str(checked))).days
+    except ValueError:
+        return None
+
+
+def needs_request(record: object) -> bool:
+    """Whether a cached record has never had an answer worth keeping.
+
+    Fetched and absent are answers. Denied is not: it records what one token
+    could read, and a later run may hold broader permissions. Anything that is
+    not a mapping is a cache written by another version, and is re-fetched.
+    Asking again about a fetched open ticket is a refresh, which is bounded
+    separately - see `refresh_plan`.
     """
     if not isinstance(record, dict):
         return True
     return bool(record.get("denied"))
+
+
+def refresh_due(record: object, today: str) -> bool:
+    """Whether a fetched open ticket's record is old enough to ask about again.
+
+    A record with no readable date - every open record an older release wrote -
+    is due rather than presumed fresh. Zero days turns refresh off.
+    """
+    if config.TICKET_REFRESH_DAYS <= 0:
+        return False
+    if not isinstance(record, dict) or not is_fetched(record) or is_resolved(record):
+        return False
+    age = _age_in_days(record.get(CHECKED), today)
+    return age is None or age >= config.TICKET_REFRESH_DAYS
+
+
+def _read_on(record: dict) -> str:
+    """The date a record was read, for ordering. No date sorts as the oldest."""
+    checked = record.get(CHECKED)
+    return checked if isinstance(checked, str) else ""
+
+
+def refresh_plan(keys: Iterable[str], cache: dict, today: str) -> tuple[list[str], int]:
+    """The open tickets this run asks about again, and how many were due.
+
+    Candidates are `keys` - the tickets the store still cites - never the whole
+    cache, so a ticket no commit mentions any more is not paid for. The oldest
+    read go first, the key breaking ties, and at most `KSB_TICKET_REFRESH_MAX` are
+    taken: the rest stay due and carry to the next run, so a large backlog drains
+    over several runs rather than landing on one.
+    """
+    due = sorted(
+        (key for key in keys if refresh_due(cache.get(key), today)),
+        key=lambda key: (_read_on(cache[key]), key),
+    )
+    return due[: max(config.TICKET_REFRESH_MAX, 0)], len(due)
 
 
 # --- the run -------------------------------------------------------------
@@ -380,6 +445,13 @@ class Report:
     denied: int = 0
     failed: int = 0
     cached: int = 0
+    # Open tickets asked about again, and those whose refresh brought back
+    # something other than the ticket - kept as they were (see `_settle`).
+    refreshed: int = 0
+    kept: int = 0
+    # How many open records were due, and the requests their refresh cost.
+    refresh_due: int = 0
+    refresh_requests: int = 0
     requests: int = 0
     redactions: Counter[str] = field(default_factory=Counter)
     # Statuses that carried no answer, and how many tickets each covered.
@@ -434,16 +506,45 @@ def _issues(body: str) -> dict[str, dict] | None:
     }
 
 
+def fetched_record(issue: dict, counts: Counter[str], today: str) -> dict:
+    """The record a fetched ticket is cached as. An unresolved one carries the
+    day it was read, which is what tells a later run when to ask again; a
+    resolved one is final and carries no date, so it never churns."""
+    record = projected_record(issue, counts)
+    if is_resolved(record):
+        return record
+    return dict(sorted({**record, CHECKED: today}.items()))
+
+
+def _settle(cache: dict, key: str, record: dict, report: Report) -> bool:
+    """Store one outcome, unless it would lose what the store already knows.
+
+    Only a fetched answer replaces a fetched record. A search leaves out tickets
+    the token cannot browse, so a refresh by someone with narrower access sees a
+    fetched ticket as missing - and absent is final, so caching it would delete
+    the ticket's text for good. A denial is the same loss by another route.
+    Returns whether the outcome was stored.
+    """
+    previous = cache.get(key)
+    if is_fetched(previous):
+        if not is_fetched(record):
+            report.kept += 1
+            return False
+        report.refreshed += 1
+    cache[key] = record
+    return True
+
+
 def _record_outcomes(
     keys: Sequence[str], issues: dict, cache: dict, report: Report, today: str
 ) -> None:
     for key in keys:
         issue = issues.get(key)
         if issue is None:
-            cache[key] = {"absent": True, CHECKED: today}
-            report.absent += 1
+            if _settle(cache, key, {"absent": True, CHECKED: today}, report):
+                report.absent += 1
         else:
-            cache[key] = projected_record(issue, report.redactions)
+            _settle(cache, key, fetched_record(issue, report.redactions, today), report)
             report.fetched += 1
 
 
@@ -457,8 +558,8 @@ def apply_page(
         return
     if response.status in DENIED_STATUSES:
         for key in keys:
-            cache[key] = {"denied": True, CHECKED: today}
-        report.denied += len(keys)
+            if _settle(cache, key, {"denied": True, CHECKED: today}, report):
+                report.denied += 1
         return
     issues = _issues(response.body) if response.status == 200 else None
     if issues is None:
@@ -483,17 +584,28 @@ def fetch(
     sleep: Callable[[float], None],
     today: str,
 ) -> Report:
-    """Fetch every outstanding key, a page at a time, writing as it goes."""
+    """Fetch every outstanding key, then the refreshes this run allows, a page
+    at a time, writing as it goes.
+
+    Refreshes get pages of their own, after the new tickets, through the same
+    batched request: what a refresh cost is then a count of whole requests, and
+    a new ticket is never held back behind an old one.
+    """
     report = Report()
     outstanding = [key for key in keys if needs_request(cache.get(key))]
-    report.cached = len(keys) - len(outstanding)
+    refreshing, report.refresh_due = refresh_plan(keys, cache, today)
+    report.cached = len(keys) - len(outstanding) - len(refreshing)
     fields = projected_fields()
     headers = request_headers()
-    for index, page in enumerate(pages(outstanding, max(1, config.TRACKER_PAGE_SIZE))):
+    size = max(1, config.TRACKER_PAGE_SIZE)
+    batches = [(page, False) for page in pages(outstanding, size)]
+    batches += [(page, True) for page in pages(refreshing, size)]
+    for index, (page, refresh) in enumerate(batches):
         if index:
             sleep(config.TRACKER_DELAY_SECONDS)
         response = request_page(search_url(root, page, fields), headers, opener, sleep)
         report.requests += 1
+        report.refresh_requests += int(refresh)
         apply_page(page, response, cache, report, today)
         # After every page, not at the end of the run: a throttled or cancelled
         # run must leave a usable cache and resume where it stopped.
@@ -519,6 +631,28 @@ def _report_failures(report: Report) -> None:
             "GET /rest/api/2/search. Cloud authenticates with Basic and has removed "
             "that endpoint, so no setting here will make it answer."
         )
+
+
+def _report_refresh(report: Report) -> None:
+    """Reported every run, even at zero, so a refresh that has stopped happening
+    is visible rather than indistinguishable from nothing being open. Whatever
+    was due and not refreshed stays due, so it is what later runs inherit."""
+    left = report.refresh_due - report.refreshed
+    off = "" if config.TICKET_REFRESH_DAYS > 0 else "; refresh is off (KSB_TICKET_REFRESH_DAYS=0)"
+    print(
+        f"  refreshed {report.refreshed:,} of {report.refresh_due:,} due, with {left:,} left "
+        f"for later runs, in {report.refresh_requests:,} requests; {report.kept:,} kept "
+        f"their earlier record because the tracker did not return them{off}"
+    )
+
+
+def refresh_measurements(report: Report) -> dict[str, int]:
+    """What the refresh cost, for `knowledge/telemetry.json`."""
+    return {
+        "tickets.refreshed": report.refreshed,
+        "tickets.refresh_due": report.refresh_due,
+        "tickets.refresh_requests": report.refresh_requests,
+    }
 
 
 def _report_redactions(report: Report) -> None:
@@ -552,6 +686,7 @@ def summarise(report: Report, cache: dict, part: Partition) -> None:
         f"({report.requests:,} requests, {report.cached:,} already cached)"
     )
     _report_failures(report)
+    _report_refresh(report)
     _report_redactions(report)
     _report_prefixes(part)
     # Reported every run, even at zero. A denial says what this token could read,
@@ -617,6 +752,7 @@ def main(
     )
     write_cache(cache)
     summarise(report, cache, part)
+    telemetry.record(refresh_measurements(report))
     return 0
 
 

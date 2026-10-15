@@ -794,8 +794,10 @@ With no credentials it names the missing settings, writes nothing and exits 0 â€
 that is a correct outcome, not a failure to work around. **Do not obtain or
 invent credentials to make it run**, and never put a token on a command line or
 into any file in the store; it comes from the environment the operator set up.
-Fetched tickets are never re-fetched, so a build without credentials reads the
-committed cache. Commit `knowledge/intent/ticket-tracker.json.gz` with the rest.
+Resolved tickets are never re-fetched, so a build without credentials reads the
+committed cache; an unresolved ticket is requested again once its record is
+`KSB_TICKET_REFRESH_DAYS` old, at most `KSB_TICKET_REFRESH_MAX` per run. Commit
+`knowledge/intent/ticket-tracker.json.gz` with the rest.
 
 Four numbers from its report belong in yours, and three of them are findings
 rather than statistics:

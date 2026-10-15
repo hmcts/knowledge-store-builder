@@ -4301,6 +4301,207 @@ MUTATIONS = (
         "secret in round 1 is handed them in round 2, and the report still says masked",
         ("test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",),
     ),
+    Mutation(
+        "ticket refresh: a fetched record is final again",
+        "fetch_tickets.py",
+        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
+        "    return False\n",
+        "the shipped defect in #421: any fetched record counted as final, so a ticket "
+        "fetched while open kept that status, description and comments for ever, and "
+        "one store deleted its unresolved records before every run to work around it",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_a_ticket_the_store_no_longer_cites_is_not_refreshed",
+            "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+            "test_fetch_tickets.RefreshTest.test_a_refresh_the_tracker_does_not_answer_keeps_the_earlier_record",
+            "test_fetch_tickets.RefreshTest.test_an_open_record_with_no_checked_date_is_due",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+            "test_fetch_tickets.RefreshTest.test_the_interval_is_read_from_its_setting",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: the minimum age is ignored",
+        "fetch_tickets.py",
+        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
+        "    return True\n",
+        "the easy over-correction of #421: every run re-requests every open ticket, "
+        "which on a large estate is most of a first run's traffic again on each build",
+        (
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_not_fetched_again_inside_the_interval",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: an undated open record is presumed fresh",
+        "fetch_tickets.py",
+        "    return age is None or age >= config.TICKET_REFRESH_DAYS\n",
+        "    return age is not None and age >= config.TICKET_REFRESH_DAYS\n",
+        "every open record in a cache committed before #421 has no date, so reading "
+        "no date as just-read leaves exactly the records the issue was about frozen",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
+            "test_fetch_tickets.RefreshTest.test_an_open_record_with_no_checked_date_is_due",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: resolved tickets are re-requested",
+        "fetch_tickets.py",
+        '    return bool(record.get("resolution") or record.get("resolved"))\n',
+        "    return False\n",
+        "the refresh that cannot tell resolved from open re-requests the whole cache "
+        "once it ages, which is a first run every interval for answers that cannot change",
+        (
+            "test_fetch_tickets.ProjectionTest.test_projected_fields_are_stored_in_reduced_form",
+            "test_fetch_tickets.RefreshTest.test_a_resolved_ticket_is_never_fetched_again",
+            "test_fetch_tickets.RefreshTest.test_a_ticket_resolved_without_a_resolution_name_is_still_resolved",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: a ticket resolved by date alone reads as open",
+        "fetch_tickets.py",
+        '    return bool(record.get("resolution") or record.get("resolved"))\n',
+        '    return bool(record.get("resolution"))\n',
+        "a workflow can stamp the resolution date without naming a resolution, and "
+        "reading only the name re-requests those finished tickets every interval",
+        (
+            "test_fetch_tickets.RefreshTest.test_a_ticket_resolved_without_a_resolution_name_is_still_resolved",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: an open record carries no date",
+        "fetch_tickets.py",
+        "    return dict(sorted({**record, CHECKED: today}.items()))\n",
+        "    return record\n",
+        "without the day it was read, an open record's age is unknowable, so it is due "
+        "on every run and the interval does nothing",
+        (
+            "test_fetch_tickets.ProjectionTest.test_an_open_ticket_stores_no_empty_fields",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_not_fetched_again_inside_the_interval",
+            "test_fetch_tickets.RefreshTest.test_the_interval_is_read_from_its_setting",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: a refresh downgrades a fetched record",
+        "fetch_tickets.py",
+        "        if not is_fetched(record):\n            report.kept += 1\n            return False\n",
+        "",
+        "a search omits tickets the token cannot browse, so a refresh by a narrower "
+        "operator caches a fetched ticket as absent - which is final - and its text is "
+        "gone from the store for good",
+        (
+            "test_fetch_tickets.RefreshTest.test_a_refresh_the_tracker_does_not_answer_keeps_the_earlier_record",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: refreshes are not counted",
+        "fetch_tickets.py",
+        "        report.refreshed += 1\n",
+        "",
+        "#421 asks the run to say how many records it refreshed; a refresh that stops "
+        "happening is otherwise indistinguishable from nothing being open",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: the per-run cap is ignored",
+        "fetch_tickets.py",
+        "    return due[: max(config.TICKET_REFRESH_MAX, 0)], len(due)\n",
+        "    return due, len(due)\n",
+        "a store upgrading from a release without refresh has every open record due at once, and an uncapped refresh lands that whole backlog on one build",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: the cap takes the newest first",
+        "fetch_tickets.py",
+        "        key=lambda key: (_read_on(cache[key]), key),\n",
+        "        key=lambda key: (_read_on(cache[key]), key),\n        reverse=True,\n",
+        "the cap then keeps refreshing the records read most recently, and the oldest wait for ever",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: the cap takes keys in key order",
+        "fetch_tickets.py",
+        "        key=lambda key: (_read_on(cache[key]), key),\n",
+        "        key=lambda key: key,\n",
+        "ordering by key alone ignores age, so the same low-numbered tickets win every run while older records wait",
+        ("test_fetch_tickets.RefreshBoundsTest.test_the_oldest_records_are_refreshed_first",),
+    ),
+    Mutation(
+        "ticket refresh: ties follow the order keys arrived in",
+        "fetch_tickets.py",
+        "        key=lambda key: (_read_on(cache[key]), key),\n",
+        "        key=lambda key: (_read_on(cache[key]),),\n",
+        "which records change in a committed artefact would then depend on iteration order rather than on the inputs",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_the_selection_is_the_same_whatever_order_keys_arrive_in",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: zero days refreshes every run",
+        "fetch_tickets.py",
+        "    if config.TICKET_REFRESH_DAYS <= 0:\n        return False\n",
+        "",
+        "0 is the documented way back to the behaviour before refresh existed; read as an age it is the most expensive setting instead",
+        ("test_fetch_tickets.RefreshBoundsTest.test_zero_days_turns_refresh_off",),
+    ),
+    Mutation(
+        "ticket refresh: one request per refreshed ticket",
+        "fetch_tickets.py",
+        "    batches += [(page, True) for page in pages(refreshing, size)]\n",
+        "    batches += [(page, True) for page in pages(refreshing, 1)]\n",
+        "a refresh outside the paged search costs a request per ticket, which is the cost the stage's batching exists to avoid",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: refresh requests are not counted",
+        "fetch_tickets.py",
+        "        report.refresh_requests += int(refresh)\n",
+        "",
+        "what a refresh cost is only measurable if its requests are counted apart from new fetches",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_refreshes_are_batched_into_pages_of_their_own",
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+            "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: tickets the store no longer cites are refreshed",
+        "fetch_tickets.py",
+        "        (key for key in keys if refresh_due(cache.get(key), today)),\n",
+        "        (key for key in cache if refresh_due(cache.get(key), today)),\n",
+        "candidates drawn from the cache pay for tickets no commit cites any more, and re-read prefixes withdrawn into the deny list",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_a_ticket_the_store_no_longer_cites_is_not_refreshed",
+        ),
+    ),
+    Mutation(
+        "ticket refresh: refresh cost is not recorded in telemetry",
+        "fetch_tickets.py",
+        "    telemetry.record(refresh_measurements(report))\n",
+        "",
+        "without a recorded predecessor the next run cannot say whether refresh cost moved",
+        (
+            "test_fetch_tickets.RefreshBoundsTest.test_the_cap_bounds_refreshes_per_run_and_the_rest_carry_over",
+        ),
+    ),
 )
 
 

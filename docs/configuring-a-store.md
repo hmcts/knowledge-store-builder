@@ -28,6 +28,8 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_TRACKER_FETCH_COMMENTS` | `false` | Add each ticket's comments to the request |
 | `KSB_TRACKER_PAGE_SIZE` | `100` | Tickets per search request |
 | `KSB_TRACKER_DELAY_SECONDS` | `1` | Pause between requests |
+| `KSB_TICKET_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
+| `KSB_TICKET_REFRESH_MAX` | `200` | Most open tickets one run requests again, oldest first. The rest wait for later runs |
 | `KSB_AUTOMATION_IDENTITIES` | `jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa` | Author or committer identities whose commit bodies are not treated as evidence. Matched as whole words against the name and the email's local part, so narrow it if a contributor shares a name with a build server — the run reports which identities it filtered. GitHub App accounts are always excluded via `[bot]` and need no entry; an empty value leaves only that rule |
 
 The full set, including tuning thresholds, is defined in
@@ -40,9 +42,12 @@ build or refresh.
 `fetch-tickets` asks the tracker what each discovered ticket is and commits the
 answer to `knowledge/intent/ticket-tracker.json.gz`. It is **opt-in**: with no
 base URL or token it names the missing settings, writes nothing, and the rest of
-the pipeline runs unchanged. Historic tickets do not change, so a ticket that has
-been fetched is never fetched again — a later build with no credentials reads the
-committed cache rather than degrading.
+the pipeline runs unchanged. A resolved ticket that has been fetched is never
+fetched again, so a later build with no credentials reads the committed cache
+rather than degrading. An unresolved ticket is still changing: its record carries
+the date it was read, and a run requests it again once that date is
+`KSB_TICKET_REFRESH_DAYS` old, within the bounds described in
+[Refreshing open tickets](#refreshing-open-tickets).
 
 The stage speaks Jira Data Center or Server: a personal access token sent as a
 Bearer credential, and `GET /rest/api/2/search`. Against Jira Cloud the search
@@ -71,7 +76,8 @@ two matters:
 
 | Outcome | Cached as | Asked about again |
 |---|---|---|
-| Fetched | the projected fields, redacted | No |
+| Fetched, resolved | the projected fields, redacted | No |
+| Fetched, unresolved | the projected fields, redacted, with the date | Once the date is `KSB_TICKET_REFRESH_DAYS` old |
 | Not in the response | `absent`, with the date | No |
 | Access denied (401, 403) | `denied`, with the date | **Yes** |
 | Transport error, 5xx, or a reply that is not a search response | not cached | Yes |
@@ -80,6 +86,38 @@ A token carries one person's permissions, so a denial records what this operator
 could read, not what exists. Recorded as absence it would never be retried and
 the gap would become permanent and invisible; every run reports how many tickets
 are waiting on access it does not have.
+
+### Refreshing open tickets
+
+A ticket's status and text change until it is resolved, so the stage asks about
+an open ticket again once its record is old enough. Two settings bound what that
+costs:
+
+| Setting | What it buys | What it costs |
+|---|---|---|
+| `KSB_TICKET_REFRESH_DAYS` (default `7`) | How stale an open ticket's record can get | A shorter interval makes more records due each run. `0` turns refresh off: open tickets keep the record from their first fetch, which is how the stage behaved before refresh existed |
+| `KSB_TICKET_REFRESH_MAX` (default `200`) | How many due records one run brings up to date | At most `KSB_TICKET_REFRESH_MAX ÷ KSB_TRACKER_PAGE_SIZE` extra requests per run, rounded up — two at the defaults — each followed by the `KSB_TRACKER_DELAY_SECONDS` pause |
+
+Refreshes go through the same batched search as new tickets, in pages of their
+own after them, so they add whole requests rather than one per ticket. When more
+records are due than the cap allows, the oldest go first and the rest stay due:
+the first run after upgrading from a release without refresh finds every open
+record due, and that backlog drains over several runs rather than landing on one.
+Only tickets the store still cites are refreshed; a cached ticket that no commit
+mentions any more, or whose prefix is now in `KSB_TRACKER_DENY`, is kept as it
+is and never requested.
+
+Each run prints `refreshed N of M due, with K left for later runs, in R
+requests`, and records `tickets.refreshed`, `tickets.refresh_due` and
+`tickets.refresh_requests` in `knowledge/telemetry.json`, so the next run says
+whether the cost moved.
+
+A refresh never downgrades a record. If the tracker leaves a fetched ticket out
+of its reply, or denies the page, the earlier record is kept and the run reports
+it as kept: a search omits tickets the token cannot browse, so an operator with
+narrower access would otherwise turn known text into a permanent `absent`.
+A ticket resolved by either a resolution name or a resolution date counts as
+resolved.
 
 ## Use BDD specifications
 
