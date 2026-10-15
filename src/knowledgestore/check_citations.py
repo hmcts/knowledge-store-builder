@@ -105,11 +105,15 @@ from .source_urls import (
 # The supported spelling of the private function. An alias rather than a copy.
 normalise = _normalise
 
-_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+# Public: `answers` reads answers by the same rule, and a rename here must not
+# silently become a break there. `SPAN` stays backticks only, because `answers`
+# masks code spans with it.
+FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+SPAN = re.compile(r"`([^`\n]+)`")
 # A backticked span, or a github.com link written outside one. The link stops at
 # the characters that end it in markdown - `)` closing a link, `>` an autolink -
 # which `source_urls` always percent-encodes inside a path.
-_SPAN = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"]+)")
+_CITED = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"]+)")
 _SENTENCE_END = ".,;:!?"
 UNKNOWN_FILE = "unknown file"
 DIFFERENT_SHA = "different sha"
@@ -318,11 +322,23 @@ def resolve(span: str, vocabulary: Vocabulary) -> Verdict:
     return Verdict("unresolved", vocabulary.labels[close] if close else "")
 
 
+def spans(text: str) -> list[str]:
+    """Inline backticked spans outside fenced code blocks, in order, de-duplicated.
+
+    `answers` lists these first and its own URL and corpus-path finds after them;
+    a record's citation order is part of what it writes, so it reads spans alone.
+    """
+    seen: dict[str, None] = {}
+    for match in SPAN.finditer(FENCE.sub("", text)):
+        seen.setdefault(match.group(1).strip(), None)
+    return list(seen)
+
+
 def citations(text: str) -> list[str]:
     """Inline backticked spans, and source links written anywhere, outside fenced
     code blocks - in order, de-duplicated."""
     seen: dict[str, None] = {}
-    for match in _SPAN.finditer(_FENCE.sub("", text)):
+    for match in _CITED.finditer(FENCE.sub("", text)):
         if match.group(1) is not None:
             seen.setdefault(match.group(1).strip(), None)
             continue

@@ -809,6 +809,68 @@ was about 1.7–2.2 billion, more than 30 times higher, and nothing showed the
 gap until someone measured. Mark any figure in a runbook that was not measured
 as an estimate, and give the date it was last measured.
 
+### Measuring what each answer cost
+
+Compare a store's answers before and after a change, per question, without
+running a full evaluation.
+
+```bash
+sessions=~/.claude/projects/<project>
+mkdir -p runs
+
+# Before the change: mark the start, ask the questions, keep this run's sessions.
+touch runs/before.start
+# ... ask the questions ...
+find "$sessions" -maxdepth 1 -name '*.jsonl' -newer runs/before.start > runs/before.txt
+xargs knowledgestore answers --store . --out before.jsonl < runs/before.txt
+
+# Make the change, then the same again for the second run.
+touch runs/after.start
+# ... ask the same questions ...
+find "$sessions" -maxdepth 1 -name '*.jsonl' -newer runs/after.start > runs/after.txt
+xargs knowledgestore answers --store . --out after.jsonl < runs/after.txt
+
+knowledgestore answers --compare before.jsonl after.jsonl
+```
+
+**Name each run's own session files.** Pointing both runs at the whole project
+folder makes the second file a superset of the first, and every question is
+then compared against a mix of both runs. The time window above keeps them
+apart; naming the session files by hand does too. `answers` finds each
+session's subagents from the session file, so name only the top-level
+`*.jsonl` files.
+
+`answers` reads Claude Code transcripts after the session, and needs the store's
+graph to class citations: without one it exits 2. Without `--out` it prints a
+summary and writes nothing. It exits 2 if no session held a prompt.
+
+**One record per answer.** An answer runs from one prompt to the next. A tool
+result, a background agent's notice, an interrupt marker or a `!` shell line
+does not open a new one. Subagents the
+answer dispatched are folded into it, and a linked subagent transcript that is
+missing is counted, because that answer then reads low. Usage is de-duplicated
+by message id exactly as `cost` does it, `input` means what it means there, and
+`output_floor` is a floor for the same reason. Dollars appear only when a
+headless result names a session holding exactly one answer.
+
+`store_files` counts files under the store: what a `Read` opened, and the file
+paths a `Grep`, `Glob` or `Bash` call named. Only files count, so a search
+over a directory adds nothing. A path inside a script passed to an
+interpreter, such as `python -c "open('a.md')"`, is not counted.
+
+**Citations get one class each:** `resolves` against the store graph,
+`pinned_url` (a blob URL at a 40-hex commit), `corpus_path` (a
+`repositories/...` path, which no reader can open), `unresolved`, `column`, or
+`skipped`. An answer that states something is absent has the sentence quoted,
+so a reader can overrule it.
+
+**`--compare` pairs by exact question text.** A question asked in only one run
+is listed under that run. A question asked several times in one run is
+compared as the median of its repetitions, and the repetitions are listed.
+
+These are measures of cost and citation hygiene. A cheaper, better-cited answer
+can still be wrong: correctness needs judging.
+
 ## 8. Keeping a store honest
 
 - **Never state a count in prose.** Repository, node and coverage figures are
