@@ -6443,6 +6443,148 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
         ),
     ),
+    # #437. None of these removes the migration or the retry themselves: the
+    # real-git test observes those only where the filesystem folds case, so an
+    # entry for them would name different observers on macOS and on Linux.
+    Mutation(
+        "sync case collision: an unrelated fetch failure migrates the clone",
+        "sync_repositories.py",
+        '    if not any(symptom in (error.stderr or "") for symptom in _COLLISION_SYMPTOMS):\n'
+        "        return []\n",
+        "",
+        "#437: an unreachable remote would rewrite the clone's ref store and then fail anyway, "
+        "where it used to fail and touch nothing",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_an_unrelated_fetch_failure_behaves_as_before",
+        ),
+    ),
+    Mutation(
+        "sync case collision: git's wording alone decides",
+        "sync_repositories.py",
+        "    return case_colliding_branches(listing)\n",
+        '    return case_colliding_branches(listing) or [["(unconfirmed)"]]\n',
+        "#437: `cannot lock ref` is also a branch named like another's directory, which "
+        "reftable does not fix, so the clone is migrated for nothing",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_lock_failure_without_a_case_collision_is_not_migrated",
+        ),
+    ),
+    Mutation(
+        "sync case collision: git 2.46 is trusted to migrate a clone",
+        "git_version.py",
+        "FLOOR = (2, 48)\n",
+        "FLOOR = (2, 46)\n",
+        "#437: `refs migrate` exists from 2.46 but refuses a repository holding reflogs until "
+        "2.48, and every clone holds them, so the operator gets git's refusal instead of the fix",
+        (
+            "test_git_version_floor.StagesRefuseAnOldGit.test_every_git_using_stage_refuses",
+            "test_git_version_floor.StagesRefuseAnOldGit.test_git_2_47_is_refused_naming_the_version_and_the_floor",
+            "test_git_version_floor.StagesRefuseAnOldGit.test_unreadable_version_output_is_refused_clearly",
+            "test_git_version_floor.StatusReportsAnOldGit.test_status_reports_an_old_git_and_still_exits_zero",
+            "test_git_version_floor.VersionFlagReportsGit.test_version_names_git_and_the_floor",
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_git_too_old_to_migrate_names_the_branches_and_the_command",
+        ),
+    ),
+    Mutation(
+        "sync case collision: a reftable clone is migrated again",
+        "sync_repositories.py",
+        '    if run(["-C", str(repo_dir), "rev-parse", "--show-ref-format"]).strip() == "reftable":\n',
+        "    if False:\n",
+        "#437: a clone the migration cannot help fails on git's error rather than one naming "
+        "the colliding branches",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_clone_already_on_reftable_is_not_migrated_again",
+        ),
+    ),
+    Mutation(
+        "sync case collision: the migration does not name the repository",
+        "sync_repositories.py",
+        '        f"{repo.name}: branches differing only in case ({named}) - "\n',
+        '        f"branches differing only in case ({named}) - "\n',
+        "#437: sync rewrites a clone's ref store and the log cannot say which one",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_collision_on_current_git_migrates_the_clone_and_syncs",
+        ),
+    ),
+    Mutation(
+        "git floor: the CLI does not gate the git-using stages",
+        "cli.py",
+        "    refused = git_version.refusal() if stage in GIT_STAGES else None\n",
+        "    refused = None\n",
+        "#437 follow-up: sync converts clones that an older git, here or on a CI runner, "
+        "cannot read, and no stage says why",
+        (
+            "test_git_version_floor.StagesRefuseAnOldGit.test_every_git_using_stage_refuses",
+            "test_git_version_floor.StagesRefuseAnOldGit.test_git_2_47_is_refused_naming_the_version_and_the_floor",
+            "test_git_version_floor.StagesRefuseAnOldGit.test_unreadable_version_output_is_refused_clearly",
+        ),
+    ),
+    Mutation(
+        "git floor: a git-using stage is left out of the gate",
+        "cli.py",
+        'GIT_STAGES = frozenset({"sync", "drift", "export-history", "check-citations"})\n',
+        'GIT_STAGES = frozenset({"sync", "drift", "export-history"})\n',
+        "#437 follow-up: check-citations asks the clones with an old git and reads its "
+        "failures as unresolved citations",
+        ("test_git_version_floor.StagesRefuseAnOldGit.test_every_git_using_stage_refuses",),
+    ),
+    Mutation(
+        "git floor: git 2.48 itself is refused",
+        "git_version.py",
+        "    if version < FLOOR:\n        return (\n",
+        "    if version <= FLOOR:\n        return (\n",
+        "#437 follow-up: the first git that can read a converted clone is turned away",
+        ("test_git_version_floor.StagesAcceptACurrentGit.test_git_2_48_runs_the_stage",),
+    ),
+    Mutation(
+        "git floor: only the minor version is compared",
+        "git_version.py",
+        "    if version < FLOOR:\n        return (\n",
+        "    if version[1] < FLOOR[1]:\n        return (\n",
+        "#437 follow-up: git 3.0 would be refused as older than 2.48",
+        (
+            "test_git_version_floor.StagesAcceptACurrentGit.test_a_major_version_above_two_runs_the_stage",
+        ),
+    ),
+    Mutation(
+        "git floor: an unreadable version passes",
+        "git_version.py",
+        '    if version is None:\n        return (\n            f"Cannot tell',
+        '    if version is None:\n        return None\n        return (\n            f"Cannot tell',
+        "#437 follow-up: a git whose version cannot be read is trusted with converted clones",
+        (
+            "test_git_version_floor.StagesRefuseAnOldGit.test_unreadable_version_output_is_refused_clearly",
+        ),
+    ),
+    Mutation(
+        "git floor: status stops reporting git",
+        "status.py",
+        '    print(f"Git: {git_version.describe()}")\n',
+        "",
+        "#437 follow-up: the health report cannot say that this machine's git is below the floor",
+        (
+            "test_git_version_floor.StatusReportsAnOldGit.test_status_reports_an_old_git_and_still_exits_zero",
+        ),
+    ),
+    Mutation(
+        "git floor: --version stops naming git",
+        "cli.py",
+        "        print(git_version.describe())\n",
+        "",
+        "#437 follow-up: the command that answers which environment runs a stage cannot "
+        "say which git it would use",
+        ("test_git_version_floor.VersionFlagReportsGit.test_version_names_git_and_the_floor",),
+    ),
+    Mutation(
+        "sync case collision: the colliding branches follow the remote's order",
+        "sync_repositories.py",
+        "    return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]\n",
+        "    return [sorted(names) for _, names in groups.items() if len(names) > 1]\n",
+        "#437: the failure message for one repository changes between runs (CLAUDE.md 1.3)",
+        (
+            "test_sync_case_collision.CollidingBranchesTest.test_groups_names_equal_once_case_folded_in_a_stable_order",
+        ),
+    ),
 )
 
 

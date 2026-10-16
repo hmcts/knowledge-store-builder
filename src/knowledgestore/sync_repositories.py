@@ -26,15 +26,21 @@ from .export_git_history import RepositoryConfig, read_repository_config
 
 
 from . import config
+from . import git_version
 
 
-def run_git(arguments: list[str], quiet: bool = False) -> str:
+def run_git(arguments: list[str], quiet: bool = False, capture_stderr: bool = False) -> str:
     """Run git and return stdout. Raises on failure.
 
     `quiet` discards git's stderr, for a caller asking a yes-or-no question whose
     "no" git reports as a `fatal:` line - which would otherwise land in the middle
     of that caller's own report.
+
+    `capture_stderr` holds git's stderr so a caller can read why a command failed,
+    from the `CalledProcessError` it raises, and still prints it afterwards.
     """
+    if capture_stderr:
+        return _run_git_holding_stderr(arguments)
     completed = subprocess.run(
         ["git", *arguments],
         check=True,
@@ -42,6 +48,18 @@ def run_git(arguments: list[str], quiet: bool = False) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL if quiet else None,
     )
+    return completed.stdout
+
+
+def _run_git_holding_stderr(arguments: list[str]) -> str:
+    completed = subprocess.run(
+        ["git", *arguments], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    sys.stderr.write(completed.stderr)
+    if completed.returncode:
+        raise subprocess.CalledProcessError(
+            completed.returncode, completed.args, completed.stdout, completed.stderr
+        )
     return completed.stdout
 
 
@@ -62,20 +80,7 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
 
     git = lambda *args: run(["-C", str(repo_dir), *args])  # noqa: E731
     git("remote", "set-url", "origin", repo.clone_url)
-    git(
-        "fetch",
-        "origin",
-        "--prune",
-        "--prune-tags",
-        "--tags",
-        # Force covers the tags. The refspec's leading + force-updates heads but
-        # says nothing about tags, so a tag moved upstream - which any repository
-        # that re-points a release tag does routinely - is rejected with "would
-        # clobber existing tag" and fails the whole fetch, leaving one repository
-        # mysteriously unsyncable.
-        "--force",
-        "+refs/heads/*:refs/remotes/origin/*",
-    )
+    _fetch(repo, repo_dir, run)
 
     remote_ref = f"refs/remotes/origin/{repo.default_branch}"
     try:
@@ -89,6 +94,98 @@ def sync_repository(repo: RepositoryConfig, repositories_dir: Path, run=run_git)
     # cleaning it forces a full (expensive) re-extraction on every sync.
     git(*CLEAN_ARGS)
     return int(git("rev-list", "--all", "--count").strip())
+
+
+FETCH_ARGS = (
+    "fetch",
+    "origin",
+    "--prune",
+    "--prune-tags",
+    "--tags",
+    # Force covers the tags. The refspec's leading + force-updates heads but
+    # says nothing about tags, so a tag moved upstream - which any repository
+    # that re-points a release tag does routinely - is rejected with "would
+    # clobber existing tag" and fails the whole fetch, leaving one repository
+    # mysteriously unsyncable.
+    "--force",
+    "+refs/heads/*:refs/remotes/origin/*",
+)
+
+# How git reports two remote branches landing on one loose ref file. Neither
+# wording is specific to case: `cannot lock ref` is also what a branch named like
+# another's directory produces, so the remote's branch list has the final say.
+_COLLISION_SYMPTOMS = ("unable to update local ref", "cannot lock ref")
+
+
+def case_colliding_branches(ls_remote: str) -> list[list[str]]:
+    """The remote's branches that differ only in case, as sorted groups.
+
+    Reads `git ls-remote --heads` output. Sorted throughout so the message that
+    names them is the same on every run.
+    """
+    groups: dict[str, set[str]] = {}
+    for line in ls_remote.splitlines():
+        ref = line.partition("\t")[2]
+        if ref.startswith("refs/heads/"):
+            name = ref.removeprefix("refs/heads/")
+            groups.setdefault(name.casefold(), set()).add(name)
+    return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]
+
+
+def _fetch(repo: RepositoryConfig, repo_dir: Path, run) -> None:
+    """Fetch every branch, converting the clone to reftable refs if it must.
+
+    On a case-insensitive filesystem the `files` ref backend keeps one file per
+    ref, so remote branches differing only in case collide and the fetch fails.
+    `reftable` keeps refs in a table, where they do not. Only the `.git`
+    directory changes; the working tree and graphify-out/ are not touched.
+    """
+    fetch = ["-C", str(repo_dir), *FETCH_ARGS]
+    try:
+        run(fetch, capture_stderr=True)
+        return
+    except subprocess.CalledProcessError as error:
+        collisions = _case_collisions(error, repo_dir, run)
+        if not collisions:
+            raise
+    named = "; ".join(" and ".join(group) for group in collisions)
+    fix = f"git -C {repo_dir} refs migrate --ref-format=reftable"
+    version = _git_version(run)
+    # The CLI refuses below this floor already; a caller of this function may not.
+    if version < git_version.FLOOR:
+        raise RuntimeError(
+            f"the remote has branches differing only in case ({named}), which this "
+            f"filesystem cannot store as separate ref files, and git "
+            f"{version[0]}.{version[1]} cannot migrate a clone to reftable refs. "
+            f"With git {git_version.FLOOR[0]}.{git_version.FLOOR[1]} or later run `{fix}`, "
+            "then sync again"
+        )
+    if run(["-C", str(repo_dir), "rev-parse", "--show-ref-format"]).strip() == "reftable":
+        raise RuntimeError(
+            f"the fetch failed on branches differing only in case ({named}) although "
+            "the clone already stores its refs as reftable, so migrating will not help"
+        )
+    print(
+        f"{repo.name}: branches differing only in case ({named}) - "
+        "migrating the clone to reftable refs and fetching again"
+    )
+    run(["-C", str(repo_dir), "refs", "migrate", "--ref-format=reftable"])
+    run(fetch, capture_stderr=True)
+
+
+def _case_collisions(error: subprocess.CalledProcessError, repo_dir: Path, run) -> list[list[str]]:
+    """The colliding branches, when this failure is a case collision; else none."""
+    if not any(symptom in (error.stderr or "") for symptom in _COLLISION_SYMPTOMS):
+        return []
+    try:
+        listing = run(["-C", str(repo_dir), "ls-remote", "--heads", "origin"])
+    except subprocess.CalledProcessError:
+        return []
+    return case_colliding_branches(listing)
+
+
+def _git_version(run) -> tuple[int, int]:
+    return git_version.parse(run(["--version"])) or (0, 0)
 
 
 def _sync_external() -> tuple[dict[str, dict], list[tuple[str, str]]]:

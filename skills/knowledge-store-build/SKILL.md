@@ -60,7 +60,14 @@ Two things this check cannot tell you, so ask rather than assume:
 pip install hmcts-knowledge-store-builder   # or: pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
 pip install graphifyy                       # graph extraction
 gh auth status                              # discovery needs an authenticated gh
+knowledgestore --version                    # last line: git must meet the 2.48 floor
 ```
+
+**Git 2.48 or later is a prerequisite.** `sync` can convert a clone to reftable
+refs (see below), and an older git cannot read a converted clone - so the floor
+holds on every machine and CI runner that reads the store's clones. `sync`,
+`drift`, `export-history` and `check-citations` refuse to start below it; if one
+does, stop and ask for git to be upgraded rather than working around it.
 
 If the store repository has a settings file (commonly `config/pipeline.sh`),
 source it first — it carries estate branding such as the page title.
@@ -894,15 +901,24 @@ Where a remote has branches differing only in casing (`team/OPS` and
 Windows, and the fetch exits non-zero. On a large estate a material share of the
 repositories can be affected.
 
-`sync` isolates that: it names the failure, carries on with the rest, records
+Any repository `sync` cannot recover is isolated: it names the failure, carries
+on with the rest, records
 provenance for everything that succeeded, and **exits non-zero** with a list of
 what failed. Read that list — a repository that did not sync keeps whatever
 graph and history it had, so the estate is incomplete rather than merely warned
 about. (Before this was fixed, one failure aborted the run and discarded the
 provenance of the repositories that had already succeeded.)
 
-Migrate the clones to the `reftable` backend (git 2.45+), which stores refs in a
-table so casing stops mattering and both variants are kept:
+`sync` fixes this itself. It confirms the collision
+against the remote's branch list, migrates that clone to the `reftable` ref
+backend - which stores refs in a table, so casing stops mattering and both
+branches are kept - prints one line naming the repository, and fetches again.
+Only `.git` changes; the working tree and `graphify-out/` are untouched. Any
+other fetch failure is reported exactly as before.
+
+If the failure says the clone is already reftable, the collision is not the
+cause; read git's output above it. The conversion is the command below, which
+`sync` runs for you; it is shown so a clone can be converted by hand:
 
 ```bash
 git -C repositories/<repo> refs migrate --ref-format=reftable

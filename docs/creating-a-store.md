@@ -28,12 +28,21 @@ Install the Knowledge Store plugin by following
 clustering procedure and authoring checks. The plugin is instructions; the
 library and command-line tools run the pipeline on your machine.
 
-You need Python 3.10 or later, Git and the GitHub CLI. On macOS, install them
-with [Homebrew](https://brew.sh/):
+You need Python 3.10 or later, Git 2.48 or later and the GitHub CLI. On macOS,
+install them with [Homebrew](https://brew.sh/):
 
 ```bash
 brew install python git gh
+git --version                 # 2.48 or later
 ```
+
+**Git 2.48 is a floor, not a recommendation.** On a case-insensitive
+filesystem, `sync` converts a clone to the reftable ref format when its remote has
+branches that differ only in case, and an older Git cannot read a converted
+clone. Every machine and CI runner that reads the store's clones needs Git 2.48
+or later, not only the one that ran `sync`. `sync`, `drift`, `export-history` and
+`check-citations` refuse to start on an older Git. `knowledgestore --version` and
+`knowledgestore status` report the Git they found.
 
 The tools have separate roles:
 
@@ -708,7 +717,8 @@ authored coverage remains and whether grounding checks passed.
 |---|---|
 | `No matching distribution found` | Install with the `hmcts-lib` feed. Installing from a lock compiled without `--emit-index-url` needs `--extra-index-url` passed as well. |
 | Discovery says a rule matched nothing | Check spelling and move any inline comment onto its own line. Use `--strict` in CI. |
-| `sync` fails on branches that differ only by case | With Git 2.45 or later, run `git -C repositories/<repo> refs migrate --ref-format=reftable`, then retry. |
+| `sync` fails on branches that differ only by case | `sync` converts the clone to reftable refs itself. If the failure says the clone is already reftable, the collision is not the cause; read Git's output above it. |
+| A stage refuses because Git is older than 2.48 | Upgrade Git on that machine or runner. See [Install the prerequisites](#install-the-prerequisites). |
 | The merged graph is unexpectedly small | Re-extract from inside each repository; do not run graphify at the store root. |
 | A graph operation refuses a large file | Raise `GRAPHIFY_MAX_GRAPH_BYTES` before the operation. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |
