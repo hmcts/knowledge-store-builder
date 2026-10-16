@@ -21,7 +21,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import io
-import re
 import subprocess
 import tempfile
 import unittest
@@ -30,6 +29,7 @@ from pathlib import Path
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import export_git_history as export  # noqa: E402
+from knowledgestore import git_version  # noqa: E402
 from knowledgestore import sync_repositories as sync  # noqa: E402
 
 # What git 2.55 prints on macOS for this fetch, abridged to the line `sync` reads.
@@ -224,9 +224,7 @@ class CollidingBranchesTest(unittest.TestCase):
 
 
 def _git_version() -> tuple[int, int]:
-    out = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True).stdout
-    match = re.search(r"(\d+)\.(\d+)", out)
-    return (int(match[1]), int(match[2])) if match else (0, 0)
+    return git_version.parse(git_version.run_git(["--version"])) or (0, 0)
 
 
 def _case_insensitive(directory: Path) -> bool:
@@ -301,7 +299,7 @@ class RealGitCaseCollisionTest(unittest.TestCase):
         )
 
         collides = _case_insensitive(root)
-        if collides and _git_version() < sync.REFTABLE_MIGRATE_SINCE:
+        if collides and _git_version() < git_version.FLOOR:
             self.skipTest("this filesystem collides and this git cannot migrate a clone")
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             sync.sync_repository(repo, repositories)

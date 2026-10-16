@@ -15,6 +15,7 @@ from pathlib import Path
 from . import __version__
 
 from . import config
+from . import git_version
 
 # Stages that build their own argument parser, and so document themselves better
 # than this module can. Everything else has --help answered centrally, in main().
@@ -77,6 +78,12 @@ def refuses_arguments(stage: str, arguments: Sequence[str]) -> bool:
         return False
     return not any(argument in ("-h", "--help") for argument in arguments)
 
+
+# The stages that run git. Each refuses before any git work when git is older than
+# `git_version.FLOOR`, because a clone `sync` has converted to reftable refs cannot
+# be read by an older git (#437). `status` runs git too and is deliberately absent:
+# it reports the same finding and never fails (CLAUDE.md 6.7).
+GIT_STAGES = frozenset({"sync", "drift", "export-history", "check-citations"})
 
 # name -> (module attribute, one-line help). Order is the pipeline run order.
 STAGES: dict[str, tuple[str, str]] = {
@@ -294,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"knowledgestore {__version__}")
         print(f"interpreter {sys.executable}")
         print(f"package {Path(__file__).resolve().parent}")
+        print(git_version.describe())
         return 0
 
     stage = rest[0] if rest else ""
@@ -347,6 +355,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+
+    if stage in GIT_STAGES:
+        refused = git_version.refusal()
+        if refused:
+            print(refused, file=sys.stderr)
+            return 1
 
     module_name = STAGES[stage][0]
     module = __import__(f"{__package__}.{module_name}", fromlist=["main"])

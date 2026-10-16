@@ -26,6 +26,7 @@ from .export_git_history import RepositoryConfig, read_repository_config
 
 
 from . import config
+from . import git_version
 
 
 def run_git(arguments: list[str], quiet: bool = False, capture_stderr: bool = False) -> str:
@@ -110,11 +111,6 @@ FETCH_ARGS = (
     "+refs/heads/*:refs/remotes/origin/*",
 )
 
-# `git refs migrate` arrived in 2.46 but refused any repository holding reflogs
-# until 2.48, and a working clone always holds them - so 2.48 is the first git
-# that can migrate a clone `sync` made.
-REFTABLE_MIGRATE_SINCE = (2, 48)
-
 # How git reports two remote branches landing on one loose ref file. Neither
 # wording is specific to case: `cannot lock ref` is also what a branch named like
 # another's directory produces, so the remote's branch list has the final say.
@@ -155,12 +151,14 @@ def _fetch(repo: RepositoryConfig, repo_dir: Path, run) -> None:
     named = "; ".join(" and ".join(group) for group in collisions)
     fix = f"git -C {repo_dir} refs migrate --ref-format=reftable"
     version = _git_version(run)
-    if version < REFTABLE_MIGRATE_SINCE:
+    # The CLI refuses below this floor already; a caller of this function may not.
+    if version < git_version.FLOOR:
         raise RuntimeError(
             f"the remote has branches differing only in case ({named}), which this "
             f"filesystem cannot store as separate ref files, and git "
             f"{version[0]}.{version[1]} cannot migrate a clone to reftable refs. "
-            f"With git 2.48 or later run `{fix}`, then sync again"
+            f"With git {git_version.FLOOR[0]}.{git_version.FLOOR[1]} or later run `{fix}`, "
+            "then sync again"
         )
     if run(["-C", str(repo_dir), "rev-parse", "--show-ref-format"]).strip() == "reftable":
         raise RuntimeError(
@@ -187,13 +185,7 @@ def _case_collisions(error: subprocess.CalledProcessError, repo_dir: Path, run) 
 
 
 def _git_version(run) -> tuple[int, int]:
-    """Major and minor from `git version 2.47.1 (Apple Git-150)`; (0, 0) if unreadable."""
-    words = run(["--version"]).split()
-    parts = words[2].split(".") if len(words) > 2 else []
-    try:
-        return int(parts[0]), int(parts[1])
-    except (IndexError, ValueError):
-        return 0, 0
+    return git_version.parse(run(["--version"])) or (0, 0)
 
 
 def _sync_external() -> tuple[dict[str, dict], list[tuple[str, str]]]:

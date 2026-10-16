@@ -28,6 +28,7 @@ from . import (
     boundary,
     config,
     duplicate_repositories,
+    git_version,
     graph_files,
     io,
     merge_inputs,
@@ -1379,6 +1380,8 @@ def main(argv=None) -> int:
 
     _report_central(arguments.central)
     _report_duplicates(arguments.duplicates)
+    # Reported, never refused: the stages that run git refuse below the floor.
+    print(f"Git: {git_version.describe()}")
     recorded = provenance.read()
     print(
         f"Provenance: {len(recorded)} repositories recorded"
