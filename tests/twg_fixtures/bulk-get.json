@@ -139,6 +139,18 @@
                 ]
               },
               {
+                "type": "codeBlock",
+                "attrs": {
+                  "language": "python"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Traceback (most recent call last):\n  File \"sort.py\", line 3, in <module>\n    order(widgets)\n\nValueError: unknown colour"
+                  }
+                ]
+              },
+              {
                 "type": "bulletList",
                 "content": [
                   {
