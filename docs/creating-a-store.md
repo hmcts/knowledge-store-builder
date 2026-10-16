@@ -611,6 +611,7 @@ are conditions to assess, not build failures; read the report.
 ```bash
 knowledgestore check-citations                     # docs/topics and docs/deep-dives
 knowledgestore check-citations docs/answers/ a.md  # or name files and directories
+knowledgestore check-citations --allow-none        # no answers yet is not a failure
 ```
 
 Every backticked identifier in a published answer is looked up in the graph. Call
@@ -622,6 +623,12 @@ real one, and the stage exits 1. It exits 2, having asserted nothing, when there
 no graph or no answer to read, when `config/repositories.txt` cannot be parsed, or
 when the answers cite a source link and there is no `config/repositories.txt` to
 check it against.
+
+A store whose gate chain runs `check-citations` before it has published any
+answers passes `--allow-none`: with no answer to read, the stage prints the same
+"nothing was asserted" message and exits 0 instead of 2. It excuses only that. An
+answer that cites code the graph does not hold still exits 1, and every other
+exit-2 case above still exits 2.
 
 A source link, `https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`, is
 checked wherever the answer writes it: a markdown link, a bare link or a backticked

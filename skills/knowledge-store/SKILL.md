@@ -190,7 +190,9 @@ repository, degree ranking, community sizes.
   like a copied one. A link to a corpus-search match, a path no node holds, is
   checked in the repository's clone under `repositories/<name>/` at that sha: it
   passes if the file is there and fails as `unknown file` if not. Where no clone is
-  present it is listed as unchecked, not failed.
+  present it is listed as unchecked, not failed. With no answer to read, the
+  stage exits 2, having asserted nothing; a gate chain that runs before the store
+  has published answers passes `--allow-none` to exit 0 with the same message.
   **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
   commits, so no reader can open it. Authored topic briefs and deep dives are not
   answers: they keep file paths in backticks, which the page renderer links.

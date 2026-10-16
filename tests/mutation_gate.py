@@ -5494,6 +5494,26 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "citation gate: --allow-none is ignored",
+        "check_citations.py",
+        "        return 0 if arguments.allow_none else 2\n",
+        "        return 2\n",
+        "a store whose gate chain runs `check-citations` before it has published any "
+        "answers reads as a failed chain, with no way to say that is expected",
+        (
+            "test_check_citations.TheStage.test_allow_none_lets_a_store_with_no_answers_pass_on_purpose",
+        ),
+    ),
+    Mutation(
+        "citation gate: no answers passes by default",
+        "check_citations.py",
+        "        return 0 if arguments.allow_none else 2\n",
+        "        return 0\n",
+        "a run that read no answer reports a pass, so a gate pointed at the wrong "
+        "directory certifies answers it never looked at",
+        ("test_check_citations.TheStage.test_no_answers_asserts_nothing_and_does_not_pass",),
+    ),
+    Mutation(
         "citation link: the sha is not checked",
         "check_citations.py",
         "    built = {r for r in repos if urls.build_sha(r) == link.sha}\n",

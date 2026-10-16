@@ -530,7 +530,12 @@ def check(files: list[Path], vocabulary: Vocabulary) -> Report:
 def _inputs(
     arguments: argparse.Namespace,
 ) -> tuple[Path, list[Path], SourceUrls] | int:
-    """The graph, the answers and the store's link map - or the exit code refusing."""
+    """The graph, the answers and the store's link map - or the exit code refusing.
+
+    No answer to read is exit 2: a check that read nothing must not report a pass.
+    `--allow-none` makes it exit 0 with the same message, for a store whose gate
+    chain runs before it has published anything; it excuses nothing else.
+    """
     graph = arguments.graph if arguments.graph else graph_files.graph_to_read(config.GRAPH_PATH)
     if graph is None or not graph.is_file():
         print(
@@ -548,7 +553,7 @@ def _inputs(
             + " - nothing was asserted.",
             file=sys.stderr,
         )
-        return 2
+        return 0 if arguments.allow_none else 2
 
     if not config.REPOSITORIES_CONFIG.is_file() and cites_links(files):
         print(
@@ -620,6 +625,11 @@ def main(argv: list[str] | None = None) -> int:
         help="answer files or directories (default: docs/topics and docs/deep-dives)",
     )
     parser.add_argument("--graph", type=Path, help="default: this store's graph")
+    parser.add_argument(
+        "--allow-none",
+        action="store_true",
+        help="exit 0, not 2, when there is no answer to check (nothing is asserted either way)",
+    )
     found = _inputs(parser.parse_args(argv))
     if isinstance(found, int):
         return found
