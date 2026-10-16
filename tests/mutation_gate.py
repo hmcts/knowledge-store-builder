@@ -4860,8 +4860,8 @@ MUTATIONS = (
     Mutation(
         "twg flatten (#436): ordered items are bulleted",
         "twg_transport.py",
-        '            marker = "- " if number is None else f"{number}. "\n',
-        '            marker = "- "\n',
+        '    return "- " if number is None else f"{number}. "\n',
+        '    return "- "\n',
         "an ordered list loses the order its numbers carried",
         (
             "test_fetch_tickets.TwgListTest.test_a_mention_in_a_list_item_is_still_an_account_id",
@@ -6654,9 +6654,6 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
         ),
     ),
-    # #437. None of these removes the migration or the retry themselves: the
-    # real-git test observes those only where the filesystem folds case, so an
-    # entry for them would name different observers on macOS and on Linux.
     Mutation(
         "sync case collision: an unrelated fetch failure migrates the clone",
         "sync_repositories.py",
@@ -6807,6 +6804,27 @@ MUTATIONS = (
         (
             "test_headless_workers.BriefTests.test_the_brief_sits_between_the_spec_and_the_addendum_and_the_addendum_is_last",
         ),
+    ),
+    Mutation(
+        "twg flatten: a code block goes through the per-line strip",
+        "twg_transport.py",
+        '        if child.get("type") == "codeBlock":\n            _code(child, out)\n',
+        "        if False:\n            _code(child, out)\n",
+        "#436 regression found on a real tracker: stack traces, config and SQL lost their "
+        "indentation and blank lines, because a code block's own newlines were split and stripped",
+        (
+            "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_beside_prose_keeps_both_shapes",
+            "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_in_a_list_item_is_indented_with_the_item",
+            "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_keeps_its_indentation_and_blank_lines",
+        ),
+    ),
+    Mutation(
+        "twg flatten: every action item reads as done",
+        "twg_transport.py",
+        '        done = isinstance(raw, dict) and raw.get("state") == "DONE"\n',
+        "        done = True\n",
+        "an open action item would be published as finished",
+        ("test_fetch_tickets.TwgCodeAndTaskTest.test_task_items_are_marked_done_or_not",),
     ),
 )
 

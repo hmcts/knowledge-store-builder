@@ -1598,6 +1598,61 @@ class TwgListTest(TwgTransportTestCase):
             self.assertNotIn(name, str(flat))
 
 
+class TwgCodeAndTaskTest(TwgTransportTestCase):
+    """A code block is stored as written, and Jira's action items keep a marker.
+
+    The code-block case is a regression from #436, found on a real tracker: the
+    hard-break change split every run on newlines and stripped each line, and a
+    code block's text carries its own newlines, so stack traces, config and SQL
+    lost their indentation and blank lines."""
+
+    def _code(self, text):
+        return {"type": "codeBlock", "content": [_text(text)]}
+
+    def test_a_code_block_keeps_its_indentation_and_blank_lines(self):
+        """Breaks if a code block goes through the per-line strip: `    run()`
+        loses its indentation and the blank line between the blocks disappears."""
+        body = _doc(self._code("if x:\n    run()\n\nend"))
+        self.assertEqual(twg_transport.flatten(body), "if x:\n    run()\n\nend")
+
+    def test_a_code_block_beside_prose_keeps_both_shapes(self):
+        """Breaks if the verbatim rule leaks into prose, or prose's strip leaks into code."""
+        body = _doc(_para(_text("  Trace:  ")), self._code("Error\n\tat a.b(C.java:1)"))
+        self.assertEqual(twg_transport.flatten(body), "Trace:\nError\n\tat a.b(C.java:1)")
+
+    def test_a_code_block_in_a_list_item_is_indented_with_the_item(self):
+        """Breaks if a code block under a list item loses its own indentation
+        inside the item's two-space indent."""
+        body = _doc(
+            {
+                "type": "bulletList",
+                "content": [_item(_para(_text("set")), self._code("a:\n  b: 1"))],
+            }
+        )
+        self.assertEqual(twg_transport.flatten(body), "- set\n  a:\n    b: 1")
+
+    def test_task_items_are_marked_done_or_not(self):
+        """Breaks if action items are stored bare, or every one reads as done."""
+        body = _doc(
+            {
+                "type": "taskList",
+                "content": [
+                    {"type": "taskItem", "attrs": {"state": "DONE"}, "content": [_text("ship it")]},
+                    {"type": "taskItem", "attrs": {"state": "TODO"}, "content": [_text("test it")]},
+                ],
+            }
+        )
+        self.assertEqual(twg_transport.flatten(body), "- [x] ship it\n- [ ] test it")
+
+    def test_a_mention_inside_a_code_block_is_still_an_account_id(self):
+        """Breaks if the verbatim path reads a node's attrs.text, the display name."""
+        mention = {"type": "mention", "attrs": {"id": "acct-0000-0001", "text": "@Invented Person"}}
+        body = _doc({"type": "codeBlock", "content": [_text("by "), mention]})
+        flat = twg_transport.flatten(body)
+        self.assertEqual(flat, "by [~accountid:acct-0000-0001]")
+        self.assertNotIn("Invented", flat)
+
+
 class TwgExitCodeTest(TwgTransportTestCase):
     def test_stdout_is_read_whatever_twg_exits_with(self):
         """Breaks if a non-zero exit is read as no answer. `twg` exits 3 when any
