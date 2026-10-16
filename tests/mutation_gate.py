@@ -254,6 +254,7 @@ MUTATIONS = (
         "graph.json.gz` died on the gzip magic byte, so the escape hatch the stage's "
         "own warning names was unavailable for the only artefact that store ships",
         (
+            "test_check_yield.BaselineFormatTests.test_a_gzipped_baseline_gives_the_same_report",
             "test_config_and_io.TheGraphLoaderHandlesGzip.test_a_gzipped_graph_is_read",
             "test_config_and_io.TheGraphLoaderHandlesGzip.test_an_unreadable_graph_raises_rather_than_returning_part_of_one",
             "test_config_and_io.TheJsonReaderHandlesGzip.test_a_gzipped_json_object_is_read",
