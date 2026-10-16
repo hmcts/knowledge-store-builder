@@ -57,9 +57,14 @@ an agent never reads them, so take one commit and leave them behind:
 ```bash
 git clone --depth 1 --filter=blob:none --sparse <store-repository> <directory>
 cd <directory>
-git sparse-checkout set graphify-out/graph.json.gz graphify-out/GRAPH_REPORT.md \
-  graphify-out/.graphify_labels.json knowledge docs knowledge_context.md
+git sparse-checkout set --no-cone /graphify-out/graph.json.gz \
+  /graphify-out/GRAPH_REPORT.md /graphify-out/.graphify_labels.json \
+  /knowledge/ /docs/ /knowledge_context.md
 ```
+
+`--no-cone` and the leading `/` are required: the default cone mode takes
+directories only, and current git refuses a file path there with a fatal
+error, so the clone stops before it has fetched anything.
 
 On a large estate this is the difference between tens and hundreds of
 megabytes. Someone who wants `explorer.html` in a browser needs a plain
