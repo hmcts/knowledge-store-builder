@@ -21,4 +21,5 @@
 --force :: graphify
 --numstat :: git
 --diff-merges :: git
+--no-cone :: git
 --comments :: twg
