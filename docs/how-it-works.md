@@ -271,6 +271,23 @@ counts behind it for every column, and a store can read which of its own columns
 paid. Nothing is compressed: the browser parses less JSON rather than gaining a
 step before parsing it, and the page stays one file that opens from disk.
 
+**Each row opens its file at the build commit.** The page carries one link base
+per repository in its configuration block, `https://github.com/<org>/<repo>/blob/<sha>/`
+from the same helper that writes each node's `url`, and every row carries only its
+line anchor. The page joins the two and escapes the path as the graph does, so a
+row's link and its node's `url` are the same bytes. A URL per row was the
+alternative and was rejected on size: every URL is unique, so the column could not
+be dictionary-encoded, and on real stores it would have added about a third to the
+page. A repository the graph cannot link - another host, no recorded commit - gives
+its rows no link at all.
+
+The explorer stage therefore reads `config/repositories.txt` and
+`knowledge/provenance.json` itself, while the graph's `url` was written from them
+when `source-urls` ran. Build the page after `source-urls` and against the same
+sync: a `sync` in between pins the page to the new commit and the graph to the old
+one. The stage compares a sample of the graph's links against its own and warns
+on stderr when they differ; re-run `source-urls`, then the explorer.
+
 **What the commits said is a retrieval surface, indexed per ticket.** The page
 searches all three evidence fields the ticket artefact carries — the curated
 description, the commit subjects as written, and the body prose — because a body

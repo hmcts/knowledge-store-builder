@@ -22,13 +22,17 @@
 /**
  * One searchable graph entry:
  * [label, repo, sourceFile, communityLabel, kind, degree, connections, tickets,
- *  communityId, deployConfig]
+ *  communityId, deployConfig, line]
  *
  * `deployConfig` is a capped run of `key=value` pairs for a deployment node, and
  * the empty string for every other entry - the whole configuration stays in the
  * committed graph, where an agent reads it.
+ *
+ * `line` is the line anchor of the row's link without its `#` - `L26`, `L5-L9` -
+ * and empty where the source names no line or the row gets no link. Absent on a
+ * page built before rows were linked (#423).
  * @typedef {[string, string, string, string, string, number, string[], string[], number,
- *            string]} Entry
+ *            string, string?]} Entry
  */
 
 /**
@@ -84,8 +88,16 @@ const DICTS = JSON.parse(getEl('dicts').textContent || '{}');
  * `branchLimit`: how many branches the intent stage keeps on a ticket record, so
  * a list that reached it can say it may be incomplete. Absent on a page built
  * before it was written, which then never claims that.
+ *
+ * `sourceBases`: per repository, the prefix of every link to its files at the
+ * build commit - `https://github.com/<org>/<repo>/blob/<sha>/` - from the helper
+ * that writes the graph's `url` (#423). A repository absent from it gets no link.
+ * `sourceSingleRoot`: the repositories whose rows carry the single-root
+ * `repositories/<repo>/` prefix, stripped before joining. Both absent on a page
+ * that links nothing.
  * @type {{pageFormat?: number, jiraBrowseUrl?: string, briefRequestUrl?: string,
- *         droppedColumns?: Record<string, string|number|null>, branchLimit?: number}} */
+ *         droppedColumns?: Record<string, string|number|null>, branchLimit?: number,
+ *         sourceBases?: Record<string, string>, sourceSingleRoot?: string[]}} */
 const CONFIG = JSON.parse(getEl('config').textContent || '{}');
 /** @type {Entry[]} */
 const DATA = decodeRows(
@@ -244,6 +256,77 @@ function ticketDates(info, hasTitle) {
 }
 
 const TICKET_BROWSE_URL = CONFIG.jiraBrowseUrl || '';
+
+/** Link prefixes by repository - see CONFIG. A Map, so a repository named
+ * `constructor` or `__proto__` cannot find a prototype member and link it. */
+const SOURCE_BASES = new Map(Object.entries(CONFIG.sourceBases || {}));
+const SINGLE_ROOT = new Set(CONFIG.sourceSingleRoot || []);
+/** `source_urls.CORPUS_PREFIX`: what a single-root row's path begins with. */
+const CORPUS_PREFIX = 'repositories/';
+
+/** The path inside `repo`, or null when it names no file inside it - a port of
+ * `source_urls.repo_relative`, so this page refuses exactly the paths the graph's
+ * `url` refuses. Only a single-root repository has its prefix stripped; on the
+ * per-repository route a path is already repo-relative, whatever it begins with.
+ * @param {string} repo @param {string} path @param {boolean} singleRoot
+ * @returns {string|null} */
+function repoRelative(repo, path, singleRoot) {
+  if (!path || path.startsWith('/')) return null;
+  let inside = path;
+  if (singleRoot) {
+    const own = CORPUS_PREFIX + repo + '/';
+    if (!inside.startsWith(own)) return null;
+    inside = inside.slice(own.length);
+  }
+  const segments = inside.split('/');
+  if (!inside || segments.some((s) => s === '' || s === '.' || s === '..')) return null;
+  return inside;
+}
+
+/** Python's `urllib.parse.quote(path, safe="/")`, byte for byte, or null.
+ *
+ * The graph's `url` escapes its path that way, and a link this page joins must
+ * be the same bytes. `encodeURIComponent` encodes UTF-8 and leaves the same
+ * unreserved set raw except for `!'()*`, which `quote` encodes, so those five
+ * are encoded here too; each segment is encoded alone, so `/` stays raw. A lone
+ * surrogate cannot be encoded at all - `quote` raises on one, and `resolve` then
+ * gives the node no `url` (`NOT_ENCODABLE`) - so it gets no link here either.
+ * @param {string} path @returns {string|null} */
+function quotePath(path) {
+  try {
+    return path.split('/').map((segment) => encodeURIComponent(segment).replace(
+      /[!'()*]/g, (c) => '%' + (c.codePointAt(0) ?? 0).toString(16).toUpperCase()
+    )).join('/');
+  } catch {
+    return null;
+  }
+}
+
+/** The row's file on the code host at the build commit, or '' for no link.
+ *
+ * The repository's base, the escaped repo-relative path and the row's line
+ * anchor: the same three parts, from the same helper, as the node's `url` in the
+ * graph. No base, no path inside the repository, or a path that cannot be
+ * escaped gives no link - never a guessed one.
+ * @param {Entry} e @returns {string} */
+function sourceLink(e) {
+  const base = SOURCE_BASES.get(e[1]);
+  if (!base || !e[2]) return '';
+  const inside = repoRelative(e[1], e[2], SINGLE_ROOT.has(e[1]));
+  const quoted = inside === null ? null : quotePath(inside);
+  if (quoted === null) return '';
+  return base + quoted + (e[10] ? '#' + e[10] : '');
+}
+
+/** The row's file name, as a link to it where it has one. Opens in a new tab
+ * with no opener, because it leaves the page for another site.
+ * @param {Entry} e @returns {string} */
+function fileName(e) {
+  const link = sourceLink(e);
+  return link
+    ? '<a href="' + esc(link) + '" target="_blank" rel="noopener">' + esc(e[2]) + '</a>'
+    : esc(e[2]);
+}
 /** The intent stage's cap on a record's `branches` - see CONFIG. */
 const BRANCH_LIMIT = CONFIG.branchLimit || 0;
 
@@ -437,7 +520,7 @@ function extraSubjects(info, shown) {
 function card(e) {
   return (
     '<div class="card"><h3>' + esc(e[0]) + ' <span class="kind">' + e[4] + '</span></h3>'
-    + (e[2] ? '<div class="path">' + esc(e[1]) + ' &middot; ' + esc(e[2]) + '</div>' : '')
+    + (e[2] ? '<div class="path">' + esc(e[1]) + ' &middot; ' + fileName(e) + '</div>' : '')
     + (e[3] ? '<div class="row"><b>community:</b> ' + esc(e[3]) + '</div>' : '')
     + (e[6].length
         ? '<div class="row"><b>connects to:</b> ' + e[6].map(esc).join(', ')
@@ -1045,7 +1128,7 @@ function vWhichRepos(seeds) {
   const rows = [...byRepo.entries()]
     .map(([r, idxs]) =>
       '<tr><td><b>' + esc(r) + '</b></td><td class="mono">'
-      + idxs.map((i) => esc(DATA[i][2])).join('<br>') + '</td><td class="tickets">'
+      + idxs.map((i) => fileName(DATA[i])).join('<br>') + '</td><td class="tickets">'
       + [...new Set(idxs.flatMap((i) => DATA[i][7]))].slice(0, 5).map(ticketChip).join('') + '</td></tr>')
     .join('');
   const others = [...new Set(seeds.map((i) => DATA[i][0]).filter((l) => l.toLowerCase() !== pl))].slice(0, 6);
@@ -1484,6 +1567,9 @@ run();
   queryTerms, idfFor, expandTerms, rankNodes, pickSeeds, bfs,
   matchTopic, matchDive, runAsk, runSearch, q, out, meta,
   ticketEvidence, unevidencedTerms, extraSubjects, proposedLabel,
+  // The row-to-file link and its two parts, so the escaping and the path rule
+  // can be held to Python's own output on awkward paths (#423).
+  sourceLink, quotePath, repoRelative,
   // The data block's decoder, so its behaviour can be asserted directly rather
   // than only through whether the page happens to answer a question.
   decodeRows,

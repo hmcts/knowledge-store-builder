@@ -122,7 +122,7 @@ const set = report(`${addresses} | brief\n${payments} | graph\n`, {
   [addresses]: { evidence: ADDRESS_ENTRY, ranked: 4, shown: 4, top: 31.2063, runnerUp: 31.2063, marginPct: 0 },
   [payments]: {
     evidence: 'code | demo-core | src/payment.service.ts | PaymentService',
-    ranked: 1, shown: 1, top: 216.2122, runnerUp: 0, marginPct: 100,
+    ranked: 1, shown: 1, top: 231.0491, runnerUp: 0, marginPct: 100,
   },
 });
 const fell = forQuestion(set.results, addresses);
@@ -147,7 +147,7 @@ equal('the summary names the population it compared, not just the finding count'
 // finding when the ranking is non-empty for a different row.
 // ---------------------------------------------------------------------------
 const gone = report(`${payments} | graph\n`, {
-  [payments]: { evidence: PAY_CONTAINER, ranked: 1, shown: 1, top: 216.2122, runnerUp: 0, marginPct: 100 },
+  [payments]: { evidence: PAY_CONTAINER, ranked: 1, shown: 1, top: 231.0491, runnerUp: 0, marginPct: 100 },
 });
 equal('a probe that no longer ranks at all is reported as such',
   forQuestion(gone.results, payments).rankDrift,
@@ -306,7 +306,7 @@ equal('the baseline records what answered, not merely that something did',
     evidence: 'code | demo-core | src/payment.service.ts | PaymentService',
     ranked: 1,
     shown: 1,
-    top: 216.2122,
+    top: 231.0491,
     runnerUp: 0,
     marginPct: 100,
   });

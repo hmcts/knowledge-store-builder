@@ -100,7 +100,7 @@ def rows_carrying(column: int, values: list) -> list:
     Full width because the costing names the column it reports, and a short row
     would be costing a column the page does not have.
     """
-    blank: list = ["", "", "", "", "", 0, [], [], 0, ""]
+    blank: list = ["", "", "", "", "", 0, [], [], 0, "", ""]
     rows = []
     for value in values:
         row = list(blank)
@@ -143,6 +143,7 @@ def sample_rows() -> list[list]:
             [f"TICKET-{index % 5}"],
             index % 4,
             "",
+            f"L{index + 1}",
         ]
         for index in range(40)
     ]
@@ -336,6 +337,7 @@ class AwkwardValueTest(unittest.TestCase):
                 [AWKWARD_VALUES[index % 3]],
                 [f"T-{index % 3}"],
                 index % 4,
+                "",
                 "",
             ]
             for index in range(40)
@@ -576,7 +578,7 @@ class RoundTripTest(unittest.TestCase):
 
         Columns 2, 3 and 9 empty, and 2 and 3 adjacent: taking them out lowest
         first removes column 4 as the second removal, and putting them back
-        highest first inserts column 9 past the end of a seven-wide row. Either
+        highest first inserts column 9 past the end of an eight-wide row. Either
         returns rows of the right length holding values in the wrong columns,
         which only equality with the rows the index built can see.
         """
@@ -588,7 +590,7 @@ class RoundTripTest(unittest.TestCase):
         encoded = explorer.drop_columns(explorer.encode_rows(rows, tables), dropped)
 
         self.assertEqual(dropped, {"2": "", "3": "", "9": ""})
-        self.assertEqual({len(row) for row in encoded}, {7})
+        self.assertEqual({len(row) for row in encoded}, {8})
         self.assertEqual(explorer.decode_rows(encoded, tables, dropped), rows)
         explorer.verify_round_trip(rows, encoded, tables, dropped)
 
@@ -753,7 +755,11 @@ class InternedPageTest(SettingsIsolated):
             dropped = self._dropped()
 
         self.assertTrue(tables, "no column was interned, so this asserts nothing")
-        self.assertEqual(dropped, {"9": ""}, "the empty deployment column was not dropped")
+        # The line column is empty too: this store records no provenance, so no row
+        # can be linked and none carries an anchor (#423).
+        self.assertEqual(
+            dropped, {"9": "", "10": ""}, "the empty deployment and line columns were not dropped"
+        )
         self.assertEqual(explorer.decode_rows(rows, tables, dropped), entries)
 
     def test_the_table_costs_exactly_what_the_page_writes(self):
@@ -965,7 +971,8 @@ class DroppedColumnPageTest(SettingsIsolated):
     def _store(self, root: Path) -> None:
         """Twelve nodes with no source file, no community label and no deployment.
 
-        Three empty columns, and two of them sit before columns every answer
+        Four empty columns - those three, and the line anchor no unlinked row
+        carries - and two of them sit before columns every answer
         reads - the kind, the degree, the connections - so a reader that lost
         track of the gap would misplace those rather than only the last field,
         where a missing value reads as the empty string it stood for.
@@ -1030,7 +1037,7 @@ class DroppedColumnPageTest(SettingsIsolated):
             carried = self._answers(self._page(Path(tmp, "carried").resolve()))
 
         self.assertEqual(carried["rowWidth"], len(explorer.COLUMN_NAMES))
-        self.assertEqual(dropped["rowWidth"], len(explorer.COLUMN_NAMES) - 3)
+        self.assertEqual(dropped["rowWidth"], len(explorer.COLUMN_NAMES) - 4)
         # Not vacuous: every question found the entry it names, in both modes.
         for answer in carried["answers"]:
             with self.subTest(question=answer["question"]):
@@ -1136,7 +1143,7 @@ class ReportedNumbersTest(unittest.TestCase):
         """
         rows = rows_carrying(0, ["abc"] * 12)
         for row, letter in zip(rows, string.ascii_lowercase):
-            for column in (1, 2, 3, 4, 9):
+            for column in (1, 2, 3, 4, 9, 10):
                 row[column] = letter
         plan, _ = explorer.interning_plan(rows)
         report = explorer.interning_report(plan)
