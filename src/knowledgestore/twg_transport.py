@@ -73,8 +73,10 @@ TIMEOUT_SECONDS = 300.0
 NOT_FOUND = 404
 # What a key must look like before it is put on twg's command line. The keys
 # come from commit messages through a configurable pattern; anything else is
-# refused rather than handed to a process as an argument.
-TICKET_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]*-[0-9]+")
+# refused rather than handed to a process as an argument. ASCII only: without
+# re.ASCII, `\w` and `\d` also match Unicode letters and digits, which would
+# widen what reaches the command line.
+TICKET_KEY = re.compile(r"[A-Za-z]\w*-\d+", re.ASCII)
 
 Runner = Callable[[list[str]], str]
 
@@ -122,6 +124,44 @@ def run_twg(arguments: list[str]) -> str:
 # --- ADF to text ---------------------------------------------------------
 
 
+def _string(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _render_text(node: dict, _attrs: dict) -> str:
+    return _string(node.get("text"))
+
+
+def _render_mention(_node: dict, attrs: dict) -> str:
+    """An account id, never the display name `attrs.text` holds."""
+    account = attrs.get("id")
+    return f"[~accountid:{account}]" if isinstance(account, str) and account else ""
+
+
+def _render_break(_node: dict, _attrs: dict) -> str:
+    return " "
+
+
+def _render_emoji(_node: dict, attrs: dict) -> str:
+    """The emoji's character, or its short name. The one `attrs.text` read."""
+    return _string(attrs.get("text") or attrs.get("shortName"))
+
+
+def _render_card(_node: dict, attrs: dict) -> str:
+    return _string(attrs.get("url"))
+
+
+# The inline nodes that render, and how. Every other inline node renders as
+# nothing - see `_inline`.
+RENDERERS: dict[str, Callable[[dict, dict], str]] = {
+    "text": _render_text,
+    "mention": _render_mention,
+    "hardBreak": _render_break,
+    "emoji": _render_emoji,
+    "inlineCard": _render_card,
+}
+
+
 def _inline(node: dict) -> str:
     """One inline node's text. A mention is its account id, never its name.
 
@@ -131,24 +171,10 @@ def _inline(node: dict) -> str:
     puts a display name. Nothing here reads it except for an emoji, where it
     holds the emoji's character.
     """
-    kind = node.get("type")
     raw = node.get("attrs")
     attrs: dict = raw if isinstance(raw, dict) else {}
-    if kind == "text":
-        value = node.get("text")
-        return value if isinstance(value, str) else ""
-    if kind == "mention":
-        account = attrs.get("id")
-        return f"[~accountid:{account}]" if isinstance(account, str) and account else ""
-    if kind == "hardBreak":
-        return " "
-    if kind == "emoji":
-        value = attrs.get("text") or attrs.get("shortName")
-        return value if isinstance(value, str) else ""
-    if kind == "inlineCard":
-        value = attrs.get("url")
-        return value if isinstance(value, str) else ""
-    return ""
+    render = RENDERERS.get(str(node.get("type")))
+    return render(node, attrs) if render else ""
 
 
 def _lines(node: dict, out: list[str]) -> None:
@@ -343,12 +369,16 @@ class Session:
             # A timeout or a missing executable: counted, and no answer for
             # this key alone - the rest of the page stands.
             return UNANSWERED
-        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
-            for issue in payload["data"]:
+        if not isinstance(payload, dict):
+            # Unparseable, or JSON that is not twg's envelope: no answer.
+            return UNANSWERED
+        data = payload.get("data")
+        if isinstance(data, list):
+            for issue in data:
                 if isinstance(issue, dict) and issue.get("key"):
                     return issue
             return UNANSWERED
-        error = payload.get("error") if isinstance(payload, dict) else None
+        error = payload.get("error")
         if isinstance(error, dict) and error.get("statusCode") == NOT_FOUND:
             return ABSENT
         return UNANSWERED

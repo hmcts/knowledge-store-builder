@@ -1581,6 +1581,19 @@ class TwgMovedTicketTest(TwgTransportTestCase):
         self.assertEqual(sorted(cache), ["ABC-1", "ABC-2"])
         self.assertIn("1 failed", output)
 
+    def test_a_follow_up_reply_that_is_not_twg_s_envelope_is_no_answer(self):
+        """Breaks if JSON that parses but is not twg's envelope - a bare list,
+        a string - is read as the tracker's not-found: absent is final, so the
+        ticket would be lost for good on one odd reply."""
+        for reply in ("[]", '"signed out"', "null"):
+            twg = FakeTwg(twg_fixture("bulk-get.json"), {"ABC-3": reply})
+            with self.subTest(reply=reply), tempfile.TemporaryDirectory() as tmp:
+                self._twg_store(tmp)
+                _code, output = self._run_twg(twg)
+                cache = self._cache()
+            self.assertNotIn("ABC-3", cache)
+            self.assertIn("1 failed", output)
+
     def test_only_a_not_found_from_get_is_absence(self):
         """Breaks if any error twg reports from `get` is read as not-found. A
         throttled (429) or signed-out (401) follow-up prints the same JSON error
@@ -1747,6 +1760,15 @@ class TwgBoundaryTest(TwgTransportTestCase):
                 self.assertEqual(twg_transport.requested(url), (["ABC-1"], ["summary"], [odd]))
         url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", "abc_2-30"], ["summary"])
         self.assertEqual(twg_transport.requested(url), (["ABC-1", "abc_2-30"], ["summary"], []))
+
+    def test_a_key_with_a_non_ascii_letter_or_digit_is_refused(self):
+        """Breaks if the key pattern matches Unicode letters or digits - which
+        `\\w` and `\\d` do in Python 3 unless the pattern is compiled ASCII-only -
+        widening what reaches twg's command line to keys no tracker issues."""
+        for odd in ("ÄB-1", "AÄB-1", "Aé-1", "AB-\u0661", "AB-1\u0663", "A\u0663-1"):
+            url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", odd], ["summary"])
+            with self.subTest(odd=odd):
+                self.assertEqual(twg_transport.requested(url), (["ABC-1"], ["summary"], [odd]))
 
     def test_a_refused_key_costs_only_itself(self):
         """Breaks if one entry that is not a ticket key refuses its whole page:

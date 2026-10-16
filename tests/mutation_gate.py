@@ -4538,8 +4538,8 @@ MUTATIONS = (
     Mutation(
         "twg transport: a mention renders the display name",
         "twg_transport.py",
-        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
-        '        return str(attrs.get("text", ""))\n',
+        '    return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
+        '    return str(attrs.get("text", ""))\n',
         "#420 point 3, a hard privacy requirement: an ADF mention carries the person's display name in attrs.text, and the store is republished",
         (
             "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
@@ -4552,8 +4552,8 @@ MUTATIONS = (
     Mutation(
         "twg transport: a mention with no id falls back to the name",
         "twg_transport.py",
-        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
-        '        return f"[~accountid:{account}]" if isinstance(account, str) and account else str(attrs.get("text", ""))\n',
+        '    return f"[~accountid:{account}]" if isinstance(account, str) and account else ""\n',
+        '    return f"[~accountid:{account}]" if isinstance(account, str) and account else str(attrs.get("text", ""))\n',
         "the friendly fallback for a mention with no id is the one that publishes a name",
         (
             "test_fetch_tickets.TwgBodyTest.test_a_mention_deep_inside_other_nodes_is_still_an_account_id",
@@ -4628,10 +4628,7 @@ MUTATIONS = (
         "            return ABSENT\n        return UNANSWERED\n",
         "            return ABSENT\n        return ABSENT\n",
         "the same permanent loss through the second request: only the tracker's own not-found is an answer",
-        (
-            "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
-            "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
-        ),
+        ("test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",),
     ),
     Mutation(
         "twg transport: moved tickets are not followed",
@@ -4645,6 +4642,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
             "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
             "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_follow_up_reply_that_is_not_twg_s_envelope_is_no_answer",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
@@ -4703,6 +4701,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
             "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
             "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_follow_up_reply_that_is_not_twg_s_envelope_is_no_answer",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_a_project_nobody_allowed_stays_absent",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
@@ -5513,8 +5512,8 @@ MUTATIONS = (
     Mutation(
         "twg transport: an inline node renders its attrs.text",
         "twg_transport.py",
-        '        return value if isinstance(value, str) else ""\n    return ""\n',
-        '        return value if isinstance(value, str) else ""\n    return str(attrs.get("text", ""))\n',
+        '    return render(node, attrs) if render else ""\n',
+        '    return render(node, attrs) if render else str(attrs.get("text", ""))\n',
         "review of #420, privacy: the helpful fallback for a status or a date publishes a name from any node carrying one in attrs.text",
         ("test_fetch_tickets.TwgPrivacyTest.test_no_node_s_attrs_text_reaches_the_flattened_text",),
     ),
@@ -5531,16 +5530,16 @@ MUTATIONS = (
     Mutation(
         "twg transport: an emoji renders nothing",
         "twg_transport.py",
-        '        value = attrs.get("text") or attrs.get("shortName")\n',
-        '        value = ""\n',
+        '    return _string(attrs.get("text") or attrs.get("shortName"))\n',
+        '    return ""\n',
         "an emoji carries meaning in a short comment (a tick, a cross) and is not person data",
         ("test_fetch_tickets.TwgPrivacyTest.test_an_emoji_and_a_link_card_render",),
     ),
     Mutation(
         "twg transport: a link card renders nothing",
         "twg_transport.py",
-        '        value = attrs.get("url")\n',
-        '        value = ""\n',
+        '    return _string(attrs.get("url"))\n',
+        '    return ""\n',
         "a link card is often the only reference in a line, and its URL is the content",
         ("test_fetch_tickets.TwgPrivacyTest.test_an_emoji_and_a_link_card_render",),
     ),
@@ -5551,6 +5550,7 @@ MUTATIONS = (
         "    keys = list(entries)\n",
         "keys come from commit messages through a configurable pattern, and anything that is not a ticket key should never reach a process's argument list",
         (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_key_with_a_non_ascii_letter_or_digit_is_refused",
             "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgBoundaryTest.test_something_that_is_not_a_ticket_key_never_reaches_twg",
         ),
@@ -5587,6 +5587,7 @@ MUTATIONS = (
             "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
             "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_follow_up_reply_that_is_not_twg_s_envelope_is_no_answer",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
         ),
@@ -5656,8 +5657,8 @@ MUTATIONS = (
     Mutation(
         "comment thread: the page loses the mark",
         "build_explorer.py",
-        '                entry["ct"] = True\n',
-        "                pass\n",
+        '            entry["ct"] = True\n',
+        "            pass\n",
         "#431: the explorer is where comments are read, and without the mark it shows a partial thread as if it were whole",
         ("test_build_explorer.TrackerEvidenceTest.test_a_partial_thread_is_marked_for_the_page",),
     ),
@@ -5711,6 +5712,7 @@ MUTATIONS = (
         '    if refused:\n        raise NoAnswer("a page held something that is not a ticket key")\n    return keys, fields, refused\n',
         "second review of #420: keys are sorted into pages, so the same page failed every run and the valid tickets beside a refused key were never fetched",
         (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_key_with_a_non_ascii_letter_or_digit_is_refused",
             "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgBoundaryTest.test_something_that_is_not_a_ticket_key_never_reaches_twg",
         ),
@@ -5730,6 +5732,27 @@ MUTATIONS = (
         "        issues, unanswered = [], []\n",
         "a refused key read as missing from the reply is cached as absent, which is final",
         ("test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",),
+    ),
+    Mutation(
+        "twg transport: the key pattern matches Unicode letters and digits",
+        "twg_transport.py",
+        'TICKET_KEY = re.compile(r"[A-Za-z]\\w*-\\d+", re.ASCII)\n',
+        'TICKET_KEY = re.compile(r"[A-Za-z]\\w*-\\d+")\n',
+        "Sonar S6353 asks for \\w and \\d; without re.ASCII they match Unicode letters and digits in Python 3, widening what reaches twg's command line",
+        (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_key_with_a_non_ascii_letter_or_digit_is_refused",
+        ),
+    ),
+    Mutation(
+        "twg transport: a follow-up reply that is not twg's envelope is absence",
+        "twg_transport.py",
+        "            # Unparseable, or JSON that is not twg's envelope: no answer.\n            return UNANSWERED\n",
+        "            # Unparseable, or JSON that is not twg's envelope: no answer.\n            return ABSENT\n",
+        "JSON that parses but is not the envelope says nothing about the ticket, and cached as absent - which is final - the ticket is lost for good",
+        (
+            "test_fetch_tickets.TwgMovedTicketTest.test_a_follow_up_reply_that_is_not_twg_s_envelope_is_no_answer",
+            "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
+        ),
     ),
 )
 

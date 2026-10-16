@@ -172,26 +172,32 @@ def merge_ticket_evidence(mined: dict, tracker: dict) -> dict:
     for ticket, record in tracker.items():
         if not isinstance(record, dict) or record.get("absent"):
             continue
-        entry = merged.setdefault(ticket, {})
-        summary = (record.get("summary") or "").strip()
-        if summary:
-            entry["t"] = summary
-        description = (record.get("description") or "").strip()
-        if description:
-            entry["x"] = truncate(description, config.TICKET_DETAIL_CHARS)
-        # Comments carried whole, so the page can search them. They arrive already
-        # bounded by KSB_TRACKER_COMMENT_CHARS, so a second cap here would be a
-        # second policy to keep in step. This is the layer that answers *why* a
-        # change was made, and holding it in the page without searching it would be
-        # the worst of both - weight with no reach.
-        comments = [c for c in (record.get("comments") or []) if isinstance(c, str) and c.strip()]
-        if comments:
-            entry["c"] = comments
-            # The stored thread is shorter than the tracker reported (#431): say
-            # so beside it, so the shown comments are not read as the whole.
-            if record.get("comments_truncated"):
-                entry["ct"] = True
+        merged.setdefault(ticket, {}).update(tracker_evidence(record))
     return merged
+
+
+def tracker_evidence(record: dict) -> dict:
+    """The page keys one fetched tracker record contributes: `t`, `x`, `c`, `ct`."""
+    entry: dict = {}
+    summary = (record.get("summary") or "").strip()
+    if summary:
+        entry["t"] = summary
+    description = (record.get("description") or "").strip()
+    if description:
+        entry["x"] = truncate(description, config.TICKET_DETAIL_CHARS)
+    # Comments carried whole, so the page can search them. They arrive already
+    # bounded by KSB_TRACKER_COMMENT_CHARS, so a second cap here would be a
+    # second policy to keep in step. This is the layer that answers *why* a
+    # change was made, and holding it in the page without searching it would be
+    # the worst of both - weight with no reach.
+    comments = [c for c in (record.get("comments") or []) if isinstance(c, str) and c.strip()]
+    if comments:
+        entry["c"] = comments
+        # The stored thread is shorter than the tracker reported (#431): say
+        # so beside it, so the shown comments are not read as the whole.
+        if record.get("comments_truncated"):
+            entry["ct"] = True
+    return entry
 
 
 def node_kind(node: dict) -> str:
