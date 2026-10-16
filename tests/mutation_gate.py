@@ -6796,6 +6796,18 @@ MUTATIONS = (
             "test_sync_case_collision.CollidingBranchesTest.test_groups_names_equal_once_case_folded_in_a_stable_order",
         ),
     ),
+    Mutation(
+        "a store brief loses to the extraction prompt on granularity",
+        "headless_workers.py",
+        '    "granularity - what gets a node of its own, and how many - follow the brief, not "\n    "the extraction prompt\'s examples.\\n"',
+        '    "conflicts with anything here or in the extraction prompt, this wins.\\n"',
+        "#447: measured on a real delta, --brief yielded the same as no brief, because the "
+        "precedence sentence let graphify's summarising guidance beat a brief asking for one "
+        "node per entry",
+        (
+            "test_headless_workers.BriefTests.test_the_brief_sits_between_the_spec_and_the_addendum_and_the_addendum_is_last",
+        ),
+    ),
 )
 
 
