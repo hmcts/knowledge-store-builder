@@ -49,8 +49,10 @@
  * branch-only commits, kept out of `d`, `s` and `b` so a draft is never shown as
  * what the ticket changed. A ticket that never landed has neither: its branch
  * text is all it has, and stays in the main fields.
+ * `c` is the tracker's comments, and `ct` is true when the stored thread is
+ * shorter than the one the tracker reported - so it is not the whole conversation.
  * @typedef {{d: string[], s?: string[], b?: string[], ps?: string[], pb?: string[],
- *            t?: string, x?: string, c?: string[],
+ *            t?: string, x?: string, c?: string[], ct?: boolean,
  *            proposed?: boolean, branches?: string[],
  *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
@@ -396,6 +398,17 @@ function commentRows(comments, terms) {
   const shown = (wanted.length ? wanted : comments.slice(0, 1)).slice(0, 3);
   return shown.map((c) => '<div class="trow"><span class="tid">comment</span> '
     + esc(clipWords(c, 400)) + '</div>').join('');
+}
+
+/** Said beside a ticket's comments when the stored thread is shorter than the
+ * one the tracker reported (#431), so what is shown is not read as the whole
+ * conversation. Neutral about which comments are missing: they may be the
+ * oldest or the newest.
+ * @param {TicketInfo|undefined} info */
+function truncatedThreadNote(info) {
+  if (!info?.ct) return '';
+  return '<div class="trow"><span class="tid">comments</span> Not every comment in this'
+    + ' thread was fetched: the tracker reports more than are stored.</div>';
 }
 
 /** Cut to at most limit characters, at a word boundary, without a regex.
@@ -1136,6 +1149,7 @@ function vTicket(id) {
       : '')
     + (info?.x ? '<div class="trow"><span class="tid">tracker</span> ' + esc(info.x) + '</div>' : '')
     + commentRows(info?.c, [])
+    + truncatedThreadNote(info)
     + evidenceRows(LABEL_DESCRIPTION, descriptions)
     + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, ...descriptions]))
     + bodyDetails(info?.b)

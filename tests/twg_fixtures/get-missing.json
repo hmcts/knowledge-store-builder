@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "error": {
+    "code": "TWG_TOOL_EXECUTION_FAILED",
+    "kind": "twg_tool_execution_failed",
+    "message": "Issue does not exist or you do not have permission to see it.",
+    "statusCode": 404,
+    "traceId": "00000000000000000000000000000000",
+    "requestId": "11111111111111111111111111111111",
+    "downstreamError": {
+      "message": "Issue does not exist or you do not have permission to see it.",
+      "statusCode": 404,
+      "service": "backend",
+      "traceId": "00000000000000000000000000000000"
+    },
+    "retry": {
+      "recommended": false,
+      "guidance": "do_not_retry_unchanged"
+    }
+  }
+}

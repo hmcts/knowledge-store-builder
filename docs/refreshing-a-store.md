@@ -60,9 +60,12 @@ is the stage that discovers which tickets exist:
 knowledgestore fetch-tickets
 ```
 
-It asks the tracker only about tickets it has never had an answer for, so a
-refresh costs requests for the tickets the refresh added. Read three numbers from
-its report:
+It asks the tracker about tickets it has never had an answer for, and about up
+to `KSB_TRACKER_REFRESH_MAX` unresolved tickets whose record is
+`KSB_TRACKER_REFRESH_DAYS` old, so a refresh costs requests for the tickets it
+added plus at most a couple of pages of open ones — see
+[Refreshing open tickets](configuring-a-store.md#refreshing-open-tickets). Read
+four numbers from its report:
 
 - **denied** — tickets waiting on access this token does not have. They are
   retried by every later run, so a colleague with broader permissions can close
@@ -73,6 +76,11 @@ its report:
 - **redacted** — identifiers withheld from fetched text, under the same rules as
   mined commit text. Carry it into your report: it is a finding about the tracker
   rather than a build statistic.
+- **refreshed N of M due** — open tickets requested again, with how many are
+  left for later runs and what they cost in requests. A large *left* after an
+  upgrade is the backlog draining, not a fault. The same line says how many
+  *kept their earlier record* because the tracker did not return them: usually a
+  token that cannot browse that ticket. The record is not lost.
 
 Failures are normal and not fatal: a 5xx, a dropped connection or a page the
 tracker refused outright is not cached, so the next run retries it. If a whole

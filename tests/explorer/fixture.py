@@ -288,6 +288,8 @@ TICKET_TRACKER = {
         "description": "Acceptance criteria: the confirmation screen shows the "
         "billing address on one line.",
         "comments": ["Agreed in refinement to reuse the existing pipe."],
+        # The tracker said the thread was longer than what it returned (#431).
+        "comments_truncated": True,
         "status": "Done",
         "resolution": "Done",
         "created": "2024-01-02",

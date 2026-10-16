@@ -290,6 +290,12 @@ _NORMALISERS = {
 # the pipeline is complete without it, and a store with no tracker credentials
 # reads whatever the last credentialled run committed.
 #
+# How the stage reaches the tracker. `rest` is Jira Data Center or Server over
+# HTTP, with the base URL and token below. `twg` is Jira Cloud through the
+# Atlassian TWG CLI, which holds its own sign-in, so neither setting is needed.
+# Only the transport changes: every decision about what to ask and what to keep
+# is the same on both. See twg_transport.py.
+TRACKER_TRANSPORT = os.environ.get("KSB_TRACKER_TRANSPORT", "rest").strip().lower()
 # The tracker's API root, e.g. https://tracker.example/jira - the part before
 # /rest/api/2. Empty means the stage is not configured and does nothing.
 TRACKER_BASE_URL = os.environ.get("KSB_TRACKER_BASE_URL", "")
@@ -337,6 +343,24 @@ TRACKER_PAGE_SIZE = _env_int("KSB_TRACKER_PAGE_SIZE", 100)
 # Pause between pages. One request is in flight at a time regardless; this is
 # what keeps a first run from reading as traffic worth alerting on.
 TRACKER_DELAY_SECONDS = _env_float("KSB_TRACKER_DELAY_SECONDS", 1.0)
+# Days before an unresolved ticket's record is asked about again. A resolved
+# ticket is history and is never re-requested; an open one is still changing, so
+# its status and text would otherwise freeze at the first fetch. A week keeps a
+# daily build from re-requesting every open ticket every day. Zero (or less)
+# turns refresh off, which is how the stage behaved before it existed.
+TRACKER_REFRESH_DAYS = _env_int("KSB_TRACKER_REFRESH_DAYS", 7)
+# Most open tickets one run re-requests, oldest first. A store upgrading from a
+# release without refresh has every open record due at once; the cap spreads that
+# backlog over several runs so no single refresh pays for all of it. At the
+# default page size, 200 is two requests.
+TRACKER_REFRESH_MAX = _env_int("KSB_TRACKER_REFRESH_MAX", 200)
+# Most follow-up calls the twg transport makes in one run. `bulk-get` answers a
+# page of keys in one call, but each key it does not return costs a `get` to
+# learn whether the ticket moved, and each comment thread it returns only part of
+# costs a `get --comments` to complete. Past this many, a key is left for the
+# next run and a thread is stored as returned and marked truncated, rather than
+# turning one page into a hundred calls. The REST transport makes none.
+TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 
 # --- identifiers redacted out of mined commit text ------------------------
 # Commit messages are written for colleagues, not for publication, and some of

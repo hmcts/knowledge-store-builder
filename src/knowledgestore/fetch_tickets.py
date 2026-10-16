@@ -1,11 +1,15 @@
-"""Ask the issue tracker what each discovered ticket is, once per ticket ever.
+"""Ask the issue tracker what each discovered ticket is.
 
 The `intent` stage finds ticket ids in commit messages; it cannot say what those
 tickets were about beyond what the commits said. This stage asks the tracker, and
-commits the answer to `knowledge/intent/ticket-tracker.json.gz`. Historic tickets
-do not change, so a ticket that has been fetched is never fetched again - the
-cache is the artefact, and a later build with no credentials reads it rather than
-degrading.
+commits the answer to `knowledge/intent/ticket-tracker.json.gz`. Resolved tickets
+do not change, so a resolved ticket that has been fetched is never fetched again -
+the cache is the artefact, and a later build with no credentials reads it rather
+than degrading. An unresolved ticket is still changing: its record carries the
+day it was read, and is asked about again once it is `KSB_TRACKER_REFRESH_DAYS`
+old (#421). Refresh is bounded so it cannot inflate a run: at most
+`KSB_TRACKER_REFRESH_MAX` records per run, oldest first, in their own batched
+pages, and only for tickets the store still cites.
 
     knowledgestore fetch-tickets
 
@@ -48,7 +52,9 @@ Everything fetched goes through the same redaction as mined commit text
 text is, and does not earn a weaker filter for being nominally cleaner.
 
 The HTTP boundary is the `opener` argument to `main()`, which is where the tests
-stub. Requests go out one at a time, batched as a JQL `key in (...)` search at
+stub. `KSB_TRACKER_TRANSPORT=twg` puts a different transport behind the same seam
+- Jira Cloud through the TWG CLI, see `twg_transport.py` - and changes nothing
+else: the decisions below are made here either way. Requests go out one at a time, batched as a JQL `key in (...)` search at
 `KSB_TRACKER_PAGE_SIZE` keys each, with a pause between pages and `Retry-After`
 honoured - a large estate becomes hundreds of requests rather than tens of
 thousands, which is what keeps a first run inside rate limits and out of an
@@ -68,9 +74,9 @@ import urllib.request
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from . import __version__, config, io, sensitive
+from . import __version__, config, io, sensitive, telemetry, twg_transport
 from .build_intent_index import truncate
 
 
@@ -90,6 +96,11 @@ USER_AGENT = (
     f"knowledge-store-builder/{__version__} (+https://github.com/hmcts/knowledge-store-builder)"
 )
 
+# The transports `KSB_TRACKER_TRANSPORT` may name.
+REST = "rest"
+TWG = "twg"
+TRANSPORTS = (REST, TWG)
+
 DENIED_STATUSES = (401, 403)
 TOO_MANY_REQUESTS = 429
 # The statuses a search endpoint that does not exist answers with.
@@ -101,8 +112,16 @@ MAX_ATTEMPTS = 3
 MAX_RETRY_WAIT_SECONDS = 300.0
 REQUEST_TIMEOUT_SECONDS = 30.0
 
-# A record's date field: what the run knew, and when it knew it.
+# A record's date field: when the tracker was last asked about the ticket. A
+# refresh the tracker did not answer moves it too, with the content untouched,
+# so it is not the date the stored content was read.
 CHECKED = "checked"
+# Set on a record whose stored comment thread is shorter than the thread the
+# tracker last reported, and that report's comment count. Invariant: an
+# unmarked record's comments stand for `comments_total` comments, less any
+# dropped as automation noise - so noise never reads as missing (#431).
+COMMENTS_TRUNCATED = "comments_truncated"
+COMMENTS_TOTAL = "comments_total"
 
 
 @dataclass(frozen=True)
@@ -112,6 +131,13 @@ class Response:
     status: int
     body: str
     retry_after: str | None = None
+    # How many calls the tracker took to give this answer: one for an HTTP
+    # request, more when a transport needed follow-ups. Counted into the run's
+    # requests, so a page's real cost is what the run reports.
+    calls: int = 1
+    # Keys in the page the transport has no answer for. Not cached, and asked
+    # about again next run, exactly as a page that failed.
+    unanswered: tuple[str, ...] = ()
 
 
 Opener = Callable[[str, dict], Response]
@@ -158,7 +184,10 @@ def tracker_root(base: str) -> str:
 
 
 def missing_settings() -> list[str]:
-    """The settings without which this stage cannot run at all."""
+    """The settings without which this stage cannot run at all. The twg
+    transport needs none: the CLI holds its own sign-in."""
+    if config.TRACKER_TRANSPORT == TWG:
+        return []
     return [
         name
         for name, value in (
@@ -171,12 +200,12 @@ def missing_settings() -> list[str]:
 
 def request_headers() -> dict[str, str]:
     """The one place the credential appears. A Data Center personal access token
-    is a bearer token, with no email or account name beside it."""
-    return {
-        "Authorization": f"Bearer {config.TRACKER_TOKEN}",
-        "Accept": "application/json",
-        "User-Agent": USER_AGENT,
-    }
+    is a bearer token, with no email or account name beside it. With no token -
+    the twg transport, which signs in by itself - there is no header to send."""
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+    if config.TRACKER_TOKEN:
+        headers["Authorization"] = f"Bearer {config.TRACKER_TOKEN}"
+    return headers
 
 
 def projected_fields() -> tuple[str, ...]:
@@ -234,6 +263,36 @@ def discovered_keys() -> list[str]:
     """
     records = io.read_gzip_json_dict(config.TICKET_DESCRIPTIONS_PATH)
     return [key for key in records if isinstance(key, str) and "-" in key]
+
+
+def may_read(key: str) -> bool:
+    """Whether this store may read the ticket a key names: allowlisted and not
+    denied. The same rule as `partition`, for a key the run learns about
+    mid-page - a ticket that has moved to another project."""
+    name = prefix_of(key)
+    allowed = {entry.upper() for entry in config.TRACKER_PROJECTS}
+    refused = {entry.upper() for entry in config.TRACKER_DENY}
+    return name in allowed and name not in refused
+
+
+def twg_opener(runner: twg_transport.Runner, sleep: Callable[[float], None]) -> Opener:
+    """The `opener` for the twg transport, one session for the whole run. The
+    library still decides: the request is the one it built, and a moved ticket
+    is read only when `may_read` allows its new key. Follow-ups are paced at the
+    page delay and bounded by `KSB_TRACKER_FOLLOWUP_MAX` across the run."""
+    session = twg_transport.Session(
+        runner,
+        may_read,
+        sleep,
+        config.TRACKER_DELAY_SECONDS,
+        config.TRACKER_FOLLOWUP_MAX,
+    )
+
+    def opener(url: str, headers: dict) -> Response:
+        body, unanswered = session.answer(url)
+        return Response(200, body, calls=session.calls, unanswered=tuple(unanswered))
+
+    return opener
 
 
 def partition(keys: Iterable[str]) -> Partition:
@@ -334,6 +393,22 @@ def _comments(value: object, counts: Counter[str]) -> list[str]:
     return kept
 
 
+def thread_truncated(value: object) -> bool:
+    """Whether a comment field holds fewer comments than the tracker says the
+    thread has. Read before any comment is dropped as noise, so it measures what
+    the tracker delivered, not what this stage kept (#431)."""
+    if not isinstance(value, dict):
+        return False
+    total, comments = value.get("total"), value.get("comments")
+    return isinstance(total, int) and isinstance(comments, list) and total > len(comments)
+
+
+def thread_total(value: object) -> int:
+    """How many comments the tracker says the thread has; 0 when it did not say."""
+    total = value.get("total") if isinstance(value, dict) else None
+    return total if isinstance(total, int) and not isinstance(total, bool) else 0
+
+
 def projected_record(issue: dict, counts: Counter[str]) -> dict:
     """One cached ticket: the projected fields, redacted, key-sorted.
 
@@ -342,6 +417,9 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
     found rather than evidence that does not exist. `summary` always stays, so
     that a fetched record is never an empty mapping and cannot be mistaken for
     one of the other three outcomes.
+
+    A thread the tracker returned only part of is marked `comments_truncated`,
+    so the stored comments never read as the whole conversation when they are not.
     """
     fields = issue.get("fields")
     fields = fields if isinstance(fields, dict) else {}
@@ -355,19 +433,82 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
         record["description"] = _text(fields.get("description"), counts)
     if config.TRACKER_FETCH_COMMENTS:
         record["comments"] = _comments(fields.get("comment"), counts)
+        record[COMMENTS_TOTAL] = thread_total(fields.get("comment"))
+        record[COMMENTS_TRUNCATED] = thread_truncated(fields.get("comment"))
     return {name: value for name, value in sorted(record.items()) if value or name == "summary"}
 
 
-def needs_request(record: object) -> bool:
-    """Whether a cached record should be asked about again.
+def is_fetched(record: object) -> bool:
+    """Whether a cached record holds what the tracker said about the ticket.
 
-    Fetched and absent are final. Denied is not: it records what one token could
-    read, and a later run may hold broader permissions. Anything that is not a
-    mapping is a cache written by another version, and is re-fetched.
+    `projected_record` always keeps `summary`, and no other outcome has one."""
+    return isinstance(record, dict) and "summary" in record
+
+
+def is_resolved(record: dict) -> bool:
+    """Whether the tracker had finished with the ticket when it was read.
+
+    Either field is enough: a workflow can stamp the resolution date without
+    naming a resolution, and that ticket is as finished as any other."""
+    return bool(record.get("resolution") or record.get("resolved"))
+
+
+def _age_in_days(checked: object, today: str) -> int | None:
+    """Days between a record's `checked` date and today; None if unreadable."""
+    try:
+        return (date.fromisoformat(today) - date.fromisoformat(str(checked))).days
+    except ValueError:
+        return None
+
+
+def needs_request(record: object) -> bool:
+    """Whether a cached record has never had an answer worth keeping.
+
+    Fetched and absent are answers. Denied is not: it records what one token
+    could read, and a later run may hold broader permissions. Anything that is
+    not a mapping is a cache written by another version, and is re-fetched.
+    Asking again about a fetched open ticket is a refresh, which is bounded
+    separately - see `refresh_plan`.
     """
     if not isinstance(record, dict):
         return True
     return bool(record.get("denied"))
+
+
+def refresh_due(record: object, today: str) -> bool:
+    """Whether a fetched open ticket's record is old enough to ask about again.
+
+    A record with no readable date - every open record an older release wrote -
+    is due rather than presumed fresh. Zero days turns refresh off.
+    """
+    if config.TRACKER_REFRESH_DAYS <= 0:
+        return False
+    if not isinstance(record, dict) or not is_fetched(record) or is_resolved(record):
+        return False
+    age = _age_in_days(record.get(CHECKED), today)
+    return age is None or age >= config.TRACKER_REFRESH_DAYS
+
+
+def _read_on(record: dict) -> str:
+    """The date a record was read, for ordering. No date sorts as the oldest."""
+    checked = record.get(CHECKED)
+    return checked if isinstance(checked, str) else ""
+
+
+def refresh_plan(keys: Iterable[str], cache: dict, today: str) -> tuple[list[str], int]:
+    """The open tickets this run asks about again, and how many were due.
+
+    Candidates are `keys` - the tickets the store still cites - never the whole
+    cache, so a ticket no commit mentions any more is not paid for. The oldest
+    read go first, the key breaking ties, and at most `KSB_TRACKER_REFRESH_MAX` are
+    taken: the rest stay due and carry to the next run, so a large backlog drains
+    over several runs rather than landing on one.
+    """
+    due = sorted(
+        (key for key in keys if refresh_due(cache.get(key), today)),
+        key=lambda key: (_read_on(cache[key]), key),
+    )
+    return due[: max(config.TRACKER_REFRESH_MAX, 0)], len(due)
 
 
 # --- the run -------------------------------------------------------------
@@ -380,6 +521,13 @@ class Report:
     denied: int = 0
     failed: int = 0
     cached: int = 0
+    # Open tickets asked about again, and those whose refresh brought back
+    # something other than the ticket - kept as they were (see `_settle`).
+    refreshed: int = 0
+    kept: int = 0
+    # How many open records were due, and the requests their refresh cost.
+    refresh_due: int = 0
+    refresh_requests: int = 0
     requests: int = 0
     redactions: Counter[str] = field(default_factory=Counter)
     # Statuses that carried no answer, and how many tickets each covered.
@@ -402,22 +550,26 @@ def retry_delay(retry_after: str | None) -> float:
 
 def request_page(
     url: str, headers: dict, opener: Opener, sleep: Callable[[float], None]
-) -> Response | None:
-    """One page, waiting as long as the tracker asks. None means no answer.
+) -> tuple[Response | None, int]:
+    """One page, waiting as long as the tracker asks, and the calls it cost.
+    None means no answer.
 
     A transport failure and repeated throttling are the same outcome - the
     tracker said nothing about these tickets - and neither is recorded in the
-    cache. The error itself is not quoted anywhere.
+    cache. The error itself is not quoted anywhere. Every attempt is counted,
+    and a failed one counts what the transport says it spent, at least one.
     """
+    calls = 0
     for _ in range(MAX_ATTEMPTS):
         try:
             response = opener(url, headers)
-        except OSError:
-            return None
+        except OSError as error:
+            return None, calls + max(getattr(error, "calls", 1), 1)
+        calls += response.calls
         if response.status != TOO_MANY_REQUESTS:
-            return response
+            return response, calls
         sleep(retry_delay(response.retry_after))
-    return None
+    return None, calls
 
 
 def _issues(body: str) -> dict[str, dict] | None:
@@ -434,17 +586,97 @@ def _issues(body: str) -> dict[str, dict] | None:
     }
 
 
+def fetched_record(issue: dict, counts: Counter[str], today: str) -> dict:
+    """The record a fetched ticket is cached as. An unresolved one carries the
+    day it was read, which is what tells a later run when to ask again; a
+    resolved one is final and carries no date, so it never churns."""
+    record = projected_record(issue, counts)
+    if is_resolved(record):
+        return record
+    return dict(sorted({**record, CHECKED: today}.items()))
+
+
+# What `_settle` did with one outcome.
+STORED = "stored"
+REFRESHED = "refreshed"
+KEPT = "kept"
+
+
+def merged(previous: dict, record: dict) -> dict:
+    """A refreshed record that holds no less than the stored one.
+
+    The refresh's fields win - status, resolution, summary - but text the store
+    already holds is not given up: a description the refresh did not return is
+    kept (it is not returned when `KSB_TRACKER_FETCH_DESCRIPTION` is off), and
+    the longer of the two comment threads is kept, so a transport that returns
+    only a recent page of comments cannot cut a thread another fetch stored.
+    """
+    out = dict(record)
+    if "description" not in out and "description" in previous:
+        out["description"] = previous["description"]
+    if len(previous.get("comments") or []) > len(out.get("comments") or []):
+        out["comments"] = previous["comments"]
+        out.pop(COMMENTS_TRUNCATED, None)
+        if kept_thread_partial(previous, out.get(COMMENTS_TOTAL)):
+            out[COMMENTS_TRUNCATED] = True
+        out.setdefault(COMMENTS_TOTAL, previous.get(COMMENTS_TOTAL))
+    return {name: value for name, value in sorted(out.items()) if value is not None}
+
+
+def kept_thread_partial(previous: dict, latest_total: object) -> bool:
+    """Whether a stored thread kept over a shorter refreshed one is short of the
+    thread the tracker now reports.
+
+    It is if it was already marked, or if the tracker's latest count is higher
+    than the count the stored thread stands for. A record written before counts
+    were stored stands for as many comments as it holds.
+    """
+    if previous.get(COMMENTS_TRUNCATED):
+        return True
+    if not isinstance(latest_total, int):
+        return False
+    held = previous.get(COMMENTS_TOTAL)
+    held = held if isinstance(held, int) else len(previous.get("comments") or [])
+    return latest_total > held
+
+
+def _settle(cache: dict, key: str, record: dict, report: Report, today: str) -> str:
+    """Store one outcome, unless it would lose what the store already knows.
+
+    Only a fetched answer replaces a fetched record, and then by `merged`. A
+    search leaves out tickets the token cannot browse, so a refresh by someone
+    with narrower access sees a fetched ticket as missing - and absent is final,
+    so caching it would delete the ticket's text for good. A denial is the same
+    loss by another route. Such a record is kept with its content untouched but
+    re-dated: the refresh was asked and answered, and an undated retry would be
+    due again on every run, at the head of the queue, starving the cap.
+    """
+    previous = cache.get(key)
+    if isinstance(previous, dict) and is_fetched(previous):
+        if not is_fetched(record):
+            if not is_resolved(previous):
+                cache[key] = dict(sorted({**previous, CHECKED: today}.items()))
+            report.kept += 1
+            return KEPT
+        cache[key] = merged(previous, record)
+        report.refreshed += 1
+        return REFRESHED
+    cache[key] = record
+    return STORED
+
+
 def _record_outcomes(
     keys: Sequence[str], issues: dict, cache: dict, report: Report, today: str
 ) -> None:
     for key in keys:
         issue = issues.get(key)
         if issue is None:
-            cache[key] = {"absent": True, CHECKED: today}
-            report.absent += 1
+            if _settle(cache, key, {"absent": True, CHECKED: today}, report, today) == STORED:
+                report.absent += 1
         else:
-            cache[key] = projected_record(issue, report.redactions)
-            report.fetched += 1
+            record = fetched_record(issue, report.redactions, today)
+            if _settle(cache, key, record, report, today) == STORED:
+                report.fetched += 1
 
 
 def apply_page(
@@ -457,15 +689,20 @@ def apply_page(
         return
     if response.status in DENIED_STATUSES:
         for key in keys:
-            cache[key] = {"denied": True, CHECKED: today}
-        report.denied += len(keys)
+            if _settle(cache, key, {"denied": True, CHECKED: today}, report, today) == STORED:
+                report.denied += 1
         return
     issues = _issues(response.body) if response.status == 200 else None
     if issues is None:
         report.failed += len(keys)
         report.failures[response.status] += len(keys)
         return
-    _record_outcomes(keys, issues, cache, report, today)
+    unanswered = [key for key in keys if key in response.unanswered]
+    if unanswered:
+        report.failed += len(unanswered)
+        report.failures[0] += len(unanswered)
+    answered = [key for key in keys if key not in response.unanswered]
+    _record_outcomes(answered, issues, cache, report, today)
 
 
 def write_cache(cache: dict) -> None:
@@ -483,17 +720,28 @@ def fetch(
     sleep: Callable[[float], None],
     today: str,
 ) -> Report:
-    """Fetch every outstanding key, a page at a time, writing as it goes."""
+    """Fetch every outstanding key, then the refreshes this run allows, a page
+    at a time, writing as it goes.
+
+    Refreshes get pages of their own, after the new tickets, through the same
+    batched request: what a refresh cost is then a count of whole requests, and
+    a new ticket is never held back behind an old one.
+    """
     report = Report()
     outstanding = [key for key in keys if needs_request(cache.get(key))]
-    report.cached = len(keys) - len(outstanding)
+    refreshing, report.refresh_due = refresh_plan(keys, cache, today)
+    report.cached = len(keys) - len(outstanding) - len(refreshing)
     fields = projected_fields()
     headers = request_headers()
-    for index, page in enumerate(pages(outstanding, max(1, config.TRACKER_PAGE_SIZE))):
+    size = max(1, config.TRACKER_PAGE_SIZE)
+    batches = [(page, False) for page in pages(outstanding, size)]
+    batches += [(page, True) for page in pages(refreshing, size)]
+    for index, (page, refresh) in enumerate(batches):
         if index:
             sleep(config.TRACKER_DELAY_SECONDS)
-        response = request_page(search_url(root, page, fields), headers, opener, sleep)
-        report.requests += 1
+        response, calls = request_page(search_url(root, page, fields), headers, opener, sleep)
+        report.requests += calls
+        report.refresh_requests += calls if refresh else 0
         apply_page(page, response, cache, report, today)
         # After every page, not at the end of the run: a throttled or cancelled
         # run must leave a usable cache and resume where it stopped.
@@ -512,13 +760,40 @@ def _report_failures(report: Report) -> None:
         for status, count in sorted(report.failures.items())
     )
     print(f"  replies that carried no answer, so nothing was cached: {named}")
+    if config.TRACKER_TRANSPORT == TWG and 0 in report.failures:
+        print(
+            "  with KSB_TRACKER_TRANSPORT=twg, no response means twg printed nothing "
+            "this stage could read: check that `twg` is on PATH and signed in"
+        )
     if any(status in WRONG_ENDPOINT_STATUSES for status in report.failures):
         print(
             "  a 404 or 410 on the search endpoint usually means this is a Jira Cloud "
             "deployment. This stage speaks Jira Data Center or Server: Bearer token, "
-            "GET /rest/api/2/search. Cloud authenticates with Basic and has removed "
-            "that endpoint, so no setting here will make it answer."
+            "GET /rest/api/2/search. Cloud has removed that endpoint; set "
+            "KSB_TRACKER_TRANSPORT=twg to reach it through the Atlassian TWG CLI."
         )
+
+
+def _report_refresh(report: Report) -> None:
+    """Reported every run, even at zero, so a refresh that has stopped happening
+    is visible rather than indistinguishable from nothing being open. Whatever
+    was due and not refreshed stays due, so it is what later runs inherit."""
+    left = report.refresh_due - report.refreshed
+    off = "" if config.TRACKER_REFRESH_DAYS > 0 else "; refresh is off (KSB_TRACKER_REFRESH_DAYS=0)"
+    print(
+        f"  refreshed {report.refreshed:,} of {report.refresh_due:,} due, with {left:,} left "
+        f"for later runs, in {report.refresh_requests:,} requests; {report.kept:,} kept "
+        f"their earlier record because the tracker did not return them{off}"
+    )
+
+
+def refresh_measurements(report: Report) -> dict[str, int]:
+    """What the refresh cost, for `knowledge/telemetry.json`."""
+    return {
+        "tickets.refreshed": report.refreshed,
+        "tickets.refresh_due": report.refresh_due,
+        "tickets.refresh_requests": report.refresh_requests,
+    }
 
 
 def _report_redactions(report: Report) -> None:
@@ -547,11 +822,13 @@ def _report_prefixes(part: Partition) -> None:
 
 def summarise(report: Report, cache: dict, part: Partition) -> None:
     print(
-        f"Tracker: {report.fetched:,} fetched, {report.absent:,} absent, "
+        f"Tracker: {report.fetched:,} fetched, {report.refreshed:,} refreshed, "
+        f"{report.absent:,} absent, "
         f"{report.denied:,} denied, {report.failed:,} failed "
         f"({report.requests:,} requests, {report.cached:,} already cached)"
     )
     _report_failures(report)
+    _report_refresh(report)
     _report_redactions(report)
     _report_prefixes(part)
     # Reported every run, even at zero. A denial says what this token could read,
@@ -575,11 +852,19 @@ def main(
     opener: Opener = open_url,
     sleep: Callable[[float], None] = time.sleep,
     today: str = "",
+    runner: twg_transport.Runner = twg_transport.run_twg,
 ) -> int:
     parser = argparse.ArgumentParser(prog="knowledgestore fetch-tickets", add_help=False)
     parser.add_argument("-h", "--help", action="help")
     parser.parse_args(sys.argv[1:] if argv is None else argv)
 
+    if config.TRACKER_TRANSPORT not in TRANSPORTS:
+        print(
+            f"KSB_TRACKER_TRANSPORT must be one of: {', '.join(TRANSPORTS)}. "
+            "Nothing was requested.",
+            file=sys.stderr,
+        )
+        return 1
     missing = missing_settings()
     if missing:
         print(f"fetch-tickets is not configured: {' and '.join(missing)} not set.")
@@ -589,11 +874,14 @@ def main(
             "whatever a credentialled run last committed."
         )
         return 0
-    try:
-        root = tracker_root(config.TRACKER_BASE_URL)
-    except ValueError as error:
-        print(error, file=sys.stderr)
-        return 1
+    if config.TRACKER_TRANSPORT == TWG:
+        root, opener = twg_transport.ROOT, twg_opener(runner, sleep)
+    else:
+        try:
+            root = tracker_root(config.TRACKER_BASE_URL)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 1
 
     keys = discovered_keys()
     if not keys:
@@ -617,6 +905,7 @@ def main(
     )
     write_cache(cache)
     summarise(report, cache, part)
+    telemetry.record(refresh_measurements(report))
     return 0
 
 
