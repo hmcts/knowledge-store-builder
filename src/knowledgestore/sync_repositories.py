@@ -28,9 +28,20 @@ from .export_git_history import RepositoryConfig, read_repository_config
 from . import config
 
 
-def run_git(arguments: list[str]) -> str:
-    """Run git and return stdout. Raises on failure."""
-    completed = subprocess.run(["git", *arguments], check=True, text=True, stdout=subprocess.PIPE)
+def run_git(arguments: list[str], quiet: bool = False) -> str:
+    """Run git and return stdout. Raises on failure.
+
+    `quiet` discards git's stderr, for a caller asking a yes-or-no question whose
+    "no" git reports as a `fatal:` line - which would otherwise land in the middle
+    of that caller's own report.
+    """
+    completed = subprocess.run(
+        ["git", *arguments],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL if quiet else None,
+    )
     return completed.stdout
 
 

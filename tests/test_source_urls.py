@@ -270,6 +270,96 @@ class BuildingTheUrl(unittest.TestCase):
                 self.assertEqual(got.reason, reason)
 
 
+class ParsingALink(unittest.TestCase):
+    """`parse_blob_url` is the inverse of `resolve`, so the citation gate reads a link
+    with the same rules that wrote it rather than a second parser of its own."""
+
+    def test_a_link_the_builder_writes_parses_back_to_its_parts(self):
+        """Breaks if the parser stops inverting the builder: a path left
+        percent-encoded, an anchor read as part of the path, or the local name taken
+        for the name on the host. Each makes a real citation look made up."""
+        urls = _builder()
+        cases = {
+            ("example-repo", "src/app/case.py", "L12-L20"): (
+                "example-org",
+                "example-repo",
+                SHA,
+                "src/app/case.py",
+                "L12-L20",
+            ),
+            ("example-repo", "docs/release notes#2.md", None): (
+                "example-org",
+                "example-repo",
+                SHA,
+                "docs/release notes#2.md",
+                "",
+            ),
+            ("renamed-locally", "db/Example Table (Draft).sql", "3"): (
+                "example-org",
+                "upstream-name",
+                OTHER_SHA,
+                "db/Example Table (Draft).sql",
+                "L3",
+            ),
+        }
+        for (repo, path, location), expected in cases.items():
+            with self.subTest(path=path):
+                url = urls.resolve(repo, path, location).url
+                assert url is not None
+                got = source_urls.parse_blob_url(url)
+                assert got is not None
+                self.assertEqual(got, source_urls.BlobUrl(*expected))
+
+    def test_only_a_github_blob_link_is_parsed(self):
+        """Breaks if the parser accepts a link the gate cannot check against the
+        graph - another host, a directory, a raw file - and so reports a link to
+        something real as a file the store does not hold."""
+        for url in (
+            "https://gitlab.example.com/example-org/example-repo/blob/main/a.py",
+            "https://github.com.example.com/example-org/example-repo/blob/main/a.py",
+            "https://github.com/example-org/example-repo/tree/main/src",
+            "https://github.com/example-org/example-repo/blob/main/",
+            "https://raw.githubusercontent.com/example-org/example-repo/main/a.py",
+            "https://github.com/example-org/example-repo",
+            "http://github.com/example-org/example-repo/blob/main/a.py",
+            # A control character decoded into the path: no file is named so, and a
+            # NUL cannot be handed to the git subprocess the gate asks.
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%00b.py",
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%0Ab.py",
+            f"https://github.com/example-org/example-repo/blob/{SHA}/a%7Fb.py",
+            "src/app/case.py",
+            "",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(source_urls.parse_blob_url(url))
+
+    def test_a_link_pinned_to_a_branch_still_parses(self):
+        """Breaks if only a full sha is read as a blob link. A made-up or unpinned
+        link (`blob/main/...`, an abbreviated sha) would then fall back to being
+        skipped, which is the hole the gate exists to close."""
+        for ref in ("main", "0123abc"):
+            with self.subTest(ref=ref):
+                got = source_urls.parse_blob_url(
+                    f"https://github.com/example-org/example-repo/blob/{ref}/src/a.py#L4"
+                )
+                assert got is not None
+                self.assertEqual(
+                    got, source_urls.BlobUrl("example-org", "example-repo", ref, "src/a.py", "L4")
+                )
+
+    def test_a_link_names_the_configured_repository_whatever_its_local_name(self):
+        """Breaks if the host's name is looked up as the local name, or case
+        matters: a renamed repository's real links would read as foreign, and GitHub
+        treats `Example-Org` and `example-org` as one organisation."""
+        urls = _builder()
+        self.assertEqual(urls.repositories_at("example-org", "upstream-name"), ("renamed-locally",))
+        self.assertEqual(urls.repositories_at("Example-Org", "Example-Repo"), ("example-repo",))
+        self.assertEqual(urls.repositories_at("example-org", "renamed-locally"), ())
+        self.assertEqual(urls.repositories_at("example-org", "hosted-elsewhere"), ())
+        self.assertEqual(urls.build_sha("renamed-locally"), OTHER_SHA)
+        self.assertEqual(urls.build_sha("never-synced"), "")
+
+
 class ReadingTheStore(SettingsIsolated):
     def test_the_store_files_are_read_in_the_formats_their_stages_write(self):
         """Breaks if either input is read from the wrong place or in the wrong shape:

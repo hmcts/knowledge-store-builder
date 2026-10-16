@@ -619,13 +619,36 @@ arguments are ignored, so `setValue(null)` resolves where the graph holds
 to resolve. A path resolves when its directories are the trailing directories of a
 real source file. An identifier that does not resolve is printed with the nearest
 real one, and the stage exits 1. It exits 2, having asserted nothing, when there is
-no graph or no answer to read.
+no graph or no answer to read, when `config/repositories.txt` cannot be parsed, or
+when the answers cite a source link and there is no `config/repositories.txt` to
+check it against.
+
+A source link, `https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`, is
+checked wherever the answer writes it: a markdown link, a bare link or a backticked
+one. A bare link ends where GitHub's autolinker ends it, so `**<link>**` and
+`<link>.` cite the link. Run the stage from the store root, or set `KSB_ROOT`,
+because it reads the repository list and `knowledge/provenance.json` there. The
+link fails, and the report says which claim is wrong, when:
+
+- its path is not a `source_file` of that repository, nor a file the repository's
+  clone under `repositories/<name>/` holds at the recorded commit: `unknown file`,
+  with the nearest file the graph holds for that repository. Where no clone is
+  present, or git cannot be asked, a path no node names cannot be decided and is
+  listed as unchecked;
+- its sha is not the commit provenance records for that repository, including a
+  branch name or an abbreviated sha: `different sha`, naming the commit the store
+  read. A link that is not pinned to a full sha reports this alone.
+
+The line anchor is not checked. Any other URL is skipped.
 
 A `table.column` citation is a third result. The graph holds code, so a database
-column never resolves and never should. These are counted and named, and do not
-change the exit code; read the list and decide. Generated evidence is never read,
-and fenced code blocks are skipped. A pass shows the cited thing exists, not that
-the claim about it is true.
+column never resolves and never should. A source link to a repository the store
+does not configure, such as a third-party library, is treated the same way. These
+are counted and named, and do not change the exit code; read the list and decide.
+Generated evidence is never read, and fenced code blocks are skipped. Only a fence
+that opens at the start of a line and is closed counts: inside an indented fence,
+or one never closed, links and backticked spans are checked like prose. A pass
+shows the cited thing exists, not that the claim about it is true.
 
 Stores that wrote their own gate should replace it with this stage rather than
 importing `build_community_summaries._normalise`, which is private. The supported

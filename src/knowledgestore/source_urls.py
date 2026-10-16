@@ -34,6 +34,13 @@ path misread a repository that really holds a top-level `repositories/`
 directory: its own files were stripped to a different path, and its files under
 another name were refused.
 
+**Read back with the same rules.** `parse_blob_url` is the inverse of `resolve`,
+and `SourceUrls.repositories_at` the inverse of the clone-URL lookup, so the
+citation gate checks a cited link against the form this module writes rather
+than a second reading of it. The parser accepts any ref where the sha goes - a
+branch, an abbreviated sha - because a link that is not pinned to the build is
+exactly what the gate must report, not skip.
+
 **The sha is the synced head.** `sync` records it, so a refresh that syncs a
 repository without re-extracting it pins the old graph's line numbers to the new
 commit. Re-extract after a sync before trusting a line anchor.
@@ -43,7 +50,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from . import config, provenance
 from .export_git_history import read_repository_config
@@ -89,12 +96,62 @@ _LINE = re.compile(r"(?:^(?:lines?\s+)?|:)L?(\d+)(?:\s*-\s*L?(\d+))?")  # NOSONA
 # and deliberately so: it is the escaping the consuming store's links already use,
 # and two spellings of one link would make the same citation compare unequal.
 _PATH_SAFE = "/"
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# A link to one file on github.com, in the form `resolve` writes. The ref is any
+# one segment, so an unpinned link parses and is then reported as not the build's
+# sha. `?plain=1` is GitHub's own spelling for a rendered file's source view.
+_BLOB = re.compile(
+    r"""^https://github\.com/
+        (?P<org>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)
+        /blob/(?P<sha>[^/?#\s]+)
+        /(?P<path>[^?#\s]*[^/?#\s])
+        (?:\?[^#\s]*)?
+        (?:\#(?P<anchor>\S*))?$""",
+    re.VERBOSE,
+)
 
 
 def github_origin(clone_url: str) -> tuple[str, str] | None:
     """(org, repository) of a github.com clone URL, or None for any other host."""
     match = _GITHUB.match(clone_url.strip())
     return (match.group("org"), match.group("repo")) if match else None
+
+
+@dataclass(frozen=True)
+class BlobUrl:
+    """The parts of a github.com file link. `path` is decoded; `anchor` has no `#`."""
+
+    org: str
+    repo: str
+    sha: str
+    path: str
+    anchor: str
+
+
+def is_full_sha(ref: str) -> bool:
+    """Whether `ref` is a full commit id, the only form a link this module writes pins."""
+    return bool(_SHA.match(ref))
+
+
+def parse_blob_url(url: str) -> BlobUrl | None:
+    """The parts of a `https://github.com/<org>/<repo>/blob/<ref>/<path>` link, or None.
+
+    None too for a path that decodes to a control character (`%00`, `%0A`): no file
+    in a repository is named that way, and a NUL cannot be passed to a subprocess.
+    """
+    match = _BLOB.match(url.strip())
+    if not match:
+        return None
+    path = unquote(match.group("path"))
+    if _CONTROL.search(path):
+        return None
+    return BlobUrl(
+        match.group("org"),
+        match.group("repo"),
+        match.group("sha"),
+        path,
+        match.group("anchor") or "",
+    )
 
 
 def line_anchor(source_location: object) -> str:
@@ -164,9 +221,17 @@ class SourceUrls:
     def __init__(self, clone_urls: dict[str, str], shas: dict[str, str]):
         self._bases: dict[str, str] = {}
         self._missing: dict[str, str] = {}
+        self._shas: dict[str, str] = {}
+        # (org, name) on the host, lower-cased because GitHub ignores case there.
+        self._origins: dict[tuple[str, str], list[str]] = {}
         for repo, clone_url in clone_urls.items():
             origin = github_origin(clone_url)
             sha = shas.get(repo)
+            if isinstance(sha, str):
+                self._shas[repo] = sha
+            if origin is not None:
+                key = (origin[0].lower(), origin[1].lower())
+                self._origins.setdefault(key, []).append(repo)
             if origin is None:
                 self._missing[repo] = NOT_GITHUB
             elif not isinstance(sha, str) or not sha:
@@ -242,6 +307,14 @@ class SourceUrls:
         except UnicodeEncodeError:
             return Resolution(None, NOT_ENCODABLE)
         return Resolution(base + escaped + line_anchor(source_location), "")
+
+    def repositories_at(self, org: str, name: str) -> tuple[str, ...]:
+        """The configured repositories cloned from github.com/<org>/<name>, by local name."""
+        return tuple(sorted(self._origins.get((org.lower(), name.lower()), ())))
+
+    def build_sha(self, repo: str) -> str:
+        """The commit provenance records for `repo`, or "" when it records none."""
+        return self._shas.get(repo, "")
 
     def file_url(self, repo: object, path: object) -> str | None:
         """The file-level URL, with no line anchor, or None."""

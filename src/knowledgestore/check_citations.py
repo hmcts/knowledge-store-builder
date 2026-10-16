@@ -32,6 +32,52 @@ A path (`a/b/Foo.java`, or a bare `Foo.java`) resolves when its segments are the
 trailing segments of a node's source file. Segments, not characters: an unanchored
 suffix test also matches `oo/Foo.java` against `src/Foo.java`.
 
+**A source link resolves against the build it claims to cite.** Answers cite a
+node's `url`, `https://github.com/<org>/<repo>/blob/<sha>/<path>#L<n>`, written
+anywhere in the prose - a markdown link, a bare link or a backticked one. Such a
+link is read with `source_urls.parse_blob_url`, the inverse of the function that
+wrote it, and holds two claims, each checked against what the store read:
+
+- the file: its path must be one of the graph's `source_file`s *for that
+  repository* (repo-relative on either build route). A path held only by another
+  repository does not resolve. A path no node names - a corpus-search match - is
+  asked of the repository's clone under `repositories/<name>/`, at the commit
+  provenance records, with `git rev-parse --verify --quiet <sha>:<path>` - the
+  existence test `git cat-file -e` makes - and git's stderr discarded, so a miss
+  never prints a `fatal:` line into the report. The clone is asked only when
+  provenance records a full sha, never at a ref the link supplies, and a path with
+  a `..` segment is not asked at all. Reported as `unknown file`, with the nearest
+  file the graph holds for that repository. With no clone on this machine, or one
+  git could not be asked, the file claim cannot be decided, so the link is listed
+  as unchecked rather than failed - unless its sha is wrong, which needs no clone
+  to say.
+- the commit: its sha must be the one `knowledge/provenance.json` records for that
+  repository. A branch or an abbreviated sha is not, and a link to it drifts off
+  the line it cites. Reported as `different sha`, naming the sha the store read.
+  A ref that is not a full sha is reported for that alone: a slashed branch
+  (`blob/feature/x/a.py`) also shifts where the path starts, so the file claim
+  read from it would be noise.
+
+A link wrong both ways says both. The repository is found from the link's
+`<org>/<repo>` through `config/repositories.txt`, the same map that wrote the link,
+because the name on the host can differ from the store's. A link to a repository
+the store does not configure - a third-party library, another organisation - is a
+fourth result like a database column: counted, named, never failing. Any other URL
+is skipped as before. The graph is the one already streamed for identifiers, so
+checking links adds no second read of it; the line anchor is not checked.
+
+**Without the repository list nothing can be said about a link.** Answers that cite
+a source link, read where `config/repositories.txt` is absent - run from outside the
+store root, most often - stop the stage with exit 2 rather than listing every link as
+outside an estate that was never loaded. The list is read from the store root, which
+is the working directory or `KSB_ROOT`.
+
+A bare link ends where GitHub's autolinker ends it: trailing `.,;:!?*_~` are dropped,
+so `**<link>**` and `<link>.` cite the link, and a curly apostrophe ends it. A link
+inside a fenced block is not read - but only a fence opened at the start of a line
+and closed; an indented fence, or one never closed, is read as prose, and the links
+in it are checked.
+
 **Database columns are a third result, not a pass or a failure.** The graph holds
 AST nodes, so a `table.column` citation will never resolve and never should.
 Rejecting them hands a store that cites its schema a permanently red gate;
@@ -51,13 +97,14 @@ files and directories named on the command line. Generated evidence - the
 is wrong, while an answer states what is true. Fenced code blocks are skipped.
 
 **A gate, as `check-evidence` and `check-answers` are.** Exit 1 when any citation
-is unresolved, 2 when it cannot run (no graph, no answers, or a named path that
-0 otherwise. Database
-columns and skipped spans never fail it. The result is a statement about the
-graph's code identifiers: a pass does not show a cited claim is *true*, only that
-the thing it names exists.
+is unresolved, 2 when it cannot run (no graph, no answers, or a repository list
+that cannot be parsed), 0 otherwise. Database columns, links outside the estate and
+skipped spans never fail it. The result is a statement about the graph's code
+identifiers and files: a pass does not show a cited claim is *true*, only that the
+thing it names exists.
 
 Run: knowledgestore check-citations [--graph PATH] [path ...]
+(run from the store root: the repository list and provenance are read from it)
 """
 
 from __future__ import annotations
@@ -65,20 +112,51 @@ from __future__ import annotations
 import argparse
 import difflib
 import re
+import subprocess
 import sys
+from collections.abc import Callable
+from functools import partial
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, graph_files, graph_stream
 from .build_community_summaries import _normalise, prose_identifiers
+from .sync_repositories import run_git
+from .source_urls import (
+    BlobUrl,
+    SourceUrls,
+    is_full_sha,
+    parse_blob_url,
+    repo_relative,
+    single_root_repositories,
+)
 
 # The supported spelling of the private function. An alias rather than a copy.
 normalise = _normalise
 
 # Public: `answers` reads answers by the same rule, and a rename here must not
-# silently become a break there.
+# silently become a break there. `SPAN` stays backticks only, because `answers`
+# masks code spans with it.
 FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
 SPAN = re.compile(r"`([^`\n]+)`")
+# A backticked span, or a github.com link written outside one. The link stops at
+# the characters that end it in markdown - `)` closing a link, `>` an autolink -
+# which `source_urls` always percent-encodes inside a path.
+# A curly apostrophe ends a link too (`<link>’s`): `source_urls` percent-encodes
+# every non-ASCII character in a path, so a raw one is never part of a link it wrote.
+_CITED = re.compile(r"`([^`\n]+)`|(https://github\.com/[^\s<>()\[\]`'\"\u2019]+)")
+# What GitHub's autolinker drops from the end of a bare link: sentence punctuation
+# and the emphasis marks of `**link**`, `*link*`, `_link_` and `~link~`.
+_LINK_TRAILING = ".,;:!?*_~"
+UNKNOWN_FILE = "unknown file"
+DIFFERENT_SHA = "different sha"
+OUTSIDE_STORE = "a repository this store does not build"
+NO_CLONE = "a file no node names, and no clone under repositories/ to look in"
+CLONE_UNASKED = "a file no node names, and the clone could not be asked"
+# Every kind `resolve` returns, so a consumer mapping them can be held to the list.
+KINDS = ("resolved", "unresolved", "column", "unchecked", "skipped")
+# What `Vocabulary.clone_holds` answers.
+HELD, ABSENT, NO_CLONE_HERE, UNASKED = "held", "absent", "no clone", "unasked"
 _INNER_CALL = re.compile(r"\([^()]*\)")
 _NAME_CHARS = re.compile(r"[.\w$@]+")
 _FILE_EXTENSION = re.compile(
@@ -98,10 +176,21 @@ class Vocabulary:
     paths: dict[str, set[tuple[str, ...]]] = field(default_factory=dict)
     # lower-cased basename -> a real source file to show
     files: dict[str, str] = field(default_factory=dict)
+    # repository -> the `source_file`s its nodes carry, as the graph writes them
+    sources: dict[str, set[str]] = field(default_factory=dict)
+    # the store's repository list and provenance; None when they were not read
+    urls: SourceUrls | None = None
+    # the store's `repositories/`, whose clones answer for files no node names
+    clones: Path | None = None
+    run: Callable[[list[str]], str] = partial(run_git, quiet=True)
+    _flags: dict[str, list[str] | None] = field(default_factory=dict)
     _names: list[str] | None = None
     _basenames: list[str] | None = None
+    _files: dict[str, set[str]] | None = None
 
-    def add(self, label: str, source_file: str) -> None:
+    def add(self, label: str, source_file: str, repo: str = "") -> None:
+        if repo and source_file:
+            self.sources.setdefault(repo, set()).add(source_file)
         key = _normalise(label)
         if key:
             shown = self.labels.get(key)
@@ -125,20 +214,91 @@ class Vocabulary:
             self._basenames = sorted(self.paths)
         return self._basenames
 
+    def repository_files(self, repo: str) -> set[str]:
+        """The repo-relative files the graph holds for `repo`, on either build route."""
+        if self._files is None:
+            single_root = single_root_repositories(
+                {"repo": name, "source_file": path}
+                for name, paths in self.sources.items()
+                for path in paths
+            )
+            self._files = {}
+            for name, paths in self.sources.items():
+                inside = (repo_relative(name, p, name in single_root) for p in paths)
+                self._files[name] = {p for p in inside if p}
+        return self._files.get(repo, set())
 
-def load_vocabulary(graph: Path) -> Vocabulary:
-    vocabulary = Vocabulary()
+    def clone_holds(self, repo: str, sha: str, path: str) -> str:
+        """`HELD` or `ABSENT` when `repo`'s clone answers for `path` at `sha`;
+        `NO_CLONE_HERE` when there is no clone; `UNASKED` when it was not asked.
+
+        Asked only at a full sha - the build commit from provenance, never a ref the
+        link supplied - so the revision git reads always begins with a hex digit and
+        cannot be taken for an option. A path with an empty, `.` or `..` segment
+        names no file in a repository and is `ABSENT` without asking. Git's stderr is
+        discarded by the default runner, so a refusal never interleaves with the
+        report, and a link git cannot be handed (a missing binary, an unpassable
+        argument) is `UNASKED` rather than a traceback.
+        """
+        clone = self.clones / repo if self.clones else None
+        if clone is None or not (clone / ".git").exists():
+            return NO_CLONE_HERE
+        if not is_full_sha(sha):
+            return UNASKED
+        if any(segment in ("", ".", "..") for segment in path.split("/")):
+            return ABSENT
+        if repo not in self._flags:
+            # `--end-of-options` where this git honours it in `rev-parse --verify`:
+            # asking for HEAD with it succeeds only then (or fails on an unborn HEAD,
+            # where going without costs nothing - the revision is hex either way).
+            probe = self._ask(clone, ["--end-of-options", "HEAD"])
+            self._flags[repo] = ["--end-of-options"] if probe else []
+        flags = self._flags[repo] or []
+        answer = self._ask(clone, [*flags, f"{sha}:{path}"])
+        if answer is None:
+            return UNASKED
+        return HELD if answer else ABSENT
+
+    def _ask(self, clone: Path, tail: list[str]) -> bool | None:
+        """Whether `rev-parse --verify` finds the revision; None when git could not
+        be asked at all."""
+        try:
+            self.run(["-C", str(clone), "rev-parse", "--verify", "--quiet", *tail])
+        except subprocess.CalledProcessError:
+            return False
+        except (OSError, ValueError):
+            return None
+        return True
+
+
+def load_vocabulary(
+    graph: Path,
+    urls: SourceUrls | None = None,
+    clones: Path | None = None,
+    run: Callable[[list[str]], str] = partial(run_git, quiet=True),
+) -> Vocabulary:
+    """Stream the graph's nodes once. Without `urls`, no source link is checked;
+    without `clones`, a link to a file no node names is unchecked."""
+    vocabulary = Vocabulary(urls=urls, clones=clones, run=run)
     for node in graph_stream.iter_array(graph, "nodes"):
-        vocabulary.add(str(node.get("label") or ""), str(node.get("source_file") or ""))
+        vocabulary.add(
+            str(node.get("label") or ""),
+            str(node.get("source_file") or ""),
+            str(node.get("repo") or ""),
+        )
     return vocabulary
 
 
 @dataclass(frozen=True)
 class Verdict:
-    """`kind` is resolved, unresolved, column or skipped."""
+    """`kind` is resolved, unresolved, column, unchecked or skipped.
+
+    `reason` says why a source link is unresolved or unchecked; else it is empty.
+    """
 
     kind: str
     nearest: str = ""
+    reason: str = ""
 
 
 def _members(span: str) -> tuple[str, bool] | None:
@@ -198,8 +358,70 @@ def _resolve_path(span: str, vocabulary: Vocabulary) -> Verdict:
     return Verdict("unresolved", vocabulary.files[close] if close else "")
 
 
+def _ask_clones(
+    link: BlobUrl, repos: tuple[str, ...], vocabulary: Vocabulary, urls: SourceUrls
+) -> tuple[set[str], set[str]]:
+    """A file no node names: each clone answers, at the commit the store read.
+
+    The repositories whose clone holds it, and the states that left it undecided.
+    """
+    holding: set[str] = set()
+    undecided: set[str] = set()
+    for r in repos:
+        state = vocabulary.clone_holds(r, urls.build_sha(r), link.path)
+        if state == HELD:
+            holding.add(r)
+        elif state != ABSENT:
+            undecided.add(state)
+    return holding, undecided
+
+
+def _nearest_file(link: BlobUrl, repos: tuple[str, ...], vocabulary: Vocabulary) -> str:
+    """The file the graph holds for these repositories that the cited path most resembles."""
+    pool = sorted(set().union(*(vocabulary.repository_files(r) for r in repos)))
+    return _nearest(link.path, pool)
+
+
+def _sha_reason(repos: tuple[str, ...], urls: SourceUrls) -> str:
+    read = sorted({urls.build_sha(r) for r in repos} - {""})
+    if read:
+        return f"{DIFFERENT_SHA}: the store read {', '.join(read)}"
+    return f"{DIFFERENT_SHA}: the store records no commit for {', '.join(repos)}"
+
+
+def _resolve_link(link: BlobUrl, vocabulary: Vocabulary) -> Verdict:
+    urls = vocabulary.urls
+    repos = urls.repositories_at(link.org, link.repo) if urls else ()
+    if urls is None or not repos:
+        return Verdict("unchecked", reason=OUTSIDE_STORE)
+    holding = {r for r in repos if link.path in vocabulary.repository_files(r)}
+    built = {r for r in repos if urls.build_sha(r) == link.sha}
+    undecided: set[str] = set()
+    if not holding:
+        holding, undecided = _ask_clones(link, repos, vocabulary, urls)
+    if holding & built:
+        return Verdict("resolved")
+    if not holding and undecided and built:
+        return Verdict("unchecked", reason=CLONE_UNASKED if UNASKED in undecided else NO_CLONE)
+    reasons, nearest = [], ""
+    # An unpinned ref (`main`, `feature/x`, an abbreviated sha) is wrong on its own,
+    # and a slashed branch also shifts the path, so the file claim says nothing.
+    if not holding and not undecided and is_full_sha(link.sha):
+        reasons.append(f"{UNKNOWN_FILE} in {', '.join(repos)}")
+        nearest = _nearest_file(link, repos, vocabulary)
+    if not built:
+        reasons.append(_sha_reason(repos, urls))
+    if not reasons:
+        # Duplicate entries for one origin: one holds the file, another the commit.
+        reasons.append(f"{DIFFERENT_SHA}: no single repository holds the file at it")
+    return Verdict("unresolved", nearest, "; ".join(reasons))
+
+
 def resolve(span: str, vocabulary: Vocabulary) -> Verdict:
-    """Decide one backticked span against the graph."""
+    """Decide one cited span or source link against the graph."""
+    link = parse_blob_url(span)
+    if link is not None:
+        return _resolve_link(link, vocabulary)
     if _is_path(span):
         return _resolve_path(span, vocabulary)
     split = _members(span)
@@ -224,12 +446,39 @@ def resolve(span: str, vocabulary: Vocabulary) -> Verdict:
     return Verdict("unresolved", vocabulary.labels[close] if close else "")
 
 
-def citations(text: str) -> list[str]:
-    """Inline backticked spans outside fenced code blocks, in order, de-duplicated."""
+def spans(text: str) -> list[str]:
+    """Inline backticked spans outside fenced code blocks, in order, de-duplicated.
+
+    `answers` lists these first and its own URL and corpus-path finds after them;
+    a record's citation order is part of what it writes, so it reads spans alone.
+    """
     seen: dict[str, None] = {}
     for match in SPAN.finditer(FENCE.sub("", text)):
         seen.setdefault(match.group(1).strip(), None)
     return list(seen)
+
+
+def citations(text: str) -> list[str]:
+    """Inline backticked spans, and source links written anywhere, outside fenced
+    code blocks - in order, de-duplicated."""
+    seen: dict[str, None] = {}
+    for match in _CITED.finditer(FENCE.sub("", text)):
+        if match.group(1) is not None:
+            seen.setdefault(match.group(1).strip(), None)
+            continue
+        link = match.group(2).rstrip(_LINK_TRAILING)
+        if parse_blob_url(link) is not None:
+            seen.setdefault(link, None)
+    return list(seen)
+
+
+def cites_links(files: list[Path]) -> bool:
+    """Whether any answer cites a source link."""
+    return any(
+        parse_blob_url(span) is not None
+        for path in files
+        for span in citations(path.read_text(encoding="utf-8"))  # NOSONAR(S8707)
+    )
 
 
 def answer_files(paths: list[Path]) -> list[Path]:
@@ -248,6 +497,10 @@ class Report:
     skipped: int = 0
     unresolved: list[tuple[str, str, str]] = field(default_factory=list)
     columns: list[tuple[str, str]] = field(default_factory=list)
+    # source links the store cannot decide, either way: (file, link)
+    unchecked: list[tuple[str, str]] = field(default_factory=list)
+    # why each source link failed or went unchecked, by span (one span, one reason)
+    reasons: dict[str, str] = field(default_factory=dict)
 
 
 def check(files: list[Path], vocabulary: Vocabulary) -> Report:
@@ -264,25 +517,20 @@ def check(files: list[Path], vocabulary: Vocabulary) -> Report:
                 report.skipped += 1
             elif verdict.kind == "column":
                 report.columns.append((str(path), span))
+            elif verdict.kind == "unchecked":
+                report.unchecked.append((str(path), span))
+                report.reasons[span] = verdict.reason
             else:
                 report.unresolved.append((str(path), span, verdict.nearest))
+                if verdict.reason:
+                    report.reasons[span] = verdict.reason
     return report
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="knowledgestore check-citations",
-        description="Fail if a published answer cites code the graph does not hold.",
-    )
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        help="answer files or directories (default: docs/topics and docs/deep-dives)",
-    )
-    parser.add_argument("--graph", type=Path, help="default: this store's graph")
-    arguments = parser.parse_args(argv)
-
+def _inputs(
+    arguments: argparse.Namespace,
+) -> tuple[Path, list[Path], SourceUrls] | int:
+    """The graph, the answers and the store's link map - or the exit code refusing."""
     graph = arguments.graph if arguments.graph else graph_files.graph_to_read(config.GRAPH_PATH)
     if graph is None or not graph.is_file():
         print(
@@ -302,13 +550,37 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    report = check(files, load_vocabulary(graph))
+    if not config.REPOSITORIES_CONFIG.is_file() and cites_links(files):
+        print(
+            f"No {config.REPOSITORIES_CONFIG} - the answers cite source links, and "
+            "without the repository list none of them can be checked. Change to the "
+            "store root, or set KSB_ROOT to it.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        urls = SourceUrls.from_store()
+    except ValueError as error:
+        # Read as an empty estate, it would turn every source link into an unchecked one.
+        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)
+        return 2
+    return graph, files, urls
+
+
+def _print_summary(files: list[Path], graph: Path, report: Report) -> None:
+    """The counts, then the two lists that never change the exit code."""
     checked = report.resolved + len(report.unresolved)
     print(
         f"{len(files):,} answer files against {graph.name}: {checked:,} citations checked, "
         f"{report.resolved:,} resolve, {len(report.unresolved):,} do not; "
         f"{len(report.columns):,} database-column citations reported separately; "
         f"{report.skipped:,} spans skipped (no code shape)"
+        + (
+            f"; {len(report.unchecked):,} source links this store cannot decide, "
+            "reported separately"
+            if report.unchecked
+            else ""
+        )
     )
     if report.columns:
         print(
@@ -317,12 +589,47 @@ def main(argv: list[str] | None = None) -> int:
         )
         for path, span in report.columns:
             print(f"  {path}  `{span}`")
-    if not report.unresolved:
-        return 0
+    if report.unchecked:
+        print(
+            "\nSource links this store cannot decide, neither passed nor failed - check "
+            "these by hand:"
+        )
+        for path, span in report.unchecked:
+            print(f"  {path}  `{span}`  {report.reasons.get(span, '')}".rstrip())
+
+
+def _print_unresolved(report: Report) -> None:
     print("\nCited but not in the graph:", file=sys.stderr)
     for path, span, nearest in report.unresolved:
         hint = f"  nearest: {nearest}" if nearest else "  no near match"
+        reason = report.reasons.get(span)
+        if reason:
+            hint = f"  {reason}" + (f"  nearest: {nearest}" if nearest else "")
         print(f"  {path}  `{span}`{hint}", file=sys.stderr)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore check-citations",
+        description="Fail if a published answer cites code the graph does not hold.",
+    )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="answer files or directories (default: docs/topics and docs/deep-dives)",
+    )
+    parser.add_argument("--graph", type=Path, help="default: this store's graph")
+    found = _inputs(parser.parse_args(argv))
+    if isinstance(found, int):
+        return found
+    graph, files, urls = found
+
+    report = check(files, load_vocabulary(graph, urls, config.REPOSITORIES_DIR))
+    _print_summary(files, graph, report)
+    if not report.unresolved:
+        return 0
+    _print_unresolved(report)
     return 1
 
 

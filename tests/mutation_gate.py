@@ -4885,6 +4885,7 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
             "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
+            "test_source_urls.ParsingALink.test_a_link_names_the_configured_repository_whatever_its_local_name",
             "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
         ),
     ),
@@ -4902,6 +4903,7 @@ MUTATIONS = (
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
             "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
     ),
     Mutation(
@@ -4913,6 +4915,7 @@ MUTATIONS = (
         "keeping the prefix links a path inside the repository that does not exist",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_real_file_at_the_build_commit_resolves",
             "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
             "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
@@ -4976,6 +4979,7 @@ MUTATIONS = (
             "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
     ),
     Mutation(
@@ -5001,6 +5005,7 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_a_repository_name_cannot_close_the_config_block",
             "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
             "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
         ),
     ),
@@ -5048,6 +5053,376 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
         ),
+    ),
+    Mutation(
+        "citation link: the sha is not checked",
+        "check_citations.py",
+        "    built = {r for r in repos if urls.build_sha(r) == link.sha}\n",
+        "    built = set(repos)\n",
+        "a link pinned to a commit the store never read, or to a branch, passes the "
+        "publish gate as a citation of this build and drifts off the line it cites",
+        (
+            "test_check_citations.AskingTheClone.test_git_is_never_handed_a_ref_the_link_supplied",
+            "test_check_citations.AskingTheClone.test_without_a_clone_a_wrong_sha_still_fails",
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_wrong_sha_still_fails",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_at_another_commit_fails_and_says_it_is_the_sha",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+            "test_check_citations.VerdictsOnSourceLinks.test_an_unpinned_link_reports_the_sha_alone",
+        ),
+    ),
+    Mutation(
+        "citation link: a path is resolved across the estate",
+        "check_citations.py",
+        "    holding = {r for r in repos if link.path in vocabulary.repository_files(r)}\n",
+        "    holding = {\n"
+        "        r\n"
+        "        for r in repos\n"
+        "        if any(link.path in vocabulary.repository_files(o) for o in vocabulary.sources)\n"
+        "    }\n",
+        "a link naming a file that only another repository holds passes, though it opens "
+        "a 404 in the repository it names",
+        (
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
+        ),
+    ),
+    Mutation(
+        "citation link: only backticked spans are read",
+        "check_citations.py",
+        "        if parse_blob_url(link) is not None:\n",
+        "        if False:\n",
+        "answers cite a link as a markdown link or bare, so a made-up one there is never "
+        "looked at and the gate's silence is about text it did not read",
+        (
+            "test_check_citations.AskingTheClone.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheLinksOfAnAnswer.test_a_bare_link_ends_where_github_ends_it",
+            "test_check_citations.TheLinksOfAnAnswer.test_a_link_is_a_citation_however_it_is_written",
+            "test_check_citations.TheStageOnSourceLinks.test_a_clean_answer_citing_links_passes",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.TheStageOnSourceLinks.test_links_with_no_repository_list_stop_the_gate",
+        ),
+    ),
+    Mutation(
+        "citation link: the cited path is compared still percent-encoded",
+        "source_urls.py",
+        '    path = unquote(match.group("path"))\n',
+        '    path = match.group("path")\n',
+        "a real link to a file whose name holds a space, `#` or bracket reads as a file the "
+        "store does not hold, failing an honest answer",
+        (
+            "test_check_citations.AskingTheClone.test_a_nul_in_a_link_is_not_a_link",
+            "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
+            "test_source_urls.ParsingALink.test_only_a_github_blob_link_is_parsed",
+        ),
+    ),
+    Mutation(
+        "citation link: an unpinned link is not parsed",
+        "source_urls.py",
+        r"/blob/(?P<sha>[^/?#\s]+)",
+        r"/blob/(?P<sha>[0-9a-f]{40})",
+        "a link to `blob/main/...` or an abbreviated sha falls back to being skipped, which "
+        "is the hole the gate closes: it passes unchecked",
+        (
+            "test_check_citations.AskingTheClone.test_git_is_never_handed_a_ref_the_link_supplied",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_at_another_commit_fails_and_says_it_is_the_sha",
+            "test_check_citations.VerdictsOnSourceLinks.test_an_unpinned_link_reports_the_sha_alone",
+            "test_source_urls.ParsingALink.test_a_link_pinned_to_a_branch_still_parses",
+        ),
+    ),
+    Mutation(
+        "citation link: the single-root prefix is kept on the graph's side",
+        "check_citations.py",
+        "                inside = (repo_relative(name, p, name in single_root) for p in paths)\n",
+        "                inside = (repo_relative(name, p, False) for p in paths)\n",
+        "on a store built by the single-root route every correct link reads as an unknown "
+        "file, so the gate is red for answers that are right",
+        (
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_real_file_at_the_build_commit_resolves",
+        ),
+    ),
+    Mutation(
+        "citation link: a link outside the estate fails the gate",
+        "check_citations.py",
+        '    if urls is None or not repos:\n        return Verdict("unchecked", reason=OUTSIDE_STORE)\n',
+        '    if urls is None or not repos:\n        return Verdict("unresolved", reason=OUTSIDE_STORE)\n',
+        "a store whose answers cite a third-party library's source could never go green, "
+        "so it would stop running the gate",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_repository_the_store_does_not_build_is_neither_passed_nor_failed",
+            "test_check_citations.VerdictsOnSourceLinks.test_without_the_store_files_a_link_is_unchecked_not_passed",
+        ),
+    ),
+    Mutation(
+        "citation link: an unreadable repository list is read as an empty estate",
+        "check_citations.py",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        return 2\n",
+        '        print(f"Cannot read {config.REPOSITORIES_CONFIG}: {error}", file=sys.stderr)\n'
+        "        urls = None\n",
+        "every source link becomes unchecked and the gate passes over all of them, exit 0",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_an_unreadable_repository_list_stops_the_gate",
+        ),
+    ),
+    Mutation(
+        "citation link: the report does not say which claim is wrong",
+        "check_citations.py",
+        "        if reason:\n",
+        "        if False:\n",
+        "an operator told only that a link does not resolve cannot tell whether to fix the "
+        "path or re-pin the commit",
+        (
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
+        "citation link: a file no node names is not asked of the clone",
+        "check_citations.py",
+        "        if state == HELD:\n",
+        "        if False:\n",
+        "every link to a corpus-search match fails as an unknown file, though the "
+        "repository holds it - the links the question skill tells an agent to build",
+        (
+            "test_check_citations.AskingTheClone.test_a_file_the_clone_holds_at_the_build_commit_resolves",
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_holds_at_the_build_commit_resolves",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+        ),
+    ),
+    Mutation(
+        "citation link: the clone is asked at its head, not the build commit",
+        "check_citations.py",
+        "vocabulary.clone_holds(r, urls.build_sha(r), link.path)",
+        'vocabulary.clone_holds(r, "HEAD", link.path)',
+        "a file added after the build passes as though the store had read it, and a "
+        "file deleted since fails though the cited commit holds it",
+        (
+            "test_check_citations.AskingTheClone.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+            "test_check_citations.AskingTheClone.test_a_file_the_clone_holds_at_the_build_commit_resolves",
+            "test_check_citations.AskingTheClone.test_a_path_climbing_with_dot_dot_is_never_asked",
+            "test_check_citations.AskingTheClone.test_the_question_carries_end_of_options_where_git_honours_it",
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_holds_at_the_build_commit_resolves",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+        ),
+    ),
+    Mutation(
+        "citation link: a missing path in the clone passes",
+        "check_citations.py",
+        "        except subprocess.CalledProcessError:\n            return False\n",
+        "        except subprocess.CalledProcessError:\n            return True\n",
+        "with the clone present, any invented path passes the gate: the clone's no is "
+        "read as a yes",
+        (
+            "test_check_citations.AskingTheClone.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_file_the_clone_does_not_hold_at_the_build_commit_fails",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
+            "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+        ),
+    ),
+    Mutation(
+        "citation link: no clone fails the link",
+        "check_citations.py",
+        "    if not holding and undecided and built:\n"
+        '        return Verdict("unchecked", reason=CLONE_UNASKED if UNASKED in undecided else NO_CLONE)\n',
+        "",
+        "a machine without the corpus - every one but the build machine - fails links "
+        "nothing it holds can decide, so the gate is red for honest answers",
+        (
+            "test_check_citations.AskingTheClone.test_a_git_that_cannot_be_asked_leaves_the_link_unchecked",
+            "test_check_citations.AskingTheClone.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.AskingTheClone.test_without_a_clone_a_file_no_node_names_is_unchecked_not_failed",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_file_no_node_names_is_unchecked_not_failed",
+        ),
+    ),
+    Mutation(
+        "citation link: a missing clone hides a wrong sha",
+        "check_citations.py",
+        "    if not holding and undecided and built:\n",
+        "    if not holding and undecided:\n",
+        "a link pinned to the wrong commit passes as unchecked on any machine without a "
+        "clone, though provenance alone shows it is wrong",
+        (
+            "test_check_citations.AskingTheClone.test_git_is_never_handed_a_ref_the_link_supplied",
+            "test_check_citations.AskingTheClone.test_without_a_clone_a_wrong_sha_still_fails",
+            "test_check_citations.LinksToFilesNoNodeNames.test_without_a_clone_a_wrong_sha_still_fails",
+        ),
+    ),
+    Mutation(
+        "citation link: the stage does not hand over the clones",
+        "check_citations.py",
+        "load_vocabulary(graph, urls, config.REPOSITORIES_DIR)",
+        "load_vocabulary(graph, urls)",
+        "the stage lists every corpus-search link as unchecked, so an invented one "
+        "passes on the machine that holds the clone that could refute it",
+        (
+            "test_check_citations.AskingTheClone.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.LinksToFilesNoNodeNames.test_the_stage_reads_the_clones_under_the_store",
+            "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
+        ),
+    ),
+    Mutation(
+        "citation link: answers hands a link it cannot see to resolve",
+        "answers.py",
+        "    if _URL.fullmatch(text) or parse_blob_url(text) is not None:\n",
+        "    if _URL.fullmatch(text):\n",
+        "a hand-written link with a raw `(` in its path slips past the URL pattern into "
+        "`resolve`, which returns `unchecked`, and the class lookup raises: one link ends "
+        "the whole measurement",
+        (
+            "test_answers.ClassingALinkCheckCitationsCanParse.test_a_link_with_a_raw_bracket_is_a_pinned_url_not_a_crash",
+        ),
+    ),
+    Mutation(
+        "citation link: an undecided link is called outside the estate",
+        "check_citations.py",
+        "if UNASKED in undecided else NO_CLONE)",
+        "if UNASKED in undecided else OUTSIDE_STORE)",
+        "a corpus-search link with no clone here is listed as a repository the store "
+        "does not build, so a reader checks the repository list rather than the file",
+        (
+            "test_check_citations.AskingTheClone.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+            "test_check_citations.LinksToFilesNoNodeNames.test_a_link_no_clone_can_decide_is_listed_as_undecided",
+        ),
+    ),
+    Mutation(
+        "citation link: links with no repository list pass as outside the estate",
+        "check_citations.py",
+        "    if not config.REPOSITORIES_CONFIG.is_file() and cites_links(files):\n",
+        "    if False:\n",
+        "run from outside the store root, every cited link is listed as a repository the "
+        "store does not build and the gate exits 0 - silence about a file it never read",
+        (
+            "test_check_citations.TheStageOnSourceLinks.test_links_with_no_repository_list_stop_the_gate",
+        ),
+    ),
+    Mutation(
+        "citation link: emphasis stays on a bare link",
+        "check_citations.py",
+        '_LINK_TRAILING = ".,;:!?*_~"',
+        '_LINK_TRAILING = ".,;:!?"',
+        "a bolded link `**<link>**` cites `a.py**`, which no repository holds, and the "
+        "gate fails an honest answer",
+        ("test_check_citations.TheLinksOfAnAnswer.test_a_bare_link_ends_where_github_ends_it",),
+    ),
+    Mutation(
+        "citation link: a curly apostrophe stays on a bare link",
+        "check_citations.py",
+        "`'\\\"\\u2019]+)",
+        "`'\\\"]+)",
+        "`<link>’s` cites a file ending `’s`, which no repository holds, and the gate "
+        "fails an honest answer",
+        ("test_check_citations.TheLinksOfAnAnswer.test_a_bare_link_ends_where_github_ends_it",),
+    ),
+    Mutation(
+        "citation link: a control character in a link reaches git",
+        "source_urls.py",
+        "    if _CONTROL.search(path):\n        return None\n",
+        "",
+        "`%00` decodes to a NUL that subprocess refuses, and the stage dies with a "
+        "traceback and no report",
+        ("test_source_urls.ParsingALink.test_only_a_github_blob_link_is_parsed",),
+    ),
+    Mutation(
+        "citation link: a git that cannot be asked is a traceback",
+        "check_citations.py",
+        "        except (OSError, ValueError):\n            return None\n",
+        "",
+        "a machine with no git binary, or an argument git cannot be handed, ends the gate "
+        "with a traceback instead of listing the link as undecided",
+        (
+            "test_check_citations.AskingTheClone.test_a_git_that_cannot_be_asked_leaves_the_link_unchecked",
+        ),
+    ),
+    Mutation(
+        "citation link: git is handed the link's own ref",
+        "check_citations.py",
+        "vocabulary.clone_holds(r, urls.build_sha(r), link.path)",
+        "vocabulary.clone_holds(r, urls.build_sha(r) or link.sha, link.path)",
+        "with no build sha recorded, text from a published answer reaches a subprocess's "
+        "argv, for a verdict the sha already decides",
+        ("test_check_citations.AskingTheClone.test_git_is_never_handed_a_ref_the_link_supplied",),
+    ),
+    Mutation(
+        "citation link: the full-sha guard on the clone question is dropped",
+        "check_citations.py",
+        "        if not is_full_sha(sha):\n            return UNASKED\n",
+        "",
+        "a ref that is not a commit id - `--help`, a branch - is put in front of git as a "
+        "revision, where only a hex sha guarantees it cannot read as an option",
+        ("test_check_citations.AskingTheClone.test_git_is_never_handed_a_ref_the_link_supplied",),
+    ),
+    Mutation(
+        "citation link: the clone question goes without end-of-options",
+        "check_citations.py",
+        '            self._flags[repo] = ["--end-of-options"] if probe else []\n',
+        "            self._flags[repo] = []\n",
+        "the revision is handed to git with nothing marking the end of its options, on a "
+        "git that would honour the marker",
+        (
+            "test_check_citations.AskingTheClone.test_the_question_carries_end_of_options_where_git_honours_it",
+        ),
+    ),
+    Mutation(
+        "citation link: a dot-dot path is asked of git",
+        "check_citations.py",
+        '        if any(segment in ("", ".", "..") for segment in path.split("/")):\n'
+        "            return ABSENT\n",
+        "",
+        "git answers a path climbing out of the repository with a `fatal:` line, and a "
+        "path that names no file is put to a subprocess at all",
+        ("test_check_citations.AskingTheClone.test_a_path_climbing_with_dot_dot_is_never_asked",),
+    ),
+    Mutation(
+        "citation link: quiet git still prints its refusals",
+        "sync_repositories.py",
+        "        stderr=subprocess.DEVNULL if quiet else None,\n",
+        "        stderr=None,\n",
+        "git's `fatal:` line for every refused question lands in the middle of the gate's report",
+        (
+            "test_check_citations.TheQuietRunner.test_a_quiet_git_call_prints_nothing_when_git_refuses",
+        ),
+    ),
+    Mutation(
+        "citation link: an unpinned link also reports an unknown file",
+        "check_citations.py",
+        "    if not holding and not undecided and is_full_sha(link.sha):\n",
+        "    if not holding and not undecided:\n",
+        "a slashed branch shifts where the path starts, so `unknown file` sends the reader "
+        "to fix a path that was never the problem",
+        ("test_check_citations.VerdictsOnSourceLinks.test_an_unpinned_link_reports_the_sha_alone",),
+    ),
+    Mutation(
+        "citation link: answers raises on a kind it does not name",
+        "answers.py",
+        '    return _VERDICT_CLASS.get(resolve(text, vocabulary).kind, "skipped")\n',
+        "    return _VERDICT_CLASS[resolve(text, vocabulary).kind]\n",
+        "the next verdict kind `check_citations` adds ends the whole measurement with a KeyError",
+        ("test_answers.EveryVerdictHasAClass.test_an_unknown_kind_is_skipped_rather_than_raising",),
+    ),
+    Mutation(
+        "citation link: answers forgets the unchecked kind",
+        "answers.py",
+        '    "unchecked": "skipped",\n',
+        "",
+        "`unchecked` falls to the default silently, so the map no longer names every kind "
+        "and the next one added is not noticed either",
+        ("test_answers.EveryVerdictHasAClass.test_every_kind_check_citations_returns_is_mapped",),
     ),
     Mutation(
         "source url stage: only the plain graph is rewritten",

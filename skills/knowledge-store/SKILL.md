@@ -184,6 +184,13 @@ repository, degree ranking, community sizes.
   yourself only for a file no node names (a corpus-search match), or in a store
   where no node carries `url`, from the repository's github.com clone URL in
   `config/repositories.txt` and its sha in `knowledge/provenance.json`.
+  `knowledgestore check-citations` fails a published link whose path that
+  repository's nodes do not hold, or whose sha is not that provenance sha - a
+  branch name or an abbreviated sha included - so a hand-built link is checked
+  like a copied one. A link to a corpus-search match, a path no node holds, is
+  checked in the repository's clone under `repositories/<name>/` at that sha: it
+  passes if the file is there and fails as `unknown file` if not. Where no clone is
+  present it is listed as unchecked, not failed.
   **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
   commits, so no reader can open it. Authored topic briefs and deep dives are not
   answers: they keep file paths in backticks, which the page renderer links.

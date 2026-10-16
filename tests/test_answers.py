@@ -29,6 +29,7 @@ import io as _io
 import json
 import os
 import tempfile
+import unittest
 from unittest import mock
 from pathlib import Path
 
@@ -593,6 +594,43 @@ class Citations(AnswersStage):
                 },
             ],
         )
+
+
+class ClassingALinkCheckCitationsCanParse(SettingsIsolated):
+    def test_a_link_with_a_raw_bracket_is_a_pinned_url_not_a_crash(self):
+        """Break: `check_citations.resolve` parses blob links, and returns `unchecked`
+        for one when no store is loaded. A link whose path holds a raw `(` slips past
+        this module's own URL pattern into `resolve`, and the class lookup raised
+        KeyError, ending the whole measurement on one hand-written link."""
+        vocabulary = check_citations.Vocabulary()
+        for span in (
+            f"https://github.com/example/shop-api/blob/{SHA}/db/Order(Draft).sql",
+            f"https://github.com/example/shop-api/blob/{SHA}/src/OrderService.java#L12",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(answers.classify(span, vocabulary), "pinned_url")
+        self.assertEqual(
+            answers.classify(
+                "https://github.com/example/shop-api/blob/main/db/Order(Draft).sql", vocabulary
+            ),
+            "skipped",
+        )
+
+
+class EveryVerdictHasAClass(unittest.TestCase):
+    def test_every_kind_check_citations_returns_is_mapped(self):
+        """Break: `check_citations` returns a kind this module does not name, and the
+        class lookup raises KeyError mid-measurement. Each kind is named here."""
+        self.assertEqual(set(answers._VERDICT_CLASS), set(check_citations.KINDS))
+
+    def test_an_unknown_kind_is_skipped_rather_than_raising(self):
+        """Break: a kind added to `check_citations` later ends the run on a KeyError.
+        Stubbed at `resolve`, the boundary the kind crosses."""
+        future = check_citations.Verdict("some-future-kind")
+        with mock.patch.object(answers, "resolve", return_value=future):
+            self.assertEqual(
+                answers.classify("CaseService", check_citations.Vocabulary()), "skipped"
+            )
 
 
 class AbsenceClaims(AnswersStage):

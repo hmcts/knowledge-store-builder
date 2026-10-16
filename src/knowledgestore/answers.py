@@ -96,7 +96,8 @@ from pathlib import Path
 from typing import Any
 
 from . import config, graph_files, io
-from .check_citations import FENCE, SPAN, Vocabulary, citations, load_vocabulary, resolve
+from .check_citations import FENCE, SPAN, Vocabulary, load_vocabulary, resolve, spans
+from .source_urls import parse_blob_url
 from .cost import (
     RESULT_SUFFIXES,
     TRANSCRIPT_SUFFIXES,
@@ -124,10 +125,15 @@ HARNESS_TEXT = (
 
 TOKEN_FIELDS = ("input", "cache_read", "cache_write", "output_floor")
 CLASSES = ("resolves", "pinned_url", "corpus_path", "unresolved", "column", "skipped")
+# Every kind `check_citations.resolve` returns (`check_citations.KINDS`) is named
+# here. `unchecked` is a source link the store could not decide, which says nothing
+# about the answer's hygiene. A kind added there later falls to "skipped" rather
+# than ending the measurement with a KeyError; a test holds this map to KINDS.
 _VERDICT_CLASS = {
     "resolved": "resolves",
     "unresolved": "unresolved",
     "column": "column",
+    "unchecked": "skipped",
     "skipped": "skipped",
 }
 
@@ -357,16 +363,18 @@ def _count_turn(message: dict[str, Any], usage: dict[str, Any], answer: Answer) 
 def classify(span: str, vocabulary: Vocabulary) -> str:
     """One citation's class. See the module docstring for what each means."""
     text = span.strip()
-    if _URL.fullmatch(text):
+    # `parse_blob_url` too: `_URL` stops at a raw `(`, which a hand-written link can
+    # hold, and `resolve` would class that link against a store this run never read.
+    if _URL.fullmatch(text) or parse_blob_url(text) is not None:
         return "pinned_url" if _PINNED.search(text) else "skipped"
     if text.removeprefix("./").startswith("repositories/"):
         return "corpus_path"
-    return _VERDICT_CLASS[resolve(text, vocabulary).kind]
+    return _VERDICT_CLASS.get(resolve(text, vocabulary).kind, "skipped")
 
 
 def cited(text: str) -> list[str]:
     """Backticked spans, then URLs and bare corpus paths outside them, de-duplicated."""
-    found: dict[str, None] = dict.fromkeys(citations(text))
+    found: dict[str, None] = dict.fromkeys(spans(text))
     prose = SPAN.sub(" ", FENCE.sub("", text))
     for pattern in (_URL, _CORPUS):
         for match in pattern.finditer(prose):
