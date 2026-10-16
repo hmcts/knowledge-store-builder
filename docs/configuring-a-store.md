@@ -174,7 +174,11 @@ cache writer are the same code on both routes. What the `twg` route adds:
   descriptions and comments are requested only when their settings are on.
 - **Bodies flattened to text.** Cloud descriptions and comments are structured
   documents. Each block — a paragraph, a heading, a list item, a table cell —
-  becomes one line.
+  becomes one line, and a hard break inside a paragraph stays a line break. A
+  bullet item starts `- `; an ordered item starts `1. `, `2. ` and so on, from
+  the list's own start number when it has one; a nested list is indented two
+  spaces per level. The same ticket fetched over the HTTP route keeps its list
+  markers too, so text from either route reads alike.
 - **No names.** A mention is stored as `[~accountid:<id>]`, never as the display
   name the document carries beside it, and a comment's author is dropped before
   the stage sees the comment. No node's `attrs.text` — where a document keeps a

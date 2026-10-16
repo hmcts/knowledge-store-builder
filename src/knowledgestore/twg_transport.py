@@ -20,7 +20,10 @@ settings are on, exactly as on the HTTP route.
 
 **Cloud bodies are documents, not strings.** Descriptions and comments arrive as
 Atlassian Document Format, and the library keeps only strings, so an unflattened
-body would store nothing. Each block becomes one line.
+body would store nothing. Each block becomes one line and a hard break a line
+break; a list item keeps its marker - `- `, or `1. `, `2. ` from the list's
+start number - and a nested list is indented two spaces per level, so a body
+reads as it does when fetched from Data Center (#436).
 
 **A mention is an account id, never a name.** An ADF mention node carries the
 person's display name in `attrs.text`. It is rendered as `[~accountid:<id>]`,
@@ -139,7 +142,7 @@ def _render_mention(_node: dict, attrs: dict) -> str:
 
 
 def _render_break(_node: dict, _attrs: dict) -> str:
-    return " "
+    return "\n"
 
 
 def _render_emoji(_node: dict, attrs: dict) -> str:
@@ -178,7 +181,8 @@ def _inline(node: dict) -> str:
 
 
 def _lines(node: dict, out: list[str]) -> None:
-    """Append one line per block under `node`. A run of inline nodes is a line."""
+    """Append one line per block under `node`. A run of inline nodes is a line,
+    split where it holds a hard break."""
     run: list[str] = []
     for child in node.get("content") or []:
         if not isinstance(child, dict):
@@ -188,19 +192,54 @@ def _lines(node: dict, out: list[str]) -> None:
             continue
         _flush(run, out)
         run = []
-        _lines(child, out)
+        if child.get("type") in LISTS:
+            _list(child, out)
+        else:
+            _lines(child, out)
     _flush(run, out)
 
 
 def _flush(run: list[str], out: list[str]) -> None:
-    line = "".join(run).strip()
-    if line:
-        out.append(line)
+    for line in "".join(run).split("\n"):
+        if line.strip():
+            out.append(line.strip())
+
+
+# The list nodes, rendered with a marker per item - see `_list`.
+LISTS = frozenset({"bulletList", "orderedList"})
+
+
+def _start(node: dict) -> int:
+    """Where an ordered list's numbering starts: `attrs.order` when it is a
+    whole number, else 1. The one list attribute read, and never as text."""
+    raw = node.get("attrs")
+    order = raw.get("order") if isinstance(raw, dict) else None
+    return order if isinstance(order, int) and not isinstance(order, bool) and order >= 0 else 1
+
+
+def _list(node: dict, out: list[str]) -> None:
+    """A bullet or ordered list, one marker per item: `- `, or `1. `, `2. ` and
+    so on from the list's start. An item's own lines render as any other
+    block's; every line after its first - a hard break, a second paragraph, a
+    nested list - is indented two spaces, so nesting indents two per level."""
+    number = _start(node) if node.get("type") == "orderedList" else None
+    for item in node.get("content") or []:
+        if not isinstance(item, dict):
+            continue
+        lines: list[str] = []
+        _lines(item, lines)
+        if lines:
+            marker = "- " if number is None else f"{number}. "
+            out.append(marker + lines[0])
+            out.extend("  " + line for line in lines[1:])
+        if number is not None:
+            number += 1
 
 
 def flatten(body: object) -> object:
-    """An ADF document as text, one line per block. Anything that is not a
-    document is returned unchanged, so a plain string body stays a string."""
+    """An ADF document as text, one line per block, list items marked. Anything
+    that is not a document is returned unchanged, so a plain string body stays a
+    string."""
     if not isinstance(body, dict):
         return body
     out: list[str] = []
