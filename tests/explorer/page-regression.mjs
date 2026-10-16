@@ -225,7 +225,7 @@ check('what is impacted if PaymentService changes?', 'impact analysis',
 check('where is PaymentService used?', 'where is it used',
   ['directly connected to', 'Used from']);
 check('walk me through the payment journey', 'user journey',
-  ['scripted business features']);
+  ['1 scripted business feature matches this journey']);
 // DEMO-1 has both a tracker summary and a mined description. The tracker's
 // words take the headline - that is the precedence rule - but the mined
 // description is separate evidence and must still appear, under a label naming
@@ -254,6 +254,67 @@ check('DEMO-4', 'ticket lookup',
 // shipped work a proposal, the reverse of the defect above.
 check('DEMO-5', 'ticket lookup', ['Document the rollback runbook'], [],
   { text: ['proposed', 'feature/runbook-appendix'] });
+// DEMO-5's branch-only commit said "Draft the runbook appendix", and the ticket
+// landed (#429). Catches that text pooled into the landed evidence, where it
+// reads as an ordinary commit subject - a draft nobody merged quoted as what the
+// ticket changed. It must still be shown, under a label saying where it came
+// from. Asserted on the markup, because the label and the text are one row.
+const BRANCH_SUBJECT = 'commit subject, from a branch-only commit';
+const BRANCH_BODY = 'commit body, from a branch-only commit';
+const DRAFT = 'Draft the runbook appendix';
+const DRAFT_BODY = 'Lists the appendix tables the on-call rota reads first.';
+api.q.value = 'DEMO-5';
+api.runAsk();
+const demo5Html = api.out.innerHTML;
+for (const [name, ok] of [
+  ['a branch-only subject is shown under its own label',
+    demo5Html.includes('<span class="ev-l">' + BRANCH_SUBJECT + '</span> ' + DRAFT)],
+  ['a branch-only body is shown under its own label',
+    demo5Html.includes('<summary>' + BRANCH_BODY + ' (1)</summary>')
+      && demo5Html.includes(DRAFT_BODY)],
+  ['a branch-only subject is not presented as a landed subject or description',
+    !demo5Html.includes('<span class="ev-l">' + 'commit subject</span> ' + DRAFT)
+      && !demo5Html.includes('<span class="ev-l">' + 'description, from commit messages</span> ' + DRAFT)],
+]) {
+  if (ok) {
+    console.log(`ok    DEMO-5: ${name}`);
+  } else {
+    failures++;
+    console.error(`FAIL  DEMO-5: ${name}`);
+    console.error(`      answer: ${demo5Html.slice(0, 600)}`);
+  }
+}
+// The same text is searchable and labelled where a question finds it. "appendix"
+// is in DEMO-5's branch-only commit and nowhere else in this estate, so a search
+// that skipped `ps` and `pb` would report the word as unevidenced.
+check('what goes in the runbook appendix?', 'commit evidence',
+  ['What the commits say about these words', 'DEMO-5', BRANCH_SUBJECT, DRAFT], [],
+  { meta: ['appendix'], text: ['proposed'] });
+// A count of one reads in the singular (#429). DEMO-4 has one commit, and DEMO-2
+// is carried by one entry in one repository. Catches "1 commits" and its kin.
+check('DEMO-4', 'ticket lookup', ['1 commit,'], [], { text: ['1 commits'] });
+check('DEMO-2', 'ticket lookup', ['touches 1 graph entry across 1 repository.'], [],
+  { text: ['1 graph entries', '1 repositories'] });
+// The other answer shapes count the same way. LedgerBook sits alone in its
+// repository with one neighbour, so every count these three draw is one.
+const ONE_PLURALS = ['1 repositories', '1 matching nodes', '1 nodes', '1 connected nodes',
+  '1 communities', '1 connections', '1 items'];
+check('which repositories implement LedgerBook?', 'which repositories',
+  ['appears in 1 repository (1 matching node).'], [], { text: ONE_PLURALS });
+check('where is LedgerBook used?', 'where is it used',
+  ['is directly connected to 1 node.', 'demo-ledger 1 connected node ', '(1 connection)',
+   'Technical evidence (2 items)'], [], { text: ONE_PLURALS });
+check('what is impacted if LedgerBook changes?', 'impact analysis',
+  ['could reach 1 connected node within two hops, spanning 1 community in 1 repository.',
+   'unlabelled 1 node ', 'Technical evidence (1 item)'], [], { text: ONE_PLURALS });
+api.q.value = 'LedgerBook';
+api.runSearch();
+if (api.meta.textContent === '1 match') {
+  console.log('ok    search: one result reads "1 match"');
+} else {
+  failures++;
+  console.error(`FAIL  search: one result reads "${api.meta.textContent}", not "1 match"`);
+}
 // The other place a ticket is a search result: the evidence section of an
 // answer, found by the words its commits used. "gazetteer" is in DEMO-4's
 // commits and nowhere else, so this row is the only thing that can answer.
@@ -276,6 +337,15 @@ check('how are payments taken?', 'open question',
 // rule silenced four legitimate questions here, because ordinary question words
 // ("used", "taken", "walk") are themselves absent from a small corpus.
 check('how does quantum payment reconciliation work?', 'no evidence for: quantum', [], ['quantum']);
+// The status line describes the question being answered, not the one before it
+// (#429). A ticket lookup returned before the note was reset, so after the
+// question above DEMO-1's status line still said "no evidence for: quantum".
+// The question above has to have left a note, or this passes over nothing.
+if (!api.meta.textContent.includes('no evidence for: quantum')) {
+  failures++;
+  console.error('FAIL  stale note: the previous question left no note, so the check is vacuous');
+}
+check('DEMO-1', 'ticket lookup', ['DEMO-1'], [], { meta: ['no evidence for', 'expanded:'] });
 
 check('how is quantum scheduling implemented?', 'no evidence',
   ['No evidence in this estate', 'quantum'],
@@ -364,6 +434,8 @@ for (const [id, info] of Object.entries(TICKETS)) {
     ...(info.d || []).map((t) => ['mined description', t]),
     ...(info.s || []).map((t) => ['commit subject', t]),
     ...(info.b || []).map((t) => ['commit body', t]),
+    ...(info.ps || []).map((t) => ['branch-only commit subject', t]),
+    ...(info.pb || []).map((t) => ['branch-only commit body', t]),
     ...(info.x ? [['tracker description', info.x]] : []),
     ...(info.c || []).slice(0, 2).map((t) => ['tracker comment', t]),
   ];

@@ -45,7 +45,12 @@
  * `proposed` is true when no landed work names the ticket - it was found only on
  * a branch - and `branches` names up to five branches its branch-only commits
  * sat on. A landed ticket can carry `branches` too, without `proposed`.
- * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string, c?: string[],
+ * `ps` and `pb` are a landed ticket's subjects and body prose from its
+ * branch-only commits, kept out of `d`, `s` and `b` so a draft is never shown as
+ * what the ticket changed. A ticket that never landed has neither: its branch
+ * text is all it has, and stays in the main fields.
+ * @typedef {{d: string[], s?: string[], b?: string[], ps?: string[], pb?: string[],
+ *            t?: string, x?: string, c?: string[],
  *            proposed?: boolean, branches?: string[],
  *            first: string, last: string, repos: string[], n: number}} TicketInfo
  */
@@ -128,7 +133,7 @@ const ticketHay = TICKET_IDS.map((t) => {
   // `t` and `x` are the tracker's own title and description extract. Without
   // them here a real title would display and be unfindable - the page would
   // show better evidence than it could search.
-  return (info.d || []).concat(info.s || [], info.b || [],
+  return (info.d || []).concat(info.s || [], info.b || [], info.ps || [], info.pb || [],
     info.t ? [info.t] : [], info.x ? [info.x] : [], info.c || []).join('\n').toLowerCase();
 });
 /** One ticket's evidence runs from a six-word subject to four thousand
@@ -456,6 +461,10 @@ const LABEL_DESCRIPTION = 'description, from commit messages';
 const LABEL_SUBJECT = 'commit subject';
 const LABEL_TRACKER = 'from the tracker';
 const LABEL_BODY = 'commit body, as written';
+// A landed ticket's branch-only text, named as such: its work is not confirmed
+// on the default branch, so it must not read as what the ticket changed (#429).
+const LABEL_BRANCH_SUBJECT = 'commit subject, from a branch-only commit';
+const LABEL_BRANCH_BODY = 'commit body, from a branch-only commit';
 
 /** Escaped for display, with line breaks kept. Bodies are bulleted lists as
  * often as prose, and lose their meaning as one run-on paragraph.
@@ -475,16 +484,31 @@ const evidenceRows = (label, texts) =>
 
 /** Commit bodies behind a disclosure: a body runs to thousands of characters,
  * so it belongs in the technical-detail idiom rather than a summary line.
- * @param {string[]|undefined} bodies */
-const bodyDetails = (bodies) =>
+ * @param {string[]|undefined} bodies @param {string} [label] */
+const bodyDetails = (bodies, label = LABEL_BODY) =>
   bodies?.length
-    ? '<details class="tech"><summary>' + LABEL_BODY + ' (' + bodies.length + ')</summary>'
+    ? '<details class="tech"><summary>' + label + ' (' + bodies.length + ')</summary>'
       + bodies.map((b) => '<div class="cbody">' + escLines(b) + '</div>').join('')
       + '</details>'
     : '';
 
-/** @param {number} n @param {string} one @param {string} many */
-const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+/** What a landed ticket's branch-only commits said, after its landed evidence
+ * and under labels of its own: that work is not confirmed on the default branch,
+ * so it must not read as what the ticket changed (#429).
+ * @param {TicketInfo|undefined} info
+ * @param {(texts: string[]|undefined) => string[]|undefined} [pick] which texts to show */
+function branchRows(info, pick = (texts) => texts) {
+  return evidenceRows(LABEL_BRANCH_SUBJECT, pick(info?.ps))
+    + bodyDetails(pick(info?.pb), LABEL_BRANCH_BODY);
+}
+
+/** A count and its noun, agreeing: "1 commit", "2 commits" (#429). The one
+ * helper for every count the page writes. `shown` is how the count is written
+ * when that is not the bare number - bold, a thousands separator, a "+".
+ * @param {number} n @param {string} one @param {string} many @param {string} [shown] */
+const plural = (n, one, many, shown = String(n)) => shown + ' ' + (n === 1 ? one : many);
+/** @param {number} n a count, bold */
+const bold = (n) => '<b>' + n + '</b>';
 
 /** Whether a text carries any of the query terms. A single-character term never
  * counts: it matches almost any prose, so a hit on one is an accident.
@@ -524,7 +548,8 @@ function card(e) {
     + (e[3] ? '<div class="row"><b>community:</b> ' + esc(e[3]) + '</div>' : '')
     + (e[6].length
         ? '<div class="row"><b>connects to:</b> ' + e[6].map(esc).join(', ')
-          + ' <span style="color:var(--muted)">(' + e[5] + ' connections)</span></div>'
+          + ' <span style="color:var(--muted)">(' + plural(e[5], 'connection', 'connections')
+          + ')</span></div>'
         : '')
     + (e[7].length
         ? '<div class="row tickets"><b>tickets:</b> ' + e[7].map(ticketChip).join('') + '</div>'
@@ -561,7 +586,8 @@ function runSearch() {
   const kinds = searchKinds();
   if (!terms.length) {
     out.innerHTML = '';
-    meta.textContent = N.toLocaleString() + ' searchable entries - start typing';
+    meta.textContent = plural(N, 'searchable entry', 'searchable entries', N.toLocaleString())
+      + ' - start typing';
     return;
   }
   /** @type {[number, Entry][]} */
@@ -575,7 +601,7 @@ function runSearch() {
   scored.sort((a, b) => b[0] - a[0]);
   const top = scored.slice(0, 100);
   meta.textContent =
-    scored.length + (scored.length === 400 ? '+' : '') + ' matches'
+    plural(scored.length, 'match', 'matches', scored.length + (scored.length === 400 ? '+' : ''))
     + (top.length < scored.length ? ', showing ' + top.length : '');
   out.innerHTML = top.map((s) => card(s[1])).join('');
 }
@@ -999,7 +1025,8 @@ const modeNote = (t) => {
  * @param {string} inner @param {number} count */
 const techDetails = (inner, count) =>
   inner
-    ? '<details class="tech"><summary>Technical evidence (' + count + ' items)</summary>'
+    ? '<details class="tech"><summary>Technical evidence ('
+      + plural(count, 'item', 'items') + ')</summary>'
       + inner + '</details>'
     : '';
 
@@ -1021,7 +1048,8 @@ function ticketMetaLine(info, hasTitle) {
   let range = esc(info.first);
   if (info.last !== info.first) range += ' → ' + esc(info.last);
   const source = hasTitle ? '' : '; description from commit messages';
-  return ' <span style="color:var(--muted)">' + info.n + ' commits, ' + range + source + '.</span>';
+  return ' <span style="color:var(--muted)">' + plural(info.n, 'commit', 'commits') + ', '
+    + range + source + '.</span>';
 }
 
 /** Which indexed entries carry a ticket, as a phrase.
@@ -1049,6 +1077,7 @@ function matchingEvidence(id, terms) {
   return evidenceRows(LABEL_DESCRIPTION, carrying(info.d))
     + evidenceRows(LABEL_SUBJECT, carrying(info.s))
     + bodyDetails(carrying(info.b))
+    + branchRows(info, carrying)
     // The tracker's own words, after what the commits said. Comments are where
     // somebody explains why a change was made, so a question whose words appear
     // in one should surface it rather than stop at the commit subject.
@@ -1095,7 +1124,8 @@ function vTicket(id) {
   const shown = hits.slice(0, 30).filter((i) => DATA[i][4] !== 'ticket');
   out.innerHTML =
     answer('<b>' + ticketLink(id) + '</b>' + proposedTag(id) + (detail ? ' — “' + esc(detail) + '”' : '')
-      + ' touches <b>' + hits.length + '</b> graph entries across <b>' + repos.length + '</b> repositories.'
+      + ' touches ' + plural(hits.length, 'graph entry', 'graph entries', bold(hits.length))
+      + ' across ' + plural(repos.length, 'repository', 'repositories', bold(repos.length)) + '.'
       + ticketMetaLine(info, Boolean(info?.t || TITLES[id])))
     // What the label means, once, where the ticket is the whole answer. A squash
     // merge can land a branch's work without its commits, so this says what was
@@ -1109,6 +1139,7 @@ function vTicket(id) {
     + evidenceRows(LABEL_DESCRIPTION, descriptions)
     + evidenceRows(LABEL_SUBJECT, extraSubjects(info, [detail, ...descriptions]))
     + bodyDetails(info?.b)
+    + branchRows(info)
     + summariesFor(hits, 2)
     + featureCards(hits, 4)
     + techDetails(shown.map((i) => card(DATA[i])).join(''), shown.length);
@@ -1133,8 +1164,9 @@ function vWhichRepos(seeds) {
     .join('');
   const others = [...new Set(seeds.map((i) => DATA[i][0]).filter((l) => l.toLowerCase() !== pl))].slice(0, 6);
   out.innerHTML =
-    answer('<b>' + esc(primary) + '</b> appears in <b>' + byRepo.size
-      + '</b> repositories (' + matches.length + ' matching nodes).'
+    answer('<b>' + esc(primary) + '</b> appears in '
+      + plural(byRepo.size, 'repository', 'repositories', bold(byRepo.size))
+      + ' (' + plural(matches.length, 'matching node', 'matching nodes') + ').'
       + (byRepo.size > 1 ? ' No edges connect them - these are independent implementations.' : ''))
     + summariesFor(matches, 2)
     + '<table class="rt"><tr><th>repository</th><th>defined in</th><th>tickets</th></tr>' + rows + '</table>'
@@ -1154,7 +1186,7 @@ function vWhereUsed(seeds) {
   for (const i of neigh) pushGroup(byRepo, DATA[i][1] || '(none)', i);
   const repoRows = [...byRepo.entries()]
     .map(([r, idxs]) => '<tr><td><b>' + esc(r) + '</b></td><td>'
-      + idxs.length + ' connected nodes</td></tr>')
+      + plural(idxs.length, 'connected node', 'connected nodes') + '</td></tr>')
     .join('');
   const tech = card(e)
     + [...byRepo.entries()]
@@ -1163,9 +1195,10 @@ function vWhereUsed(seeds) {
         + idxs.slice(0, 12).map((i) => esc(DATA[i][0])).join(' &middot; ') + '</div></div>')
       .join('');
   out.innerHTML =
-    answer('<b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') is directly connected to <b>'
-      + neigh.length + '</b> nodes'
-      + (byRepo.size > 1 ? ' across <b>' + byRepo.size + '</b> repositories' : '') + '.')
+    answer('<b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') is directly connected to '
+      + plural(neigh.length, 'node', 'nodes', bold(neigh.length))
+      + (byRepo.size > 1 ? ' across ' + plural(byRepo.size, 'repository', 'repositories', bold(byRepo.size)) : '')
+      + '.')
     + summariesFor([s, ...neigh], 2)
     + featureCards(neigh, 3)
     + '<h2>Used from</h2><table class="rt"><tr><th>repository</th><th>reach</th></tr>' + repoRows + '</table>'
@@ -1187,7 +1220,8 @@ function vImpact(seeds) {
   }
   const grouped = [...byComm.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 10);
   const commRows = grouped
-    .map(([k, idxs]) => '<tr><td><b>' + esc(k) + '</b></td><td>' + idxs.length + ' nodes</td></tr>')
+    .map(([k, idxs]) => '<tr><td><b>' + esc(k) + '</b></td><td>'
+      + plural(idxs.length, 'node', 'nodes') + '</td></tr>')
     .join('');
   const tech = card(e)
     + grouped
@@ -1196,9 +1230,11 @@ function vImpact(seeds) {
         + idxs.slice(0, 10).map((i) => esc(DATA[i][0])).join(' &middot; ') + '</div></div>')
       .join('');
   out.innerHTML =
-    answer('Changing <b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') could reach <b>'
-      + (reached.size - 1) + '</b> connected nodes within two hops, spanning <b>' + byComm.size
-      + '</b> communities in <b>' + repos.size + '</b> repositories.')
+    answer('Changing <b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') could reach '
+      + plural(reached.size - 1, 'connected node', 'connected nodes', bold(reached.size - 1))
+      + ' within two hops, spanning '
+      + plural(byComm.size, 'community', 'communities', bold(byComm.size)) + ' in '
+      + plural(repos.size, 'repository', 'repositories', bold(repos.size)) + '.')
     + summariesFor([s, ...reached.keys()], 3)
     + featureCards(reached.keys(), 3)
     + '<h2>Affected areas</h2><table class="rt"><tr><th>community</th><th>reach</th></tr>' + commRows + '</table>'
@@ -1231,8 +1267,10 @@ function vWhy(seeds) {
   features.sort((a, b) => b[0] - a[0]);
   const topT = [...tickets.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map((t) => t[0]);
   out.innerHTML =
-    answer('<b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') is linked to <b>' + topT.length
-      + '</b> Jira tickets and <b>' + features.length + '</b> business features in its neighbourhood.'
+    answer('<b>' + esc(e[0]) + '</b> (' + esc(e[1]) + ') is linked to '
+      + plural(topT.length, 'Jira ticket', 'Jira tickets', bold(topT.length)) + ' and '
+      + plural(features.length, 'business feature', 'business features', bold(features.length))
+      + ' in its neighbourhood.'
       + ' Hover a ticket for its title; commit subjects live in the history datasets.')
     + summariesFor([s], 1)
     + (features.length
@@ -1267,7 +1305,8 @@ function vJourney(ranked) {
     );
   });
   out.innerHTML =
-    answer('<b>' + feats.length + '</b> scripted business features match this journey - '
+    answer(plural(feats.length, 'scripted business feature matches',
+      'scripted business features match', bold(feats.length)) + ' this journey - '
       + 'each is a real E2E test written in business language, with its scenarios and step definitions.')
     + summariesFor(feats, 2)
     + blocks.join('');
@@ -1300,8 +1339,9 @@ function vCluster(ranked) {
         + idxs.slice(0, 10).map((i) => esc(DATA[i][0])).join(' &middot; ') + '</div></div>')
       .join('');
   out.innerHTML =
-    answer('Closest evidence: <b>' + reached.size + '</b> connected nodes across <b>'
-      + groups.size + '</b> communities.')
+    answer('Closest evidence: '
+      + plural(reached.size, 'connected node', 'connected nodes', bold(reached.size)) + ' across '
+      + plural(groups.size, 'community', 'communities', bold(groups.size)) + '.')
     + summariesFor(seeds.concat([...groups.values()].sort((a, b) => b.length - a.length).flat()), 3)
     + featureCards(reached.keys(), 4)
     + (topT.length
@@ -1500,6 +1540,10 @@ function prependPrewritten(topic, dive, raw) {
 }
 
 function runAsk() {
+  // Reset before any answer path can return, so the status line describes this
+  // question and never the one before it: a ticket lookup returns before the
+  // expansion note below is computed, and used to inherit the last one (#429).
+  expansionNote = '';
   const raw = q.value.trim();
   if (!raw) {
     out.innerHTML = '';

@@ -302,9 +302,12 @@ TICKET_TRACKER = {
 #
 # DEMO-4 exists only on a branch: no landed commit names it. DEMO-5 landed, and
 # also has a branch-only commit, so its record carries `branches` without
-# `proposed` - the shape that must NOT be labelled as a proposal. Neither touches
-# anything another fixture question asks about: "gazetteer" and "runbook" occur
-# nowhere else in this estate.
+# `proposed` - the shape that must NOT be labelled as a proposal. Its branch-only
+# commit carries a subject and a body, which the stage keeps in `ps` and `pb`
+# rather than among the landed evidence (#429): "appendix" is in that commit's
+# text and nowhere else, so a question using it can only be answered from there.
+# Neither touches anything another fixture question asks about: "gazetteer" and
+# "runbook" occur nowhere else in this estate.
 BRANCH_HISTORY = [
     {
         "subject": "DEMO-4: Look up the street through the gazetteer before entry",
@@ -324,6 +327,7 @@ BRANCH_HISTORY = [
     },
     {
         "subject": "DEMO-5: Draft the runbook appendix",
+        "body": "Lists the appendix tables the on-call rota reads first.",
         "author_date": "2024-05-13T09:00:00+00:00",
         "files": [{"path": "docs/runbook-appendix.md"}],
         "reach": "branch",
