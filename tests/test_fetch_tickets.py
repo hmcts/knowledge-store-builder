@@ -1381,9 +1381,10 @@ class TwgBodyTest(TwgTransportTestCase):
         self.assertEqual(
             record["description"],
             "Background\n"
-            "Widgets are sorted by colour. See the design note.\n"
-            "Raised by [~accountid:acct-0000-alpha]\n"
-            "Second point\n"
+            "Widgets are sorted by colour.\n"
+            "See the design note.\n"
+            "- Raised by [~accountid:acct-0000-alpha]\n"
+            "- Second point\n"
             "Owner\n"
             "[~accountid:acct-0000-bravo]",
         )
@@ -1456,7 +1457,145 @@ class TwgBodyTest(TwgTransportTestCase):
                 }
             ],
         }
-        self.assertEqual(twg_transport.flatten(body), "ask [~accountid:acct-0000-echo]")
+        self.assertEqual(twg_transport.flatten(body), "- ask [~accountid:acct-0000-echo]")
+
+
+def _para(*inline: dict) -> dict:
+    return {"type": "paragraph", "content": list(inline)}
+
+
+def _text(value: str) -> dict:
+    return {"type": "text", "text": value}
+
+
+def _item(*blocks: dict) -> dict:
+    return {"type": "listItem", "content": list(blocks)}
+
+
+def _doc(*blocks: dict) -> dict:
+    return {"type": "doc", "version": 1, "content": list(blocks)}
+
+
+class TwgListTest(TwgTransportTestCase):
+    """#436: a Cloud body keeps the shape a Data Center body has - list items
+    keep their markers and a hard break stays a line break - so the same
+    ticket reads alike whichever route fetched it."""
+
+    def test_a_bullet_list_keeps_its_markers(self):
+        """Breaks if bullet items are stored as bare lines, so a list reads as
+        unrelated sentences rather than as a list."""
+        body = _doc(
+            _para(_text("Steps")),
+            {
+                "type": "bulletList",
+                "content": [_item(_para(_text("open the tray"))), _item(_para(_text("sort it")))],
+            },
+        )
+        self.assertEqual(twg_transport.flatten(body), "Steps\n- open the tray\n- sort it")
+
+    def test_an_ordered_list_is_numbered_from_one(self):
+        """Breaks if ordered items lose their numbers, or are numbered from
+        anything but one when the list names no start."""
+        body = _doc(
+            {
+                "type": "orderedList",
+                "content": [
+                    _item(_para(_text("first"))),
+                    _item(_para(_text("second"))),
+                    _item(_para(_text("third"))),
+                ],
+            }
+        )
+        self.assertEqual(twg_transport.flatten(body), "1. first\n2. second\n3. third")
+
+    def test_an_ordered_list_honours_its_start_number(self):
+        """Breaks if `attrs.order` is ignored, so a list continued after a
+        paragraph restarts at one. The start is a number: a list whose `order`
+        is not one is numbered from one rather than from whatever it holds."""
+        continued = _doc(
+            {
+                "type": "orderedList",
+                "attrs": {"order": 4},
+                "content": [_item(_para(_text("fourth"))), _item(_para(_text("fifth")))],
+            }
+        )
+        self.assertEqual(twg_transport.flatten(continued), "4. fourth\n5. fifth")
+        textual = _doc(
+            {
+                "type": "orderedList",
+                "attrs": {"order": INVENTED_NAMES[2]},
+                "content": [_item(_para(_text("only")))],
+            }
+        )
+        self.assertEqual(twg_transport.flatten(textual), "1. only")
+
+    def test_a_nested_list_is_indented_two_spaces_per_level(self):
+        """Breaks if nesting is flattened away, so a sub-point reads as a
+        sibling of its parent, or if the indent does not grow with depth."""
+        body = _doc(
+            {
+                "type": "bulletList",
+                "content": [
+                    _item(
+                        _para(_text("outer")),
+                        {
+                            "type": "orderedList",
+                            "content": [
+                                _item(
+                                    _para(_text("middle")),
+                                    {
+                                        "type": "bulletList",
+                                        "content": [_item(_para(_text("inner")))],
+                                    },
+                                ),
+                                _item(_para(_text("middle two"))),
+                            ],
+                        },
+                    ),
+                    _item(_para(_text("outer two"))),
+                ],
+            }
+        )
+        self.assertEqual(
+            twg_transport.flatten(body),
+            "- outer\n  1. middle\n    - inner\n  2. middle two\n- outer two",
+        )
+
+    def test_a_hard_break_stays_a_line_break(self):
+        """Breaks if a hardBreak becomes a space, so two lines a writer kept
+        apart are stored as one."""
+        body = _doc(_para(_text("line one"), {"type": "hardBreak"}, _text("line two")))
+        self.assertEqual(twg_transport.flatten(body), "line one\nline two")
+
+    def test_a_mention_in_a_list_item_is_still_an_account_id(self):
+        """Breaks if the list renderer reads a mention, or the item, from
+        `attrs.text` - the display name - instead of rendering the item's
+        content through the same inline renderers as any other line."""
+        body = _doc(
+            {
+                "type": "orderedList",
+                "attrs": {"order": 2},
+                "content": [
+                    {
+                        "type": "listItem",
+                        "attrs": {"text": INVENTED_NAMES[1]},
+                        "content": [
+                            _para(
+                                _text("ask "),
+                                {
+                                    "type": "mention",
+                                    "attrs": {"id": "acct-0000-golf", "text": INVENTED_NAMES[0]},
+                                },
+                            )
+                        ],
+                    }
+                ],
+            }
+        )
+        flat = twg_transport.flatten(body)
+        self.assertEqual(flat, "2. ask [~accountid:acct-0000-golf]")
+        for name in INVENTED_NAMES:
+            self.assertNotIn(name, str(flat))
 
 
 class TwgExitCodeTest(TwgTransportTestCase):
