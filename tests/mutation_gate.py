@@ -6410,8 +6410,8 @@ MUTATIONS = (
     Mutation(
         "git floor: the CLI does not gate the git-using stages",
         "cli.py",
-        "    if stage in GIT_STAGES:\n",
-        "    if False:\n",
+        "    refused = git_version.refusal() if stage in GIT_STAGES else None\n",
+        "    refused = None\n",
         "#437 follow-up: sync converts clones that an older git, here or on a CI runner, "
         "cannot read, and no stage says why",
         (

@@ -356,16 +356,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if stage in GIT_STAGES:
-        refused = git_version.refusal()
-        if refused:
-            print(refused, file=sys.stderr)
-            return 1
+    return _run_stage(stage, rest[1:])
 
+
+def _run_stage(stage: str, arguments: Sequence[str]) -> int:
+    """Run one stage, after refusing a git below the floor if the stage needs git."""
+    refused = git_version.refusal() if stage in GIT_STAGES else None
+    if refused:
+        print(refused, file=sys.stderr)
+        return 1
     module_name = STAGES[stage][0]
     module = __import__(f"{__package__}.{module_name}", fromlist=["main"])
     # Stage mains read sys.argv for their own sub-commands and arguments.
-    sys.argv = [f"knowledgestore {stage}", *rest[1:]]
+    sys.argv = [f"knowledgestore {stage}", *arguments]
     return module.main()
 
 
