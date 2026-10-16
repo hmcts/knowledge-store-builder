@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import NamedTuple
 from typing import Iterable, Iterator
 
+from .git_env import git_env
+
 
 FIELD_SEPARATOR = "\x1f"
 RECORD_SEPARATOR = "\x1e"
@@ -37,6 +39,7 @@ def run_git(repo_path: Path, *arguments: str) -> str:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=git_env(),
         )
     except subprocess.CalledProcessError as error:
         print(
@@ -158,6 +161,7 @@ def _verified(repo_path: Path, ref: str) -> bool:
         ["git", "-C", str(repo_path), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=git_env(),
     )
     return completed.returncode == 0
 

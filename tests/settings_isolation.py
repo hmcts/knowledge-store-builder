@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -37,6 +38,13 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from knowledgestore import config  # noqa: E402
+from knowledgestore.git_env import BINDING  # noqa: E402
+
+# A git hook exports GIT_DIR and its kin, and they outrank `git -C`: run from a
+# hook, every fixture's git call would read and write the repository running the
+# hook. Dropped once, here, because every test module imports this one first.
+for _name in BINDING:
+    os.environ.pop(_name, None)
 
 
 def _settings() -> dict[str, object]:

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import subprocess
 
+from .git_env import git_env
+
 # The one definition of the floor. `sync` reads it too, for the migration.
 FLOOR = (2, 48)
 
@@ -24,7 +26,9 @@ UPGRADE = "Upgrade git (https://git-scm.com/downloads), then check with `git --v
 
 def run_git(arguments: list[str]) -> str:
     """Run git and return stdout. The IO boundary; tests replace it."""
-    return subprocess.run(["git", *arguments], check=True, text=True, stdout=subprocess.PIPE).stdout
+    return subprocess.run(
+        ["git", *arguments], check=True, text=True, stdout=subprocess.PIPE, env=git_env()
+    ).stdout
 
 
 def parse(output: str) -> tuple[int, int] | None:
