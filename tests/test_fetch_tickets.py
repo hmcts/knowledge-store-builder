@@ -1371,7 +1371,9 @@ class TwgBodyTest(TwgTransportTestCase):
         """Breaks if a Cloud description or comment is stored as nothing - the
         library keeps only strings, and an ADF body is a mapping - or if blocks
         run together so a heading, a list item and a table cell read as one
-        sentence."""
+        sentence. The description carries a code block, so a change anywhere
+        between the transport and the cache that strips its indentation or blank
+        lines fails here, not only in the unit tests on `flatten` (#445)."""
         with tempfile.TemporaryDirectory() as tmp:
             self._twg_store(tmp, TRACKER_FETCH_DESCRIPTION=True, TRACKER_FETCH_COMMENTS=True)
             twg = FakeTwg(twg_fixture("bulk-get.json"))
@@ -1383,6 +1385,11 @@ class TwgBodyTest(TwgTransportTestCase):
             "Background\n"
             "Widgets are sorted by colour.\n"
             "See the design note.\n"
+            "Traceback (most recent call last):\n"
+            '  File "sort.py", line 3, in <module>\n'
+            "    order(widgets)\n"
+            "\n"
+            "ValueError: unknown colour\n"
             "- Raised by [~accountid:acct-0000-alpha]\n"
             "- Second point\n"
             "Owner\n"

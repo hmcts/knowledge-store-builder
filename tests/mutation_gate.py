@@ -6804,6 +6804,7 @@ MUTATIONS = (
         "#436 regression found on a real tracker: stack traces, config and SQL lost their "
         "indentation and blank lines, because a code block's own newlines were split and stripped",
         (
+            "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
             "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_beside_prose_keeps_both_shapes",
             "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_in_a_list_item_is_indented_with_the_item",
             "test_fetch_tickets.TwgCodeAndTaskTest.test_a_code_block_keeps_its_indentation_and_blank_lines",
