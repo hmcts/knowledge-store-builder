@@ -529,6 +529,23 @@ them.
 other, to fire; seven negative controls must stay clean. Run it after installing,
 so the gate an agent trusts is one you have seen fail.
 
+### Keep your extraction brief's detail with headless workers
+
+```bash
+knowledgestore workers extract --brief extraction-brief.md --chunks 41,42,43
+knowledgestore check-yield --chunks <directory of this wave's chunk files> \
+  --baseline graphify-out/.graphify_semantic.json
+```
+
+`knowledgestore workers extract --brief` hands the store's extraction brief to every headless
+worker, under the library's own rules, which it cannot override. `check-yield`
+then compares nodes per file in the new chunks against the layer they would
+replace, and exits 1 when the overall ratio is below `--floor` (default 0.5). A
+chunk gate checks shape, not how much a file yielded, so this is the check that
+catches a wave saying less than the layer it replaces. The build skill's
+[headless route](../skills/knowledge-store-build/SKILL.md#the-headless-route-workers-extract)
+covers both in full.
+
 ### Add the retrieval layers
 
 Community summaries give the explorer plain-English descriptions of graph

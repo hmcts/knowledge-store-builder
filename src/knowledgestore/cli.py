@@ -36,6 +36,7 @@ SELF_PARSING = frozenset(
         "chunk-plan",
         "chunk-status",
         "check-chunk",
+        "check-yield",
         "content-set",
         "merge-chunks",
         "workers",
@@ -148,6 +149,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "workers": (
         "headless_workers",
         "run extraction or summary authoring as headless claude workers, one per chunk or batch",
+    ),
+    "check-yield": (
+        "check_yield",
+        "compare nodes per file in new chunk extractions against the layer they replace",
     ),
     "size-cuts": (
         "size_cuts",

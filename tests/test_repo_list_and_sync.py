@@ -533,6 +533,9 @@ class CliTest(SettingsIsolated):
                 # the headless route through extraction and summary authoring,
                 # listed beside the stages whose artefacts it produces and gates (#396)
                 "workers",
+                # after a wave and before its merge: it compares the new chunks'
+                # per-file yield against the layer the merge would replace (#438)
+                "check-yield",
                 # before the layers are merged, because a content cut decides
                 # what the merge is given - and it reads the per-repository
                 # layer as extracted, which is the only place that layer can

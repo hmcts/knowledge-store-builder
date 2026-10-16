@@ -368,11 +368,12 @@ def _write_merged_summaries(
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
 #   S8707 policy site: check_citations.py - check, citing merge
-#   S8707 policy site: check_chunk.py - check_batches, citing merge
+#   S8707 policy site: check_chunk.py - check_batches and _read_chunk, citing merge;
+#     check-yield reads the chunk files of its --chunks directory through the latter
 #   S8707 policy site: build_content_set.py - a write, validated the same way
 #   S8707 policy site: summary_batches.py - _read_batch, citing merge
-#   S8707 policy site: headless_workers.py - _text_of, citing merge; its masked
-#     copies are written through checked_write_target
+#   S8707 policy site: headless_workers.py - _text_of and read_brief, citing merge;
+#     its masked copies are written through checked_write_target
 #   S8707 policy site: store_paths.py - load_plan, citing merge
 #   S8707 policy site: answers.py - load, citing merge; its --out write in main is
 #     validated by checked_write_target
