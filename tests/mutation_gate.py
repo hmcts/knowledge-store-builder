@@ -2456,6 +2456,7 @@ MUTATIONS = (
         "never read looks identical to one that was compared, because the file afterwards "
         "is the same either way",
         (
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
@@ -2492,6 +2493,7 @@ MUTATIONS = (
         "nothing - a mechanism that reads green and measures nothing, which is the class "
         "this gate exists for",
         (
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
@@ -4660,16 +4662,35 @@ MUTATIONS = (
         "a store that had not re-exported would have seen every link move to proposed",
         (
             "test_build_intent_index.ApplyCommitTest.test_body_contributes_at_most_three_tickets",
+            "test_build_intent_index.ApplyCommitTest.test_body_fallback_description_is_truncated_at_a_word_boundary",
             "test_build_intent_index.ApplyCommitTest.test_body_ticket_is_indexed_when_the_subject_names_none",
+            "test_build_intent_index.ApplyCommitTest.test_good_subject_description_is_not_replaced_by_the_body",
+            "test_build_intent_index.ApplyCommitTest.test_junk_subject_falls_back_to_the_body_first_paragraph",
             "test_build_intent_index.ApplyCommitTest.test_subject_ticket_is_not_diluted_by_body_tickets",
             "test_build_intent_index.ApplyCommitTest.test_ticketed_commit_updates_files_and_descriptions",
             "test_build_intent_index.AutomatedAuthorTest.test_human_noreply_github_address_is_kept",
             "test_build_intent_index.AutomatedAuthorTest.test_human_prose_naming_a_bot_is_kept",
+            "test_build_intent_index.BoilerplateTest.test_boilerplate_is_learned_per_repository",
+            "test_build_intent_index.BoilerplateTest.test_counting_ignores_case_and_spacing_but_survivors_keep_their_text",
+            "test_build_intent_index.BoilerplateTest.test_line_recurring_in_five_bodies_is_dropped_from_every_one",
+            "test_build_intent_index.BoilerplateTest.test_line_recurring_in_only_four_bodies_is_kept",
+            "test_build_intent_index.BoilerplateTest.test_line_under_two_percent_of_a_large_repository_is_kept",
+            "test_build_intent_index.BranchTextTest.test_a_ticket_with_no_branch_commits_is_unchanged",
             "test_build_intent_index.ConfigurableAutomationTest.test_emptying_the_list_leaves_only_the_bot_convention",
             "test_build_intent_index.ConfigurableAutomationTest.test_narrowing_the_list_keeps_that_person",
             "test_build_intent_index.ConfigurableAutomationTest.test_the_list_is_read_when_called_not_when_imported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_cap_the_stage_does_not_keep_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_documented_view_the_record_does_not_carry_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_singular_description_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_wrong_presence_claim_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_an_always_present_field_not_declared_as_one_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_only_d_is_written_on_a_ticket_with_nothing_to_store",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_caps_are_the_hand_derived_ones_on_both_sides",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_forged_block_this_gate_is_driven_with_is_itself_clean",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_skill_agrees_with_the_record_it_documents",
             "test_build_intent_index.IndexRepositoryTest.test_end_to_end_over_ndjson",
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
+            "test_build_intent_index.RedactedValuesTest.test_branch_only_text_is_redacted_like_landed_text",
             "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
@@ -4694,6 +4715,8 @@ MUTATIONS = (
         "    if True:",
         "a shipped ticket would read as never landed",
         (
+            "test_build_intent_index.BranchTextTest.test_a_landed_tickets_branch_text_is_kept_apart",
+            "test_build_intent_index.BranchTextTest.test_a_ticket_with_no_branch_commits_is_unchanged",
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
@@ -4702,6 +4725,87 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
         ),
+    ),
+    Mutation(
+        "branch-only text is pooled with a landed ticket's evidence",
+        "build_intent_index.py",
+        "        _pool_text(info, *texts, text_landed=text_landed)",
+        "        _pool_text(info, *texts)",
+        "a landed ticket quoted a draft nobody merged as what it changed (#429)",
+        (
+            "test_build_intent_index.BranchTextTest.test_a_landed_tickets_branch_text_is_kept_apart",
+            "test_build_intent_index.BranchTextTest.test_branch_text_that_also_landed_is_not_called_branch_only",
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_cap_the_stage_does_not_keep_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_documented_view_the_record_does_not_carry_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_singular_description_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_a_wrong_presence_claim_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_an_always_present_field_not_declared_as_one_is_reported",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_only_d_is_written_on_a_ticket_with_nothing_to_store",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_caps_are_the_hand_derived_ones_on_both_sides",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_forged_block_this_gate_is_driven_with_is_itself_clean",
+            "test_build_intent_index.DocumentedRecordShapeTest.test_the_skill_agrees_with_the_record_it_documents",
+            "test_build_intent_index.RedactedValuesTest.test_branch_only_text_is_redacted_like_landed_text",
+        ),
+    ),
+    Mutation(
+        "squash-landed text is kept apart as branch-only",
+        "build_intent_index.py",
+        '    text_landed = is_landed or any(f.get("landed") for f in commit.get("files", []))',
+        "    text_landed = is_landed",
+        "a squash merge's own account of its work was labelled as never landed (#429)",
+        (
+            "test_build_intent_index.BranchTextTest.test_a_branch_commit_whose_content_landed_is_landed_text",
+        ),
+    ),
+    Mutation(
+        "branch-only text the landed commits also said stays in branch-only",
+        "build_intent_index.py",
+        "            repeated = [text for text in branch[name] if text in main[name]]",
+        "            repeated = []",
+        "a rebased branch's stale commits labelled landed words as branch-only (#429)",
+        (
+            "test_build_intent_index.BranchTextTest.test_branch_copies_of_landed_text_keep_their_count",
+            "test_build_intent_index.BranchTextTest.test_branch_text_that_also_landed_is_not_called_branch_only",
+        ),
+    ),
+    Mutation(
+        "branch copies of landed text are dropped with their count",
+        "build_intent_index.py",
+        "                main[name][text] += branch[name].pop(text)",
+        "                branch[name].pop(text)",
+        "separating branch text re-ranked a landed ticket's own fields (#429 review)",
+        (
+            "test_build_intent_index.BranchTextTest.test_branch_copies_of_landed_text_keep_their_count",
+        ),
+    ),
+    Mutation(
+        "the run stops recording how many tickets carry branch-only text",
+        "build_intent_index.py",
+        '            "intent.tickets_with_branch_text": branch_texted,',
+        '            "intent.tickets_with_branch_text": 0,',
+        "a rebuild that moved text into `ps`/`pb` reported nothing of it (#429 review)",
+        (
+            "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+        ),
+    ),
+    Mutation(
+        "a proposed-only ticket's branch text is left out of its main fields",
+        "build_intent_index.py",
+        "            main[name][text] = main[name].get(text, 0) + count",
+        "            pass",
+        "a ticket found only on a branch lost the only evidence it had (#429)",
+        (
+            "test_build_intent_index.BranchTextTest.test_a_proposed_only_ticket_keeps_its_text_in_the_main_fields",
+        ),
+    ),
+    Mutation(
+        "check-evidence is blind to branch-only text",
+        "sensitive.py",
+        'EVIDENCE_FIELDS = ("d", "s", "b", "ps", "pb")',
+        'EVIDENCE_FIELDS = ("d", "s", "b")',
+        "a committed identifier in branch-only text passed the gate and reached the page (#429)",
+        ("test_build_intent_index.CheckEvidenceStageTest.test_branch_only_text_is_checked_too",),
     ),
     Mutation(
         "the context stops explaining what a proposed link means",
@@ -4775,7 +4879,12 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+            "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.ParsingALink.test_a_link_names_the_configured_repository_whatever_its_local_name",
             "test_source_urls.ParsingTheCloneUrl.test_a_clone_url_on_another_host_names_nothing",
         ),
@@ -4783,14 +4892,16 @@ MUTATIONS = (
     Mutation(
         "source url: the link loses its line anchor",
         "source_urls.py",
-        'quote(inside, safe=_PATH_SAFE) + line_anchor(source_location), "")',
-        'quote(inside, safe=_PATH_SAFE), "")',
+        'base + escaped + line_anchor(source_location), "")',
+        'base + escaped, "")',
         "every node would link the top of its file rather than the line `source_location` "
         "names, so a citation of one method in a long class sends the reader to find it",
         (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_node_links_to_its_line_at_the_build_commit",
             "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
@@ -4805,6 +4916,7 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_the_single_root_route_links_the_same_file",
             "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_real_file_at_the_build_commit_resolves",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_both_path_forms_give_one_url",
             "test_source_urls.TheRepositoryRelativePath.test_both_build_routes_name_the_same_file",
         ),
@@ -4856,12 +4968,16 @@ MUTATIONS = (
     Mutation(
         "source url: a path character that changes the URL is written raw",
         "source_urls.py",
-        "base + quote(inside, safe=_PATH_SAFE) + line_anchor",
-        "base + inside + line_anchor",
+        "            escaped = quote(inside, safe=_PATH_SAFE)\n",
+        "            escaped = inside\n",
         "a `#` in a file name turns the rest of the path into a fragment and a space ends "
         "the URL in most renderers, so the link opens a different file or none",
         (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_a_character_that_would_change_the_url_is_escaped",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
             "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
         ),
@@ -4874,6 +4990,7 @@ MUTATIONS = (
         "RFC 3986 allows `(` raw, and a consuming store's committed links encode it: a "
         "file written both ways is one citation that compares unequal across the two writers",
         (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_source_urls.BuildingTheUrl.test_the_escaping_matches_the_links_stores_already_publish",
         ),
     ),
@@ -4885,6 +5002,8 @@ MUTATIONS = (
         "a repository listed under a local name that differs from its name on GitHub would "
         "link to a 404",
         (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_repository_name_cannot_close_the_config_block",
+            "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.BuildingTheUrl.test_the_org_and_name_come_from_the_clone_url_not_the_local_name",
             "test_source_urls.ParsingALink.test_a_link_the_builder_writes_parses_back_to_its_parts",
             "test_source_urls.ReadingTheStore.test_the_store_files_are_read_in_the_formats_their_stages_write",
@@ -5347,6 +5466,7 @@ MUTATIONS = (
         "a store with no provenance would print `0 of N linked` with no reason beside it, "
         "which is the silent-zero shape this stage's report exists to prevent",
         (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
         ),
@@ -5399,6 +5519,126 @@ MUTATIONS = (
         "and the graph is of the default branch - so a ticket found only on a branch "
         "would be published as what changed this code, the reading the label exists to stop",
         ("test_build_explorer.NodeTicketsTest.test_proposed_tickets_stay_off_a_code_node",),
+    ),
+    Mutation(
+        "explorer source links: a base is guessed for a repository the graph cannot link",
+        "build_explorer.py",
+        "    bases = {repo: base for repo in repos if (base := urls.base(repo))}\n",
+        '    bases = {repo: urls.base(repo) or f"https://github.com/{repo}/blob/main/" '
+        "for repo in repos}\n",
+        "#423: rows of a repository on another host or with no recorded commit would link "
+        "a guessed file at a moving branch, where the rule is to write no link at all",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
+        ),
+    ),
+    Mutation(
+        "explorer source links: the single-root repositories are not named",
+        "build_explorer.py",
+        "    if single:\n",
+        "    if False:\n",
+        "#423: rows of a repository built by the single-root route would keep the "
+        "`repositories/<repo>/` prefix when joined, linking a path that does not exist",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+            "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
+        ),
+    ),
+    Mutation(
+        "explorer source links: rows lose their line anchor",
+        "build_explorer.py",
+        '    return line_anchor(location).removeprefix("#") if found.url else ""\n',
+        '    return ""\n',
+        "#423: every row would link the top of its file rather than the line the graph's "
+        "`url` names, so the page and the graph would cite one node two ways",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+            "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
+        ),
+    ),
+    Mutation(
+        "explorer source links: a row that cannot be linked still carries its line",
+        "build_explorer.py",
+        '    return line_anchor(location).removeprefix("#") if found.url else ""\n',
+        '    return line_anchor(location).removeprefix("#")\n',
+        "#423: the anchor is the one per-row cost of linking, and every row the page will "
+        "never link would pay it for nothing",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
+        ),
+    ),
+    Mutation(
+        "explorer source links: an unreadable repository list stops the page",
+        "build_explorer.py",
+        '    except ValueError as error:\n        print(f"No source links',
+        '    except OSError as error:\n        print(f"No source links',
+        "#423: a malformed `config/repositories.txt` would refuse the whole page over its "
+        "links, when the page is still worth having without them",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
+            "test_explorer_source_links.SourceLinksOnThePage.test_unreadable_provenance_is_named_as_the_file_that_failed",
+        ),
+    ),
+    Mutation(
+        "source url: a file name that cannot be encoded raises",
+        "source_urls.py",
+        "        except UnicodeEncodeError:\n",
+        "        except UnicodeDecodeError:\n",
+        "#423 review: a lone surrogate in a `source_file` - a non-UTF-8 file name under "
+        "surrogateescape - would stop both the source-urls stage and the explorer page "
+        "rather than leave that one node unlinked",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_file_name_that_cannot_be_encoded_gets_no_line_and_stops_nothing",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+        ),
+    ),
+    Mutation(
+        "explorer: the config block is written without the </ escape",
+        "build_explorer.py",
+        'json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS).replace("</", "<\\\\/")',
+        "json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS)",
+        "#423 review: repository names are #config keys and are not validated, so one "
+        "holding `</script>` would close the block and run what follows as page script",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_repository_name_cannot_close_the_config_block",
+        ),
+    ),
+    Mutation(
+        "source url: unreadable provenance is blamed on the repository list",
+        "source_urls.py",
+        '            raise ValueError(f"{config.PROVENANCE_PATH}: {error}") from error\n',
+        '            raise ValueError(f"{config.REPOSITORIES_CONFIG}: {error}") from error\n',
+        "#423 review: an operator told the repository list is unreadable looks in the "
+        "wrong file while the malformed one is provenance.json",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_unreadable_provenance_is_named_as_the_file_that_failed",
+        ),
+    ),
+    Mutation(
+        "explorer source links: a sync after source-urls passes silently",
+        "build_explorer.py",
+        "    if not differing:\n",
+        "    if True:\n",
+        "#423 review: the page would link the newly synced commit while the graph's `url` "
+        "cites the old one, and nothing would say the two now cite one node two ways",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
+        ),
+    ),
+    Mutation(
+        "explorer source links: unreadable inputs are reported as unlinkable hosts",
+        "build_explorer.py",
+        '    if urls is None:\n        print("Source links: none',
+        '    if False:\n        print("Source links: none',
+        "#423 review: the summary would say every repository lacks a github.com clone URL "
+        "or a sha when the real cause was a file that could not be read",
+        (
+            "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
+        ),
     ),
 )
 

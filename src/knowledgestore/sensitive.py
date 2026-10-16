@@ -41,8 +41,9 @@ from . import config
 
 
 # The fields of a ticket record that hold mined commit text. Dates, repositories
-# and counts are not text and are never redacted.
-EVIDENCE_FIELDS = ("d", "s", "b")
+# and counts are not text and are never redacted. `ps` and `pb` are a landed
+# ticket's branch-only subjects and bodies, which reach the page like the rest.
+EVIDENCE_FIELDS = ("d", "s", "b", "ps", "pb")
 
 # Any word character outside a placeholder means the value still says something.
 WORD = re.compile(r"\w")

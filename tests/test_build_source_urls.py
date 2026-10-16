@@ -209,6 +209,30 @@ class SourceUrlsStageTest(SettingsIsolated):
             with self.subTest(node=node_id):
                 self.assertNotIn("url", nodes[node_id])
 
+    def test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted(self):
+        """Breaks if a lone surrogate in a `source_file` - what a non-UTF-8 file name
+        decodes to under surrogateescape - raises out of the stage instead of
+        leaving that node unlinked under its own reason. The rest of the graph must
+        still be linked.
+
+        Read through `annotate` rather than `main`, because the stage's own write
+        encodes the graph as UTF-8 and cannot write such a node back at all; what
+        this pins is that linking no longer fails first."""
+        from knowledgestore import source_urls
+
+        graph = {
+            "nodes": [
+                _code_node("bad", "Bad", "src/caf\udcff.java", "L1"),
+                _code_node("good", "Good", "src/Good.java", "L2"),
+            ],
+            "links": [],
+        }
+        outcome = build_source_urls.annotate(graph, source_urls.SourceUrls.from_store())
+
+        self.assertNotIn("url", graph["nodes"][0])
+        self.assertEqual(graph["nodes"][1]["url"], BASE + "src/Good.java#L2")
+        self.assertEqual(dict(outcome.skipped), {source_urls.NOT_ENCODABLE: 1})
+
     def test_both_graph_files_are_written_and_agree(self):
         """Breaks if only one file is rewritten: the committed archive is what a store
         ships, and a link written only into the gitignored plain file is lost."""

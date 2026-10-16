@@ -28,8 +28,10 @@ from knowledgestore import config, io  # noqa: E402
 STORE = ROOT / ".fixture-store"
 
 
-def node(nid, label, repo, source_file, community, kind=None, file_type="code", metadata=None):
-    return {
+def node(
+    nid, label, repo, source_file, community, kind=None, file_type="code", metadata=None, line=None
+):
+    built = {
         "id": nid,
         "label": label,
         "repo": repo,
@@ -38,12 +40,17 @@ def node(nid, label, repo, source_file, community, kind=None, file_type="code", 
         "file_type": file_type,
         "metadata": {"kind": kind, **(metadata or {})} if kind else dict(metadata or {}),
     }
+    if line is not None:
+        built["source_location"] = line
+    return built
 
 
 GRAPH = {
     "nodes": [
         # the same pipe implemented independently in two applications
-        node("app-a::pipe", "AddressPipe", "demo-app-a", "src/pipes/address.pipe.ts", 1),
+        node(
+            "app-a::pipe", "AddressPipe", "demo-app-a", "src/pipes/address.pipe.ts", 1, line="L12"
+        ),
         node("app-b::pipe", "AddressPipe", "demo-app-b", "src/pipes/address.pipe.ts", 2),
         node(
             "app-a::form",
@@ -60,7 +67,8 @@ GRAPH = {
             2,
         ),
         # a service both applications call
-        node("core::pay", "PaymentService", "demo-core", "src/payment.service.ts", 3),
+        # a line range, which the link anchors as one (#423)
+        node("core::pay", "PaymentService", "demo-core", "src/payment.service.ts", 3, line="L5-L9"),
         node(
             "app-a::checkout",
             "CheckoutContainer",
@@ -116,8 +124,30 @@ GRAPH = {
             kind="environment",
             file_type="concept",
         ),
+        # A repository built by the single-root route, whose every `source_file`
+        # carries `repositories/<repo>/`, holding file names that change a URL
+        # unless escaped: a space, `#`, `%`, parentheses, `!`, `*`, an apostrophe,
+        # non-ASCII, and markup with an ampersand and quotes, which the page must
+        # escape in the link text. Its rows must link exactly where the graph's
+        # `url` does (#423). "ledger" occurs nowhere else in this estate.
+        node(
+            "ledger::book",
+            "LedgerBook",
+            "demo-ledger",
+            "repositories/demo-ledger/src/odd names/Ledger (v2) #1 50%!*.ts",
+            5,
+            line="L3",
+        ),
+        node(
+            "ledger::line",
+            "LedgerLine",
+            "demo-ledger",
+            'repositories/demo-ledger/src/caf\u00e9/it\'s \u00fc\u2603 <b>&"x".ts',
+            5,
+        ),
     ],
     "links": [
+        {"source": "ledger::book", "target": "ledger::line"},
         {"source": "app-a::pipe", "target": "app-a::form"},
         {"source": "app-b::pipe", "target": "app-b::form"},
         {"source": "core::pay", "target": "app-a::checkout"},
@@ -136,6 +166,30 @@ LABELS = {
     "2": "Address handling (app B)",
     "3": "Payments",
     "4": "Business Features: Payments",
+}
+
+# Where each repository is hosted, as `config/repositories.txt` holds it, and the
+# commit each was built from, as `sync` records it. Together they give each
+# repository on the page a link base (#423) - except the two left without one on
+# purpose: demo-e2e is hosted somewhere other than github.com, and demo-deploy
+# has no recorded commit. Their rows must carry no link at all.
+REPOSITORIES = (
+    "demo-app-a | git@github.com:example-org/demo-app-a.git | main",
+    "demo-app-b | https://github.com/example-org/demo-app-b.git | main",
+    "demo-core | git@github.com:example-org/demo-core.git | main",
+    "demo-ledger | git@github.com:example-org/demo-ledger.git | main",
+    "demo-e2e | https://gitlab.example.com/example-org/demo-e2e.git | main",
+    "demo-deploy | git@github.com:example-org/demo-deploy.git | main",
+)
+PROVENANCE = {
+    repo: {"sha": sha * 40, "branch": "main", "committed": "2024-06-01T09:00:00+00:00"}
+    for repo, sha in (
+        ("demo-app-a", "a"),
+        ("demo-app-b", "b"),
+        ("demo-core", "c"),
+        ("demo-ledger", "d"),
+        ("demo-e2e", "e"),
+    )
 }
 
 SUMMARIES = {
@@ -248,9 +302,12 @@ TICKET_TRACKER = {
 #
 # DEMO-4 exists only on a branch: no landed commit names it. DEMO-5 landed, and
 # also has a branch-only commit, so its record carries `branches` without
-# `proposed` - the shape that must NOT be labelled as a proposal. Neither touches
-# anything another fixture question asks about: "gazetteer" and "runbook" occur
-# nowhere else in this estate.
+# `proposed` - the shape that must NOT be labelled as a proposal. Its branch-only
+# commit carries a subject and a body, which the stage keeps in `ps` and `pb`
+# rather than among the landed evidence (#429): "appendix" is in that commit's
+# text and nowhere else, so a question using it can only be answered from there.
+# Neither touches anything another fixture question asks about: "gazetteer" and
+# "runbook" occur nowhere else in this estate.
 BRANCH_HISTORY = [
     {
         "subject": "DEMO-4: Look up the street through the gazetteer before entry",
@@ -270,6 +327,7 @@ BRANCH_HISTORY = [
     },
     {
         "subject": "DEMO-5: Draft the runbook appendix",
+        "body": "Lists the appendix tables the on-call rota reads first.",
         "author_date": "2024-05-13T09:00:00+00:00",
         "files": [{"path": "docs/runbook-appendix.md"}],
         "reach": "branch",
@@ -389,6 +447,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     io.write_json(config.GRAPH_PATH, GRAPH)
+    (store / "config").mkdir(exist_ok=True)
+    config.REPOSITORIES_CONFIG.write_text("\n".join(REPOSITORIES) + "\n", encoding="utf-8")
+    io.write_json(config.PROVENANCE_PATH, {"repositories": PROVENANCE}, indent=1)
     io.write_json(config.LABELS_PATH, LABELS)
     io.write_json(config.SUMMARIES_PATH, SUMMARIES)
     branch_files, branch_records = branch_evidence(store)
@@ -414,7 +475,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Stage modules snapshot config at import time, so import after configure().
-    from knowledgestore import build_deep_dives, build_explorer, build_topic_briefs
+    from knowledgestore import (
+        build_deep_dives,
+        build_explorer,
+        build_source_urls,
+        build_topic_briefs,
+    )
+
+    # The real stage writes each node's `url`, so the page regression can hold
+    # every link the page joins to the one the graph carries for the same node.
+    if build_source_urls.main() != 0:
+        print("fixture: source-urls did not run", file=sys.stderr)
+        return 1
 
     for module in (build_topic_briefs, build_deep_dives, build_explorer):
         _repoint(module)

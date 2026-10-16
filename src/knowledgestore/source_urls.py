@@ -20,8 +20,8 @@ path is percent-encoded with only `/` kept raw: a `#` in a file name written raw
 turns the rest of the path into a fragment and links a different file.
 
 **No link is better than a wrong one.** A repository on another host, a missing
-or malformed sha, a repository the store never configured, or a path that is not
-inside its own repository gets no URL, and `resolve` says which of those it was.
+or malformed sha, a repository the store never configured, a path that is not
+inside its own repository, or one that cannot be encoded as UTF-8 gets no URL, and `resolve` says which of those it was.
 The reasons are reported, never guessed around.
 
 Both build routes are accepted, and which one a repository came through is
@@ -65,6 +65,9 @@ NOT_GITHUB = "clone URL is not on github.com"
 NO_SHA = "no provenance sha"
 MALFORMED_SHA = "malformed provenance sha"
 OUTSIDE_REPOSITORY = "source_file is not a path inside its repository"
+# A lone surrogate: what a non-UTF-8 file name decodes to under surrogateescape,
+# and what JSON then carries. `quote` cannot encode it, and no link names that file.
+NOT_ENCODABLE = "source_file is not encodable as UTF-8"
 
 # The host is anchored on both sides: `notgithub.com` and `github.com.example.com`
 # are other hosts, and a link to github.com for them names a repository that is not
@@ -246,7 +249,9 @@ class SourceUrls:
         Either may be absent, which yields a builder that links nothing and says why.
         Fetch-only repositories are not read: provenance keeps them apart from the
         estate, and no graph node is one of their files. A malformed repository list
-        raises `ValueError` from its own parser, naming the line.
+        raises `ValueError` from its own parser, naming the line; a malformed
+        provenance file raises `ValueError` naming that file, so a caller reporting
+        the error names the file that actually failed.
         """
         clone_urls: dict[str, str] = {}
         if config.REPOSITORIES_CONFIG.is_file():
@@ -254,12 +259,27 @@ class SourceUrls:
                 entry.name: entry.clone_url
                 for entry in read_repository_config(config.REPOSITORIES_CONFIG)
             }
+        try:
+            recorded = provenance.read()
+        except ValueError as error:
+            raise ValueError(f"{config.PROVENANCE_PATH}: {error}") from error
         shas = {
             name: entry.get("sha", "")
-            for name, entry in provenance.read().items()
+            for name, entry in recorded.items()
             if isinstance(entry, dict)
         }
         return cls(clone_urls, shas)
+
+    def base(self, repo: object) -> str | None:
+        """`https://github.com/<org>/<repo>/blob/<sha>/`, or None when `repo` gets no link.
+
+        The prefix every link `resolve` writes for this repository, so a reader that
+        joins it to an escaped repo-relative path and a line anchor holds the same
+        bytes as the node's `url`. The explorer page carries this, one per
+        repository, rather than a URL per row: every URL is unique, so a per-row
+        column could not be interned and would grow the page by about a third.
+        """
+        return self._bases.get(repo) if isinstance(repo, str) else None
 
     def resolve(
         self,
@@ -276,13 +296,17 @@ class SourceUrls:
             return Resolution(None, NO_SOURCE_FILE)
         if not isinstance(repo, str) or not repo:
             return Resolution(None, NO_REPO)
-        base = self._bases.get(repo)
+        base = self.base(repo)
         if base is None:
             return Resolution(None, self._missing.get(repo, NOT_CONFIGURED))
         inside = repo_relative(repo, path, single_root)
         if inside is None:
             return Resolution(None, OUTSIDE_REPOSITORY)
-        return Resolution(base + quote(inside, safe=_PATH_SAFE) + line_anchor(source_location), "")
+        try:
+            escaped = quote(inside, safe=_PATH_SAFE)
+        except UnicodeEncodeError:
+            return Resolution(None, NOT_ENCODABLE)
+        return Resolution(base + escaped + line_anchor(source_location), "")
 
     def repositories_at(self, org: str, name: str) -> tuple[str, ...]:
         """The configured repositories cloned from github.com/<org>/<name>, by local name."""
