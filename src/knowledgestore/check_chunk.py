@@ -181,7 +181,9 @@ def confidence_ok(record: dict) -> bool:
 
 def _read_chunk(out: Path, where: str) -> tuple[dict | None, Violation | None]:
     try:
-        payload = json.loads(out.read_text(encoding="utf-8"))
+        # Sonar S8707, on the grounds stated in `build_community_summaries.merge`: the
+        # operator named this file, by a batch's `out` or check-yield's --chunks.
+        payload = json.loads(out.read_text(encoding="utf-8"))  # NOSONAR(S8707)
     except FileNotFoundError:
         return None, Violation(PARSE, where, f"{out} is not on disk")
     except (OSError, ValueError) as error:
