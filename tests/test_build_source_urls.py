@@ -10,6 +10,7 @@ the files the stage wrote. Each test names the defect it catches.
 from __future__ import annotations
 
 import contextlib
+import filecmp
 import gzip
 import io as stdio
 import json
@@ -276,9 +277,9 @@ class SourceUrlsStageTest(SettingsIsolated):
         """Breaks if a list the stage cannot read is treated as an estate of nothing.
 
         The graph carries no link here on purpose. With one, the stage's "would link
-        none" refusal also fires and this test could not tell the two guards apart;
-        without one, a stage reading the list as empty proceeds to rewrite both files
-        and exits 0, so this refusal is the only thing that stops it."""
+        none" refusal also fires. Without one, a list read as empty still meets the
+        refusal of a list that configures none of the estate, so the assertion is on
+        this refusal's own words: it is the one that names the malformed line."""
         graph = _graph()
         graph["nodes"] = [node for node in graph["nodes"] if "url" not in node]
         self._write_graph(graph)
@@ -286,7 +287,7 @@ class SourceUrlsStageTest(SettingsIsolated):
         config.REPOSITORIES_CONFIG.write_text("example-repo|only-two-fields\n", encoding="utf-8")
         code, report = self._run()
         self.assertEqual(code, 1)
-        self.assertIn("repositories.txt", report)
+        self.assertIn(f"Cannot read {config.REPOSITORIES_CONFIG}", report)
         self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
 
     # --- refusing to strip an estate's links --------------------------------
@@ -339,3 +340,100 @@ class SourceUrlsStageTest(SettingsIsolated):
         self.assertIn("would link none", report)
         self.assertIn("repository not in config/repositories.txt", report)
         self._assert_nothing_written(before)
+
+    def test_a_run_whose_shas_are_all_unusable_keeps_every_link(self):
+        """Breaks if a store whose list configures every repository, but whose
+        provenance records no usable sha, loses every link it published. The list
+        is present here, so only the "would link none" refusal can stop it."""
+        before = self._write_linked_pair()
+        provenance.write(
+            {
+                name: {"sha": "not-a-sha", "branch": "main", "committed": ""}
+                for name in ("example-repo", "single-root-repo", "hosted-elsewhere")
+            }
+        )
+        code, report = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn("would link none", report)
+        self.assertIn("malformed provenance sha", report)
+        self._assert_nothing_written(before)
+
+    # --- refusing a repository list that links nothing -----------------------
+
+    def _write_unlinked_pair(self, graph):
+        """Both graph files, holding no link, as a store that never ran the stage."""
+        serialised = json.dumps(graph)
+        config.GRAPH_PATH.write_text(serialised, encoding="utf-8")
+        with gzip.open(config.GRAPH_PATH.with_name("graph.json.gz"), "wt", encoding="utf-8") as f:
+            f.write(serialised)
+        snapshot = Path(self._tmp.name) / "before"
+        snapshot.mkdir()
+        for name in ("graph.json", "graph.json.gz"):
+            (snapshot / name).write_bytes(config.GRAPH_PATH.with_name(name).read_bytes())
+        return snapshot
+
+    def _assert_unchanged_since(self, snapshot):
+        for name in ("graph.json", "graph.json.gz"):
+            with self.subTest(file=name):
+                self.assertTrue(
+                    filecmp.cmp(snapshot / name, config.GRAPH_PATH.with_name(name), shallow=False),
+                    f"a refusal must leave {name} as it was",
+                )
+
+    def _never_linked(self):
+        graph = _graph()
+        graph["nodes"] = [node for node in graph["nodes"] if "url" not in node]
+        return graph
+
+    def test_a_missing_repository_list_with_estate_nodes_is_refused(self):
+        """Breaks if a store run from the wrong root, or without its repository list,
+        links nothing and exits 0 over a graph that was never linked: the "would link
+        none" refusal needs carried links, so before this guard nothing fired. The
+        message must name the file and the root it was looked for under."""
+        snapshot = self._write_unlinked_pair(self._never_linked())
+        config.REPOSITORIES_CONFIG.unlink()
+        code, report = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn(str(config.REPOSITORIES_CONFIG), report)
+        self.assertIn(f"under {config.ROOT}", report)
+        self.assertIn("is missing", report)
+        self._assert_unchanged_since(snapshot)
+
+    def test_a_repository_list_naming_none_of_the_graphs_repositories_is_refused(self):
+        """Breaks if a list from another store, present but configuring none of this
+        graph's repositories, is read as an estate that simply has no links."""
+        snapshot = self._write_unlinked_pair(self._never_linked())
+        config.REPOSITORIES_CONFIG.write_text(
+            "unrelated|git@github.com:example-org/unrelated.git|main\n", encoding="utf-8"
+        )
+        code, report = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn(str(config.REPOSITORIES_CONFIG), report)
+        self.assertIn("names none of", report)
+        self._assert_unchanged_since(snapshot)
+
+    def test_a_missing_repository_list_with_no_estate_nodes_passes(self):
+        """Breaks if the guard fires on a graph with nothing to link: a node with no
+        `repo`, or no `source_file`, is not an estate file, and such a graph ran clean
+        before the guard existed."""
+        graph = {
+            "nodes": [node for node in self._never_linked()["nodes"] if not node.get("repo")],
+            "links": [],
+        }
+        graph["nodes"].append({"id": "example-repo::uk_example", "repo": "example-repo"})
+        self._write_graph(graph)
+        config.REPOSITORIES_CONFIG.unlink()
+        code, report = self._run()
+        self.assertEqual(code, 0, report)
+        self.assertIn("Source URLs: 0 of 3 nodes linked", report)
+
+    def test_an_estate_configured_on_another_host_still_passes(self):
+        """Breaks if the guard is widened to "linked nothing": a store whose
+        repositories are all on another host is configured correctly, links nothing
+        by design, and must not be refused on every run."""
+        self._write_graph(
+            {"nodes": [_code_node("ci", "ci.yml", ".gitlab-ci.yml", "L1", repo="hosted-elsewhere")]}
+        )
+        code, report = self._run()
+        self.assertEqual(code, 0, report)
+        self.assertIn("1 clone URL is not on github.com", report)

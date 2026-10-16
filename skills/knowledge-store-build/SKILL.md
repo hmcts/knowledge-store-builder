@@ -744,13 +744,17 @@ they add are linked too. It reads `config/repositories.txt` and
 `knowledge/provenance.json`, and reports every node it could not link, by
 reason. **Read that report.** It links each node it can, and removes any `url`
 a node carried that it can no longer build correctly; the report counts those
-on their own line, `removed N links an earlier build wrote`. Two
-cases refuse instead, exit 1 and write nothing, because they would strip links
-across the whole estate rather than from a few nodes:
+on their own line, `removed N links an earlier build wrote`. Three
+cases refuse instead, exit 1 and write nothing, because they would strip or
+withhold links across the whole estate rather than from a few nodes:
 
 - `knowledge/provenance.json` is missing or records no repository - run `sync`;
 - the graph carried links and this run would link none - the reasons printed
-  above the refusal say why no node could be linked.
+  above the refusal say why no node could be linked;
+- the graph holds nodes with a `repo` and a `source_file`, and
+  `config/repositories.txt` is missing or names none of their repositories -
+  the refusal names the file and the root it looked under; run from the store
+  root, or set `KSB_ROOT`.
 
 Answers cite the `url`; without it they cite `repositories/<repo>/...`, which no
 reader can open.

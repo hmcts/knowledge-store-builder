@@ -25,7 +25,13 @@ local file must not strip every link a store has published and exit 0. So:
 - the stage refuses, writing nothing, when `knowledge/provenance.json` is missing
   or records no repository - every node would fall to "no provenance sha";
 - it refuses, writing nothing, when the graph carried links and this run would
-  link none, whatever the reason.
+  link none, whatever the reason;
+- it refuses, writing nothing, when the graph holds estate nodes - a `repo` and a
+  `source_file` - and `config/repositories.txt` is missing or configures none of
+  their repositories. Run from the wrong root, the stage would otherwise link
+  nothing and exit 0 over a graph that was never linked, where the refusal above
+  cannot fire. An estate whose list configures it on another host links nothing
+  by design and is not refused.
 
 Run after `gherkin`, `packages` and `deployments`, so the nodes they add are
 linked too, and before clustering: like them it rewrites both graph files, and
@@ -41,7 +47,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from . import config, graph_files, io, provenance
-from .source_urls import SourceUrls, single_root_repositories
+from .source_urls import NOT_CONFIGURED, SourceUrls, single_root_repositories
 
 
 @dataclass
@@ -52,6 +58,7 @@ class Outcome:
     linked: int = 0
     anchored: int = 0
     carried: int = 0  # nodes that held a `url` before this pass
+    estate: int = 0  # nodes naming a repository and a file in it
     removed: int = 0  # of those, the ones left without one
     skipped: Counter = field(default_factory=Counter)
 
@@ -65,10 +72,9 @@ def annotate(graph: dict, urls: SourceUrls) -> Outcome:
         # Popped first so a link lands in the same key position on every run.
         had = node.pop("url", None) is not None
         outcome.carried += had
-        repo = node.get("repo")
-        found = urls.resolve(
-            repo, node.get("source_file"), node.get("source_location"), repo in single_root
-        )
+        repo, path = node.get("repo"), node.get("source_file")
+        outcome.estate += bool(isinstance(repo, str) and repo and isinstance(path, str) and path)
+        found = urls.resolve(repo, path, node.get("source_location"), repo in single_root)
         if found.url is None:
             outcome.skipped[found.reason] += 1
             outcome.removed += had
@@ -92,6 +98,22 @@ def report(outcome: Outcome) -> str:
         for reason, count in sorted(outcome.skipped.items(), key=lambda kv: (-kv[1], kv[0])):
             lines.append(f"    {count} {reason}")
     return "\n".join(lines)
+
+
+def unconfigured_refusal(outcome: Outcome) -> str:
+    """Why a run whose repository list configures none of the estate writes nothing."""
+    listed = config.REPOSITORIES_CONFIG
+    found = (
+        "is missing"
+        if not listed.is_file()
+        else "names none of the repositories those nodes belong to"
+    )
+    return (
+        f"Refusing to write: {listed}, looked for under {config.ROOT}, {found}, and the "
+        f"graph holds {outcome.estate} nodes with a repository and a source file, none "
+        "of which can be linked without it. Nothing was written. Run from the store "
+        "root, or set KSB_ROOT to it; `knowledgestore discover` writes the list."
+    )
 
 
 def main() -> int:
@@ -128,6 +150,10 @@ def main() -> int:
             "reasons above say why no node could be linked.",
             file=sys.stderr,
         )
+        return 1
+    if outcome.estate and outcome.skipped[NOT_CONFIGURED] == outcome.estate:
+        print(report(outcome), flush=True)
+        print(unconfigured_refusal(outcome), file=sys.stderr)
         return 1
 
     serialised = json.dumps(graph, ensure_ascii=False)

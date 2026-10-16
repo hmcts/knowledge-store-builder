@@ -5281,6 +5281,7 @@ MUTATIONS = (
         "write none",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
@@ -5366,7 +5367,10 @@ MUTATIONS = (
         "                self._missing[repo] = NO_SHA\n",
         "an operator told `no provenance sha` beside a provenance file that has one looks "
         "for a missing sync rather than an abbreviated or uppercase value",
-        ("test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",),
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+        ),
     ),
     Mutation(
         "source url: a path character that changes the URL is written raw",
@@ -5451,11 +5455,67 @@ MUTATIONS = (
         "build_source_urls.py",
         "    if outcome.carried and not outcome.linked:\n",
         "    if False:\n",
-        "a store whose repository list is missing, with provenance present, would lose "
-        "every link it published and exit 0",
+        "a store whose provenance records no usable sha, or whose repository list is "
+        "missing, would lose every link it published and exit 0",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
         ),
+    ),
+    Mutation(
+        "source url stage: a missing repository list links nothing and exits 0",
+        "build_source_urls.py",
+        "    if outcome.estate and outcome.skipped[NOT_CONFIGURED] == outcome.estate:\n",
+        "    if False:\n",
+        "a store run from the wrong root, or without `config/repositories.txt`, gets a "
+        "graph with no links and a clean exit, because the graph never carried a link "
+        "for the other refusal to protect",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_estate_nodes_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_list_naming_none_of_the_graphs_repositories_is_refused",
+        ),
+    ),
+    Mutation(
+        "source url stage: a graph with no estate node is refused for a missing list",
+        "build_source_urls.py",
+        "    if outcome.estate and outcome.skipped[NOT_CONFIGURED] == outcome.estate:\n",
+        "    if outcome.skipped[NOT_CONFIGURED] == outcome.estate:\n",
+        "a graph holding nothing to link - no node with a repository and a file - "
+        "fails the stage when the repository list is absent, though it ran clean before",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_no_estate_nodes_passes",
+        ),
+    ),
+    Mutation(
+        "source url stage: an estate on another host is refused on every run",
+        "build_source_urls.py",
+        "    if outcome.estate and outcome.skipped[NOT_CONFIGURED] == outcome.estate:\n",
+        "    if outcome.estate and not outcome.linked:\n",
+        "a store whose repositories are configured on a host other than github.com links "
+        "nothing by design, and would be refused on every build",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
+        ),
+    ),
+    Mutation(
+        "citation gate: --allow-none is ignored",
+        "check_citations.py",
+        "        return 0 if arguments.allow_none else 2\n",
+        "        return 2\n",
+        "a store whose gate chain runs `check-citations` before it has published any "
+        "answers reads as a failed chain, with no way to say that is expected",
+        (
+            "test_check_citations.TheStage.test_allow_none_lets_a_store_with_no_answers_pass_on_purpose",
+        ),
+    ),
+    Mutation(
+        "citation gate: no answers passes by default",
+        "check_citations.py",
+        "        return 0 if arguments.allow_none else 2\n",
+        "        return 0\n",
+        "a run that read no answer reports a pass, so a gate pointed at the wrong "
+        "directory certifies answers it never looked at",
+        ("test_check_citations.TheStage.test_no_answers_asserts_nothing_and_does_not_pass",),
     ),
     Mutation(
         "citation link: the sha is not checked",
@@ -5870,7 +5930,11 @@ MUTATIONS = (
         "which is the silent-zero shape this stage's report exists to prevent",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_estate_nodes_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_list_naming_none_of_the_graphs_repositories_is_refused",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
+            "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
         ),
     ),

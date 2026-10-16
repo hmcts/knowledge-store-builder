@@ -211,6 +211,30 @@ class TheStage(Bed):
         self.assertEqual(code, 0)
         self.assertIn("graph.json.gz", out)
 
+    def test_no_answers_asserts_nothing_and_does_not_pass(self):
+        """Breaks if a run that read no answer exits 0 by default: a check that read
+        nothing must not report a pass (CLAUDE.md 2.10)."""
+        (self.answers / "case-lookup.md").unlink()
+        code, _, err = self.run_stage("--graph", str(self.graph))
+        self.assertEqual(code, 2)
+        self.assertIn("nothing was asserted", err)
+
+    def test_allow_none_lets_a_store_with_no_answers_pass_on_purpose(self):
+        """Breaks if `--allow-none` is ignored, so a store that has published no
+        answers yet reads as a failed gate chain - or if it passes silently, without
+        the message saying nothing was asserted."""
+        (self.answers / "case-lookup.md").unlink()
+        code, _, err = self.run_stage("--graph", str(self.graph), "--allow-none")
+        self.assertEqual(code, 0)
+        self.assertIn("No published answers to check under", err)
+        self.assertIn("nothing was asserted", err)
+
+    def test_allow_none_does_not_excuse_an_answer_that_fails(self):
+        """Breaks if `--allow-none` turns into a general pass: it excuses having no
+        answers, never an answer citing code the graph does not hold."""
+        code, _, _ = self.run_stage("--graph", str(self.graph), "--allow-none")
+        self.assertEqual(code, 1)
+
     def test_named_paths_replace_the_default_locations(self):
         other = self.tmp / "other.md"
         other.write_text("Use `inventedThing()`.\n")
