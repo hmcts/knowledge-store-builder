@@ -6344,6 +6344,74 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_an_unreadable_repository_list_builds_the_page_without_links",
         ),
     ),
+    # #437. None of these removes the migration or the retry themselves: the
+    # real-git test observes those only where the filesystem folds case, so an
+    # entry for them would name different observers on macOS and on Linux.
+    Mutation(
+        "sync case collision: an unrelated fetch failure migrates the clone",
+        "sync_repositories.py",
+        '    if not any(symptom in (error.stderr or "") for symptom in _COLLISION_SYMPTOMS):\n'
+        "        return []\n",
+        "",
+        "#437: an unreachable remote would rewrite the clone's ref store and then fail anyway, "
+        "where it used to fail and touch nothing",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_an_unrelated_fetch_failure_behaves_as_before",
+        ),
+    ),
+    Mutation(
+        "sync case collision: git's wording alone decides",
+        "sync_repositories.py",
+        "    return case_colliding_branches(listing)\n",
+        '    return case_colliding_branches(listing) or [["(unconfirmed)"]]\n',
+        "#437: `cannot lock ref` is also a branch named like another's directory, which "
+        "reftable does not fix, so the clone is migrated for nothing",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_lock_failure_without_a_case_collision_is_not_migrated",
+        ),
+    ),
+    Mutation(
+        "sync case collision: git 2.46 is trusted to migrate a clone",
+        "sync_repositories.py",
+        "REFTABLE_MIGRATE_SINCE = (2, 48)\n",
+        "REFTABLE_MIGRATE_SINCE = (2, 46)\n",
+        "#437: `refs migrate` exists from 2.46 but refuses a repository holding reflogs until "
+        "2.48, and every clone holds them, so the operator gets git's refusal instead of the fix",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_git_too_old_to_migrate_names_the_branches_and_the_command",
+        ),
+    ),
+    Mutation(
+        "sync case collision: a reftable clone is migrated again",
+        "sync_repositories.py",
+        '    if run(["-C", str(repo_dir), "rev-parse", "--show-ref-format"]).strip() == "reftable":\n',
+        "    if False:\n",
+        "#437: a clone the migration cannot help fails on git's error rather than one naming "
+        "the colliding branches",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_clone_already_on_reftable_is_not_migrated_again",
+        ),
+    ),
+    Mutation(
+        "sync case collision: the migration does not name the repository",
+        "sync_repositories.py",
+        '        f"{repo.name}: branches differing only in case ({named}) - "\n',
+        '        f"branches differing only in case ({named}) - "\n',
+        "#437: sync rewrites a clone's ref store and the log cannot say which one",
+        (
+            "test_sync_case_collision.CaseCollisionDecisionTest.test_a_collision_on_current_git_migrates_the_clone_and_syncs",
+        ),
+    ),
+    Mutation(
+        "sync case collision: the colliding branches follow the remote's order",
+        "sync_repositories.py",
+        "    return [sorted(names) for _, names in sorted(groups.items()) if len(names) > 1]\n",
+        "    return [sorted(names) for _, names in groups.items() if len(names) > 1]\n",
+        "#437: the failure message for one repository changes between runs (CLAUDE.md 1.3)",
+        (
+            "test_sync_case_collision.CollidingBranchesTest.test_groups_names_equal_once_case_folded_in_a_stable_order",
+        ),
+    ),
 )
 
 

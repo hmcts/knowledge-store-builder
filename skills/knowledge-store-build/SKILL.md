@@ -901,8 +901,16 @@ graph and history it had, so the estate is incomplete rather than merely warned
 about. (Before this was fixed, one failure aborted the run and discarded the
 provenance of the repositories that had already succeeded.)
 
-Migrate the clones to the `reftable` backend (git 2.45+), which stores refs in a
-table so casing stops mattering and both variants are kept:
+With git 2.48 or later, `sync` fixes this itself. It confirms the collision
+against the remote's branch list, migrates that clone to the `reftable` ref
+backend - which stores refs in a table, so casing stops mattering and both
+branches are kept - prints one line naming the repository, and fetches again.
+Only `.git` changes; the working tree and `graphify-out/` are untouched. Any
+other fetch failure is reported exactly as before.
+
+With an older git, the repository fails with a message naming the colliding
+branches and the command. `refs migrate` exists from 2.46 but refuses a clone
+holding reflogs until 2.48, and every clone holds them, so upgrade git first:
 
 ```bash
 git -C repositories/<repo> refs migrate --ref-format=reftable

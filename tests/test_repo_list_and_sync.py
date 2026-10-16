@@ -163,7 +163,7 @@ class SyncRepositoryTest(SettingsIsolated):
     def test_clones_when_missing_and_syncs(self):
         commands = []
 
-        def fake_git(args):
+        def fake_git(args, capture_stderr=False):
             commands.append(args)
             return "42\n" if args[-2:] == ["--all", "--count"] else ""
 
@@ -181,7 +181,7 @@ class SyncRepositoryTest(SettingsIsolated):
         # the per-repo graphs the estate merge is built from.
         commands = []
 
-        def fake_git(args):
+        def fake_git(args, capture_stderr=False):
             commands.append(args)
             return "1\n" if args[-2:] == ["--all", "--count"] else ""
 
@@ -196,7 +196,7 @@ class SyncRepositoryTest(SettingsIsolated):
     def test_skips_clone_when_repo_exists(self):
         commands = []
 
-        def fake_git(args):
+        def fake_git(args, capture_stderr=False):
             commands.append(args)
             return "7\n" if args[-2:] == ["--all", "--count"] else ""
 
@@ -206,7 +206,7 @@ class SyncRepositoryTest(SettingsIsolated):
         self.assertNotEqual(commands[0][0], "clone")
 
     def test_missing_remote_branch_raises(self):
-        def fake_git(args):
+        def fake_git(args, capture_stderr=False):
             if args[-3:-1] == ["--verify", "--quiet"] or "--verify" in args:
                 raise subprocess.CalledProcessError(1, args)
             return ""
@@ -843,7 +843,7 @@ class FetchShapeTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         (Path(tmp.name) / "repo-a" / ".git").mkdir(parents=True)
 
-        def run(args):
+        def run(args, capture_stderr=False):
             calls.append(args)
             return "1"
 

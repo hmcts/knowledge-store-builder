@@ -708,7 +708,7 @@ authored coverage remains and whether grounding checks passed.
 |---|---|
 | `No matching distribution found` | Install with the `hmcts-lib` feed. Installing from a lock compiled without `--emit-index-url` needs `--extra-index-url` passed as well. |
 | Discovery says a rule matched nothing | Check spelling and move any inline comment onto its own line. Use `--strict` in CI. |
-| `sync` fails on branches that differ only by case | With Git 2.45 or later, run `git -C repositories/<repo> refs migrate --ref-format=reftable`, then retry. |
+| `sync` fails on branches that differ only by case | `sync` migrates the clone to reftable refs itself with Git 2.48 or later. With an older Git, upgrade, then run the command the failure names (`git -C repositories/<repo> refs migrate --ref-format=reftable`) and sync again. |
 | The merged graph is unexpectedly small | Re-extract from inside each repository; do not run graphify at the store root. |
 | A graph operation refuses a large file | Raise `GRAPHIFY_MAX_GRAPH_BYTES` before the operation. |
 | `status` says the page is older than an embedded layer | Run `knowledgestore explorer` again and commit the rebuilt page. |
