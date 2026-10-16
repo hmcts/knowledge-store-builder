@@ -5281,6 +5281,7 @@ MUTATIONS = (
         "write none",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
@@ -5366,7 +5367,10 @@ MUTATIONS = (
         "                self._missing[repo] = NO_SHA\n",
         "an operator told `no provenance sha` beside a provenance file that has one looks "
         "for a missing sync rather than an abbreviated or uppercase value",
-        ("test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",),
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
+            "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
+        ),
     ),
     Mutation(
         "source url: a path character that changes the URL is written raw",
