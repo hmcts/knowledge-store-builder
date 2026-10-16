@@ -375,7 +375,7 @@ for (const [id, info] of Object.entries(TICKETS)) {
 // A thread the tracker returned only part of must say so where its comments
 // are shown (#431): the fixture marks DEMO-1's thread and leaves DEMO-2's
 // alone, so the note has to appear for one and not the other.
-const TRUNCATION_NOTE = 'earlier comments were not fetched';
+const TRUNCATION_NOTE = 'not every comment in this thread was fetched';
 for (const [id, expected] of [['DEMO-1', true], ['DEMO-2', false]]) {
   api.q.value = id;
   api.runAsk();

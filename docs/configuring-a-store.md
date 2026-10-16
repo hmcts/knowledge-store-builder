@@ -26,7 +26,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_TRACKER_PROJECTS` | none | Comma-separated ticket prefixes this store may read, for example `AAA,BBB`. Empty means none, which is not the same as all |
 | `KSB_TRACKER_DENY` | none | Prefixes that must never be requested, whatever the allowlist says. A deny entry wins, so an allowlist edit cannot re-enable a project somebody withdrew |
 | `KSB_TRACKER_FETCH_DESCRIPTION` | `false` | Add each ticket's description to the request |
-| `KSB_TRACKER_FETCH_COMMENTS` | `false` | Add each ticket's comments to the request. A thread the tracker returned only part of is stored with `comments_truncated: true` |
+| `KSB_TRACKER_FETCH_COMMENTS` | `false` | Add each ticket's comments to the request. The record stores the tracker's comment count as `comments_total`, and `comments_truncated: true` when it holds fewer comments than that |
 | `KSB_TRACKER_PAGE_SIZE` | `100` | Tickets per search request |
 | `KSB_TRACKER_DELAY_SECONDS` | `1` | Pause between requests |
 | `KSB_TRACKER_REFRESH_DAYS` | `7` | Days before an unresolved ticket's record is requested again. Resolved tickets are never requested again. `0` turns refresh off — see [Refreshing open tickets](#refreshing-open-tickets) |
@@ -178,8 +178,9 @@ cache writer are the same code on both routes. What the `twg` route adds:
 - **No names.** A mention is stored as `[~accountid:<id>]`, never as the display
   name the document carries beside it, and a comment's author is dropped before
   the stage sees the comment. No node's `attrs.text` — where a document keeps a
-  display name — is ever read: text, emoji and link cards render, while status
-  lozenges, dates and placeholders render as nothing. A node type the transport
+  display name — is read, except an emoji's, which holds the emoji's character:
+  text, emoji and link cards render, while status lozenges, dates and
+  placeholders render as nothing. A node type the transport
   does not know is read as a block: the text inside it renders, its attributes
   do not.
 - **The exit code is not the answer.** `twg` exits non-zero whenever a key in the
@@ -196,29 +197,30 @@ cache writer are the same code on both routes. What the `twg` route adds:
   not in `KSB_TRACKER_DENY`. Only that command's own not-found counts as
   absent; a throttled, signed-out or failed `get` is no answer for that key, and
   it is asked about next run.
-- **Follow-ups are counted and bounded.** Each follow-up is paced by
-  `KSB_TRACKER_DELAY_SECONDS`, counted in the run's requests, and limited to
-  `KSB_TRACKER_FOLLOWUP_MAX` per run; a key past the limit is no answer and waits
-  for the next run.
+- **Long comment threads are completed.** `bulk-get` returns only the most
+  recent page of a long thread. When it reports more comments than it returned,
+  one `twg jira workitem get --comments`, which returns the whole thread, fills
+  it in.
+- **Follow-ups are counted and bounded.** Each follow-up — a move check or a
+  thread completion — is paced by `KSB_TRACKER_DELAY_SECONDS`, counted in the
+  run's requests, and limited to `KSB_TRACKER_FOLLOWUP_MAX` per run. A key past
+  the limit, or whose `get` fails as a process (a timeout, say), is no answer
+  and waits for the next run; a thread past it is stored as returned.
 
 A ticket that moved to an undecided or denied project is cached as absent, and
 absent is final: adding its new project to `KSB_TRACKER_PROJECTS` later does not
 bring it back on its own. Clear its cache entry, as shown in
 [Refreshing open tickets](#refreshing-open-tickets), and the next run asks again.
 
-- **Long comment threads are completed.** `bulk-get` returns only the most
-  recent page of a long thread. When it reports more comments than it returned,
-  one `twg jira workitem get --comments`, which returns the whole thread, fills
-  it in. It is a follow-up like the others: paced, counted, and within
-  `KSB_TRACKER_FOLLOWUP_MAX`.
-
-On either transport, a thread the tracker returned only part of and that could
-not be completed — no follow-up budget left, or a reply that did not help — is
-stored as returned and marked `comments_truncated: true`. The explorer then says,
-beside the ticket's comments, that earlier comments were not fetched, so the
-stored comments are never read as the whole conversation. The next refresh of
-an open ticket tries again; a resolved ticket keeps its mark until its cache
-entry is cleared.
+On either transport, a record stores the tracker's comment count as
+`comments_total` and is marked `comments_truncated: true` whenever it holds fewer
+comments than that count — a thread the tracker returned only part of and that
+could not be completed, or a stored thread kept over a shorter refresh while the
+tracker now reports more. Comments dropped as automation noise do not count as
+missing. The explorer then says, beside the ticket's comments, that not every
+comment in the thread was fetched; the missing ones may be the oldest or the
+newest. The next refresh of an open ticket tries again; a resolved ticket keeps
+its mark until its cache entry is cleared.
 
 ## Use BDD specifications
 

@@ -41,8 +41,8 @@
  * `proposed` is true when no landed work names the ticket - it was found only on
  * a branch - and `branches` names up to five branches its branch-only commits
  * sat on. A landed ticket can carry `branches` too, without `proposed`.
- * `c` is the tracker's comments, and `ct` is true when the tracker returned only
- * part of the thread - so what is shown is not the whole conversation.
+ * `c` is the tracker's comments, and `ct` is true when the stored thread is
+ * shorter than the one the tracker reported - so it is not the whole conversation.
  * @typedef {{d: string[], s?: string[], b?: string[], t?: string, x?: string, c?: string[],
  *            ct?: boolean,
  *            proposed?: boolean, branches?: string[],
@@ -313,13 +313,15 @@ function commentRows(comments, terms) {
     + esc(clipWords(c, 400)) + '</div>').join('');
 }
 
-/** Said beside a ticket's comments when the tracker returned only part of the
- * thread (#431), so what is shown is not read as the whole conversation.
+/** Said beside a ticket's comments when the stored thread is shorter than the
+ * one the tracker reported (#431), so what is shown is not read as the whole
+ * conversation. Neutral about which comments are missing: they may be the
+ * oldest or the newest.
  * @param {TicketInfo|undefined} info */
 function truncatedThreadNote(info) {
   if (!info?.ct) return '';
-  return '<div class="trow"><span class="tid">comments</span> Earlier comments were not fetched:'
-    + ' the tracker returned only the most recent part of this thread.</div>';
+  return '<div class="trow"><span class="tid">comments</span> Not every comment in this'
+    + ' thread was fetched: the tracker reports more than are stored.</div>';
 }
 
 /** Cut to at most limit characters, at a word boundary, without a regex.

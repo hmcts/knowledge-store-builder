@@ -1737,17 +1737,50 @@ class TwgPrivacyTest(TwgTransportTestCase):
 
 
 class TwgBoundaryTest(TwgTransportTestCase):
-    def test_a_page_holding_something_that_is_not_a_ticket_key_is_refused(self):
+    def test_something_that_is_not_a_ticket_key_never_reaches_twg(self):
         """Breaks if anything but a ticket key can reach twg's command line.
         Keys come from commit messages through a configurable pattern; one that
-        looks like an option, or carries a comma or a bracket, is refused as no
-        answer rather than handed to a process."""
+        looks like an option, or carries a comma or a bracket, is refused."""
         for odd in ("--help", "ABC-1;x", "ABC-", "1-ABC"):
             url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", odd], ["summary"])
-            with self.subTest(odd=odd), self.assertRaises(twg_transport.NoAnswer):
-                twg_transport.requested(url)
+            with self.subTest(odd=odd):
+                self.assertEqual(twg_transport.requested(url), (["ABC-1"], ["summary"], [odd]))
         url = fetch_tickets.search_url(twg_transport.ROOT, ["ABC-1", "abc_2-30"], ["summary"])
-        self.assertEqual(twg_transport.requested(url), (["ABC-1", "abc_2-30"], ["summary"]))
+        self.assertEqual(twg_transport.requested(url), (["ABC-1", "abc_2-30"], ["summary"], []))
+
+    def test_a_refused_key_costs_only_itself(self):
+        """Breaks if one entry that is not a ticket key refuses its whole page:
+        keys are sorted into pages, so the same page would fail every run and
+        the valid tickets beside it would never be fetched. A page of nothing
+        but refused keys runs twg not at all, and is not counted as a request."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(
+                tmp,
+                ["ABC-1", "ABC-2", "ABC-3", "ABC-9x"],
+                TRACKER_TRANSPORT="twg",
+                TRACKER_BASE_URL="",
+                TRACKER_TOKEN="",
+                TRACKER_PROJECTS={"ABC"},
+            )
+            twg = FakeTwg(twg_fixture("bulk-get.json"))
+            _code, output = self._run_twg(twg)
+            cache = self._cache()
+        self.assertEqual(twg.calls[0][-4:], ["--", "ABC-1", "ABC-2", "ABC-3"])
+        self.assertEqual(sorted(cache), ["ABC-1", "ABC-2", "ABC-3"])
+        self.assertIn("1 failed", output)
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(
+                tmp,
+                ["ABC-9x"],
+                TRACKER_TRANSPORT="twg",
+                TRACKER_BASE_URL="",
+                TRACKER_TOKEN="",
+                TRACKER_PROJECTS={"ABC"},
+            )
+            twg = FakeTwg(twg_fixture("bulk-get.json"))
+            _code, output = self._run_twg(twg)
+        self.assertEqual(twg.calls, [])
+        self.assertIn("(0 requests", output)
 
     def test_output_that_is_not_valid_utf_8_is_still_read(self):
         """Breaks if twg's output is decoded with the locale's codec or strictly:
@@ -1869,22 +1902,90 @@ class ThreadTruncationTest(FetchTicketsTestCase):
             self.assertEqual(record.get("comments_truncated", False), marked)
             self.assertEqual(record["comments"], ["only one"])
 
-    def test_a_kept_longer_thread_keeps_its_own_mark(self):
-        """Breaks if the truncation mark describes the refreshed thread while
-        the record holds the longer stored one - the mark must describe the
-        comments actually kept."""
-        stored = {
-            "checked": "2025-12-01",
-            "comments": ["one", "two", "three"],
-            "status": "Open",
-            "summary": "s",
-        }
-        later = open_fields("s")
-        later["comment"] = {"comments": [{"body": "three"}], "total": 9}
+    def test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more(self):
+        """Breaks if a stored thread kept over a shorter refresh is shown as
+        whole while the tracker has just reported more comments than it holds -
+        the store would present 3 comments as the conversation when the tracker
+        says there are 9. Against a reported total it already matches, it stays
+        unmarked. Checked for a record that stored its count, and for one
+        written before counts were stored."""
+        for stored_total in (3, None):
+            for reported, marked in ((9, True), (3, False)):
+                stored = {
+                    "checked": "2025-12-01",
+                    "comments": ["one", "two", "three"],
+                    "status": "Open",
+                    "summary": "s",
+                }
+                if stored_total is not None:
+                    stored["comments_total"] = stored_total
+                later = open_fields("s")
+                later["comment"] = {"comments": [{"body": "three"}], "total": reported}
+                case = f"stored {stored_total}, reported {reported}"
+                with self.subTest(case), tempfile.TemporaryDirectory() as tmp:
+                    self._store(tmp, ["AAA-1"], TRACKER_FETCH_COMMENTS=True)
+                    pio.write_gzip_json(config.TICKET_TRACKER_PATH, {"AAA-1": stored})
+                    self._run_stage(FakeTracker({"AAA-1": later}))
+                    record = self._cache()["AAA-1"]
+                self.assertEqual(record["comments"], ["one", "two", "three"])
+                self.assertEqual(record.get("comments_truncated", False), marked)
+                self.assertEqual(record["comments_total"], reported, "the latest count is kept")
+
+    def test_a_comment_dropped_as_noise_is_not_read_as_missing(self):
+        """Breaks if the truncation mark compares the comments kept with the
+        tracker's count: a whole thread with one automation comment dropped
+        would read as partial on every ticket that had a build notice."""
+        fields = fields_for(
+            "s",
+            comment={
+                "comments": [{"body": "Jenkins build #1 failed"}, {"body": "real"}],
+                "total": 2,
+            },
+        )
         with tempfile.TemporaryDirectory() as tmp:
             self._store(tmp, ["AAA-1"], TRACKER_FETCH_COMMENTS=True)
-            pio.write_gzip_json(config.TICKET_TRACKER_PATH, {"AAA-1": stored})
-            self._run_stage(FakeTracker({"AAA-1": later}))
+            self._run_stage(FakeTracker({"AAA-1": fields}))
             record = self._cache()["AAA-1"]
-        self.assertEqual(record["comments"], ["one", "two", "three"])
+        self.assertEqual(record["comments"], ["real"])
+        self.assertEqual(record["comments_total"], 2)
         self.assertNotIn("comments_truncated", record)
+
+
+class RaisingTwg(FakeTwg):
+    """A twg whose `get` - either kind - fails as a process: a timeout or a
+    missing executable, which the real runner raises as OSError."""
+
+    def __call__(self, arguments: list[str]) -> str:
+        if arguments[2] == "get":
+            self.calls.append(list(arguments))
+            raise OSError("twg did not answer in time")
+        return super().__call__(arguments)
+
+
+class TwgFollowUpFailureTest(TwgTransportTestCase):
+    def test_a_follow_up_that_fails_as_a_process_costs_only_its_key(self):
+        """Breaks if a `get` that raises - a timeout - escapes the page: the
+        bulk-get answers for every other key would be thrown away, and the run
+        would count one call where twg ran two."""
+        twg = RaisingTwg(twg_fixture("bulk-get.json"))
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp)
+            _code, output = self._run_twg(twg)
+            cache = self._cache()
+        self.assertEqual(sorted(cache), ["ABC-1", "ABC-2"])
+        self.assertIn("1 failed", output)
+        self.assertIn("(2 requests", output, "the bulk-get and the get that ran")
+
+    def test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked(self):
+        """Breaks if a failed `get --comments` escapes the page, losing every
+        ticket in it, rather than leaving that one thread as returned and
+        marked."""
+        twg = RaisingTwg(with_partial_thread())
+        with tempfile.TemporaryDirectory() as tmp:
+            self._twg_store(tmp, TRACKER_FETCH_COMMENTS=True)
+            _code, output = self._run_twg(twg)
+            cache = self._cache()
+        self.assertIs(cache["ABC-1"]["comments_truncated"], True)
+        self.assertEqual(cache["ABC-1"]["comments_total"], 3)
+        self.assertIn("ABC-2", cache)
+        self.assertIn("(3 requests", output)

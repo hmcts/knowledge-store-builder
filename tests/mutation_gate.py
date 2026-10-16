@@ -4333,6 +4333,7 @@ MUTATIONS = (
             "test_fetch_tickets.RefreshTest.test_an_open_record_with_no_checked_date_is_due",
             "test_fetch_tickets.RefreshTest.test_an_open_ticket_is_fetched_again_once_its_record_is_a_week_old",
             "test_fetch_tickets.RefreshTest.test_the_interval_is_read_from_its_setting",
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_refresh_counts_its_follow_ups_in_its_cost",
             "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
         ),
@@ -4642,6 +4643,8 @@ MUTATIONS = (
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_follow_up_is_counted_and_paced_like_a_request",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_refresh_counts_its_follow_ups_in_its_cost",
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
@@ -4691,12 +4694,15 @@ MUTATIONS = (
         (
             "test_fetch_tickets.TwgBodyTest.test_document_bodies_are_flattened_one_line_per_block",
             "test_fetch_tickets.TwgBodyTest.test_no_person_s_name_reaches_the_store",
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgBoundaryTest.test_output_that_is_not_valid_utf_8_is_still_read",
             "test_fetch_tickets.TwgExitCodeTest.test_output_that_does_not_parse_is_no_answer",
             "test_fetch_tickets.TwgExitCodeTest.test_stdout_is_read_whatever_twg_exits_with",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_follow_up_is_counted_and_paced_like_a_request",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_refresh_counts_its_follow_ups_in_its_cost",
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_a_project_nobody_allowed_stays_absent",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
@@ -5450,7 +5456,7 @@ MUTATIONS = (
         "a refresh with descriptions off erases every stored description, and a transport returning a recent page of comments cuts a thread another fetch stored whole",
         (
             "test_fetch_tickets.RefreshKeepsTest.test_a_refresh_never_leaves_a_record_holding_less",
-            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_keeps_its_own_mark",
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more",
         ),
     ),
     Mutation(
@@ -5470,8 +5476,11 @@ MUTATIONS = (
         "        return Response(200, body, unanswered=tuple(unanswered))\n",
         "review of #420: a page of a hundred unreturned keys is a hundred and one calls and was reported as one, so the run under-reported its own cost",
         (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_follow_up_is_counted_and_paced_like_a_request",
             "test_fetch_tickets.TwgFollowUpCostTest.test_a_refresh_counts_its_follow_ups_in_its_cost",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
             "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
@@ -5538,11 +5547,12 @@ MUTATIONS = (
     Mutation(
         "twg transport: a key is not checked before the command line",
         "twg_transport.py",
-        "    if not all(TICKET_KEY.fullmatch(key) for key in keys):\n",
-        "    if False:\n",
+        "    keys = [key for key in entries if TICKET_KEY.fullmatch(key)]\n",
+        "    keys = list(entries)\n",
         "keys come from commit messages through a configurable pattern, and anything that is not a ticket key should never reach a process's argument list",
         (
-            "test_fetch_tickets.TwgBoundaryTest.test_a_page_holding_something_that_is_not_a_ticket_key_is_refused",
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
+            "test_fetch_tickets.TwgBoundaryTest.test_something_that_is_not_a_ticket_key_never_reaches_twg",
         ),
     ),
     Mutation(
@@ -5552,6 +5562,7 @@ MUTATIONS = (
         "        *keys,\n",
         "without the end-of-options marker a key shaped like a flag is read as one",
         (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgMovedTicketTest.test_a_ticket_moved_to_an_allowlisted_project_is_filed_under_the_cited_key",
             "test_fetch_tickets.TwgRefreshTest.test_a_refresh_through_twg_is_capped_and_batched_like_any_other",
             "test_fetch_tickets.TwgRequestTest.test_a_page_is_one_bulk_get_answered_in_the_v2_shape",
@@ -5573,7 +5584,9 @@ MUTATIONS = (
         "    answered = list(keys)\n",
         "a key the transport could not answer, cached as absent, is final and lost for good",
         (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
             "test_fetch_tickets.TwgFollowUpCostTest.test_follow_ups_stop_at_the_per_run_budget",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
             "test_fetch_tickets.TwgMovedTicketTest.test_an_unreadable_follow_up_is_no_answer_not_absence",
             "test_fetch_tickets.TwgMovedTicketTest.test_only_a_not_found_from_get_is_absence",
         ),
@@ -5585,6 +5598,7 @@ MUTATIONS = (
         "",
         "#431: bulk-get returns only the most recent page of a long thread, so a ticket's earliest comments - usually where the problem is stated - never reached the store",
         (
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
             "test_fetch_tickets.TwgThreadTest.test_a_partial_thread_is_completed_by_one_counted_follow_up",
         ),
     ),
@@ -5614,6 +5628,7 @@ MUTATIONS = (
         "#431: a thread stored as returned reads as the whole conversation when its start is missing",
         (
             "test_fetch_tickets.ThreadTruncationTest.test_a_thread_the_tracker_returned_part_of_is_marked_on_any_transport",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
             "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
         ),
     ),
@@ -5623,7 +5638,10 @@ MUTATIONS = (
         '    if isinstance(value.get("total"), int):\n        out["total"] = value["total"]\n',
         "",
         "without the tracker's total the library cannot tell a partial thread from a whole one, and the mark silently never appears on the twg route",
-        ("test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",),
+        (
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+            "test_fetch_tickets.TwgThreadTest.test_a_thread_left_partial_is_marked_truncated",
+        ),
     ),
     Mutation(
         "comment thread: the mark describes the wrong thread",
@@ -5631,7 +5649,9 @@ MUTATIONS = (
         "        out.pop(COMMENTS_TRUNCATED, None)\n",
         "",
         "a refresh that keeps the longer stored thread would otherwise carry the shorter refreshed thread's mark, describing comments the record does not hold",
-        ("test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_keeps_its_own_mark",),
+        (
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more",
+        ),
     ),
     Mutation(
         "comment thread: the page loses the mark",
@@ -5640,6 +5660,76 @@ MUTATIONS = (
         "                pass\n",
         "#431: the explorer is where comments are read, and without the mark it shows a partial thread as if it were whole",
         ("test_build_explorer.TrackerEvidenceTest.test_a_partial_thread_is_marked_for_the_page",),
+    ),
+    Mutation(
+        "comment thread: a kept thread ignores the tracker's newer count",
+        "fetch_tickets.py",
+        "    return latest_total > held\n",
+        "    return False\n",
+        "second review of #431: a stored thread kept over a shorter refresh was shown as whole while the tracker had just reported more comments than it held",
+        (
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more",
+        ),
+    ),
+    Mutation(
+        "comment thread: the tracker's count is not stored",
+        "fetch_tickets.py",
+        '        record[COMMENTS_TOTAL] = thread_total(fields.get("comment"))\n',
+        "",
+        "without the count a later refresh cannot tell whether the thread it keeps is short of what the tracker reports",
+        (
+            "test_fetch_tickets.ThreadTruncationTest.test_a_comment_dropped_as_noise_is_not_read_as_missing",
+            "test_fetch_tickets.ThreadTruncationTest.test_a_kept_longer_thread_is_marked_when_the_tracker_reports_more",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+        ),
+    ),
+    Mutation(
+        "twg transport: a follow-up that fails as a process escapes the page",
+        "twg_transport.py",
+        "        except OSError:\n            # A timeout or a missing executable: counted, and no answer for\n",
+        "        except ValueError:\n            # A timeout or a missing executable: counted, and no answer for\n",
+        "second review of #420: a timed-out get discarded the bulk-get answers for every other key in its page, and the run counted one call where twg ran two",
+        (
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_follow_up_that_fails_as_a_process_costs_only_its_key",
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+        ),
+    ),
+    Mutation(
+        "comment thread: a completion that fails as a process escapes the page",
+        "twg_transport.py",
+        "        except OSError:\n            return issue\n",
+        "        except ValueError:\n            return issue\n",
+        "the same loss through the thread completion: one failed get --comments would cost every ticket in its page",
+        (
+            "test_fetch_tickets.TwgFollowUpFailureTest.test_a_thread_completion_that_fails_as_a_process_leaves_the_thread_marked",
+        ),
+    ),
+    Mutation(
+        "twg transport: one refused key refuses its page",
+        "twg_transport.py",
+        "    return keys, fields, refused\n",
+        '    if refused:\n        raise NoAnswer("a page held something that is not a ticket key")\n    return keys, fields, refused\n',
+        "second review of #420: keys are sorted into pages, so the same page failed every run and the valid tickets beside a refused key were never fetched",
+        (
+            "test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",
+            "test_fetch_tickets.TwgBoundaryTest.test_something_that_is_not_a_ticket_key_never_reaches_twg",
+        ),
+    ),
+    Mutation(
+        "twg transport: a page of refused keys still runs twg",
+        "twg_transport.py",
+        '        if not keys:\n            return json.dumps({"issues": []}), refused\n',
+        "",
+        "a page with nothing to ask about would still run twg and be counted as a request",
+        ("test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",),
+    ),
+    Mutation(
+        "twg transport: a refused key is cached as absent",
+        "twg_transport.py",
+        "        issues, unanswered = [], list(refused)\n",
+        "        issues, unanswered = [], []\n",
+        "a refused key read as missing from the reply is cached as absent, which is final",
+        ("test_fetch_tickets.TwgBoundaryTest.test_a_refused_key_costs_only_itself",),
     ),
 )
 

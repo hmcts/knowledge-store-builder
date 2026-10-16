@@ -112,10 +112,16 @@ MAX_ATTEMPTS = 3
 MAX_RETRY_WAIT_SECONDS = 300.0
 REQUEST_TIMEOUT_SECONDS = 30.0
 
-# A record's date field: what the run knew, and when it knew it.
+# A record's date field: when the tracker was last asked about the ticket. A
+# refresh the tracker did not answer moves it too, with the content untouched,
+# so it is not the date the stored content was read.
 CHECKED = "checked"
-# Set on a record whose comment thread the tracker returned only part of.
+# Set on a record whose stored comment thread is shorter than the thread the
+# tracker last reported, and that report's comment count. Invariant: an
+# unmarked record's comments stand for `comments_total` comments, less any
+# dropped as automation noise - so noise never reads as missing (#431).
 COMMENTS_TRUNCATED = "comments_truncated"
+COMMENTS_TOTAL = "comments_total"
 
 
 @dataclass(frozen=True)
@@ -397,6 +403,12 @@ def thread_truncated(value: object) -> bool:
     return isinstance(total, int) and isinstance(comments, list) and total > len(comments)
 
 
+def thread_total(value: object) -> int:
+    """How many comments the tracker says the thread has; 0 when it did not say."""
+    total = value.get("total") if isinstance(value, dict) else None
+    return total if isinstance(total, int) and not isinstance(total, bool) else 0
+
+
 def projected_record(issue: dict, counts: Counter[str]) -> dict:
     """One cached ticket: the projected fields, redacted, key-sorted.
 
@@ -421,6 +433,7 @@ def projected_record(issue: dict, counts: Counter[str]) -> dict:
         record["description"] = _text(fields.get("description"), counts)
     if config.TRACKER_FETCH_COMMENTS:
         record["comments"] = _comments(fields.get("comment"), counts)
+        record[COMMENTS_TOTAL] = thread_total(fields.get("comment"))
         record[COMMENTS_TRUNCATED] = thread_truncated(fields.get("comment"))
     return {name: value for name, value in sorted(record.items()) if value or name == "summary"}
 
@@ -603,11 +616,28 @@ def merged(previous: dict, record: dict) -> dict:
         out["description"] = previous["description"]
     if len(previous.get("comments") or []) > len(out.get("comments") or []):
         out["comments"] = previous["comments"]
-        # The truncation mark describes a thread, so it travels with the one kept.
         out.pop(COMMENTS_TRUNCATED, None)
-        if previous.get(COMMENTS_TRUNCATED):
+        if kept_thread_partial(previous, out.get(COMMENTS_TOTAL)):
             out[COMMENTS_TRUNCATED] = True
-    return dict(sorted(out.items()))
+        out.setdefault(COMMENTS_TOTAL, previous.get(COMMENTS_TOTAL))
+    return {name: value for name, value in sorted(out.items()) if value is not None}
+
+
+def kept_thread_partial(previous: dict, latest_total: object) -> bool:
+    """Whether a stored thread kept over a shorter refreshed one is short of the
+    thread the tracker now reports.
+
+    It is if it was already marked, or if the tracker's latest count is higher
+    than the count the stored thread stands for. A record written before counts
+    were stored stands for as many comments as it holds.
+    """
+    if previous.get(COMMENTS_TRUNCATED):
+        return True
+    if not isinstance(latest_total, int):
+        return False
+    held = previous.get(COMMENTS_TOTAL)
+    held = held if isinstance(held, int) else len(previous.get("comments") or [])
+    return latest_total > held
 
 
 def _settle(cache: dict, key: str, record: dict, report: Report, today: str) -> str:

@@ -26,10 +26,10 @@ body would store nothing. Each block becomes one line.
 person's display name in `attrs.text`. It is rendered as `[~accountid:<id>]`,
 the form Data Center bodies already use, and `attrs.text` is never read. That is
 a privacy requirement rather than a formatting choice: a person's name must not
-reach the store. For the same reason no node's `attrs.text` is ever read:
-status, date and placeholder nodes render as nothing, and a node type this
-module does not know is read as a block - its `content` children render, its
-attributes do not. Comment authors are dropped before the library sees the
+reach the store. For the same reason no node's `attrs.text` is read except
+an emoji's, which holds the emoji's character: status, date and placeholder
+nodes render as nothing, and a node type this module does not know is read as a
+block - its `content` children render, its attributes do not. Comment authors are dropped before the library sees the
 comment.
 
 **The exit code is not the answer.** `bulk-get` exits 3 when any key in the page
@@ -128,7 +128,8 @@ def _inline(node: dict) -> str:
     Text, an emoji and a link card render. Every other inline node - status,
     date, placeholder, media and any type not listed - renders as nothing,
     because what it would show lives in `attrs`, and `attrs.text` is where ADF
-    puts a display name. Nothing here reads it.
+    puts a display name. Nothing here reads it except for an emoji, where it
+    holds the emoji's character.
     """
     kind = node.get("type")
     raw = node.get("attrs")
@@ -184,20 +185,22 @@ def flatten(body: object) -> object:
 # --- the request the library built, and the answer it expects -------------
 
 
-def requested(url: str) -> tuple[list[str], list[str]]:
-    """The keys and fields in a search URL `fetch_tickets.search_url` built.
+def requested(url: str) -> tuple[list[str], list[str], list[str]]:
+    """The keys and fields in a search URL `fetch_tickets.search_url` built, and
+    the entries refused as keys.
 
-    Every key must look like a ticket key before it goes near a command line;
-    a page holding anything else is refused whole, as no answer.
+    Every key must look like a ticket key before it goes near a command line.
+    Anything else is refused on its own - no answer for it, asked about again
+    next run - and the rest of its page is still asked about.
     """
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
     jql = query.get("jql", [""])[0]
     inside = jql[jql.find("(") + 1 : jql.rfind(")")] if "(" in jql else ""
-    keys = [key.strip() for key in inside.split(",") if key.strip()]
-    if not all(TICKET_KEY.fullmatch(key) for key in keys):
-        raise NoAnswer("a page held something that is not a ticket key")
+    entries = [key.strip() for key in inside.split(",") if key.strip()]
+    keys = [key for key in entries if TICKET_KEY.fullmatch(key)]
+    refused = [key for key in entries if not TICKET_KEY.fullmatch(key)]
     fields = [name for name in query.get("fields", [""])[0].split(",") if name]
-    return keys, fields
+    return keys, fields, refused
 
 
 def _comment(value: object) -> object:
@@ -334,7 +337,12 @@ class Session:
         if self.followups <= 0:
             return UNANSWERED
         self.followups -= 1
-        payload = _parsed(self.run(_arguments("get", [key], fields)))
+        try:
+            payload = _parsed(self.run(_arguments("get", [key], fields)))
+        except OSError:
+            # A timeout or a missing executable: counted, and no answer for
+            # this key alone - the rest of the page stands.
+            return UNANSWERED
         if isinstance(payload, dict) and isinstance(payload.get("data"), list):
             for issue in payload["data"]:
                 if isinstance(issue, dict) and issue.get("key"):
@@ -354,7 +362,10 @@ class Session:
         if "comment" not in fields or not partial_thread(issue) or self.followups <= 0:
             return issue
         self.followups -= 1
-        payload = _parsed(self.run(_arguments("get", [key], ["comment"], "--comments")))
+        try:
+            payload = _parsed(self.run(_arguments("get", [key], ["comment"], "--comments")))
+        except OSError:
+            return issue
         data = payload.get("data") if isinstance(payload, dict) else None
         whole = (
             data[0].get("comment")
@@ -375,10 +386,9 @@ class Session:
         about the page as a whole.
         """
         self.calls = 0
-        try:
-            keys, fields = requested(url)
-        except NoAnswer as error:
-            raise NoAnswer(str(error), self.calls) from error
+        keys, fields, refused = requested(url)
+        if not keys:
+            return json.dumps({"issues": []}), refused
         items = bulk_items(self.run(_arguments("bulk-get", keys, fields)))
         # Every key must be mentioned, as returned or as unreturned. One that is
         # not is output this module does not understand - including output that
@@ -386,7 +396,7 @@ class Session:
         # absence.
         if any(key not in items for key in keys):
             raise NoAnswer("twg bulk-get gave no readable answer", self.calls)
-        issues, unanswered = [], []
+        issues, unanswered = [], list(refused)
         for key in keys:
             item = items.get(key, {})
             issue = item.get("data") if item.get("ok") else None
