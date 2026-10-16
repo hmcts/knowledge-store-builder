@@ -192,11 +192,24 @@ def _lines(node: dict, out: list[str]) -> None:
             continue
         _flush(run, out)
         run = []
-        if child.get("type") in LISTS:
+        if child.get("type") == "codeBlock":
+            _code(child, out)
+        elif child.get("type") in LISTS:
             _list(child, out)
         else:
             _lines(child, out)
     _flush(run, out)
+
+
+def _code(node: dict, out: list[str]) -> None:
+    """A code block, verbatim: every line as written, its indentation and its
+    blank lines kept, because in a stack trace, config or SQL they are the
+    content. Its children still render through `_inline`, so nothing here reads
+    an attribute a name could sit in."""
+    text = "".join(_inline(c) for c in node.get("content") or [] if isinstance(c, dict))
+    lines = text.rstrip("\n").split("\n")
+    if any(line.strip() for line in lines):
+        out.extend(line.rstrip() for line in lines)
 
 
 def _flush(run: list[str], out: list[str]) -> None:
@@ -205,8 +218,9 @@ def _flush(run: list[str], out: list[str]) -> None:
             out.append(line.strip())
 
 
-# The list nodes, rendered with a marker per item - see `_list`.
-LISTS = frozenset({"bulletList", "orderedList"})
+# The list nodes, rendered with a marker per item - see `_list`. A task list is
+# Jira's action items, each marked done or not from its `state`.
+LISTS = frozenset({"bulletList", "orderedList", "taskList"})
 
 
 def _start(node: dict) -> int:
@@ -229,11 +243,21 @@ def _list(node: dict, out: list[str]) -> None:
         lines: list[str] = []
         _lines(item, lines)
         if lines:
-            marker = "- " if number is None else f"{number}. "
+            marker = _marker(item, number)
             out.append(marker + lines[0])
             out.extend("  " + line for line in lines[1:])
         if number is not None:
             number += 1
+
+
+def _marker(item: dict, number: int | None) -> str:
+    """`- `, `1. `, or for a task `- [x] ` / `- [ ] ` from its `state` - an
+    enumerated value compared, never text copied out."""
+    if item.get("type") == "taskItem":
+        raw = item.get("attrs")
+        done = isinstance(raw, dict) and raw.get("state") == "DONE"
+        return "- [x] " if done else "- [ ] "
+    return "- " if number is None else f"{number}. "
 
 
 def flatten(body: object) -> object:
