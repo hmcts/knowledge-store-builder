@@ -179,14 +179,33 @@ assess workflows.
 ## Update the plugin
 
 The plugin installs from this repository's `main` branch and has no separate
-version. Adding the marketplace again does not fetch newer skills. Update the
-marketplace, reinstall the plugin and reload it:
+version. Refresh the marketplace, update the plugin, then reload it:
 
 ```
 /plugin marketplace update knowledge-store-builder
-/plugin install knowledge-store@knowledge-store-builder
+```
+
+Then open `/plugin`, go to the **Installed** tab, select `knowledge-store` and
+choose **Update now**, and load the new skills into the session:
+
+```
 /reload-plugins
 ```
+
+From a shell, outside a session, the same update is two commands. Claude Code
+needs a restart to apply it:
+
+```bash
+claude plugin marketplace update knowledge-store-builder
+claude plugin update knowledge-store@knowledge-store-builder
+```
+
+Installing again, or adding the marketplace again, is not the update path.
+
+This marketplace does not update itself. Claude Code auto-updates only the
+marketplaces that have auto-update switched on, and third-party marketplaces
+start with it off. To turn it on, open `/plugin`, go to the **Marketplaces**
+tab, select `knowledge-store-builder` and choose **Enable auto-update**.
 
 Run `claude plugin details knowledge-store` again to check the installed skills.
 
@@ -222,5 +241,4 @@ and start with `./`; a path such as `.claude/skills/` is invalid, while
 `./.claude/skills/` is valid.
 
 The plugin installs from `main`, so a published manifest error must be corrected
-there. After it is corrected, update the marketplace, reinstall the plugin and
-run `/reload-plugins`.
+there. After it is corrected, follow [Update the plugin](#update-the-plugin).

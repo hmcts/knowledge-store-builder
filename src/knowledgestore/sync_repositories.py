@@ -27,6 +27,7 @@ from .export_git_history import RepositoryConfig, read_repository_config
 
 from . import config
 from . import git_version
+from .git_env import git_env
 
 
 def run_git(arguments: list[str], quiet: bool = False, capture_stderr: bool = False) -> str:
@@ -47,13 +48,18 @@ def run_git(arguments: list[str], quiet: bool = False, capture_stderr: bool = Fa
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL if quiet else None,
+        env=git_env(),
     )
     return completed.stdout
 
 
 def _run_git_holding_stderr(arguments: list[str]) -> str:
     completed = subprocess.run(
-        ["git", *arguments], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ["git", *arguments],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=git_env(),
     )
     sys.stderr.write(completed.stderr)
     if completed.returncode:

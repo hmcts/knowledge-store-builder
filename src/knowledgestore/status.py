@@ -38,6 +38,7 @@ from . import (
     telemetry,
 )
 from .build_topic_briefs import read_topics
+from .git_env import git_env
 
 
 # committed layers the page embeds; if any is newer than the page, rebuild.
@@ -64,6 +65,7 @@ def run_git(arguments: list[str]) -> str:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        env=git_env(),
     )
     return completed.stdout
 

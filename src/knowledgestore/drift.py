@@ -74,6 +74,7 @@ from pathlib import Path
 from typing import TextIO
 
 from . import config, io, store_paths
+from .git_env import git_env
 
 TOP_REPOSITORIES = 5
 
@@ -104,6 +105,7 @@ def name_status(clone: Path, before: str, after: str) -> tuple[list[tuple[str, s
         capture_output=True,
         encoding="utf-8",
         check=False,
+        env=git_env(),
     )
     if completed.returncode:
         return [], (completed.stderr.strip().splitlines() or ["git diff failed"])[0]
