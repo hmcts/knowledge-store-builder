@@ -5842,6 +5842,7 @@ MUTATIONS = (
             "test_check_citations.TheStageOnSourceLinks.test_it_fails_on_a_bad_link_and_says_which_of_the_two_it_is",
             "test_check_citations.VerdictsOnSourceLinks.test_a_link_to_a_file_its_repository_does_not_hold_fails_and_says_so",
             "test_check_citations.VerdictsOnSourceLinks.test_a_link_wrong_in_both_ways_names_both",
+            "test_git_env.AHookBindingDoesNotRedirectAStage.test_check_citations_asks_the_clone",
         ),
     ),
     Mutation(
