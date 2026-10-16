@@ -91,7 +91,7 @@ function readerSees(question) {
   return {
     // `vWhichRepos`'s own answer line for this fixture: the graph route composed
     // an answer and rendered it.
-    composedFromGraph: text.includes('PaymentService appears in 1 repositories'),
+    composedFromGraph: text.includes('PaymentService appears in 1 repository'),
     // `reportUnevidenced`'s card, which it renders as the WHOLE answer.
     abstained: text.includes('No evidence in this estate'),
     text,
@@ -213,7 +213,7 @@ equal('the rank record for an unboosted question is untouched',
     evidence: 'code | demo-core | src/payment.service.ts | PaymentService',
     ranked: 1,
     shown: 1,
-    top: 216.2122,
+    top: 231.0491,
     runnerUp: 0,
     marginPct: 100,
   });

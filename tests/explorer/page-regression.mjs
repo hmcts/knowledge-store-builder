@@ -119,6 +119,13 @@ const EXPECTED_ROWS = [
   ['pay-service (prd)', 'demo-deploy', 'ansible/group_vars/prd/pay-service_values.yaml.j2',
     'Payments', 'concept', 'PaymentService,prd', ''],
   ['prd', 'demo-deploy', '', 'Payments', 'concept', 'pay-service (prd)', ''],
+  // The single-root repository whose file names need escaping (#423). No label
+  // for community 5 in LABELS, so its community column is empty.
+  ['LedgerBook', 'demo-ledger', 'repositories/demo-ledger/src/odd names/Ledger (v2) #1 50%!*.ts',
+    '', 'code', 'LedgerLine', ''],
+  ['LedgerLine', 'demo-ledger',
+    'repositories/demo-ledger/src/caf\u00e9/it\'s \u00fc\u2603 <b>&"x".ts',
+    '', 'code', 'LedgerBook', ''],
 ];
 const flatten = (rows) => rows.map((r) => r.join('\u241f')).sort().join('\n');
 /** @param {any[][]} data */
@@ -218,7 +225,7 @@ check('what is impacted if PaymentService changes?', 'impact analysis',
 check('where is PaymentService used?', 'where is it used',
   ['directly connected to', 'Used from']);
 check('walk me through the payment journey', 'user journey',
-  ['scripted business features']);
+  ['1 scripted business feature matches this journey']);
 // DEMO-1 has both a tracker summary and a mined description. The tracker's
 // words take the headline - that is the precedence rule - but the mined
 // description is separate evidence and must still appear, under a label naming
@@ -247,6 +254,67 @@ check('DEMO-4', 'ticket lookup',
 // shipped work a proposal, the reverse of the defect above.
 check('DEMO-5', 'ticket lookup', ['Document the rollback runbook'], [],
   { text: ['proposed', 'feature/runbook-appendix'] });
+// DEMO-5's branch-only commit said "Draft the runbook appendix", and the ticket
+// landed (#429). Catches that text pooled into the landed evidence, where it
+// reads as an ordinary commit subject - a draft nobody merged quoted as what the
+// ticket changed. It must still be shown, under a label saying where it came
+// from. Asserted on the markup, because the label and the text are one row.
+const BRANCH_SUBJECT = 'commit subject, from a branch-only commit';
+const BRANCH_BODY = 'commit body, from a branch-only commit';
+const DRAFT = 'Draft the runbook appendix';
+const DRAFT_BODY = 'Lists the appendix tables the on-call rota reads first.';
+api.q.value = 'DEMO-5';
+api.runAsk();
+const demo5Html = api.out.innerHTML;
+for (const [name, ok] of [
+  ['a branch-only subject is shown under its own label',
+    demo5Html.includes('<span class="ev-l">' + BRANCH_SUBJECT + '</span> ' + DRAFT)],
+  ['a branch-only body is shown under its own label',
+    demo5Html.includes('<summary>' + BRANCH_BODY + ' (1)</summary>')
+      && demo5Html.includes(DRAFT_BODY)],
+  ['a branch-only subject is not presented as a landed subject or description',
+    !demo5Html.includes('<span class="ev-l">' + 'commit subject</span> ' + DRAFT)
+      && !demo5Html.includes('<span class="ev-l">' + 'description, from commit messages</span> ' + DRAFT)],
+]) {
+  if (ok) {
+    console.log(`ok    DEMO-5: ${name}`);
+  } else {
+    failures++;
+    console.error(`FAIL  DEMO-5: ${name}`);
+    console.error(`      answer: ${demo5Html.slice(0, 600)}`);
+  }
+}
+// The same text is searchable and labelled where a question finds it. "appendix"
+// is in DEMO-5's branch-only commit and nowhere else in this estate, so a search
+// that skipped `ps` and `pb` would report the word as unevidenced.
+check('what goes in the runbook appendix?', 'commit evidence',
+  ['What the commits say about these words', 'DEMO-5', BRANCH_SUBJECT, DRAFT], [],
+  { meta: ['appendix'], text: ['proposed'] });
+// A count of one reads in the singular (#429). DEMO-4 has one commit, and DEMO-2
+// is carried by one entry in one repository. Catches "1 commits" and its kin.
+check('DEMO-4', 'ticket lookup', ['1 commit,'], [], { text: ['1 commits'] });
+check('DEMO-2', 'ticket lookup', ['touches 1 graph entry across 1 repository.'], [],
+  { text: ['1 graph entries', '1 repositories'] });
+// The other answer shapes count the same way. LedgerBook sits alone in its
+// repository with one neighbour, so every count these three draw is one.
+const ONE_PLURALS = ['1 repositories', '1 matching nodes', '1 nodes', '1 connected nodes',
+  '1 communities', '1 connections', '1 items'];
+check('which repositories implement LedgerBook?', 'which repositories',
+  ['appears in 1 repository (1 matching node).'], [], { text: ONE_PLURALS });
+check('where is LedgerBook used?', 'where is it used',
+  ['is directly connected to 1 node.', 'demo-ledger 1 connected node ', '(1 connection)',
+   'Technical evidence (2 items)'], [], { text: ONE_PLURALS });
+check('what is impacted if LedgerBook changes?', 'impact analysis',
+  ['could reach 1 connected node within two hops, spanning 1 community in 1 repository.',
+   'unlabelled 1 node ', 'Technical evidence (1 item)'], [], { text: ONE_PLURALS });
+api.q.value = 'LedgerBook';
+api.runSearch();
+if (api.meta.textContent === '1 match') {
+  console.log('ok    search: one result reads "1 match"');
+} else {
+  failures++;
+  console.error(`FAIL  search: one result reads "${api.meta.textContent}", not "1 match"`);
+}
 // The other place a ticket is a search result: the evidence section of an
 // answer, found by the words its commits used. "gazetteer" is in DEMO-4's
 // commits and nowhere else, so this row is the only thing that can answer.
@@ -269,6 +337,15 @@ check('how are payments taken?', 'open question',
 // rule silenced four legitimate questions here, because ordinary question words
 // ("used", "taken", "walk") are themselves absent from a small corpus.
 check('how does quantum payment reconciliation work?', 'no evidence for: quantum', [], ['quantum']);
+// The status line describes the question being answered, not the one before it
+// (#429). A ticket lookup returned before the note was reset, so after the
+// question above DEMO-1's status line still said "no evidence for: quantum".
+// The question above has to have left a note, or this passes over nothing.
+if (!api.meta.textContent.includes('no evidence for: quantum')) {
+  failures++;
+  console.error('FAIL  stale note: the previous question left no note, so the check is vacuous');
+}
+check('DEMO-1', 'ticket lookup', ['DEMO-1'], [], { meta: ['no evidence for', 'expanded:'] });
 
 check('how is quantum scheduling implemented?', 'no evidence',
   ['No evidence in this estate', 'quantum'],
@@ -357,6 +434,8 @@ for (const [id, info] of Object.entries(TICKETS)) {
     ...(info.d || []).map((t) => ['mined description', t]),
     ...(info.s || []).map((t) => ['commit subject', t]),
     ...(info.b || []).map((t) => ['commit body', t]),
+    ...(info.ps || []).map((t) => ['branch-only commit subject', t]),
+    ...(info.pb || []).map((t) => ['branch-only commit body', t]),
     ...(info.x ? [['tracker description', info.x]] : []),
     ...(info.c || []).slice(0, 2).map((t) => ['tracker comment', t]),
   ];
@@ -653,6 +732,125 @@ try {
 } finally {
   rmSync(legacyDir, { recursive: true, force: true });
 }
+
+// --- every row opens its file at the build commit (#423) -------------------
+// The page carries one link base per repository in #config, and app.js joins it
+// to the row's own path and line. The graph already holds the link for every
+// node, written by the real `source-urls` stage in fixture.py, and the two must
+// be the same bytes: a page link that differs from the graph's `url` cites a
+// different file, or the same file under a second spelling.
+
+/** Record one comparison of what the page did against what it should have.
+ * @param {string} name the break this catches @param {unknown} observed
+ * @param {unknown} expected derived by hand */
+function expectSame(name, observed, expected) {
+  const got = JSON.stringify(observed);
+  const want = JSON.stringify(expected);
+  if (got === want) {
+    console.log(`ok    ${name}`);
+    return;
+  }
+  failures++;
+  console.error(`FAIL  ${name}`);
+  console.error(`      expected ${want}`);
+  console.error(`      observed ${got}`);
+}
+
+const graphNodes = JSON.parse(readFileSync(join(dirname(pagePath), 'graph.json'), 'utf-8')).nodes;
+// Catches: any row whose joined link is not the node's `url` - the base built a
+// second way, the single-root prefix kept, a path escaped differently from
+// Python's `quote`, a line anchor dropped or invented, or a link written for a
+// repository the graph links nothing in (another host, no recorded commit).
+// A row matches its node on label, repository and file, and each must match one.
+const linkMismatches = [];
+for (const row of api.DATA) {
+  const nodes = graphNodes.filter((n) => n.label === row[0] && (n.repo || '') === row[1]
+    && (n.source_file || '') === row[2]);
+  if (nodes.length !== 1) {
+    linkMismatches.push({ row: row[0], nodesMatched: nodes.length });
+    continue;
+  }
+  const link = api.sourceLink(row);
+  if (link !== (nodes[0].url || '')) {
+    linkMismatches.push({ row: row[0], page: link, graph: nodes[0].url || '' });
+  }
+}
+expectSame('links: every row links exactly where the graph url for its node does',
+  linkMismatches, []);
+
+// Not vacuous: the comparison above passes over a page that links nothing when
+// the graph links nothing too. Counted by hand from fixture.py: three rows each
+// in demo-app-a and demo-app-b, PaymentService, and both demo-ledger rows link;
+// the demo-e2e feature and scenario (not on github.com), the deployment and its
+// environment (no recorded commit) and the DEMO-1 ticket (no file) do not.
+expectSame('links: the rows with a link are the ones the fixture configures',
+  api.DATA.filter((e) => api.sourceLink(e)).map((e) => e[0]).sort(),
+  ['AddressEntryComponent', 'AddressFormComponent', 'AddressPipe', 'AddressPipe',
+    'CheckoutContainer', 'LedgerBook', 'LedgerLine', 'PayContainer', 'PaymentService']);
+
+// The links themselves, written out, so the comparison above cannot pass by the
+// graph and the page agreeing on something wrong. The escapes are Python's
+// `quote(path, safe="/")`; the single-root prefix is gone; the anchors are the
+// fixture's `source_location` values.
+const LEDGER = 'https://github.com/example-org/demo-ledger/blob/' + 'd'.repeat(40) + '/';
+const linkOf = (label) => api.DATA.filter((e) => e[0] === label).map(api.sourceLink).sort();
+expectSame('links: a single-root file with awkward characters links escaped, at its line',
+  linkOf('LedgerBook'),
+  [LEDGER + 'src/odd%20names/Ledger%20%28v2%29%20%231%2050%25%21%2A.ts#L3']);
+expectSame('links: non-ASCII and markup in a file name are percent-encoded',
+  linkOf('LedgerLine'),
+  [LEDGER + 'src/caf%C3%A9/it%27s%20%C3%BC%E2%98%83%20%3Cb%3E%26%22x%22.ts']);
+expectSame('links: a line range anchors as a range',
+  linkOf('PaymentService'),
+  ['https://github.com/example-org/demo-core/blob/' + 'c'.repeat(40)
+    + '/src/payment.service.ts#L5-L9']);
+
+// Catches: the link computed but never rendered, rendered without `rel` or
+// `target`, or the file name written raw - the fixture's carries `<b>`, `&` and
+// quotes, so an unescaped name injects markup into the card.
+api.q.value = 'LedgerLine';
+api.runSearch();
+const ledgerCard = api.out.innerHTML;
+expectSame('links: the search card renders the file as an escaped link opening a new tab',
+  ledgerCard.includes('<a href="' + LEDGER
+    + 'src/caf%C3%A9/it%27s%20%C3%BC%E2%98%83%20%3Cb%3E%26%22x%22.ts" target="_blank"'
+    + ' rel="noopener">repositories/demo-ledger/src/café/it\'s ü☃'
+    + ' &lt;b&gt;&amp;&quot;x&quot;.ts</a>'),
+  true);
+expectSame('links: no raw markup from a file name reaches the card',
+  ledgerCard.includes('<b>&"x"'), false);
+
+// Catches: a link rendered for a repository with no base. Each card's path line
+// is read on its own, so an anchor elsewhere in the results cannot mask one.
+/** @param {string} query @param {string} repo @returns {string[]} */
+function pathLines(query, repo) {
+  api.q.value = query;
+  api.runSearch();
+  return api.out.innerHTML.split('<div class="path">').slice(1)
+    .map((chunk) => chunk.split('</div>')[0])
+    .filter((line) => line.startsWith(repo + ' '));
+}
+for (const [query, repo] of [['Pay a fine online', 'demo-e2e'], ['pay-service', 'demo-deploy']]) {
+  const lines = pathLines(query, repo);
+  expectSame(`links: ${repo}'s card shows its file with no link`,
+    { cards: lines.length > 0, linked: lines.some((line) => line.includes('<a ')) },
+    { cards: true, linked: false });
+}
+
+// Catches: the "defined in" table of a which-repositories answer still printing
+// bare paths - the other place the page shows a file.
+api.q.value = 'which repositories implement AddressPipe?';
+api.runAsk();
+const repoTable = api.out.innerHTML;
+expectSame('links: the which-repositories table links each file it names',
+  [
+    'https://github.com/example-org/demo-app-a/blob/' + 'a'.repeat(40)
+      + '/src/pipes/address.pipe.ts#L12',
+    'https://github.com/example-org/demo-app-b/blob/' + 'b'.repeat(40)
+      + '/src/pipes/address.pipe.ts',
+  ].map((url) => repoTable.includes('<a href="' + url + '" target="_blank" rel="noopener">'
+    + 'src/pipes/address.pipe.ts</a>')),
+  [true, true]);
 
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);

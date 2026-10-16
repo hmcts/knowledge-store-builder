@@ -44,6 +44,7 @@ from . import graph_files
 from . import io
 from . import kinds
 from . import telemetry
+from .source_urls import SourceUrls, line_anchor, single_root_repositories
 
 
 MINIFIED = re.compile(r"^[A-Za-z_$]{1,3}(\(\))?$")
@@ -298,8 +299,37 @@ def join_by_layer(kept: list, entries: list, intent: dict) -> dict:
     return {name: (joined, total) for name, (joined, total) in counts.items()}
 
 
-def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
-    """Return (entries, edge index pairs) restricted to non-noise nodes."""
+def row_line(node: dict, urls: SourceUrls | None, single_root: set[str]) -> str:
+    """The line anchor the page appends to this row's link, without its `#`.
+
+    "" when the row gets no link at all, so a row whose file cannot be linked
+    spends nothing on a line it will never use. The anchor and the decision both
+    come from `source_urls` - the helper that writes the graph's `url` - so the
+    link `app.js` joins is the node's `url`, byte for byte, and a reading of a
+    `source_location` exists in one place only.
+    """
+    if urls is None:
+        return ""
+    repo = node.get("repo")
+    location = node.get("source_location")
+    found = urls.resolve(
+        repo, node.get("source_file"), location, isinstance(repo, str) and repo in single_root
+    )
+    return line_anchor(location).removeprefix("#") if found.url else ""
+
+
+def build_index(
+    graph: dict,
+    labels: dict,
+    intent: dict,
+    urls: SourceUrls | None = None,
+    single_root: set[str] | None = None,
+) -> tuple[list, list]:
+    """Return (entries, edge index pairs) restricted to non-noise nodes.
+
+    `urls` and `single_root` give each row its line anchor (`row_line`); without
+    them every row's anchor is empty, and the page links nothing.
+    """
     # The join in node_tickets is keyed on `repo`, so without it every lookup
     # misses and the page ships with no ticket evidence at all - which reads as
     # an estate whose files no ticket ever touched.
@@ -344,6 +374,7 @@ def build_index(graph: dict, labels: dict, intent: dict) -> tuple[list, list]:
             node_tickets(node, kind, intent),
             node.get("community", -1),
             deployment_summary(node.get("metadata") or {}),
+            row_line(node, urls, single_root or set()),
         ]
         for node_id, node, kind in kept
     ]
@@ -415,6 +446,7 @@ COLUMN_NAMES = (
     "tickets",
     "community",
     "deployment",
+    "line",
 )
 
 
@@ -710,8 +742,13 @@ DROPPED_COLUMNS_KEY = "droppedColumns"
 
 
 def config_text(page_config: Mapping[str, object]) -> str:
-    """The #config block exactly as the page writes it."""
-    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS)
+    """The #config block exactly as the page writes it.
+
+    With `json_text`'s `</` escape, because this block carries estate text too:
+    repository names are keys of `sourceBases`, and nothing validates a name in
+    `config/repositories.txt`, so one holding `</script>` would close the block.
+    """
+    return json.dumps(page_config, ensure_ascii=False, separators=SEPARATORS).replace("</", "<\\/")
 
 
 def layout_bytes(dropped: Mapping[str, object]) -> int:
@@ -992,8 +1029,10 @@ h2 { font-size:15px; margin:18px 0 8px; color:var(--muted); font-weight:600; }
 .tickets span, .chips span { display:inline-block; background:var(--chip); border-radius:6px;
                 padding:0 7px; margin:2px 4px 0 0; font-size:12px;
                 font-family:ui-monospace,Menlo,monospace; }
-.tickets a, .chips a, .trow a, .answer a { color:var(--accent); text-decoration:none; }
-.tickets a:hover, .chips a:hover, .trow a:hover, .answer a:hover { text-decoration:underline; }
+.tickets a, .chips a, .trow a, .answer a, .path a, td.mono a { color:var(--accent);
+        text-decoration:none; }
+.tickets a:hover, .chips a:hover, .trow a:hover, .answer a:hover, .path a:hover,
+td.mono a:hover { text-decoration:underline; }
 .group { border-left:3px solid var(--accent); padding-left:10px; margin:10px 0; }
 .group .g-title { font-weight:600; font-size:14px; }
 .group .g-items { color:var(--muted); font-size:13px; }
@@ -1331,13 +1370,128 @@ def page_measurements(
     }
 
 
+# The #config keys a page links its rows through (#423). Absent when no repository
+# on the page can be linked, which is also how every earlier page reads.
+SOURCE_BASES_KEY = "sourceBases"
+SOURCE_SINGLE_ROOT_KEY = "sourceSingleRoot"
+
+
+def store_source_urls() -> SourceUrls | None:
+    """The store's link builder, or None when its inputs cannot be read.
+
+    None rather than a raise: the page is still worth having without links, and
+    a file that cannot be parsed must not be read as an estate that links
+    nothing silently - so the reason is printed. The error names the file that
+    failed, `config/repositories.txt` or `knowledge/provenance.json`; this does
+    not guess which.
+    """
+    try:
+        return SourceUrls.from_store()
+    except ValueError as error:
+        print(f"No source links on the page: {error}", file=sys.stderr)
+        return None
+
+
+# How many nodes `link_drift` compares at most. Enough to notice a sync between
+# `source-urls` and this stage - which moves every link of the repositories it
+# synced - without resolving every node of a large graph a second time.
+DRIFT_SAMPLE = 500
+
+
+def link_drift(
+    nodes: list, urls: SourceUrls | None, single_root: set[str], sample: int = DRIFT_SAMPLE
+) -> tuple[int, int]:
+    """`(nodes compared, nodes whose graph url differs from the link this page builds)`.
+
+    The page's links are built from `knowledge/provenance.json` and
+    `config/repositories.txt` as they stand now; the graph's `url` was written
+    from them when `source-urls` last ran. A `sync` in between pins the page to the
+    new commit and the graph to the old one, and the two would cite one node two
+    ways. Compared on an evenly spaced sample of the nodes that carry a `url`, so
+    the cost is bounded and the choice is the same on every build.
+    """
+    if urls is None:
+        return 0, 0
+    carrying = [node for node in nodes if isinstance(node.get("url"), str)]
+    step = max(1, -(-len(carrying) // sample))
+    checked = differing = 0
+    for node in carrying[::step]:
+        repo = node.get("repo")
+        found = urls.resolve(
+            repo,
+            node.get("source_file"),
+            node.get("source_location"),
+            isinstance(repo, str) and repo in single_root,
+        )
+        checked += 1
+        differing += found.url != node["url"]
+    return checked, differing
+
+
+def drift_warning(checked: int, differing: int) -> str:
+    """What to say when the graph's links and the page's disagree, or ""."""
+    if not differing:
+        return ""
+    return (
+        f"WARNING: {differing} of {checked} sampled nodes carry a graph `url` that differs "
+        "from the link this page builds for them, so knowledge/provenance.json or "
+        "config/repositories.txt changed after `knowledgestore source-urls` ran. The page "
+        "links the current commit and the graph the earlier one. Run `knowledgestore "
+        "source-urls`, then rebuild this page.\n"
+    )
+
+
+def source_link_config(
+    entries: list, urls: SourceUrls | None, single_root: set[str]
+) -> dict[str, object]:
+    """What #config carries so `app.js` can link a row: one base per repository.
+
+    `https://github.com/<org>/<repo>/blob/<sha>/` from `SourceUrls.base` - the
+    prefix of every graph `url` - for each repository the page's rows name, and
+    the repositories whose rows carry the single-root `repositories/<repo>/`
+    prefix, which `app.js` strips exactly as `repo_relative` does. A repository
+    with no base is left out, so its rows get no link rather than a wrong one.
+
+    Not a URL per row: every URL is unique, so that column could not be interned,
+    and on real stores it would have added about a third to the page.
+    """
+    if urls is None:
+        return {}
+    repos = sorted({entry[1] for entry in entries if isinstance(entry[1], str) and entry[1]})
+    bases = {repo: base for repo in repos if (base := urls.base(repo))}
+    if not bases:
+        return {}
+    carried: dict[str, object] = {SOURCE_BASES_KEY: bases}
+    single = sorted(repo for repo in bases if repo in single_root)
+    if single:
+        carried[SOURCE_SINGLE_ROOT_KEY] = single
+    return carried
+
+
 def main() -> int:
     if not config.GRAPH_PATH.exists():
         print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
         return 1
 
     graph, labels, intent, titles = load_inputs()
-    entries, edges = build_index(graph, labels, intent)
+    urls = store_source_urls()
+    # Decided over every node, as `build-source-urls` decides it, never over the
+    # rows the page keeps: a repository is single-root only when all its files are.
+    single_root = single_root_repositories(graph["nodes"])
+    entries, edges = build_index(graph, labels, intent, urls, single_root)
+    source_links = source_link_config(entries, urls, single_root)
+    on_page = {entry[1] for entry in entries if entry[1]}
+    if urls is None:
+        print("Source links: none, because the store's link inputs could not be read (above).")
+    else:
+        bases = source_links.get(SOURCE_BASES_KEY, {})
+        linked = len(bases) if isinstance(bases, dict) else 0
+        print(
+            f"Source links: {linked} of {len(on_page)} repositories on this page link their "
+            "files at the build commit; the rest are not configured with a github.com clone "
+            "URL or have no valid provenance sha."
+        )
+    print(drift_warning(*link_drift(graph["nodes"], urls, single_root)), end="", file=sys.stderr)
     summaries = io.read_summaries(config.SUMMARIES_PATH)
     synonyms = (
         json.load(gzip.open(config.SYNONYMS_PATH, "rt", encoding="utf-8"))
@@ -1377,6 +1531,7 @@ def main() -> int:
         # The intent stage's cap on a ticket's `branches`, so a list that reached it
         # can say "and possibly others" rather than read as complete (#425).
         "branchLimit": BRANCH_LIMIT,
+        **source_links,
     }
 
     app_js = app_source()
