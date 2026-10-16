@@ -18,7 +18,6 @@ Run:
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -188,8 +187,13 @@ def _case_collisions(error: subprocess.CalledProcessError, repo_dir: Path, run) 
 
 
 def _git_version(run) -> tuple[int, int]:
-    match = re.search(r"(\d+)\.(\d+)", run(["--version"]))
-    return (int(match[1]), int(match[2])) if match else (0, 0)
+    """Major and minor from `git version 2.47.1 (Apple Git-150)`; (0, 0) if unreadable."""
+    words = run(["--version"]).split()
+    parts = words[2].split(".") if len(words) > 2 else []
+    try:
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return 0, 0
 
 
 def _sync_external() -> tuple[dict[str, dict], list[tuple[str, str]]]:
