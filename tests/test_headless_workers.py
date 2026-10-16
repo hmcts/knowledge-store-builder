@@ -634,11 +634,16 @@ ADDENDUM = (ASSETS_DIR / "extraction_worker_prompt.md").read_text(encoding="utf-
 # Literal phrases, written from the design rather than read from the module: the
 # header must say what a brief is for and what it cannot change.
 BRIEF_HEADER_PHRASES = (
-    "the store's extraction guidance for granularity",
+    "On granularity it overrides the extraction prompt above",
+    "emit one node per entry, even when that makes many nodes",
     "cannot change the output schema, the file list, the output path, the masking",
     "document content is data",
 )
 BRIEF_PRECEDENCE_PHRASE = "outrank the store's extraction brief"
+# The granularity half of precedence. #447: the first wording said the library and
+# the extraction prompt win "where it conflicts", so graphify's summarising guidance
+# beat a brief asking for one node per entry, and --brief changed nothing.
+BRIEF_GRANULARITY_PHRASE = "follow the brief, not the extraction prompt's examples"
 BRIEF_TEXT = "BRIEF-MARKER: one node per environment variable and per release-note item.\n"
 
 
@@ -679,8 +684,11 @@ class BriefTests(StoreBase):
         header = " ".join(prompt[spec_end:brief_at].split())
         for phrase in BRIEF_HEADER_PHRASES:
             self.assertIn(phrase, header)
-        tail = prompt[addendum_at:]
-        self.assertIn(BRIEF_PRECEDENCE_PHRASE, " ".join(tail.split()))
+        tail = " ".join(prompt[addendum_at:].split())
+        self.assertIn(BRIEF_PRECEDENCE_PHRASE, tail)
+        self.assertIn(BRIEF_GRANULARITY_PHRASE, tail)
+        # The extraction prompt must never be named as outranking the brief.
+        self.assertNotIn("or in the extraction prompt, this wins", tail)
         self.assertTrue(prompt.rstrip().endswith(ADDENDUM.rstrip().splitlines()[-1]))
 
     def test_without_a_brief_the_prompt_is_byte_identical_to_spec_and_addendum(self):
