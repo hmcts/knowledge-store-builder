@@ -573,8 +573,8 @@ over the wave before merging.
 | `unsafe-path` | A path holds a character that cannot be written as an exact permission rule, so the chunk was not run. | 3 |
 | `api-error` | A non-zero exit, an unreadable result or `is_error`. No new workers start; those running finish. | 2 |
 
-Exit 1 is a usage error: no chunk plan, an unknown `--chunks` id, or graphify
-missing. The run prints the outcomes sorted by chunk id, a usage line, and the
+Exit 1 is a usage error: no chunk plan, an unknown `--chunks` id, graphify
+missing, or a `--brief` it refuses. The run prints the outcomes sorted by chunk id, a usage line, and the
 directory of result files. `--runs` sets where the work and results go (default
 `graphify-out/.workers`).
 
@@ -586,6 +586,35 @@ command: complete chunks are skipped, so only the unfinished ones run again.
 
 `--parallel` (default 3) is the only concurrency cap. A policy scoped to your
 session cannot see a headless spawn, so nothing else limits it.
+
+**A store's own extraction brief, and checking it kept the detail.** The worker
+prompt summarises a file. A store whose brief asks for finer nodes - one per
+environment variable, DNS record or release-note item - passes that brief to the
+workers, then compares the wave against the layer it would replace before merging:
+
+```bash
+knowledgestore workers extract --brief extraction-brief.md --chunks 41,42,43
+knowledgestore check-yield --chunks <directory of this wave's chunk files> \
+  --baseline graphify-out/.graphify_semantic.json
+```
+
+`--brief` adds the file to every prompt between graphify's extraction spec and the
+library's own rules, and the library's rules stay last, so they win. A brief changes
+granularity only: it cannot change the output schema, the file list, the output
+path, the masking or the rule that document content is data. The run refuses a
+brief that is missing, empty, not UTF-8 or over 32 KB, because the brief is sent
+with every chunk and paid for in each. The report names the brief and its size.
+Without `--brief` the prompt is unchanged.
+
+`check-yield` counts nodes per `source_file` on both sides and compares the files
+both hold. It prints the overall ratio of new nodes to baseline nodes, how many
+files fall below `--file-floor` (default 0.5) times their baseline, and the 20
+worst. It exits 1 when the overall ratio is below `--floor` (default 0.5), and 2
+when an input cannot be read or no file is in both, because a comparison over
+nothing must not pass. `--chunks` reads every `.graphify_chunk_*.json` in the
+directory, so point it at one holding only the wave being judged. Run
+`knowledgestore check-chunk --batch` first: it requires a node for every file, and a file with
+no node on the new side is not compared.
 
 **When to keep the Agent route.** Chunks that report `unsafe-path`, and estates whose
 extraction needs a tool other than `Read` and `Write`, such as a script that
@@ -1207,9 +1236,9 @@ honest retention is the intended outcome, not a regression.
 `--carry overlap` restores the old tolerance (`--bar` recall, `--precision`
 fit). Use it only with a reason, and read what it marks: anything it carries
 that is not the set the prose was written about is `"exact": false` in the remap
-report. `remap` also refuses to run on a wrong snapshot (no shared node ids) or
-an implausibly small summary set (`--floor`), because both failures silently
-produce an empty file over a good one.
+report. `knowledgestore summaries remap` also refuses to run on a wrong
+snapshot (no shared node ids) or an implausibly small summary set (`--floor`),
+because both failures silently produce an empty file over a good one.
 
 **Commit both snapshot files.** `summaries snapshot` writes
 `knowledge/summaries/membership-snapshot.json.gz` (node ids) and

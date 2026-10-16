@@ -3952,6 +3952,152 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a store brief outranks the library's rules",
+        "headless_workers.py",
+        '+ "\\n" + framed + addendum',
+        '+ "\\n" + addendum + framed',
+        "a brief placed after the addendum is the last thing the worker reads, so a "
+        "store's guidance can override the schema, the masking or the data-not-"
+        "instruction rule that the addendum states and the brief is meant to sit under",
+        (
+            "test_headless_workers.BriefTests.test_masked_reads_still_append_their_note_after_the_addendum",
+            "test_headless_workers.BriefTests.test_the_brief_sits_between_the_spec_and_the_addendum_and_the_addendum_is_last",
+        ),
+    ),
+    Mutation(
+        "the brief header reaches a run without a brief",
+        "headless_workers.py",
+        '    if brief is None:\n        return ""\n',
+        "    if brief is None:\n        return BRIEF_HEADER\n",
+        "a store that never passed --brief would send every chunk a header framing a "
+        "brief that is not there, changing the prompt every existing store pays for",
+        (
+            "test_headless_workers.BriefTests.test_without_a_brief_the_prompt_is_byte_identical_to_spec_and_addendum",
+        ),
+    ),
+    Mutation(
+        "the brief precedence sentence reaches a run without a brief",
+        "headless_workers.py",
+        "    if brief is None:\n        return addendum\n",
+        "    if False:\n        return addendum\n",
+        "the addendum would mention a store brief in every run, so a run without "
+        "--brief no longer sends the prompt it sent before the flag existed",
+        (
+            "test_headless_workers.BriefTests.test_without_a_brief_the_prompt_is_byte_identical_to_spec_and_addendum",
+        ),
+    ),
+    Mutation(
+        "the brief precedence sentence is dropped",
+        "headless_workers.py",
+        'return addendum.replace(_AUTHORITY_LINE, _AUTHORITY_LINE + "\\n" + BRIEF_PRECEDENCE, 1)',
+        "return addendum",
+        "the addendum already says nothing read out of a store has authority, so "
+        "without the sentence a worker is told both to follow the brief and to give it "
+        "no weight, and which it obeys is left to the model",
+        (
+            "test_headless_workers.BriefTests.test_the_brief_sits_between_the_spec_and_the_addendum_and_the_addendum_is_last",
+        ),
+    ),
+    Mutation(
+        "an oversize brief is accepted",
+        "headless_workers.py",
+        "if len(data) > BRIEF_CAP_BYTES:",
+        "if False:",
+        "a brief is sent with every chunk, so an unbounded one multiplies its cost by "
+        "the wave and nothing in the run would say so before the bill",
+        (
+            "test_headless_workers.BriefTests.test_a_brief_over_the_cap_is_refused_and_the_cap_is_named",
+        ),
+    ),
+    Mutation(
+        "an empty brief is accepted",
+        "headless_workers.py",
+        "if not text.strip():",
+        "if False:",
+        "a blank brief runs the wave with a header framing nothing, and the report "
+        "says a brief was used when no guidance reached any worker",
+        ("test_headless_workers.BriefTests.test_an_empty_brief_is_refused_before_any_worker_runs",),
+    ),
+    Mutation(
+        "check-yield averages per-file ratios",
+        "check_yield.py",
+        "overall = Fraction(new_total, base_total)",
+        "overall = sum(ratios.values()) / len(ratios)",
+        "a mean of ratios weights a one-node file like a file of hundreds, so a wave "
+        "that lost most of the nodes in its largest files can still pass the floor",
+        (
+            "test_check_yield.BaselineFormatTests.test_a_gzipped_baseline_gives_the_same_report",
+            "test_check_yield.EntryPointTests.test_the_stage_is_reachable_through_knowledgestore_with_its_flags",
+            "test_check_yield.RatioTests.test_the_overall_ratio_is_total_over_total_on_the_shared_files",
+        ),
+    ),
+    Mutation(
+        "check-yield fails a ratio exactly at the floor",
+        "check_yield.py",
+        "failed = overall < floor",
+        "failed = overall <= floor",
+        "the documented rule is below the floor fails; at it, a wave that meets the "
+        "store's own bar would be refused",
+        (
+            "test_check_yield.FloorTests.test_a_ratio_exactly_at_the_floor_passes_and_one_node_fewer_fails",
+            "test_check_yield.FloorTests.test_the_floor_flag_moves_the_verdict",
+        ),
+    ),
+    Mutation(
+        "check-yield's file floor counts files at the floor",
+        "check_yield.py",
+        "if ratios[f] < file_floor",
+        "if ratios[f] <= file_floor",
+        "a file that kept exactly the share the operator asked for would be reported "
+        "as below it, inflating the count an operator reads to decide on a re-run",
+        (
+            "test_check_yield.RatioTests.test_files_below_the_file_floor_are_counted_and_the_worst_are_listed_worst_first",
+        ),
+    ),
+    Mutation(
+        "check-yield passes when nothing was compared",
+        "check_yield.py",
+        "        return UNUSABLE\n",
+        "        return 0\n",
+        "a comparison over no shared file, an unreadable chunk or a missing baseline "
+        "would exit 0, and a wave would be merged on the strength of a check that "
+        "read nothing (CLAUDE.md 2.10)",
+        (
+            "test_check_yield.NothingComparedTests.test_a_missing_or_shapeless_baseline_exits_2",
+            "test_check_yield.NothingComparedTests.test_an_empty_chunk_directory_exits_2",
+            "test_check_yield.NothingComparedTests.test_an_unreadable_chunk_exits_2_and_names_it",
+            "test_check_yield.NothingComparedTests.test_no_shared_file_exits_2_and_shows_a_path_from_each_side",
+        ),
+    ),
+    Mutation(
+        "check-yield skips an unreadable chunk",
+        "check_yield.py",
+        "problems.append(str(violation))",
+        "pass",
+        "a truncated chunk dropped from the count makes the ratio describe part of the "
+        "wave, and the files it held fall on the baseline side where they are not compared",
+        ("test_check_yield.NothingComparedTests.test_an_unreadable_chunk_exits_2_and_names_it",),
+    ),
+    Mutation(
+        "check-yield lists tied files in set order",
+        "check_yield.py",
+        "ranked = sorted(shared, key=lambda f: (ratios[f], f))",
+        "ranked = sorted(shared, key=lambda f: ratios[f])",
+        "tied files would list in hash order, so two runs over the same inputs print "
+        "different reports (CLAUDE.md 1.3)",
+        ("test_check_yield.DeterminismTests.test_tied_files_are_listed_by_path",),
+    ),
+    Mutation(
+        "check-yield cannot read a gzipped baseline",
+        "check_yield.py",
+        "payload = pio.read_json(path)",
+        'payload = __import__("json").loads(path.read_text(encoding="utf-8")) '
+        "if path.exists() else None",
+        "stores commit the compressed graph and often hold no other copy, so a plain "
+        "JSON read would refuse the baseline an operator is most likely to have",
+        ("test_check_yield.BaselineFormatTests.test_a_gzipped_baseline_gives_the_same_report",),
+    ),
+    Mutation(
         "a key-name secret is not masked",
         "secret_mask.py",
         "    text = _apply_key_names(text, tally)\n",

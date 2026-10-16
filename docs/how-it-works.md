@@ -226,8 +226,8 @@ that in both directions
 - **`remap` protects continuity**: it carries a summary only onto a community
   holding exactly the node set it was written about, and withdraws the rest to
   `communities-withdrawn.json` (`--carry overlap` restores the older
-  60%-of-the-old-members tolerance, `--bar`). Three refusals stop it running at
-  all: an implausibly small summary set (`--floor`, default 10), fewer than half
+  60%-of-the-old-members tolerance, `--bar`). Three refusals stop
+  `knowledgestore summaries remap` running at all: an implausibly small summary set (`--floor`, default 10), fewer than half
   the graph's nodes carrying a community (`--coverage`), and a snapshot that
   shares no node ids with the graph. Each would otherwise write a bad file over a
   good one and report it as legitimate churn.
