@@ -265,8 +265,26 @@ class BodyTicketIdsTest(SettingsIsolated):
         body = "Rolls up ZZ-9, AA-1, MM-5, BB-2 and CC-3 into the June release."
         self.assertEqual(intent.body_ticket_ids(body), ["ZZ-9", "AA-1", "MM-5"])
 
-    def test_rejected_body_contributes_no_ids(self):
-        self.assertEqual(intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"), [])
+    def test_a_squash_merge_list_contributes_its_ids(self):
+        """Catches a squash merge's landed ids being dropped with its prose.
+
+        The list is not prose and none of it is stored, but its bullets are the
+        commits this one collapsed, so the ids in them landed here.
+        """
+        self.assertEqual(
+            intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"),
+            ["DD-1", "DD-2", "DD-3"],
+        )
+
+    def test_a_squash_merge_list_is_capped_at_its_own_limit(self):
+        body = "\n".join(
+            f"* AA-{n} change {n}" for n in range(1, intent.MERGE_BODY_TICKET_LIMIT + 5)
+        )
+        self.assertEqual(len(intent.body_ticket_ids(body)), intent.MERGE_BODY_TICKET_LIMIT)
+
+    def test_bot_text_still_contributes_no_ids(self):
+        """A machine's body says nothing about this commit, squashed or not."""
+        self.assertEqual(intent.body_ticket_ids("* Bump dep from 1 to 2\n* Signed-off-by: bot"), [])
 
 
 class ApplyCommitTest(SettingsIsolated):
@@ -318,6 +336,36 @@ class ApplyCommitTest(SettingsIsolated):
         self.assertEqual(files["src/x.ts"]["tickets"], {"DD-42": 1})
         self.assertEqual(descriptions["DD-42"]["count"], 1)
         self.assertEqual(descriptions["DD-42"]["first"], "2024-05-01")
+
+    def test_a_squash_merge_links_the_tickets_its_bullets_name(self):
+        """Catches landed work being published as `proposed`.
+
+        A squash merge's subject names the pull request's own ticket and its
+        bullets name the commits it collapsed. Reading the subject alone kept
+        only the first, and because the branch the rest came from is never an
+        ancestor of the default branch, they were then filed as work that never
+        landed. Shape taken from ia-case-api 288f8507 and cnp-module-key-vault
+        fd9db0a.
+        """
+        files, descriptions = make_files(), make_descriptions()
+        commit = self._commit(
+            "RIA-7579 Merge SNL -> Master (#1497)",
+            body="* RIA-7002 add the hearing requirements handler\n"
+            "* RIA-7483 create the flag handler\n",
+        )
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["RIA-7579", "RIA-7002", "RIA-7483"])
+        self.assertEqual(files["src/x.ts"]["proposed"], {})
+
+    def test_a_squash_merge_whose_subject_names_nothing_still_links_its_bullets(self):
+        files, descriptions = make_files(), make_descriptions()
+        commit = self._commit(
+            "Make default creator access policy conditional (#72)",
+            body="* allow developer group object id override\n"
+            "* DTSPO-31965: add preview Jenkins access opt-in\n",
+        )
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["DTSPO-31965"])
 
     def test_body_contributes_at_most_three_tickets(self):
         """Catches one release-note body attributing a file to every ticket it lists."""

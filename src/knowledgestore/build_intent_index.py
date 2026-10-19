@@ -109,6 +109,9 @@ MIN_MERGE_BULLETS = 2
 MIN_BODY_CHARS = 25
 # One body must not attribute a file to every ticket it happens to list.
 BODY_TICKET_LIMIT = 3
+# A squash merge's bullets are the commits it collapsed, not neighbouring work,
+# so the whole list is this commit's own and the prose cap is too tight for it.
+MERGE_BODY_TICKET_LIMIT = 20
 BODY_DESCRIPTION_CHARS = 300
 
 # Per ticket, how much of the commit's own words to keep. `d` is a curated
@@ -319,19 +322,43 @@ def truncate(text: str, limit: int) -> str:
     return head.rstrip()
 
 
-def body_ticket_ids(body: str, boilerplate: frozenset[str] = frozenset()) -> list[str]:
-    """Ticket ids a body's prose names, in first-appearance order, capped.
+def _link_text(body: str, boilerplate: frozenset[str]) -> tuple[str, int, bool]:
+    """The body text ticket links may be read from, the cap that applies, and
+    whether the body is a squash merge's list of the commits it collapsed.
+
+    A ticket id is a link, not a value, so the prose nets do not all apply to it.
+    `merge-list` says the body is not prose, which is true and is why nothing of
+    it is stored - but its bullets are this commit's own squashed subjects, and
+    the ids in them are the only record that the work landed here. `bot-text` and
+    `squashed-authors` stay rejected: those bodies are machine noise, and an id
+    inside them says nothing about this commit.
+    """
+    cleaned = _flatten(_body_blocks(body, boilerplate))
+    reason = _rejection(cleaned)
+    if reason == "merge-list":
+        return cleaned, MERGE_BODY_TICKET_LIMIT, True
+    return ("" if reason else cleaned), BODY_TICKET_LIMIT, False
+
+
+def _capped_ids(text: str, limit: int) -> list[str]:
+    """The ticket ids text names, in first-appearance order, up to limit.
 
     First-appearance rather than set order because output has to be identical
     between runs, and set iteration order is not.
     """
     ids: list[str] = []
-    for ticket in config.TICKET_PATTERN.findall(clean_body(body, boilerplate)):
+    for ticket in config.TICKET_PATTERN.findall(text):
         if ticket not in ids:
             ids.append(ticket)
-        if len(ids) == BODY_TICKET_LIMIT:
+        if len(ids) == limit:
             break
     return ids
+
+
+def body_ticket_ids(body: str, boilerplate: frozenset[str] = frozenset()) -> list[str]:
+    """Ticket ids a body names, in first-appearance order, capped."""
+    text, limit, _ = _link_text(body, boilerplate)
+    return _capped_ids(text, limit)
 
 
 def body_description(body: str, boilerplate: frozenset[str] = frozenset()) -> str:
@@ -507,11 +534,20 @@ def commit_tickets(commit: dict, boilerplate: frozenset[str] = frozenset()) -> l
 
     The body is read only when the subject names nothing, so a body mentioning
     neighbouring work cannot dilute links the subject already states.
+
+    A squash merge is the exception, and both are read. Its subject names the
+    pull request's own ticket and its bullets name the commits it collapsed; all
+    of that work arrived in this one commit, so the bullets are not neighbouring
+    work. Reading the subject alone loses every ticket but the pull request's,
+    and because the branch those commits came from is never an ancestor of the
+    default branch, the lost ids are then published as `proposed` - work that
+    landed, filed as work that did not.
     """
     subject_tickets = list(dict.fromkeys(config.TICKET_PATTERN.findall(commit["subject"])))
-    if subject_tickets:
+    text, limit, squashed = _link_text(commit_body(commit), boilerplate)
+    if subject_tickets and not squashed:
         return subject_tickets
-    return body_ticket_ids(commit_body(commit), boilerplate)
+    return list(dict.fromkeys(subject_tickets + _capped_ids(text, limit)))
 
 
 def apply_commit(
