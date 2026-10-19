@@ -6945,6 +6945,36 @@ MUTATIONS = (
             "test_git_env.EveryGitCallPassesTheStrippedEnvironment.test_no_git_call_in_the_library_inherits_the_callers_binding",
         ),
     ),
+    Mutation(
+        "a squash merge's ticket ids are read as prose again",
+        "build_intent_index.py",
+        '    if reason == "merge-list":\n        return cleaned, MERGE_BODY_TICKET_LIMIT, True\n',
+        "",
+        "shipped in v0.17.0 and found by an evaluation of the CFT store: a squash "
+        "merge's bullets are the commits it collapsed, but the `merge-list` prose "
+        "rejection threw away their ticket ids, and the branch those commits came "
+        "from is never an ancestor of the default branch - so 33 of 120 sampled "
+        "`proposed` links were work that had landed, filed as work that had not",
+        (
+            "test_build_intent_index.BodyTicketIdsTest.test_a_squash_merge_list_contributes_its_ids",
+            "test_build_intent_index.BodyTicketIdsTest.test_a_squash_merge_list_is_capped_at_its_own_limit",
+            "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_links_the_tickets_its_bullets_name",
+            "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_whose_subject_names_nothing_still_links_its_bullets",
+        ),
+    ),
+    Mutation(
+        "a squash merge's subject hides its bullets' tickets again",
+        "build_intent_index.py",
+        "    if subject_tickets and not squashed:\n",
+        "    if subject_tickets:\n",
+        "shipped in v0.17.0: where a squash merge's subject named the pull request's "
+        "own ticket, the anti-dilution rule dropped every ticket its bullets named, "
+        "and those ids then survived only on the unlanded branch - published as "
+        "`proposed` though the work was on the default branch",
+        (
+            "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_links_the_tickets_its_bullets_name",
+        ),
+    ),
 )
 
 
