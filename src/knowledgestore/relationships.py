@@ -87,12 +87,23 @@ class Kind:
     publishes: Callable[[Path], list[tuple[str, str]]]
 
 
-_USERINFO = re.compile(r"(?<=://)[^/@\s\"']+@")
+_USERINFO = re.compile(r"(?P<scheme>[a-z][a-z0-9+.-]*)://(?P<userinfo>[^/@\s\"']+)@")
+_WEB_SCHEMES = ("http", "https")
+
+
+def _drop_credential(match: re.Match) -> str:
+    userinfo = match.group("userinfo")
+    # `user:pass@` is a credential in any scheme. A bare `token@` is one on http(s),
+    # where it is a token; on ssh it is the login name (`git@host`), which every
+    # such URL carries and which is not a secret.
+    if ":" in userinfo or match.group("scheme").split("+")[-1] in _WEB_SCHEMES:
+        return f"{match.group('scheme')}://"
+    return match.group(0)
 
 
 def strip_userinfo(text: str) -> str:
-    """`text` without the `user:token@` of any URL in it."""
-    return _USERINFO.sub("", text)
+    """`text` without the credential of any URL in it, keeping an ssh login name."""
+    return _USERINFO.sub(_drop_credential, text)
 
 
 def files_of(clone: Path, kind: Kind) -> list[str]:
@@ -168,6 +179,8 @@ _TF_SOURCE = re.compile(
 )
 _TF_ANY_SOURCE = re.compile(r'source\s*=\s*"(?P<address>[^"]*)"')
 _LOCAL_SOURCE = ("./", "../", "/")
+_HEREDOC = re.compile(r"<<-?(?P<tag>[A-Za-z_]\w*)")
+_PIN_PARAMS = ("ref", "depth")
 _MODULE_BLOCK = re.compile(r'(?<![\w-])module\s+"[^"]*"\s*\{')
 
 
@@ -215,6 +228,10 @@ def _module_source_offsets(text: str) -> set[int]:
             if ch == '"':
                 i = _string_end(text, i)
                 continue
+            heredoc = _HEREDOC.match(text, i)
+            if heredoc:
+                i = _heredoc_end(text, heredoc)
+                continue
             if ch == "#" or text.startswith("//", i):
                 i = text.find("\n", i)
                 i = len(text) if i < 0 else i
@@ -238,10 +255,46 @@ def _module_source_offsets(text: str) -> set[int]:
 
 
 def _string_end(text: str, start: int) -> int:
+    """The offset after the string opening at `start`. An interpolation (`${...}`,
+    `%{...}`) can hold strings and braces of its own, so it is skipped as a unit."""
     i = start + 1
-    while i < len(text) and text[i] != '"':
-        i += 2 if text[i] == "\\" else 1
-    return i + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+        elif text[i] == '"':
+            return i + 1
+        elif text.startswith(("$${", "%%{"), i):
+            i += 3  # an escaped literal, not an interpolation
+        elif text.startswith(("${", "%{"), i):
+            i = _interpolation_end(text, i + 2)
+        else:
+            i += 1
+    return i
+
+
+def _interpolation_end(text: str, i: int) -> int:
+    depth = 1
+    while i < len(text) and depth:
+        if text[i] == '"':
+            i = _string_end(text, i)
+            continue
+        depth += (text[i] == "{") - (text[i] == "}")
+        i += 1
+    return i
+
+
+def _heredoc_end(text: str, opening: re.Match) -> int:
+    """The offset after the terminator line of a heredoc, or the end of the text.
+    The body is free text: braces and quotes in it are not structure."""
+    tag = opening.group("tag")
+    offset = text.find("\n", opening.end())
+    while offset >= 0:
+        start = offset + 1
+        offset = text.find("\n", start)
+        line = text[start : len(text) if offset < 0 else offset]
+        if line.strip() == tag:
+            return len(text) if offset < 0 else offset
+    return len(text)
 
 
 def _word_before(text: str, i: int) -> bool:
@@ -280,12 +333,14 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
         ):
             continue
         line, linetext = _line_of(text, match.start())
-        # The query is a pin, not part of what is referenced: two pins of one module
-        # are one target.
+        # A pin is not part of what is referenced, so two pins of one module are one
+        # target. Any other query parameter selects something and stays.
+        base, _, query = address.partition("?")
+        kept = [p for p in query.split("&") if p and p.partition("=")[0] not in _PIN_PARAMS]
         found.append(
             Reference(
                 kind="terraform_module",
-                target=address.partition("?")[0],
+                target=base + ("?" + "&".join(kept) if kept else ""),
                 chart="",
                 ref=_ref_of(address),
                 rel=rel,

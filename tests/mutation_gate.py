@@ -7025,11 +7025,33 @@ MUTATIONS = (
     Mutation(
         "relationships: a URL credential reaches a reference field",
         "relationships.py",
-        '    return _USERINFO.sub("", text)',
+        "    return _USERINFO.sub(_drop_credential, text)",
         "    return text",
         "#455: a module source can be `git::https://user:token@host/...`, and a reference's target becomes a key of the unresolved report, so the token is written to a committed file unmasked; the same holds for an npm git URL spec",
         (
             "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
+            "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: a heredoc body is read as Terraform structure",
+        "relationships.py",
+        "            if heredoc:",
+        "            if False:",
+        "#455: a heredoc body is free text, so a `}` or an unbalanced quote in it (a policy document, a script) ends or swallows the module block and the module's `source` is silently dropped from the layer",
+        (
+            "test_relationships_parsers.TerraformScopeTest.test_a_heredoc_body_is_not_structure",
+            "test_relationships_parsers.TerraformScopeTest.test_an_unbalanced_quote_and_brace_in_a_heredoc_are_text",
+        ),
+    ),
+    Mutation(
+        "relationships: an ssh login name is stripped from a URL",
+        "relationships.py",
+        '    if ":" in userinfo or match.group("scheme").split("+")[-1] in _WEB_SCHEMES:',
+        "    if True:",
+        "#455: credential stripping that removes `git@` from `git::ssh://git@host/...` changes the address that was written, so the same module referenced two ways no longer reads as one target and the reference no longer names what the file says",
+        (
+            "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
         ),
     ),
 )

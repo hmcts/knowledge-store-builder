@@ -194,6 +194,58 @@ class TerraformScopeTest(SettingsIsolated):
             refs = relationships.scan(Path(root), _kind("terraform_module"))
         self.assertNotIn("interpolated", " ".join(r.text for r in refs))
 
+    def _scan(self, text: str) -> list[relationships.Reference]:
+        with _clone({"a.tf": text}) as root:
+            return relationships.scan(Path(root), _kind("terraform_module"))
+
+    def test_a_heredoc_body_is_not_structure(self):
+        """Break caught: a `}` in a heredoc body ending the module block, so the
+        `source` after it is dropped as outside a module."""
+        refs = self._scan('module "a" {\n x = <<EOF\n}\nEOF\n source = "r/x"\n}\n')
+        self.assertEqual([(r.target, r.line) for r in refs], [("r/x", 5)])
+
+    def test_an_unbalanced_quote_and_brace_in_a_heredoc_are_text(self):
+        """Break caught: `} "unbalanced {` in an indented heredoc read as brace and
+        string, which swallows or ends the block and loses the source."""
+        text = (
+            'module "a" {\n x = <<-EOT\n  } "unbalanced {\n  EOT\n'
+            ' source = "git::https://git.example.test/t/m.git?ref=v1"\n}\n'
+        )
+        refs = self._scan(text)
+        self.assertEqual(
+            [(r.target, r.ref) for r in refs], [("git::https://git.example.test/t/m.git", "v1")]
+        )
+
+    def test_an_interpolation_holding_a_quote_and_a_brace_does_not_end_the_block(self):
+        """Break caught: the string ended at the quote inside `${ ... }`, so the `}`
+        in it closed the module block early."""
+        text = 'module "a" {\n d = "${var.x == "}" ? 1 : 2}"\n source = "r/x"\n}\n'
+        refs = self._scan(text)
+        self.assertEqual([(r.target, r.line) for r in refs], [("r/x", 3)])
+
+    def test_only_pin_parameters_leave_a_targets_query(self):
+        """Break caught: the whole query dropped, so `?archive=zip&id=1` and `id=2`
+        collapse into one target - or a pin left in, so two pins read as two."""
+        tf = 'module "m" {{\n  source = "{}"\n}}\n'
+        with _clone(
+            {
+                "1.tf": tf.format("https://h.example.test/x?archive=zip&id=1"),
+                "2.tf": tf.format("https://h.example.test/x?archive=zip&id=2"),
+                "3.tf": tf.format("https://h.example.test/x?ref=v2&depth=1"),
+                "4.tf": tf.format("https://h.example.test/x?id=3&ref=v2&archive=zip"),
+            }
+        ) as root:
+            refs = relationships.scan(Path(root), _kind("terraform_module"))
+        self.assertEqual(
+            [(r.target, r.ref) for r in refs],
+            [
+                ("https://h.example.test/x?archive=zip&id=1", ""),
+                ("https://h.example.test/x?archive=zip&id=2", ""),
+                ("https://h.example.test/x", "v2"),
+                ("https://h.example.test/x?id=3&archive=zip", "v2"),
+            ],
+        )
+
     def test_a_non_github_git_source_keeps_its_pin_and_drops_it_from_the_target(self):
         """Break caught: `?ref=v2` on a non-GitHub source reported as floating, or
         left in the target so two pins of one module read as two modules."""
@@ -233,6 +285,28 @@ class CredentialTest(SettingsIsolated):
                 self.assertNotIn(self.TOKEN, repr(ref))
         self.assertEqual(refs[0].target, "git::https://git.example.test/team/mod.git")
         self.assertEqual(refs[0].ref, "v1")
+
+
+class UserinfoTest(SettingsIsolated):
+    def test_an_ssh_login_name_is_kept_and_a_credential_is_not(self):
+        """Break caught: `git@` stripped from an ssh URL (the target no longer names
+        the address that was written), or `user:pass@` / a bare http token kept."""
+        for text, want in [
+            (
+                "git::ssh://git@gitlab.example.test/o/r.git",
+                "git::ssh://git@gitlab.example.test/o/r.git",
+            ),
+            ("ssh://user@host.example.test/x", "ssh://user@host.example.test/x"),
+            ("git+ssh://git@h.example.test/x", "git+ssh://git@h.example.test/x"),
+            ("ssh://user:pw@host.example.test/x", "ssh://host.example.test/x"),
+            ("ftp://user:pw@host.example.test/x", "ftp://host.example.test/x"),
+            ("https://tok@h.example.test/x", "https://h.example.test/x"),
+            ("git::http://tok@h.example.test/x", "git::http://h.example.test/x"),
+            ("git+https://tok@h.example.test/x", "git+https://h.example.test/x"),
+            ("git@github.com:o/r.git", "git@github.com:o/r.git"),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(relationships.strip_userinfo(text), want)
 
 
 class LocateTest(SettingsIsolated):
