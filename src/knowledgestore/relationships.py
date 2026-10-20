@@ -21,15 +21,22 @@ to read a Flux `HelmRelease`, which is arbitrary YAML.
 from __future__ import annotations
 
 import fnmatch
+import importlib.util
 import json
 import os
 import re
-from collections.abc import Callable
+import tempfile
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from xml.parsers import expat
 
-from . import deploy_flux
+from . import config, deploy_flux, io, secret_mask
+
+if TYPE_CHECKING:
+    from .source_urls import SourceUrls
 
 # Directories that hold copies of other repositories' files rather than this one's
 # own. `.terraform` is Terraform's download cache: it holds the upstream modules,
@@ -50,7 +57,8 @@ class Reference:
     `resolved_repo` is set only when the declaration names a repository outright,
     as a Terraform GitHub source does. `source` is a Flux `HelmRelease`'s
     `sourceRef` name, which the chart resolver falls back on when no clone defines
-    the chart.
+    the chart. `org` is the organisation a GitHub source names, which the layer
+    checks against the estate's.
     """
 
     kind: str
@@ -62,6 +70,7 @@ class Reference:
     text: str
     resolved_repo: str | None = None
     source: str = ""
+    org: str = ""
 
     def __post_init__(self) -> None:
         # A URL in a declaration can carry `user:token@`. The fields are what the
@@ -71,13 +80,21 @@ class Reference:
             object.__setattr__(self, name, strip_userinfo(getattr(self, name)))
 
 
+def _no_skips(_clone: Path, _rel: str, _text: str) -> dict[str, int]:
+    return {}
+
+
 @dataclass(frozen=True)
 class Kind:
     """A registered way of declaring a dependency between repositories.
 
     `references(clone, rel, text)` reads one file matching `globs` (`rel` is its
-    path relative to `clone`, `text` its contents). `publishes(clone)` returns
-    `(target key, declaring path)` for what the clone offers to others.
+    path relative to `clone`, `text` its contents); a `ValueError` from it means the
+    file is unreadable, and the layer counts it rather than stopping. `publishes(clone)`
+    returns `(target key, declaring path)` for what the clone offers to others.
+    `skips(clone, rel, text)` counts, by reason, declarations in the file that are
+    deliberately not references (a local module path), so the layer can say how
+    many it set aside.
     """
 
     name: str
@@ -85,6 +102,7 @@ class Kind:
     globs: tuple[str, ...]
     references: Callable[[Path, str, str], list[Reference]]
     publishes: Callable[[Path], list[tuple[str, str]]]
+    skips: Callable[[Path, str, str], dict[str, int]] = _no_skips
 
 
 _USERINFO = re.compile(r"(?P<scheme>[a-z][a-z0-9+.-]*)://(?P<userinfo>[^/@\s\"']+)@")
@@ -305,7 +323,8 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
     found = []
     github_at = {match.start() for match in _TF_SOURCE.finditer(text)}
     in_module = _module_source_offsets(text)
-    # The organisation is not carried: the layer decides whether it is the estate's.
+    # The organisation is carried, not checked: the layer decides whether it is the
+    # estate's, because only the layer knows the estate.
     for match in _TF_SOURCE.finditer(text):
         if match.start() not in in_module:
             continue
@@ -320,6 +339,7 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
                 line=line,
                 text=linetext,
                 resolved_repo=match.group("repo"),
+                org=match.group("org"),
             )
         )
     for match in _TF_ANY_SOURCE.finditer(text):
@@ -349,6 +369,19 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
             )
         )
     return sorted(found, key=lambda ref: ref.line)
+
+
+def _terraform_skips(_clone: Path, _rel: str, text: str) -> dict[str, int]:
+    """Module sources inside the repository: a local path, or one built by
+    interpolation (`${path.module}/...`), which no prefix can tell from local."""
+    module_sources = _module_source_offsets(text)
+    local = sum(
+        1
+        for match in _TF_ANY_SOURCE.finditer(text)
+        if match.start() in module_sources
+        and (match.group("address").startswith(_LOCAL_SOURCE) or "${" in match.group("address"))
+    )
+    return {"local": local} if local else {}
 
 
 # --- Helm ---------------------------------------------------------------------
@@ -594,7 +627,26 @@ def _helm_releases(rel: str, text: str) -> list[Reference]:
     return found
 
 
-def _helm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
+def vendored(clone: Path, rel: str) -> bool:
+    """Whether `rel` sits under a chart's own `charts/` directory.
+
+    That directory holds the chart's dependencies, unpacked by `helm dependency
+    build` or committed by hand. A `Chart.yaml` there is a copy of another
+    repository's chart: read as this repository's, every consumer that vendors a
+    dependency would publish it (a conflict with its owner) and declare its
+    dependencies. A `charts/<name>/` directory with no `Chart.yaml` above it is a
+    chart repository's own layout, and is not vendored.
+    """
+    parts = rel.split("/")
+    return any(
+        part == "charts" and clone.joinpath(*parts[:index], "Chart.yaml").is_file()
+        for index, part in enumerate(parts[:-2])
+    )
+
+
+def _helm_references(clone: Path, rel: str, text: str) -> list[Reference]:
+    if vendored(clone, rel):
+        return []
     if rel.rsplit("/", 1)[-1] == "Chart.yaml":
         return _chart_dependencies(rel, text)
     return _helm_releases(rel, text)
@@ -603,6 +655,8 @@ def _helm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
 def _helm_publishes(clone: Path) -> list[tuple[str, str]]:
     found = []
     for rel in files_of(clone, _CHART_FILES):
+        if vendored(clone, rel):
+            continue
         name, _ = chart_yaml(read_text(clone / rel))
         if name:
             found.append((name, rel))
@@ -816,7 +870,14 @@ _CHART_FILES = Kind("", "", ("**/Chart.yaml",), lambda *_: [], lambda _: [])
 _POM_FILES = Kind("", "", ("**/pom.xml",), lambda *_: [], lambda _: [])
 
 BUILTIN: tuple[Kind, ...] = (
-    Kind("terraform_module", "builtin", ("**/*.tf",), _terraform_references, lambda _clone: []),
+    Kind(
+        "terraform_module",
+        "builtin",
+        ("**/*.tf",),
+        _terraform_references,
+        lambda _clone: [],
+        _terraform_skips,
+    ),
     Kind(
         "helm_chart",
         "builtin",
@@ -827,3 +888,342 @@ BUILTIN: tuple[Kind, ...] = (
     Kind("maven_artifact", "builtin", ("**/pom.xml",), _maven_references, _maven_publishes),
     Kind("npm_package", "builtin", ("**/package.json",), _npm_references, _npm_publishes),
 )
+
+
+# --- the layer ----------------------------------------------------------------
+#
+# Every kind's references, resolved to a repository in the estate or reported as
+# outside it, aggregated per (consumer, provider, chart). `chart` is "" for every
+# kind but `helm_chart`: one repository of generic charts would otherwise read as a
+# dependency of nearly everything, with no way to ask which chart.
+
+FORMAT = {"major": 1, "minor": 0}
+FLUX_UNREAD = "not read: PyYAML is not installed"
+
+
+class KindError(Exception):
+    """A kind's parser raised something other than "this file is unreadable". The
+    stage stops, naming the kind and the file, before anything is written."""
+
+
+@dataclass
+class Layer:
+    """What `write` puts on disk, built entirely in memory first.
+
+    `dependencies` is the `repository-dependencies.json` body, `by_repo` each
+    `by-repo/<repo>.json` body, `kinds` the `kinds.json` body. `conflicts` is
+    `{kind: {target: [repositories]}}`, the first of which was chosen; `skipped` is
+    `{kind: {reason: count}}`; `unreadable` names each file a parser could not read,
+    store-relative.
+    """
+
+    dependencies: dict
+    by_repo: dict[str, dict]
+    kinds: dict
+    conflicts: dict
+    skipped: dict
+    unreadable: list[str]
+
+
+def resolve_chart(
+    chart: str, source: str, estate: Iterable[str], pattern: str, defined: dict[str, str]
+) -> str | None:
+    """The repository providing `chart`, or None when the estate holds none.
+
+    In order: the pattern's repository when the pattern is set and names a clone;
+    the clone `defined` chose for the chart (a non-umbrella definition over an
+    umbrella's, first by name); and, for a Flux `HelmRelease`, a `sourceRef` that
+    names a clone - the graph's `uses_chart` rule, kept so the two agree.
+    """
+    estate = set(estate)
+    if pattern:
+        candidate = pattern.format(name=chart)
+        if candidate in estate:
+            return candidate
+    if chart in defined:
+        return defined[chart]
+    if source and source in estate:
+        return source
+    return None
+
+
+@dataclass
+class _Edge:
+    references: int = 0
+    kinds: Counter = field(default_factory=Counter)
+    refs: Counter = field(default_factory=Counter)
+    examples: list = field(default_factory=list)
+
+
+@dataclass
+class _Unresolved:
+    references: int = 0
+    referenced_by: set = field(default_factory=set)
+
+
+class _Resolver:
+    """Decides, for one reference, whether it is an edge, a self-reference or a
+    target outside the estate."""
+
+    def __init__(self, estate, org, pattern, umbrellas, publishers):
+        self.estate = estate
+        self.org = org.lower()
+        self.pattern = pattern
+        self.publishers = publishers
+        self.chosen: dict[str, dict[str, str]] = {}
+        self.conflicts: dict[str, dict[str, list[str]]] = {}
+        for kind, published in publishers.items():
+            chosen = self.chosen.setdefault(kind, {})
+            for target, repos in sorted(published.items()):
+                # Only the chart resolver knows umbrellas: an umbrella bundles other
+                # repositories' charts, and is the owner of none of them.
+                own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos
+                candidates = own or repos
+                chosen[target] = candidates[0]
+                if len(candidates) > 1:
+                    self.conflicts.setdefault(kind, {})[target] = candidates
+
+    def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
+        """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
+        if ref.resolved_repo is not None:
+            ours = ref.resolved_repo in self.estate and (
+                not self.org or ref.org.lower() == self.org
+            )
+            if not ours:
+                return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
+            provider = ref.resolved_repo
+        elif consumer in self.publishers.get(ref.kind, {}).get(ref.target, ()):
+            # A repository using what it publishes itself: a sibling module of a
+            # multi-module build, a chart beside its own umbrella.
+            return "self", ""
+        elif ref.kind == "helm_chart":
+            provider = resolve_chart(
+                ref.target, ref.source, self.estate, self.pattern, self.chosen.get(ref.kind, {})
+            )
+        else:
+            provider = self.chosen.get(ref.kind, {}).get(ref.target)
+        if provider is None:
+            return "unresolved", ref.target
+        if provider == consumer:
+            return "self", ""
+        return "edge", provider
+
+
+def _publishers(clones: list[Path], kind: Kind) -> dict[str, list[str]]:
+    found: dict[str, set[str]] = {}
+    for clone in clones:
+        try:
+            published = kind.publishes(clone)
+        except Exception as error:
+            raise KindError(
+                f"{kind.name}: publishes() raised on {clone.name}: {error!r}"
+            ) from error
+        for target, _rel in published:
+            found.setdefault(target, set()).add(clone.name)
+    return {target: sorted(repos) for target, repos in found.items()}
+
+
+def _store_relative(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _read_extra(repo: str) -> dict:
+    path = config.RELATIONSHIPS_EXTRA_DIR / f"{repo}.json"
+    if not path.is_file():
+        return {}
+    try:
+        extra = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"{path}: not readable as JSON: {error}") from error
+    if not isinstance(extra, dict):
+        raise ValueError(f"{path}: `extra` must be a JSON object")
+    return extra
+
+
+def _edge_body(edge: _Edge, consumer: str, chart: str, examples: int, urls) -> dict:
+    shown = sorted(edge.examples)[: max(examples, 0)]
+    return {
+        "chart": chart,
+        "references": edge.references,
+        "kinds": dict(sorted(edge.kinds.items())),
+        "refs_pinned": dict(sorted(edge.refs.items())),
+        "examples": [
+            {
+                "url": urls.resolve(consumer, rel, f"L{line}").url if urls is not None else None,
+                "line": secret_mask.mask(text),
+            }
+            for rel, line, text in shown
+        ],
+    }
+
+
+def _scan_layer(clones, kinds, resolver, root):
+    edges: dict[tuple[str, str, str], _Edge] = {}
+    unresolved: dict[str, dict[str, _Unresolved]] = {kind.name: {} for kind in kinds}
+    skipped: dict[str, Counter] = {kind.name: Counter() for kind in kinds}
+    unreadable: list[str] = []
+    for clone in clones:
+        for kind in kinds:
+            for rel in files_of(clone, kind):
+                text = read_text(clone / rel)
+                try:
+                    found = kind.references(clone, rel, text)
+                    skipped[kind.name].update(kind.skips(clone, rel, text))
+                except ValueError:
+                    unreadable.append(_store_relative(root, clone / rel))
+                    skipped[kind.name]["unreadable"] += 1
+                    continue
+                except Exception as error:
+                    raise KindError(
+                        f"{kind.name}: the parser raised on {clone.name}/{rel}: {error!r}"
+                    ) from error
+                for ref in found:
+                    outcome, value = resolver.resolve(clone.name, ref)
+                    if outcome == "self":
+                        skipped[kind.name]["self"] += 1
+                    elif outcome == "unresolved":
+                        # A target is written as a key of a committed file, so it
+                        # is masked like an example line.
+                        entry = unresolved[kind.name].setdefault(
+                            secret_mask.mask(value), _Unresolved()
+                        )
+                        entry.references += 1
+                        entry.referenced_by.add(clone.name)
+                    else:
+                        edge = edges.setdefault((clone.name, value, ref.chart), _Edge())
+                        edge.references += 1
+                        edge.kinds[kind.name] += 1
+                        edge.refs[ref.ref] += 1
+                        edge.examples.append((ref.rel, ref.line, ref.text))
+    return edges, unresolved, skipped, sorted(unreadable)
+
+
+def build(
+    root: Path,
+    clones: list[Path],
+    kinds: tuple[Kind, ...],
+    org: str,
+    chart_pattern: str,
+    umbrellas: set[str],
+    examples: int,
+    urls: SourceUrls | None,
+) -> Layer:
+    """The layer for these clones, in memory. Nothing is written.
+
+    `org` is the estate's GitHub organisation (`""` accepts any); `chart_pattern`
+    names a chart's repository (`chart-{name}`, `""` to skip that step);
+    `umbrellas` are repositories that bundle other repositories' charts; `examples`
+    caps the example lines per edge and nothing else; `urls` links each example and
+    names each repository's commit, or None for a store with no provenance.
+    Raises `KindError` when a parser fails, and `ValueError` for an unreadable
+    `extra` input.
+    """
+    clones = sorted(clones, key=lambda clone: clone.name)
+    names = [clone.name for clone in clones]
+    publishers = {kind.name: _publishers(clones, kind) for kind in kinds}
+    resolver = _Resolver(frozenset(names), org, chart_pattern, umbrellas, publishers)
+    edges, unresolved, skipped, unreadable = _scan_layer(clones, kinds, resolver, root)
+
+    flat, depends_on, depended_on_by = [], {}, {}
+    for (consumer, provider, chart), edge in sorted(edges.items()):
+        body = _edge_body(edge, consumer, chart, examples, urls)
+        flat.append({"consumer": consumer, "provider": provider, **body})
+        depends_on.setdefault(consumer, []).append({"repository": provider, **body})
+        depended_on_by.setdefault(provider, []).append({"repository": consumer, **body})
+
+    def by_other_end(found: list[dict]) -> list[dict]:
+        return sorted(found, key=lambda edge: (edge["repository"], edge["chart"]))
+
+    by_repo = {}
+    for name in names:
+        commit = urls.build_sha(name) if urls is not None else ""
+        by_repo[name] = {
+            "repository": name,
+            "commit": commit or None,
+            "base_url": urls.base(name) if urls is not None else None,
+            "depends_on": by_other_end(depends_on.get(name, [])),
+            "depended_on_by": by_other_end(depended_on_by.get(name, [])),
+            "extra": _read_extra(name),
+        }
+
+    unresolved_body = {
+        kind: {
+            target: {"references": entry.references, "referenced_by": sorted(entry.referenced_by)}
+            for target, entry in sorted(targets.items())
+        }
+        for kind, targets in unresolved.items()
+    }
+    flux_readable = importlib.util.find_spec("yaml") is not None
+    kinds_body = {}
+    for kind in kinds:
+        carrying = [edge for edge in edges.values() if kind.name in edge.kinds]
+        kinds_body[kind.name] = {
+            "origin": kind.origin,
+            "edges": len(carrying),
+            "references": sum(edge.kinds[kind.name] for edge in carrying),
+            "unresolved": len(unresolved[kind.name]),
+            "skipped": dict(sorted(skipped[kind.name].items())),
+            "notes": {"flux": FLUX_UNREAD}
+            if kind.name == "helm_chart" and not flux_readable
+            else {},
+        }
+    return Layer(
+        dependencies={
+            "format": dict(FORMAT),
+            "edges": flat,
+            "unresolved_targets_outside_estate": unresolved_body,
+            "conflicts": resolver.conflicts,
+        },
+        by_repo=by_repo,
+        kinds=kinds_body,
+        conflicts=resolver.conflicts,
+        skipped={kind: dict(sorted(counts.items())) for kind, counts in skipped.items()},
+        unreadable=unreadable,
+    )
+
+
+def dumps(body) -> str:
+    """The one serialisation every layer file is written with (CLAUDE.md 1.3)."""
+    return json.dumps(body, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def write(layer: Layer, cfg) -> None:
+    """Write the layer: every file to a temporary sibling first, then each renamed
+    into place, then the `by-repo/` file of every repository no longer cloned removed.
+
+    Nothing is renamed until every file has been written, so a failure part-way
+    leaves the previous layer as it was. Only `*.json` files in `by-repo/` are
+    candidates for removal: anything else a store keeps there is not this stage's.
+    """
+    files = {
+        Path(cfg.REPOSITORY_DEPENDENCIES_PATH): layer.dependencies,
+        Path(cfg.RELATIONSHIP_KINDS_PATH): layer.kinds,
+    }
+    by_repo_dir = Path(cfg.RELATIONSHIPS_BY_REPO_DIR)
+    for repo, body in layer.by_repo.items():
+        files[by_repo_dir / f"{repo}.json"] = body
+    for path in files:
+        io.checked_write_target(path)
+    staged: list[tuple[str, Path]] = []
+    try:
+        for path, body in sorted(files.items()):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle, temporary = tempfile.mkstemp(
+                dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+            )
+            staged.append((temporary, path))
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(dumps(body))
+    except BaseException:
+        for temporary, _ in staged:
+            Path(temporary).unlink(missing_ok=True)
+        raise
+    for temporary, path in staged:
+        os.replace(temporary, path)
+    keep = {f"{repo}.json" for repo in layer.by_repo}
+    for path in sorted(by_repo_dir.glob("*.json")):
+        if path.name not in keep and path.is_file():
+            path.unlink()

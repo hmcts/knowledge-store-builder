@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import datetime
 import gzip
+import json
 import re
 import shutil
 import subprocess
@@ -1097,6 +1098,32 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _report_relationships() -> None:
+    """The relationships layer's edges per kind, from `kinds.json` alone.
+
+    Per kind rather than one total, because one edge can carry two kinds and a sum
+    would count it twice. Never fails: an absent or unreadable file is reported.
+    """
+    path = config.RELATIONSHIP_KINDS_PATH
+    if not path.is_file():
+        print("Relationships: not built - `knowledgestore relationships` writes it")
+        return
+    try:
+        kinds = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        print(f"Relationships: {_relative(path)} is unreadable ({error})")
+        return
+    if not isinstance(kinds, dict):
+        print(f"Relationships: {_relative(path)} is not a JSON object")
+        return
+    parts = []
+    for name, entry in sorted(kinds.items()):
+        edges = entry.get("edges") if isinstance(entry, dict) else None
+        count = edges if isinstance(edges, int) else 0
+        parts.append(f"{name} {count} {'edge' if count == 1 else 'edges'}")
+    print(f"Relationships: {', '.join(parts) or 'no kinds'} ({_relative(path)})")
+
+
 def _report_telemetry() -> None:
     """What the last build measured, so an operator can see the numbers at all.
 
@@ -1413,6 +1440,8 @@ def main(argv=None) -> int:
     _report_failed_syncs(recorded)
 
     _report_merge_inputs()
+
+    _report_relationships()
 
     _report_intent(recorded)
 

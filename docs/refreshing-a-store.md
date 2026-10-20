@@ -28,6 +28,7 @@ knowledgestore sync
 knowledgestore export-history
 knowledgestore context
 knowledgestore intent
+knowledgestore relationships
 ```
 
 Skip `summaries snapshot` only when the store has no summaries to preserve.
@@ -359,8 +360,10 @@ not the configuration.
 **`sync` takes no flags.** An unrecognised one is refused and nothing runs.
 Removing a clone is the manual step in the table above.
 
-`knowledge/provenance.json` is the one thing that self-corrects, because `sync`
-rewrites it from the configured set.
+`knowledge/provenance.json` self-corrects, because `sync` rewrites it from the
+configured set. So does `knowledge/relationships/`, once the clone is gone:
+`relationships` removes the `by-repo` file of a repository it no longer finds
+under `repositories/`, and its edges with it.
 
 [`knowledgestore merge-inputs`](#check-what-the-merge-will-read) names any clone
 whose graph `config/repositories.txt` does not declare. Nothing does the same for

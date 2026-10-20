@@ -506,6 +506,27 @@ DEPLOY_VALUE_CHARS = _env_int("KSB_DEPLOY_VALUE_CHARS", 200)
 # makes - a values file runs to hundreds of keys and the page is a download.
 DEPLOY_PAGE_KEYS = _env_int("KSB_DEPLOY_PAGE_KEYS", 12)
 
+# --- repository relationships (the `relationships` stage) ------------------
+# Which repositories reference which others, parsed from their own declarations.
+RELATIONSHIPS_DIR = ROOT / "knowledge" / "relationships"
+RELATIONSHIPS_BY_REPO_DIR = RELATIONSHIPS_DIR / "by-repo"
+REPOSITORY_DEPENDENCIES_PATH = RELATIONSHIPS_DIR / "repository-dependencies.json"
+RELATIONSHIP_KINDS_PATH = RELATIONSHIPS_DIR / "kinds.json"
+# A store's own joined data for `by-repo/<repo>.json`'s `extra`, one file per
+# repository. An input the stage copies, never one it edits.
+RELATIONSHIPS_EXTRA_DIR = RELATIONSHIPS_DIR / "extra"
+RELATIONSHIP_KINDS_CONFIG_PATH = ROOT / "config" / "relationship-kinds.json"
+# The repository a chart lives in, by naming convention: `chart-{name}` makes
+# chart `web` the clone `chart-web`. Empty by default, because a convention is an
+# estate's and not this library's; resolution then starts at the clone whose
+# `Chart.yaml` names the chart.
+CHART_REPO_PATTERN = os.environ.get("KSB_CHART_REPO_PATTERN", "")
+# Repositories that bundle other repositories' charts. A chart they define resolves
+# to them only when no other clone defines it.
+UMBRELLA_REPOS = _env_set("KSB_UMBRELLA_REPOS", set())
+# Example lines carried per edge. `references` is never capped by it.
+RELATIONSHIP_EXAMPLES = _env_int("KSB_RELATIONSHIP_EXAMPLES", 3)
+
 # --- BDD specifications --------------------------------------------------
 # Gherkin (.feature) files are read wherever they appear in a repository. This
 # is the directory whose next path segment names the feature's area, used to
@@ -665,6 +686,15 @@ def _recompute_paths() -> None:
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",
         EXPLORER_INPUTS_PATH=root / "graphify-out" / "explorer-inputs.json",
         CLUSTERING_RECORD_PATH=root / "graphify-out" / "clustering-inputs.json",
+        RELATIONSHIPS_DIR=root / "knowledge" / "relationships",
+        RELATIONSHIPS_BY_REPO_DIR=root / "knowledge" / "relationships" / "by-repo",
+        REPOSITORY_DEPENDENCIES_PATH=root
+        / "knowledge"
+        / "relationships"
+        / "repository-dependencies.json",
+        RELATIONSHIP_KINDS_PATH=root / "knowledge" / "relationships" / "kinds.json",
+        RELATIONSHIPS_EXTRA_DIR=root / "knowledge" / "relationships" / "extra",
+        RELATIONSHIP_KINDS_CONFIG_PATH=root / "config" / "relationship-kinds.json",
         # A store that pins its dependencies keeps these; a store that installs
         # the library directly has neither, and check-install-docs says so.
         REQUIREMENTS_PATH=root / "requirements.txt",

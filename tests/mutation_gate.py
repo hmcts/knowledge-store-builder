@@ -6952,6 +6952,8 @@ MUTATIONS = (
         '                ref="",',
         "#455: the layer reports which pin each consumer holds, so a parser that reads the repository and drops `?ref=` yields every edge as floating - plausible edges, all of them saying nothing about version drift. The pre-existing `_TF_SOURCE` captured the organisation and nothing read it; the same shape of silent omission",
         (
+            "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
         ),
     ),
@@ -6985,6 +6987,9 @@ MUTATIONS = (
         'IGNORED_DIRS = frozenset({".git", "node_modules", "target"})',
         "#455: `.terraform` holds copies of the upstream modules, whose sources would read as this repository's dependencies; a cache committed once would quietly invent reuse. The graph stage guards the same directory (`_own_terraform_files`) and the registry must not lose the guard in the move",
         (
+            "test_build_relationships.StageTest.test_the_stage_prints_one_line_per_kind_and_records_telemetry",
+            "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
+            "test_build_relationships.SvcATest.test_kinds_json_counts_each_kind",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
             "test_relationships_parsers.TerraformKindTest.test_the_terraform_cache_is_ignored",
         ),
@@ -7029,6 +7034,7 @@ MUTATIONS = (
         "    return text",
         "#455: a module source can be `git::https://user:token@host/...`, and a reference's target becomes a key of the unresolved report, so the token is written to a committed file unmasked; the same holds for an npm git URL spec",
         (
+            "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
             "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
         ),
@@ -7052,6 +7058,87 @@ MUTATIONS = (
         "#455: credential stripping that removes `git@` from `git::ssh://git@host/...` changes the address that was written, so the same module referenced two ways no longer reads as one target and the reference no longer names what the file says",
         (
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: the chart pattern step is skipped",
+        "relationships.py",
+        "    if pattern:\n",
+        "    if False:\n",
+        "#455 comment 1: an estate that names chart repositories by a rule (`chart-{name}`) says so in configuration; skipping the step resolves each chart to whichever clone happens to define a chart of that name, a plausible and wrong provider",
+        ("test_build_relationships.ChartResolutionTest.test_the_pattern_step_wins_when_set",),
+    ),
+    Mutation(
+        "relationships: an umbrella is preferred over the chart's own repository",
+        "relationships.py",
+        '                own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos\n',
+        '                own = [r for r in repos if r in umbrellas] if kind == "helm_chart" else repos\n',
+        "#455 comment 1: an umbrella bundles other repositories' charts, so preferring it resolves every chart it bundles to the umbrella and `dependents` of the chart's owner reads as empty",
+        (
+            "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
+        ),
+    ),
+    Mutation(
+        "relationships: an unresolved target loses who references it",
+        "relationships.py",
+        "                        entry.referenced_by.add(clone.name)\n",
+        "",
+        "#455 comment 3: an unresolved target with no `referenced_by` is a dependency nobody can act on - the report says the estate needs something and not which repositories need it",
+        (
+            "test_build_relationships.ChartResolutionTest.test_an_undefined_chart_is_unresolved",
+            "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
+            "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
+            "test_build_relationships.SvcATest.test_referenced_by_is_complete_and_sorted",
+        ),
+    ),
+    Mutation(
+        "relationships: an edge's references are capped by its examples",
+        "relationships.py",
+        '        "references": edge.references,\n',
+        '        "references": len(shown),\n',
+        "#455: counting references from the truncated example list makes every heavily used provider read as used three times; the same cap-shaped defect the module edges once had, which lost 290 of 388 relationships on one estate",
+        (
+            "test_build_relationships.SvcATest.test_references_are_never_capped_by_the_example_limit",
+        ),
+    ),
+    Mutation(
+        "relationships: a removed clone keeps its by-repo file",
+        "relationships.py",
+        "        if path.name not in keep and path.is_file():\n",
+        "        if False:\n",
+        "#455: `by-repo/` only ever added to, so a repository that left the estate keeps answering dependency questions from a file nothing rewrites - the same shape as the graphs `git clean` left behind (CLAUDE.md 7)",
+        (
+            "test_build_relationships.StageTest.test_a_removed_clone_loses_its_file_and_nothing_else_is_touched",
+        ),
+    ),
+    Mutation(
+        "relationships: an example line is written unmasked",
+        "relationships.py",
+        '                "line": secret_mask.mask(text),\n',
+        '                "line": text,\n',
+        "#455: a module source can carry `access_token=` in its query, and the example line is written to a committed file; the reference strips `user:token@` but not a query secret",
+        (
+            "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+        ),
+    ),
+    Mutation(
+        "relationships: a Terraform source in another organisation is the estate's",
+        "relationships.py",
+        "                not self.org or ref.org.lower() == self.org\n",
+        "                True\n",
+        "#455: matching a module source on the repository name alone makes a same-named module in another organisation an in-estate dependency - the pre-existing `_TF_SOURCE` captured the organisation and nothing read it",
+        (
+            "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
+        ),
+    ),
+    Mutation(
+        "relationships: a vendored subchart is read as the repository's own",
+        "relationships.py",
+        '        part == "charts" and clone.joinpath(*parts[:index], "Chart.yaml").is_file()\n',
+        '        False and clone.joinpath(*parts[:index], "Chart.yaml").is_file()\n',
+        "#455: a chart's `charts/` directory holds copies of its dependencies, so reading one publishes the dependency from every consumer that vendors it (a conflict with its owner) and adds the copy's own dependencies to the consumer's",
+        (
+            "test_build_relationships.ChartResolutionTest.test_a_vendored_subchart_publishes_nothing_and_declares_nothing",
         ),
     ),
 )

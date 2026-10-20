@@ -765,8 +765,19 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+knowledgestore relationships   # knowledge/relationships/: which repositories reference which
 knowledgestore source-urls     # a `url` on each node: its file at the build commit
 ```
+
+`relationships` reads the clones and `knowledge/provenance.json`, never the
+graph. It prints one line per kind: edges, references, unresolved targets and
+skipped declarations. **Read the unresolved count**: those are dependencies the
+store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
+(for example `chart-{name}`) only when the estate names chart repositories by a
+rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle others' charts.
+A conflict (two clones publishing one chart, coordinate or package) is printed
+and resolved to the first by name. It exits 1 on a parser failure or an
+unreadable input, and 2 when it cannot write.
 
 `source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
 they add are linked too. It reads `config/repositories.txt` and

@@ -94,6 +94,77 @@ shatter a stable community into fragments, and prose attached to the whole
 does not describe a part. The measured cost of that, and the economics of
 refreshing generally, are in the operator guide §7.
 
+## The relationships layer
+
+Which repositories depend on which others is answered from their own
+declarations, not from the graph (`src/knowledgestore/relationships.py`, written
+by `knowledgestore relationships`). Four kinds are read:
+
+| Kind | Declared in | Target |
+|---|---|---|
+| `terraform_module` | a `module` block's `source` | the repository a GitHub source names, or the address as written |
+| `helm_chart` | `Chart.yaml` `dependencies`, and a Flux `HelmRelease`'s chart | the chart name |
+| `maven_artifact` | `pom.xml` `<dependencies>`, including under `<profiles>` | `groupId:artifactId` |
+| `npm_package` | `package.json` `dependencies`, `devDependencies` and `peerDependencies` | the package name |
+
+Each reference resolves to a repository in the estate, to the repository that
+declared it, or to nothing the store holds. A reference to its own repository (a
+sibling Maven module, a chart beside its umbrella) is counted under `skipped` and
+is not an edge. A local module path is counted the same way. A target the store does
+not hold is never dropped: `unresolved_targets_outside_estate` lists it per kind,
+with how often it is referenced and every repository that references it.
+
+**Three outputs**, under `knowledge/relationships/`:
+
+- `by-repo/<repo>.json`, one per clone: its `depends_on` and `depended_on_by`
+  edges, the `commit` and `base_url` from `knowledge/provenance.json` (`null` when
+  none is recorded), and `extra`, copied from `extra/<repo>.json` when the store
+  writes one. The stage never interprets `extra`.
+- `repository-dependencies.json`: every edge with both ends, the unresolved
+  targets, and `conflicts`.
+- `kinds.json`: per kind, its origin and its counts of edges, references and
+  unresolved targets, plus what was skipped and why. It is small enough to read
+  without opening the others.
+
+**An edge** aggregates every reference from one repository to another, per chart:
+
+```json
+{"repository": "<other end>", "chart": "", "references": 7,
+ "kinds": {"terraform_module": 7},
+ "refs_pinned": {"v4.2.0": 5, "": 2},
+ "examples": [{"url": "https://github.com/<org>/<repo>/blob/<sha>/<path>#L12",
+               "line": "source = \"git::…?ref=v4.2.0\""}]}
+```
+
+`refs_pinned` counts each pin as written, and `""` means none (floating).
+`references` is the full count. `examples` holds at most
+`KSB_RELATIONSHIP_EXAMPLES` (default 3), sorted by path and line, and each `line`
+is passed through the secret mask before it is written. `chart` is `""` for every
+kind but `helm_chart`, so one repository of shared charts yields an edge per
+chart rather than one edge that hides which.
+
+**A chart resolves** to the first of these that holds:
+
+1. `KSB_CHART_REPO_PATTERN` with `{name}` replaced, when it is set and names a
+   clone. It is empty by default.
+2. The clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella.
+3. An umbrella (`KSB_UMBRELLA_REPOS`) that defines it.
+4. For a Flux `HelmRelease` only, a `sourceRef` that names a clone.
+5. Otherwise, unresolved.
+
+A `Chart.yaml` under another chart's `charts/` directory is a vendored copy of a
+dependency, and is neither published nor read. When two clones publish one chart,
+coordinate or package, the first by name wins and both are listed under
+`conflicts`. A Terraform GitHub source belongs to the estate only when its
+repository is a clone and its organisation matches `KSB_GITHUB_ORG`, ignoring case.
+An unset organisation matches any. A source outside the estate is reported as
+`<org>/<repo>`.
+
+A POM that does not parse is counted as `unreadable` and named in the run's
+output. The rest of the estate is still read. Two runs over the same clones write
+identical bytes, and a repository no longer cloned loses its `by-repo` file in the
+same run.
+
 ## The history layers
 
 Commit history is exported in **one `git log` pass per repository**

@@ -49,6 +49,7 @@ SELF_PARSING = frozenset(
         "size-cuts",
         "cost",
         "answers",
+        "relationships",
     }
 )
 
@@ -170,6 +171,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "deployments": (
         "build_deployments",
         "add per-environment deployment config and join it to services (opt-in)",
+    ),
+    "relationships": (
+        "build_relationships",
+        "write which repositories reference which (modules, charts, artifacts, packages)",
     ),
     "source-urls": (
         "build_source_urls",
