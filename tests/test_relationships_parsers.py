@@ -9,6 +9,7 @@ parsers are held to what the files say.
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -26,6 +27,17 @@ except ImportError:  # pragma: no cover - the default-install CI job takes this 
 needs_yaml = unittest.skipUnless(HAS_YAML, "needs the `deploy` extra (PyYAML)")
 
 ESTATE = Path(__file__).resolve().parent / "fixtures" / "relationships"
+
+
+def _clone(files: dict[str, str]) -> tempfile.TemporaryDirectory:
+    """A throwaway clone holding exactly `files`, for a shape the shared fixture
+    estate does not carry."""
+    holder = tempfile.TemporaryDirectory()
+    for rel, text in files.items():
+        path = Path(holder.name) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return holder
 
 
 def _kind(name: str) -> relationships.Kind:
@@ -152,6 +164,101 @@ class TerraformKindTest(SettingsIsolated):
         self.assertEqual({ref.rel for ref in refs}, {"main.tf"})
 
 
+class TerraformScopeTest(SettingsIsolated):
+    FILES = {
+        "main.tf": (
+            'terraform {\n  required_providers {\n    aws = {\n      source = "hashicorp/aws"\n    }\n  }\n}\n\n'
+            'resource "aws_s3_object" "page" {\n  source = "files/app.zip"\n}\n\n'
+            'resource "aws_s3_object" "tpl" {\n  source = "${path.module}/files/index.html"\n}\n\n'
+            'resource "aws_s3_object" "gh" {\n  source = "github.com/example-org/not-a-module"\n}\n\n'
+            'module "interpolated" {\n  source = "${path.module}/modules/x"\n}\n\n'
+            '# module "old" {\n#   source = "hashicorp/old/aws"\n# }\n\n'
+            'module "real" {\n  providers = {\n    source = "ignored-nested"\n  }\n'
+            '  xsource = "ignored-suffix"\n  source = "hashicorp/consul/aws"\n}\n'
+        )
+    }
+
+    def test_only_a_module_blocks_source_is_a_reference(self):
+        """Break caught: every `source = "..."` in a .tf file reported as a module
+        dependency - an `aws_s3_object` file argument, an interpolated path, a
+        provider address, a commented-out block - which the store would then list
+        as dependencies it does not hold."""
+        with _clone(self.FILES) as root:
+            refs = relationships.scan(Path(root), _kind("terraform_module"))
+        self.assertEqual([(r.target, r.line) for r in refs], [("hashicorp/consul/aws", 34)])
+
+    def test_an_interpolated_module_source_is_no_reference(self):
+        """Break caught: `${path.module}/modules/x` inside a real module block read
+        as a registry address. It is a local path the guard cannot see by prefix."""
+        with _clone(self.FILES) as root:
+            refs = relationships.scan(Path(root), _kind("terraform_module"))
+        self.assertNotIn("interpolated", " ".join(r.text for r in refs))
+
+    def test_a_non_github_git_source_keeps_its_pin_and_drops_it_from_the_target(self):
+        """Break caught: `?ref=v2` on a non-GitHub source reported as floating, or
+        left in the target so two pins of one module read as two modules."""
+        files = {
+            "a.tf": 'module "m" {\n  source = "git::https://git.example.test/team/mod.git?ref=v2"\n}\n'
+        }
+        with _clone(files) as root:
+            (ref,) = relationships.scan(Path(root), _kind("terraform_module"))
+        self.assertEqual(
+            (ref.target, ref.ref), ("git::https://git.example.test/team/mod.git", "v2")
+        )
+
+
+class CredentialTest(SettingsIsolated):
+    TOKEN = "xxxxx-not-a-real-token"
+
+    def test_a_credential_in_a_url_reaches_no_field_of_any_kind(self):
+        """Break caught: `user:token@` in a module source or an npm spec carried into
+        `target`, `ref` or `text`. A target becomes a key of the unresolved report,
+        so the token would be written unmasked."""
+        url = f"git::https://user:{self.TOKEN}@git.example.test/team/mod.git?ref=v1"
+        files = {
+            "main.tf": f'module "m" {{\n  source = "{url}"\n}}\n',
+            "package.json": (
+                '{\n  "dependencies": {\n'
+                f'    "private": "git+https://user:{self.TOKEN}@git.example.test/p.git#v2"\n'
+                "  }\n}\n"
+            ),
+        }
+        refs = []
+        with _clone(files) as root:
+            for name in ("terraform_module", "npm_package"):
+                refs.extend(relationships.scan(Path(root), _kind(name)))
+        self.assertEqual(len(refs), 2)
+        for ref in refs:
+            with self.subTest(kind=ref.kind):
+                self.assertNotIn(self.TOKEN, repr(ref))
+        self.assertEqual(refs[0].target, "git::https://git.example.test/team/mod.git")
+        self.assertEqual(refs[0].ref, "v1")
+
+
+class LocateTest(SettingsIsolated):
+    def test_two_chart_dependencies_of_one_name_get_their_own_lines(self):
+        """Break caught: an aliased dependency (`redis` twice) reporting the first
+        one's line for both, so the second example cites the wrong place."""
+        text = (
+            "name: c\ndependencies:\n"
+            "  - name: redis\n    version: 1.0.0\n    alias: one\n"
+            "  - name: redis\n    version: 2.0.0\n    alias: two\n"
+        )
+        with _clone({"Chart.yaml": text}) as root:
+            refs = relationships.scan(Path(root), _kind("helm_chart"))
+        self.assertEqual([(r.ref, r.line) for r in refs], [("1.0.0", 3), ("2.0.0", 6)])
+
+    def test_a_non_ascii_npm_name_is_found_on_its_own_line(self):
+        """Break caught: the name searched for in its `\\u` escaped form, which the
+        file does not contain, so the reference silently cites the section line."""
+        # The blank line separates the fallback position (the line after the previous
+        # hit) from the right one, so a name that is not found cannot pass by luck.
+        text = '{\n  "dependencies": {\n    "a": "1",\n\n    "caf\u00e9": "^1.0.0"\n  }\n}\n'
+        with _clone({"package.json": text}) as root:
+            refs = relationships.scan(Path(root), _kind("npm_package"))
+        self.assertEqual([(r.target, r.line) for r in refs], [("a", 3), ("caf\u00e9", 5)])
+
+
 class ChartYamlTest(SettingsIsolated):
     ADVERSARIAL = {
         "comments": (
@@ -176,6 +283,9 @@ class ChartYamlTest(SettingsIsolated):
             '  - name: "dbl"\n'
             "    version: ^2.0.0\n"
             "    condition: dbl.enabled\n"
+            '  - name: "esc"\n'
+            '    version: "1\\"#2"\n'
+            "    repository: 'it''s # here'\n"
         ),
         "flow": (
             "name: flowed\n"
@@ -187,6 +297,9 @@ class ChartYamlTest(SettingsIsolated):
 
     @staticmethod
     def _reference(text: str) -> tuple[str, list[dict]]:
+        # `str()` normalises PyYAML's typed scalars, and is only safe for fixtures
+        # whose values are strings there: an unquoted `version: 1.10` loads as the
+        # float 1.1 and would fail here although the reader's "1.10" is the right one.
         document = yaml.safe_load(text)
         keep = ("name", "version", "repository")
         return str(document["name"]), [
@@ -293,6 +406,22 @@ class HelmReleaseTest(SettingsIsolated):
             (chart.name, chart.version, chart.source), ("chart-web", "1.4.0", "chart-web")
         )
 
+    def test_the_kind_reads_a_release_the_way_chart_of_does_and_no_other_way(self):
+        """Break caught: the kind reimplementing the read instead of going through
+        `deploy_flux.chart_of`. Three things only `chart_of` decides: a `sourceRef`
+        of a kind it does not accept gives no source, a numeric version is
+        stringified, and a document with no chart block (a patch) is no reference."""
+        text = (
+            "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n  name: a\n"
+            "spec:\n  chart:\n    spec:\n      chart: odd\n      version: 1.4\n"
+            "      sourceRef:\n        kind: ExternalArtifact\n        name: not-a-chart-source\n"
+            "---\napiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n"
+            "  name: a\nspec:\n  values:\n    replicaCount: 2\n"
+        )
+        with _clone({"r.yaml": text}) as root:
+            (ref,) = relationships.scan(Path(root), _kind("helm_chart"))
+        self.assertEqual((ref.target, ref.ref, ref.source, ref.line), ("odd", "1.4", "", 8))
+
     def test_the_kind_reports_the_release_as_a_chart_reference(self):
         """Break caught: the release read but not turned into a reference, or its
         sourceRef dropped - the resolver falls back on it for a chart no clone
@@ -346,10 +475,10 @@ class PomTest(SettingsIsolated):
         self.assertIn(("org.third", "widget", "4.1", 27), pom.dependencies)
 
     def test_an_unknown_property_stays_literal(self):
-        """Break caught: an unresolvable `${framework.version}` replaced by an empty
+        """Break caught: an unresolvable `${example.lib.version}` replaced by an empty
         string, which reads as unpinned-by-omission rather than by property."""
         pom = relationships.pom(_text("libs-java", "pom.xml"))
-        self.assertIn(("org.third", "gadget", "${framework.version}", 32), pom.dependencies)
+        self.assertIn(("org.third", "gadget", "${example.lib.version}", 32), pom.dependencies)
 
     def test_a_child_inherits_its_parents_coordinates(self):
         """Break caught: the `<parent>` ignored, which leaves a child with no
@@ -377,7 +506,7 @@ class PomTest(SettingsIsolated):
                 ("lib-b/pom.xml", 16, "com.example:lib-core", "1.2.0-b"),
                 ("pom.xml", 22, "com.example:lib-core", "1.2.0"),
                 ("pom.xml", 27, "org.third:widget", "4.1"),
-                ("pom.xml", 32, "org.third:gadget", "${framework.version}"),
+                ("pom.xml", 32, "org.third:gadget", "${example.lib.version}"),
                 ("pom.xml", 42, "org.third:profile-dep", "3.0"),
             ],
         )

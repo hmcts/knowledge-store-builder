@@ -6948,13 +6948,11 @@ MUTATIONS = (
     Mutation(
         "relationships: a Terraform source loses its ref",
         "relationships.py",
-        '        ref = _ref_of(match.group("tail"))',
-        '        ref = ""',
+        '                ref=_ref_of(match.group("tail")),',
+        '                ref="",',
         "#455: the layer reports which pin each consumer holds, so a parser that reads the repository and drops `?ref=` yields every edge as floating - plausible edges, all of them saying nothing about version drift. The pre-existing `_TF_SOURCE` captured the organisation and nothing read it; the same shape of silent omission",
         (
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
-            "test_relationships_parsers.TerraformSourcesTest.test_a_ref_after_another_query_argument_is_still_the_ref",
-            "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
         ),
     ),
     Mutation(
@@ -6994,14 +6992,44 @@ MUTATIONS = (
     Mutation(
         "relationships: the Chart.yaml reader keeps quotes out of values",
         "relationships.py",
-        "        return text[1:-1]",
-        '        return ""',
+        "        inner = text[1:-1]",
+        '        inner = ""',
         '#455: a hand-written YAML reader is wrong in the cases its author did not write down, and quoted `version: "1.2.3"` is the commonest. Dropping the value reads every pinned chart as floating; the test holding it to PyYAML\'s output is what makes a stdlib reader safe to ship',
         (
             "test_relationships_parsers.ChartYamlTest.test_a_chart_dependency_is_a_helm_chart_reference",
             "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_equals_pyyaml_on_comments_quotes_and_flow_lists",
             "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_equals_pyyaml_on_every_fixture_chart",
             "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_matches_hand_derived_values",
+        ),
+    ),
+    Mutation(
+        "relationships: a Terraform source outside a module block is read as a dependency",
+        "relationships.py",
+        "    in_module = _module_source_offsets(text)",
+        "    in_module = {m.start() for m in _TF_ANY_SOURCE.finditer(text)} | {m.start() for m in _TF_SOURCE.finditer(text)}",
+        "#455: `source` is also an `aws_s3_object` file argument and a `required_providers` address, so reading every one reports file paths and provider addresses as module dependencies the store does not hold - plausible rows in the unresolved report, none of them a dependency",
+        (
+            "test_relationships_parsers.TerraformScopeTest.test_only_a_module_blocks_source_is_a_reference",
+        ),
+    ),
+    Mutation(
+        "relationships: an interpolated Terraform module source is read as an address",
+        "relationships.py",
+        '            or "${" in address\n',
+        "",
+        "#455: `${path.module}/modules/x` is a local path the prefix guard cannot see, so it would be reported as an address the store does not hold",
+        (
+            "test_relationships_parsers.TerraformScopeTest.test_only_a_module_blocks_source_is_a_reference",
+        ),
+    ),
+    Mutation(
+        "relationships: a URL credential reaches a reference field",
+        "relationships.py",
+        '    return _USERINFO.sub("", text)',
+        "    return text",
+        "#455: a module source can be `git::https://user:token@host/...`, and a reference's target becomes a key of the unresolved report, so the token is written to a committed file unmasked; the same holds for an npm git URL spec",
+        (
+            "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
         ),
     ),
 )

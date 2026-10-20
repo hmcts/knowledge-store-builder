@@ -30,7 +30,7 @@
     <dependency>
       <groupId>org.third</groupId>
       <artifactId>gadget</artifactId>
-      <version>${framework.version}</version>
+      <version>${example.lib.version}</version>
     </dependency>
   </dependencies>
   <profiles>

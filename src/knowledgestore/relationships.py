@@ -63,6 +63,13 @@ class Reference:
     resolved_repo: str | None = None
     source: str = ""
 
+    def __post_init__(self) -> None:
+        # A URL in a declaration can carry `user:token@`. The fields are what the
+        # layer writes (a target becomes a key of the unresolved report), so the
+        # credential is dropped here, once, for every kind including a store's.
+        for name in ("target", "chart", "ref", "text", "source"):
+            object.__setattr__(self, name, strip_userinfo(getattr(self, name)))
+
 
 @dataclass(frozen=True)
 class Kind:
@@ -78,6 +85,14 @@ class Kind:
     globs: tuple[str, ...]
     references: Callable[[Path, str, str], list[Reference]]
     publishes: Callable[[Path], list[tuple[str, str]]]
+
+
+_USERINFO = re.compile(r"(?<=://)[^/@\s\"']+@")
+
+
+def strip_userinfo(text: str) -> str:
+    """`text` without the `user:token@` of any URL in it."""
+    return _USERINFO.sub("", text)
 
 
 def files_of(clone: Path, kind: Kind) -> list[str]:
@@ -153,6 +168,7 @@ _TF_SOURCE = re.compile(
 )
 _TF_ANY_SOURCE = re.compile(r'source\s*=\s*"(?P<address>[^"]*)"')
 _LOCAL_SOURCE = ("./", "../", "/")
+_MODULE_BLOCK = re.compile(r'(?<![\w-])module\s+"[^"]*"\s*\{')
 
 
 def _ref_of(tail: str | None) -> str:
@@ -182,18 +198,101 @@ def terraform_sources(text: str) -> list[tuple[str, str, str, int, str]]:
     return found
 
 
+def _module_source_offsets(text: str) -> set[int]:
+    """Offsets of the `source = "..."` attributes that sit directly inside a
+    `module "<name>" { ... }` block.
+
+    `source` is also a file argument (`aws_s3_object`), a provider address
+    (`required_providers`) and a suffix of other attribute names, and none of those
+    is a module dependency. A brace-depth scan, skipping strings and comments, so a
+    commented-out source and a nested map's `source` are not read either.
+    """
+    found: set[int] = set()
+    for block in _MODULE_BLOCK.finditer(text):
+        i, depth = block.end(), 1
+        while i < len(text) and depth:
+            ch = text[i]
+            if ch == '"':
+                i = _string_end(text, i)
+                continue
+            if ch == "#" or text.startswith("//", i):
+                i = text.find("\n", i)
+                i = len(text) if i < 0 else i
+                continue
+            if text.startswith("/*", i):
+                i = text.find("*/", i)
+                i = len(text) if i < 0 else i + 2
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            elif depth == 1 and text.startswith("source", i) and not _word_before(text, i):
+                match = _TF_ANY_SOURCE.match(text, i)
+                if match:
+                    found.add(match.start())
+                    i = match.end()
+                    continue
+            i += 1
+    return found
+
+
+def _string_end(text: str, start: int) -> int:
+    i = start + 1
+    while i < len(text) and text[i] != '"':
+        i += 2 if text[i] == "\\" else 1
+    return i + 1
+
+
+def _word_before(text: str, i: int) -> bool:
+    return i > 0 and (text[i - 1].isalnum() or text[i - 1] in "_-")
+
+
 def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
     found = []
     github_at = {match.start() for match in _TF_SOURCE.finditer(text)}
+    in_module = _module_source_offsets(text)
     # The organisation is not carried: the layer decides whether it is the estate's.
-    for _org, repo, ref, line, linetext in terraform_sources(text):
-        found.append(Reference("terraform_module", repo, "", ref, rel, line, linetext, repo))
-    for match in _TF_ANY_SOURCE.finditer(text):
-        address = match.group("address")
-        if match.start() in github_at or not address or address.startswith(_LOCAL_SOURCE):
+    for match in _TF_SOURCE.finditer(text):
+        if match.start() not in in_module:
             continue
         line, linetext = _line_of(text, match.start())
-        found.append(Reference("terraform_module", address, "", "", rel, line, linetext))
+        found.append(
+            Reference(
+                kind="terraform_module",
+                target=match.group("repo"),
+                chart="",
+                ref=_ref_of(match.group("tail")),
+                rel=rel,
+                line=line,
+                text=linetext,
+                resolved_repo=match.group("repo"),
+            )
+        )
+    for match in _TF_ANY_SOURCE.finditer(text):
+        address = match.group("address")
+        if (
+            match.start() in github_at
+            or match.start() not in in_module
+            or not address
+            or "${" in address
+            or address.startswith(_LOCAL_SOURCE)
+        ):
+            continue
+        line, linetext = _line_of(text, match.start())
+        # The query is a pin, not part of what is referenced: two pins of one module
+        # are one target.
+        found.append(
+            Reference(
+                kind="terraform_module",
+                target=address.partition("?")[0],
+                chart="",
+                ref=_ref_of(address),
+                rel=rel,
+                line=line,
+                text=linetext,
+            )
+        )
     return sorted(found, key=lambda ref: ref.line)
 
 
@@ -204,11 +303,16 @@ def _comment_free(line: str) -> str:
     """The line without a trailing YAML comment. `#` opens one only after
     whitespace and outside quotes, so a `#` inside a URL is kept."""
     quote = ""
+    skip = False
     for i, ch in enumerate(line):
-        if quote:
+        if skip:
+            skip = False
+        elif quote:
             if ch == "\\" and quote == '"':
-                continue
-            if ch == quote:
+                skip = True
+            elif ch == quote and quote == "'" and line[i + 1 : i + 2] == "'":
+                skip = True  # `''` is an escaped quote inside a single-quoted scalar
+            elif ch == quote:
                 quote = ""
         elif ch in "\"'" and line[:i].rstrip()[-1:] in ("", ":", "-", ",", "[", "{"):
             quote = ch
@@ -220,7 +324,10 @@ def _comment_free(line: str) -> str:
 def _scalar(text: str) -> str:
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        return text[1:-1]
+        inner = text[1:-1]
+        if text[0] == "'":
+            return inner.replace("''", "'")
+        return re.sub(r"\\([\"\\])", r"\1", inner)
     return text
 
 
@@ -318,8 +425,9 @@ def chart_yaml(text: str) -> tuple[str, list[dict]]:
     `repository`), read without a YAML library.
 
     Covers what a `Chart.yaml` holds - block or flow `dependencies`, comments,
-    quoted values - and is held to PyYAML's output by a test. Multi-line scalars
-    are not read; a chart that needs them is a chart this reader is wrong about, and
+    quoted values - and is held to PyYAML's output by a test. Quoted scalars
+    unescape `\\"`, `\\\\` and `''` only; other escapes (`\\n`, `\\u...`) and multi-line
+    scalars are not read; a chart that needs them is a chart this reader is wrong about, and
     that test is what says so.
     """
     lines = [
@@ -351,11 +459,21 @@ def chart_yaml(text: str) -> tuple[str, list[dict]]:
     return name, deps
 
 
-def _first_line(lines: list[str], pattern: re.Pattern, start: int) -> int:
-    for index in range(start, len(lines)):
-        if pattern.search(lines[index]):
-            return index
-    return start
+def _locate(lines: list[str], pattern: re.Pattern, at: int) -> tuple[str, int, int]:
+    """`(line text, 1-based line number, next search start)` for the first line at or
+    after `at` matching `pattern`.
+
+    The next search starts after the hit, so two entries of one name (a chart
+    dependency with an `alias`) get their own lines. A flow list can hold two on one
+    line, so a miss is retried from the previous hit's line, and a second miss keeps
+    the start rather than inventing a position.
+    """
+    for first in (at, max(at - 1, 0)):
+        for index in range(first, len(lines)):
+            if pattern.search(lines[index]):
+                return lines[index].strip(), index + 1, index + 1
+    index = min(at, len(lines) - 1)
+    return (lines[index].strip(), index + 1, at) if lines else ("", at + 1, at)
 
 
 def _chart_dependencies(rel: str, text: str) -> list[Reference]:
@@ -367,10 +485,16 @@ def _chart_dependencies(rel: str, text: str) -> list[Reference]:
         if not name:
             continue
         pattern = re.compile(rf"\bname:\s*([\"']?){re.escape(name)}\1\s*(?:[,}}#]|$)")
-        at = _first_line(lines, pattern, at)
+        linetext, line, at = _locate(lines, pattern, at)
         found.append(
             Reference(
-                "helm_chart", name, name, dep.get("version", ""), rel, at + 1, lines[at].strip()
+                kind="helm_chart",
+                target=name,
+                chart=name,
+                ref=dep.get("version", ""),
+                rel=rel,
+                line=line,
+                text=linetext,
             )
         )
     return found
@@ -399,18 +523,17 @@ def _helm_releases(rel: str, text: str) -> list[Reference]:
         if chart is None or not chart.name:
             continue
         pattern = re.compile(rf"\bchart:\s*([\"']?){re.escape(chart.name)}\1\s*(?:#|$)")
-        at = _first_line(lines, pattern, at)
+        linetext, line, at = _locate(lines, pattern, at)
         found.append(
             Reference(
-                "helm_chart",
-                chart.name,
-                chart.name,
-                chart.version,
-                rel,
-                at + 1,
-                lines[at].strip() if lines else "",
-                None,
-                chart.source,
+                kind="helm_chart",
+                target=chart.name,
+                chart=chart.name,
+                ref=chart.version,
+                rel=rel,
+                line=line,
+                text=linetext,
+                source=chart.source,
             )
         )
     return found
@@ -566,7 +689,13 @@ def _maven_references(_clone: Path, rel: str, text: str) -> list[Reference]:
     lines = text.splitlines()
     return [
         Reference(
-            "maven_artifact", f"{group}:{artifact}", "", version, rel, line, lines[line - 1].strip()
+            kind="maven_artifact",
+            target=f"{group}:{artifact}",
+            chart="",
+            ref=version,
+            rel=rel,
+            line=line,
+            text=lines[line - 1].strip(),
         )
         for group, artifact, version, line in pom(text).dependencies
     ]
@@ -602,11 +731,20 @@ def _npm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
         block = data.get(section)
         if not isinstance(block, dict):
             continue
-        at = _first_line(lines, re.compile(rf'"{section}"\s*:'), 0)
+        _, _, at = _locate(lines, re.compile(rf'"{section}"\s*:'), 0)
         for name, spec in block.items():
-            at = _first_line(lines, re.compile(rf"{re.escape(json.dumps(name))}\s*:"), at)
+            key = re.escape(json.dumps(name, ensure_ascii=False))
+            linetext, line, at = _locate(lines, re.compile(rf"{key}\s*:"), at)
             found.append(
-                Reference("npm_package", name, "", str(spec), rel, at + 1, lines[at].strip())
+                Reference(
+                    kind="npm_package",
+                    target=name,
+                    chart="",
+                    ref=str(spec),
+                    rel=rel,
+                    line=line,
+                    text=linetext,
+                )
             )
     return found
 
