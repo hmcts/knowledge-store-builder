@@ -228,13 +228,10 @@ class TheSizeWarning(StageCase):
         self.assertNotIn("100 MB", out + err)
 
     def test_the_threshold_is_exclusive_of_an_archive_exactly_at_it(self):
-        """Breaks if `>` becomes `>=`: an archive of exactly the limit is not over it."""
-        self.run_stage()
-        size = self.gz.stat().st_size
-        self.assertGreater(size, 0)
-        # INDEX_WARN_MB is whole megabytes, so test the boundary through the helper.
-        self.assertFalse(build_store_index.over_warning(size, size / 1_000_000))
-        self.assertTrue(build_store_index.over_warning(size + 1, size / 1_000_000))
+        """Breaks if `>` becomes `>=`: an archive of exactly the limit is not over it.
+        Whole numbers, so no rounding decides the boundary."""
+        self.assertFalse(build_store_index.over_warning(2_000_000, 2))
+        self.assertTrue(build_store_index.over_warning(2_000_001, 2))
 
     def test_a_threshold_given_as_a_string_through_configure_is_a_number(self):
         """Breaks if `configure(INDEX_WARN_MB="0")` stores the string: the comparison

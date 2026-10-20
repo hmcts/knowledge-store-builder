@@ -55,7 +55,7 @@ SCHEMA: tuple[int, int] = (1, 0)
 DDL = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
 CREATE TABLE repos(k INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
-CREATE TABLE files(k INTEGER PRIMARY KEY, repo INTEGER NOT NULL REFERENCES repos(k),
+CREATE TABLE files(k INTEGER PRIMARY KEY, repo INTEGER REFERENCES repos(k),
                    path TEXT NOT NULL, UNIQUE(repo, path));
 CREATE TABLE relations(k INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
 CREATE TABLE nodes(k INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, label TEXT,
@@ -176,14 +176,15 @@ def _fill(connection: sqlite3.Connection) -> dict:
 
     execute(
         "INSERT INTO repos(name) SELECT repo FROM ("
-        " SELECT repo FROM stg_nodes UNION SELECT repo FROM stg_tickets) ORDER BY repo"
+        " SELECT repo FROM stg_nodes UNION SELECT repo FROM stg_tickets)"
+        " WHERE repo <> '' ORDER BY repo"
     )
     execute(
         "INSERT INTO files(repo, path)"
         " SELECT r.k, u.path FROM ("
         "  SELECT repo, file AS path FROM stg_nodes"
         "  UNION SELECT repo, path FROM stg_tickets) u"
-        " JOIN repos r ON r.name = u.repo ORDER BY r.k, u.path"
+        " LEFT JOIN repos r ON r.name = u.repo ORDER BY r.k, u.path"
     )
 
     # Counted before each insert and never left to OR IGNORE: a row that goes
@@ -220,8 +221,8 @@ def _fill(connection: sqlite3.Connection) -> dict:
         "  SELECT *, ROW_NUMBER() OVER ("
         "   PARTITION BY id ORDER BY repo, file, kind, label, url, community) AS rn"
         "  FROM stg_nodes) d"
-        " JOIN repos r ON r.name = d.repo"
-        " JOIN files f ON f.repo = r.k AND f.path = d.file"
+        " LEFT JOIN repos r ON r.name = d.repo"
+        " JOIN files f ON f.repo IS r.k AND f.path = d.file"
         " WHERE d.rn = 1 ORDER BY d.id"
     )
     execute(
@@ -236,8 +237,8 @@ def _fill(connection: sqlite3.Connection) -> dict:
     execute(
         "INSERT INTO tickets(file, ticket, count, landed)"
         " SELECT f.k, t.ticket, t.count, t.landed FROM stg_tickets t"
-        " JOIN repos r ON r.name = t.repo"
-        " JOIN files f ON f.repo = r.k AND f.path = t.path ORDER BY f.k, t.ticket"
+        " LEFT JOIN repos r ON r.name = t.repo"
+        " JOIN files f ON f.repo IS r.k AND f.path = t.path ORDER BY f.k, t.ticket"
     )
 
     execute(

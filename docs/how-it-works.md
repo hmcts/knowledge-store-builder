@@ -373,7 +373,7 @@ measured at five times the size on the largest local store graph.
 | Table | Holds |
 |---|---|
 | `meta` | `index_schema`, the store-relative `graph` path that was read, and the first 16 hex characters of `graph_sha256` and `file_tickets_sha256` |
-| `repos`, `files`, `relations` | the interned names; `files` is unique on `(repo, path)` |
+| `repos`, `files`, `relations` | the interned names; `files` is unique on `(repo, path)`, and a node with no repository has a NULL `files.repo` rather than a repository named `""` |
 | `nodes` | `id`, `label` (NULL on a structural node), `kind` in its current form, `file`, `url` and `community` (NULL when absent) |
 | `edges` | `source`, `relation`, `target` as integer keys, with an index on `(target, relation, source)` for incoming edges |
 | `tickets` | `file`, `ticket`, `count` and `landed`, from `file-tickets.json.gz`, joined to a node through `(repo, path)` |

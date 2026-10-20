@@ -6974,12 +6974,12 @@ MUTATIONS = (
         '        "  SELECT *, ROW_NUMBER() OVER ("\n'
         '        "   PARTITION BY id ORDER BY repo, file, kind, label, url, community) AS rn"\n'
         '        "  FROM stg_nodes) d"\n'
-        '        " JOIN repos r ON r.name = d.repo"\n'
-        '        " JOIN files f ON f.repo = r.k AND f.path = d.file"\n'
+        '        " LEFT JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo IS r.k AND f.path = d.file"\n'
         '        " WHERE d.rn = 1 ORDER BY d.id"\n',
         '        " SELECT d.id, d.label, d.kind, f.k, d.url, d.community FROM stg_nodes d"\n'
-        '        " JOIN repos r ON r.name = d.repo"\n'
-        '        " JOIN files f ON f.repo = r.k AND f.path = d.file"\n'
+        '        " LEFT JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo IS r.k AND f.path = d.file"\n'
         '        " WHERE d.rowid = (SELECT min(rowid) FROM stg_nodes WHERE id = d.id)"\n',
         "a node's integer key, every edge keyed on it, and the copy of a repeated id that "
         "survives would follow the order the graph listed its nodes in, so two builds of one "
@@ -7004,7 +7004,10 @@ MUTATIONS = (
         '        connection.execute("VACUUM")\n',
         "        pass\n",
         "pages freed by merging the full-text segments stay in the file holding stale bytes, so the index is larger than it needs to be and its bytes follow input order",
-        ("test_store_index.ABulkBuildIsFinished.test_the_file_has_no_free_pages",),
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_exclusive_of_an_archive_exactly_at_it",
+            "test_store_index.ABulkBuildIsFinished.test_the_file_has_no_free_pages",
+        ),
     ),
     Mutation(
         "store index: a dangling edge is written",
@@ -7045,6 +7048,7 @@ MUTATIONS = (
             "test_store_index.WhatTheIndexHolds.test_a_label_search_finds_the_hand_listed_nodes",
             "test_store_index.WhatTheIndexHolds.test_a_missing_field_is_null_and_a_present_one_is_kept",
             "test_store_index.WhatTheIndexHolds.test_a_missing_ticket_layer_gives_an_empty_table_and_a_null_digest",
+            "test_store_index.WhatTheIndexHolds.test_a_node_with_no_repository_is_not_a_repository",
             "test_store_index.WhatTheIndexHolds.test_a_repeated_link_is_counted_and_stored_once",
             "test_store_index.WhatTheIndexHolds.test_a_repeated_node_id_keeps_the_copy_that_sorts_first",
             "test_store_index.WhatTheIndexHolds.test_an_old_kind_is_stored_in_its_current_form",
@@ -7062,6 +7066,7 @@ MUTATIONS = (
         '" ORDER BY k"',
         "a structural node with no label would get an empty row in the full-text index, which is a row a search can never return and a reader of the index cannot explain",
         (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_exclusive_of_an_archive_exactly_at_it",
             "test_store_index.WhatTheIndexHolds.test_the_unlabeled_node_is_a_node_and_is_not_searchable",
         ),
     ),
@@ -7281,6 +7286,14 @@ MUTATIONS = (
         "90",
         "an operator's `KSB_INDEX_WARN_MB` is read and dropped, so the warning fires at the wrong size",
         ("test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",),
+    ),
+    Mutation(
+        "store index: a node with no repository is listed as a repository",
+        "store_index.py",
+        "        \" WHERE repo <> '' ORDER BY repo\"",
+        '        " ORDER BY repo"',
+        "a store of N repositories reports N+1, the extra one named with the empty string",
+        ("test_store_index.WhatTheIndexHolds.test_a_node_with_no_repository_is_not_a_repository",),
     ),
 )
 

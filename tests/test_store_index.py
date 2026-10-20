@@ -275,6 +275,27 @@ class WhatTheIndexHolds(IndexCase):
         )
         self.assertEqual(by_ticket, [("docs/readme.md",)])
 
+    def test_a_node_with_no_repository_is_not_a_repository(self):
+        """Breaks if the empty name is listed in `repos`: a store of two repositories
+        would report three. The node still reads as having no repository, through a
+        NULL `files.repo`."""
+        write_graph(
+            self.graph,
+            NODES + [{"id": "n0", "label": "Orphan", "source_file": "loose.txt"}],
+            LINKS,
+        )
+        self.build()
+        self.assertEqual(
+            self.query("SELECT name FROM repos ORDER BY name"), [("svc-a",), ("svc-b",)]
+        )
+        self.assertEqual(
+            self.query(
+                "SELECT f.path, coalesce(r.name, '') FROM nodes n JOIN files f ON f.k = n.file"
+                " LEFT JOIN repos r ON r.k = f.repo WHERE n.id = 'n0'"
+            ),
+            [("loose.txt", "")],
+        )
+
     def test_a_missing_ticket_layer_gives_an_empty_table_and_a_null_digest(self):
         """Breaks if a store without the ticket layer cannot be indexed, or if the
         digest of an absent layer is written as something other than NULL."""
