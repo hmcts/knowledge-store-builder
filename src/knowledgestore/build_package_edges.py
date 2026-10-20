@@ -24,37 +24,16 @@ from __future__ import annotations
 
 import json
 import sys
-import re
 
-from . import config, graph_files, io
+from . import config, graph_files, io, relationships
 
 FORMAT = "packages"
 MANIFEST = "package.json"
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 
-# Terraform module reuse. An infrastructure estate's shared dependencies are
-# declared here rather than in a language manifest, so an estate can be built
-# almost entirely from shared modules and still report "0 shared packages".
-#
-# Unlike an npm package, the reference names the providing repository outright,
-# so no manifest lookup is needed - the edge is repository to repository.
-# Both forms are in use and neither dominates by design: on one estate the
-# scp-style `git@` form outnumbered `git::https://` five to one, so handling only
-# the documented form would have missed most of the reuse.
+# Terraform module reuse: the source patterns live in `relationships`, which owns
+# every declaration parser. This stage reads them through `terraform_references`.
 TERRAFORM_SUFFIX = ".tf"
-_TF_SOURCE = re.compile(
-    r"""source\s*=\s*"
-        (?:git::)?
-        # The scheme is optional in Terraform: its GitHub detector accepts a bare
-        # `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made
-        # 5 shared modules invisible on a 361-repository estate (#125). The opening
-        # quote anchors this, so `notgithub.com/...` cannot match.
-        (?:https://|git@|ssh://git@)?github\.com[/:]
-        (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
-        (?:\.git)?(?:[?/][^"]*)?"
-    """,
-    re.VERBOSE,
-)
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
 
@@ -144,7 +123,7 @@ def terraform_references(text: str) -> set[str]:
     Deliberately only GitHub-hosted sources. A registry or local path reference
     names no repository, so reporting one would be a guess.
     """
-    return {m.group("repo") for m in _TF_SOURCE.finditer(text)}
+    return {repo for _org, repo, _ref, _line, _text in relationships.terraform_sources(text)}
 
 
 def _module_node(repo_name: str, in_estate: bool) -> dict:

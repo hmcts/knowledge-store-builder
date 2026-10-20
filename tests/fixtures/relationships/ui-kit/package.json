@@ -1,0 +1,7 @@
+{
+  "name": "@example/ui",
+  "version": "2.1.0",
+  "dependencies": {
+    "react": "^18.2.0"
+  }
+}

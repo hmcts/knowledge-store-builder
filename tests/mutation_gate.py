@@ -6945,6 +6945,65 @@ MUTATIONS = (
             "test_git_env.EveryGitCallPassesTheStrippedEnvironment.test_no_git_call_in_the_library_inherits_the_callers_binding",
         ),
     ),
+    Mutation(
+        "relationships: a Terraform source loses its ref",
+        "relationships.py",
+        '        ref = _ref_of(match.group("tail"))',
+        '        ref = ""',
+        "#455: the layer reports which pin each consumer holds, so a parser that reads the repository and drops `?ref=` yields every edge as floating - plausible edges, all of them saying nothing about version drift. The pre-existing `_TF_SOURCE` captured the organisation and nothing read it; the same shape of silent omission",
+        (
+            "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
+            "test_relationships_parsers.TerraformSourcesTest.test_a_ref_after_another_query_argument_is_still_the_ref",
+            "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
+        ),
+    ),
+    Mutation(
+        "relationships: a POM's dependencyManagement is read as use",
+        "relationships.py",
+        "    holders = [project]",
+        '    holders = [project, *project.kids("dependencyManagement")]',
+        "#455: `<dependencyManagement>` declares a version without using the artifact, so reading it invents a dependency edge for every managed coordinate - on a parent POM that is every artifact the estate could use, attributed to the repository that merely lists it",
+        (
+            "test_relationships_parsers.PomTest.test_dependency_management_and_plugins_are_not_read",
+            "test_relationships_parsers.PomTest.test_the_kind_reports_group_artifact_and_version_spec",
+        ),
+    ),
+    Mutation(
+        "relationships: a POM property is left literal",
+        "relationships.py",
+        "    scope = {**properties, **scope}",
+        "    scope = scope",
+        "#455: most dependency versions in a Maven estate are written as `${property}`, so a reader that does not resolve them reports every pin as an expression and a drift summary built from it groups nothing",
+        (
+            "test_relationships_parsers.PomTest.test_a_child_inherits_its_parents_coordinates",
+            "test_relationships_parsers.PomTest.test_expressions_resolve_within_the_pom",
+            "test_relationships_parsers.PomTest.test_the_kind_reports_group_artifact_and_version_spec",
+        ),
+    ),
+    Mutation(
+        "relationships: the Terraform download cache is read as the repository's own",
+        "relationships.py",
+        'IGNORED_DIRS = frozenset({".git", ".terraform", "node_modules", "target"})',
+        'IGNORED_DIRS = frozenset({".git", "node_modules", "target"})',
+        "#455: `.terraform` holds copies of the upstream modules, whose sources would read as this repository's dependencies; a cache committed once would quietly invent reuse. The graph stage guards the same directory (`_own_terraform_files`) and the registry must not lose the guard in the move",
+        (
+            "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
+            "test_relationships_parsers.TerraformKindTest.test_the_terraform_cache_is_ignored",
+        ),
+    ),
+    Mutation(
+        "relationships: the Chart.yaml reader keeps quotes out of values",
+        "relationships.py",
+        "        return text[1:-1]",
+        '        return ""',
+        '#455: a hand-written YAML reader is wrong in the cases its author did not write down, and quoted `version: "1.2.3"` is the commonest. Dropping the value reads every pinned chart as floating; the test holding it to PyYAML\'s output is what makes a stdlib reader safe to ship',
+        (
+            "test_relationships_parsers.ChartYamlTest.test_a_chart_dependency_is_a_helm_chart_reference",
+            "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_equals_pyyaml_on_comments_quotes_and_flow_lists",
+            "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_equals_pyyaml_on_every_fixture_chart",
+            "test_relationships_parsers.ChartYamlTest.test_the_stdlib_reader_matches_hand_derived_values",
+        ),
+    ),
 )
 
 

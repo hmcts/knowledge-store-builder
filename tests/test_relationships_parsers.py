@@ -1,0 +1,418 @@
+"""The relationship parsers read what a repository declares, and nothing else.
+
+Four built-in kinds - Terraform module sources, Helm charts, Maven artifacts and
+npm packages - each turn declaration files into `Reference`s. Every expected
+value here is written by hand from the fixture estate under
+`tests/fixtures/relationships/`, never computed by the code under test: the
+parsers are held to what the files say.
+"""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from settings_isolation import SettingsIsolated  # noqa: E402
+from knowledgestore import build_package_edges as packages  # noqa: E402
+from knowledgestore import deploy_flux, relationships  # noqa: E402
+
+try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
+    import yaml
+
+    HAS_YAML = True
+except ImportError:  # pragma: no cover - the default-install CI job takes this path
+    HAS_YAML = False
+
+needs_yaml = unittest.skipUnless(HAS_YAML, "needs the `deploy` extra (PyYAML)")
+
+ESTATE = Path(__file__).resolve().parent / "fixtures" / "relationships"
+
+
+def _kind(name: str) -> relationships.Kind:
+    return next(kind for kind in relationships.BUILTIN if kind.name == name)
+
+
+def _text(repo: str, rel: str) -> str:
+    return (ESTATE / repo / rel).read_text(encoding="utf-8")
+
+
+class RegistryTest(SettingsIsolated):
+    def test_the_built_in_kinds_are_the_four_in_order(self):
+        """Break caught: a kind dropped or reordered. Order is the order the layer
+        reports in, so it is part of the output."""
+        self.assertEqual(
+            [kind.name for kind in relationships.BUILTIN],
+            ["terraform_module", "helm_chart", "maven_artifact", "npm_package"],
+        )
+        self.assertEqual({kind.origin for kind in relationships.BUILTIN}, {"builtin"})
+
+
+class TerraformSourcesTest(SettingsIsolated):
+    def test_every_documented_form_gives_org_repo_ref_and_line(self):
+        """Break caught: a form the regex stops matching, a `.git` suffix left in
+        the repo name, or a `?ref=` that is read as part of the repository or lost.
+        The five forms are the ones `_TF_SOURCE` documents; the line numbers are
+        those of `tests/fixtures/relationships/svc-a/main.tf`."""
+        got = relationships.terraform_sources(_text("svc-a", "main.tf"))
+        self.assertEqual(
+            got,
+            [
+                (
+                    "example-org",
+                    "tf-network",
+                    "v4.2.0",
+                    2,
+                    'source = "git::https://github.com/example-org/tf-network.git?ref=v4.2.0"',
+                ),
+                (
+                    "example-org",
+                    "tf-storage",
+                    "",
+                    6,
+                    'source = "git@github.com:example-org/tf-storage.git"',
+                ),
+                (
+                    "example-org",
+                    "tf-queue",
+                    "main",
+                    10,
+                    'source = "ssh://git@github.com/example-org/tf-queue.git?ref=main"',
+                ),
+                (
+                    "example-org",
+                    "tf-dns",
+                    "v1.0.1",
+                    14,
+                    'source = "github.com/example-org/tf-dns//modules/zone?ref=v1.0.1"',
+                ),
+                (
+                    "example-org",
+                    "tf-cache",
+                    "",
+                    18,
+                    'source = "github.com/example-org/tf-cache"',
+                ),
+            ],
+        )
+
+    def test_the_wrapper_still_returns_repository_names(self):
+        """Break caught: `terraform_references` drifting from `terraform_sources`
+        while the graph stage still calls it."""
+        self.assertEqual(
+            packages.terraform_references(_text("svc-a", "main.tf")),
+            {"tf-network", "tf-storage", "tf-queue", "tf-dns", "tf-cache"},
+        )
+
+    def test_a_ref_after_another_query_argument_is_still_the_ref(self):
+        """Break caught: the ref read only when `?ref=` is first, which loses the
+        pin on `?depth=1&ref=v2`."""
+        got = relationships.terraform_sources('source = "github.com/o/m?depth=1&ref=v2"\n')
+        self.assertEqual([entry[2] for entry in got], ["v2"])
+
+
+class TerraformKindTest(SettingsIsolated):
+    def test_a_repository_source_resolves_outright_and_a_registry_one_does_not(self):
+        """Break caught: a registry source resolved to a repository (a guess), or
+        dropped (a dependency the store does not hold, which must be reported)."""
+        refs = relationships.scan(ESTATE / "svc-a", _kind("terraform_module"))
+        by_target = {ref.target: ref for ref in refs}
+        self.assertEqual(
+            sorted(by_target),
+            [
+                "hashicorp/consul/aws",
+                "tf-cache",
+                "tf-dns",
+                "tf-network",
+                "tf-queue",
+                "tf-storage",
+            ],
+        )
+        pinned = by_target["tf-network"]
+        self.assertEqual(
+            (pinned.kind, pinned.chart, pinned.ref, pinned.rel, pinned.line),
+            ("terraform_module", "", "v4.2.0", "main.tf", 2),
+        )
+        self.assertEqual(pinned.resolved_repo, "tf-network")
+        registry = by_target["hashicorp/consul/aws"]
+        self.assertIsNone(registry.resolved_repo)
+        self.assertEqual((registry.rel, registry.line), ("main.tf", 22))
+
+    def test_a_local_path_is_no_reference(self):
+        """Break caught: `../modules/local-thing` reported as a dependency. It is
+        inside the repository, so it is not a cross-repository reference at all."""
+        refs = relationships.scan(ESTATE / "svc-a", _kind("terraform_module"))
+        self.assertEqual([ref for ref in refs if "local-thing" in ref.target], [])
+
+    def test_the_terraform_cache_is_ignored(self):
+        """Break caught: `.terraform/` read as the repository's own files. It holds
+        copies of upstream modules, whose sources would read as this repository's
+        dependencies."""
+        refs = relationships.scan(ESTATE / "svc-a", _kind("terraform_module"))
+        self.assertNotIn("tf-cached-only", {ref.target for ref in refs})
+        self.assertEqual({ref.rel for ref in refs}, {"main.tf"})
+
+
+class ChartYamlTest(SettingsIsolated):
+    ADVERSARIAL = {
+        "comments": (
+            "# top comment\n"
+            "name: commented   # trailing\n"
+            "dependencies:   # deps\n"
+            "# a comment line\n"
+            "- name: a  # c\n"
+            "  version: 1.0.0 # c\n"
+            '  repository: "https://x.example/#frag"\n'
+            "  # between\n"
+            "- name: b\n"
+            '  version: "2"\n'
+            "appVersion: 9\n"
+        ),
+        "quoted": (
+            'name: "quoted-name"\n'
+            "dependencies:\n"
+            "  - name: 'single'\n"
+            "    version: '1.0'\n"
+            '    repository: "oci://r.example/a"\n'
+            '  - name: "dbl"\n'
+            "    version: ^2.0.0\n"
+            "    condition: dbl.enabled\n"
+        ),
+        "flow": (
+            "name: flowed\n"
+            'dependencies: [{name: a, version: "1.0", repository: "https://x.example"},\n'
+            "  {name: b, version: ^2.0.0}]\n"
+            "keywords: [one, two]\n"
+        ),
+    }
+
+    @staticmethod
+    def _reference(text: str) -> tuple[str, list[dict]]:
+        document = yaml.safe_load(text)
+        keep = ("name", "version", "repository")
+        return str(document["name"]), [
+            {key: str(dep[key]) for key in keep if key in dep}
+            for dep in document.get("dependencies", [])
+        ]
+
+    @needs_yaml
+    def test_the_stdlib_reader_equals_pyyaml_on_every_fixture_chart(self):
+        """Break caught: the hand-written reader diverging from a real YAML parser
+        on a chart the estate actually holds."""
+        charts = sorted(ESTATE.glob("*/Chart.yaml"))
+        self.assertTrue(charts)
+        for path in charts:
+            with self.subTest(chart=path.parent.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(relationships.chart_yaml(text), self._reference(text))
+
+    @needs_yaml
+    def test_the_stdlib_reader_equals_pyyaml_on_comments_quotes_and_flow_lists(self):
+        """Break caught: a `#` inside a quoted URL read as a comment, a comment line
+        between list items ending the block, quotes kept in a value, or a
+        flow-style list read as nothing."""
+        for label, text in self.ADVERSARIAL.items():
+            with self.subTest(case=label):
+                self.assertEqual(relationships.chart_yaml(text), self._reference(text))
+
+    def test_the_stdlib_reader_matches_hand_derived_values(self):
+        """Break caught: the same divergence, without PyYAML in the way - this
+        runs on the default install, where the comparison above skips."""
+        self.assertEqual(
+            relationships.chart_yaml(_text("chart-web", "Chart.yaml")),
+            (
+                "chart-web",
+                [
+                    {
+                        "name": "common",
+                        "version": "1.2.3",
+                        "repository": "https://charts.example.test/stable",
+                    },
+                    {
+                        "name": "redis",
+                        "version": "~17.0.0",
+                        "repository": "oci://registry.example.test/charts",
+                    },
+                ],
+            ),
+        )
+        self.assertEqual(
+            relationships.chart_yaml(self.ADVERSARIAL["comments"]),
+            (
+                "commented",
+                [
+                    {"name": "a", "version": "1.0.0", "repository": "https://x.example/#frag"},
+                    {"name": "b", "version": "2"},
+                ],
+            ),
+        )
+
+    def test_a_flow_list_is_read_without_pyyaml(self):
+        """Break caught: flow-style `dependencies: [...]` read as an empty list."""
+        self.assertEqual(
+            relationships.chart_yaml(self.ADVERSARIAL["flow"]),
+            (
+                "flowed",
+                [
+                    {"name": "a", "version": "1.0", "repository": "https://x.example"},
+                    {"name": "b", "version": "^2.0.0"},
+                ],
+            ),
+        )
+
+    def test_a_chart_dependency_is_a_helm_chart_reference(self):
+        """Break caught: Chart.yaml dependencies not reaching the kind, or the
+        chart name, version spec and line lost on the way."""
+        refs = relationships.scan(ESTATE / "chart-web", _kind("helm_chart"))
+        self.assertEqual(
+            [(r.target, r.chart, r.ref, r.rel, r.line) for r in refs],
+            [
+                ("common", "common", "1.2.3", "Chart.yaml", 5),
+                ("redis", "redis", "~17.0.0", "Chart.yaml", 8),
+            ],
+        )
+        self.assertEqual(refs[0].text, "- name: common")
+        self.assertTrue(all(r.kind == "helm_chart" for r in refs))
+
+    def test_the_chart_a_repository_publishes_is_its_chart_yaml_name(self):
+        """Break caught: publishers read from the directory name, not the chart."""
+        self.assertEqual(
+            _kind("helm_chart").publishes(ESTATE / "chart-web"),
+            [("chart-web", "Chart.yaml")],
+        )
+
+
+@needs_yaml
+class HelmReleaseTest(SettingsIsolated):
+    def test_a_helm_release_is_read_through_the_flux_reader(self):
+        """Break caught: a second, divergent reading of HelmRelease. The release's
+        chart, version and sourceRef name come from `deploy_flux.chart_of`."""
+        document = yaml.safe_load(_text("svc-b", "flux/helmrelease.yaml"))
+        chart = deploy_flux.chart_of(document)
+        assert chart is not None
+        self.assertEqual(
+            (chart.name, chart.version, chart.source), ("chart-web", "1.4.0", "chart-web")
+        )
+
+    def test_the_kind_reports_the_release_as_a_chart_reference(self):
+        """Break caught: the release read but not turned into a reference, or its
+        sourceRef dropped - the resolver falls back on it for a chart no clone
+        defines."""
+        refs = relationships.scan(ESTATE / "svc-b", _kind("helm_chart"))
+        self.assertEqual(len(refs), 1)
+        ref = refs[0]
+        self.assertEqual(
+            (ref.kind, ref.target, ref.chart, ref.ref, ref.rel, ref.source),
+            ("helm_chart", "chart-web", "chart-web", "1.4.0", "flux/helmrelease.yaml", "chart-web"),
+        )
+        self.assertIsNone(ref.resolved_repo)
+
+
+class PomTest(SettingsIsolated):
+    def test_a_namespaced_pom_is_read(self):
+        """Break caught: matching `project` only without its namespace, which reads
+        every namespaced POM - nearly all of them - as empty."""
+        pom = relationships.pom(_text("svc-b", "pom.xml"))
+        self.assertEqual((pom.group, pom.artifact, pom.version), ("com.example", "svc-b", "2.0.0"))
+        self.assertEqual(pom.dependencies, [("com.example", "lib-a", "1.2.0", 12)])
+
+    def test_a_plain_pom_is_read_the_same(self):
+        """Break caught: handling only the namespaced form."""
+        pom = relationships.pom(_text("libs-java", "pom.xml"))
+        self.assertEqual((pom.group, pom.artifact, pom.version), ("com.example", "lib-a", "1.2.0"))
+        self.assertIsNone(pom.parent)
+
+    def test_dependency_management_and_plugins_are_not_read(self):
+        """Break caught: `<dependencyManagement>`, which declares a version without
+        using the artifact, or a plugin's own dependencies counted as the
+        project's. Both would invent reuse."""
+        pom = relationships.pom(_text("libs-java", "pom.xml"))
+        artifacts = {dep[1] for dep in pom.dependencies}
+        self.assertNotIn("managed-only", artifacts)
+        self.assertNotIn("plugin-only", artifacts)
+        self.assertNotIn("some-plugin", artifacts)
+
+    def test_profile_dependencies_are_read(self):
+        """Break caught: dependencies declared only under a profile vanishing."""
+        pom = relationships.pom(_text("libs-java", "pom.xml"))
+        self.assertIn(("org.third", "profile-dep", "3.0", 42), pom.dependencies)
+
+    def test_expressions_resolve_within_the_pom(self):
+        """Break caught: `${project.groupId}`, `${project.version}` or a
+        `<properties>` value left literal, which makes a coordinate that cannot
+        match its publisher and a version that reads as unpinned."""
+        pom = relationships.pom(_text("libs-java", "pom.xml"))
+        self.assertEqual(pom.properties["lib.v"], "4.1")
+        self.assertIn(("com.example", "lib-core", "1.2.0", 22), pom.dependencies)
+        self.assertIn(("org.third", "widget", "4.1", 27), pom.dependencies)
+
+    def test_an_unknown_property_stays_literal(self):
+        """Break caught: an unresolvable `${framework.version}` replaced by an empty
+        string, which reads as unpinned-by-omission rather than by property."""
+        pom = relationships.pom(_text("libs-java", "pom.xml"))
+        self.assertIn(("org.third", "gadget", "${framework.version}", 32), pom.dependencies)
+
+    def test_a_child_inherits_its_parents_coordinates(self):
+        """Break caught: the `<parent>` ignored, which leaves a child with no
+        groupId (so no publisher) and `${project.parent.version}` literal."""
+        pom = relationships.pom(_text("libs-java/lib-b", "pom.xml"))
+        self.assertEqual(pom.parent, ("com.example", "lib-a", "1.2.0"))
+        self.assertEqual((pom.group, pom.artifact, pom.version), ("com.example", "lib-b", "1.2.0"))
+        self.assertEqual(pom.properties["own.v"], "1.2.0-b")
+        self.assertEqual(pom.dependencies, [("com.example", "lib-core", "1.2.0-b", 16)])
+
+    def test_a_malformed_pom_raises_rather_than_reading_as_empty(self):
+        """Break caught: a file that will not parse read as a POM with no
+        dependencies. The caller counts it as unreadable and names it."""
+        with self.assertRaises(ValueError):
+            relationships.pom("<project><dependencies></project>")
+
+    def test_the_kind_reports_group_artifact_and_version_spec(self):
+        """Break caught: the kind reading a different quantity than `pom()` - the
+        target must be `group:artifact` and the version spec the `ref`."""
+        refs = relationships.scan(ESTATE / "libs-java", _kind("maven_artifact"))
+        got = sorted((r.rel, r.line, r.target, r.ref) for r in refs)
+        self.assertEqual(
+            got,
+            [
+                ("lib-b/pom.xml", 16, "com.example:lib-core", "1.2.0-b"),
+                ("pom.xml", 22, "com.example:lib-core", "1.2.0"),
+                ("pom.xml", 27, "org.third:widget", "4.1"),
+                ("pom.xml", 32, "org.third:gadget", "${framework.version}"),
+                ("pom.xml", 42, "org.third:profile-dep", "3.0"),
+            ],
+        )
+        self.assertEqual(refs[0].text, "<artifactId>lib-core</artifactId>")
+
+    def test_each_pom_publishes_its_own_coordinate(self):
+        """Break caught: a child POM publishing nothing because it names no
+        groupId, or publishing its parent's artifact."""
+        self.assertEqual(
+            _kind("maven_artifact").publishes(ESTATE / "libs-java"),
+            [("com.example:lib-b", "lib-b/pom.xml"), ("com.example:lib-a", "pom.xml")],
+        )
+
+
+class NpmTest(SettingsIsolated):
+    def test_all_three_dependency_sections_are_read_with_their_specs(self):
+        """Break caught: `peerDependencies` or `devDependencies` skipped, or the
+        version spec lost - it is what the pin summary is built from."""
+        refs = relationships.scan(ESTATE / "svc-b", _kind("npm_package"))
+        self.assertEqual(
+            [(r.target, r.ref, r.rel, r.line) for r in refs],
+            [
+                ("@example/ui", "^2.1.0", "package.json", 4),
+                ("typescript", "~5.4.0", "package.json", 7),
+                ("react", ">=18", "package.json", 10),
+            ],
+        )
+        self.assertEqual(refs[0].text, '"@example/ui": "^2.1.0"')
+
+    def test_a_package_publishes_its_name_and_manifest(self):
+        """Break caught: the publisher map missing the scoped name consumers use."""
+        self.assertEqual(
+            _kind("npm_package").publishes(ESTATE / "ui-kit"), [("@example/ui", "package.json")]
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
