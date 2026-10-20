@@ -1097,6 +1097,43 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _report_manifest() -> None:
+    """What the store's manifest says is built, and which layers it says are not.
+
+    Read from the manifest file, never recomputed: hashing every layer is the
+    manifest stage's work. So this is the last manifest written, which lags any
+    stage run since - the digest is how a reader tells. Unreadable in any way is
+    a line of its own, never a failure (CLAUDE.md 6.7): the file is committed, so
+    it is merge-resolved by hand and may come from a later format.
+    """
+    path = config.STORE_MANIFEST_PATH
+    if not path.is_file():
+        print("Store manifest: none - run `knowledgestore manifest` after the last stage")
+        return
+    try:
+        manifest = io.read_json(path)
+        if not isinstance(manifest, dict):
+            raise ValueError("not an object")
+        layers = manifest["layers"]
+        format_ = manifest["format"]
+        summary = (
+            f"Store manifest: format {format_['major']}.{format_['minor']}, "
+            f"digest {manifest['digest']}, "
+            + (
+                f"sources as of {manifest['sources_as_of']}"
+                if manifest.get("sources_as_of")
+                else "no source date recorded"
+            )
+        )
+        # `False` only: a layer nothing measured is unknown, which is not absent.
+        absent = sorted(name for name, layer in layers.items() if layer["present"] is False)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        print(f"Store manifest: unreadable ({path}) - rewrite it with `knowledgestore manifest`")
+        return
+    print(summary)
+    print(f"  absent: {', '.join(absent) if absent else 'none'}")
+
+
 def _report_telemetry() -> None:
     """What the last build measured, so an operator can see the numbers at all.
 
@@ -1429,6 +1466,8 @@ def main(argv=None) -> int:
     _report_freshness()
 
     _report_clustering()
+
+    _report_manifest()
 
     _report_telemetry()
 

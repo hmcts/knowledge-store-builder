@@ -23,3 +23,4 @@
 --diff-merges :: git
 --no-cone :: git
 --comments :: twg
+--store-id :: mcp-server

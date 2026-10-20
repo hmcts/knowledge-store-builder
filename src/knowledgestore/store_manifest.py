@@ -211,17 +211,39 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()[:16]
 
 
-def _digest(path: Path, kind: str) -> str:
+def _held(path: Path, root: Path) -> None:
+    """Refuse a path that resolves outside the store.
+
+    A layer's digest reads the target of any link it holds, so a link out of the
+    store would put a file no other clone carries into a manifest that is
+    committed and read elsewhere. A link that stays inside is hashed as its
+    target. Resolved before comparing, on both sides: a store under a symlinked
+    directory (`/tmp` on macOS) is still inside itself.
+    """
+    if root.resolve() not in path.resolve().parents:
+        raise UsageError(
+            f"{path.relative_to(root).as_posix()} resolves outside the store "
+            f"({path.resolve()}). A layer may hold links that stay inside the store; "
+            "copy the file in, or point the link at one that is."
+        )
+
+
+def _digest(path: Path, kind: str, root: Path) -> str:
     """A content digest: the file's, or for a directory one over its files.
 
     A directory's is taken over `relative path NUL file digest` lines, sorted, so
-    a renamed file changes it as surely as an edited one.
+    a renamed file changes it as surely as an edited one. Every link met on the
+    way must stay inside `root` (see `_held`).
     """
+    _held(path, root)
     if kind != "dir":
         return _file_digest(path)
+    entries = list(path.rglob("*"))
+    for entry in entries:
+        _held(entry, root)
     lines = sorted(
         f"{entry.relative_to(path).as_posix()}\0{_file_digest(entry)}"
-        for entry in path.rglob("*")
+        for entry in entries
         if entry.is_file()
     )
     return _text_digest(lines)
@@ -241,7 +263,7 @@ def _layers(root: Path) -> dict:
         layers[layer.name] = {
             "paths": [_listed(rel, layer.kind) for rel in ordered],
             "present": bool(found),
-            "digest": _digest(root / chosen, layer.kind) if found else None,
+            "digest": _digest(root / chosen, layer.kind, root) if found else None,
         }
     return layers
 
@@ -296,7 +318,7 @@ def extra_layers(root: Path) -> dict:
             "path": rel,
             "description": description,
             "present": present,
-            "digest": _digest(target, kind) if present else None,
+            "digest": _digest(target, kind, root) if present else None,
         }
         if "kind" in entry:
             if entry["kind"] not in EXTRA_KINDS:

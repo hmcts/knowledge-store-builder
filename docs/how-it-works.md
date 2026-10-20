@@ -358,6 +358,38 @@ drives every answer shape and asserts the built page inlines the application
 source **byte-for-byte** — so the code the tests exercise is provably the
 code that ships.
 
+## The store manifest
+
+`knowledge/store-manifest.json` says what a store holds, so a reader opens it
+first instead of guessing the layout from whichever files exist. It is written
+last by `knowledgestore manifest` and committed with the store.
+
+- **One entry per layer**: the store-relative paths a reader should open, whether
+  the layer is present, and a content `digest` (the first 16 hex digits of a
+  sha256; for a directory, one over its files' names and digests). The graph is
+  hashed, never parsed. A layer a stage can measure but a file cannot - source
+  links, deployments, ticket reach - carries a flag read from
+  `knowledge/telemetry.json`, and `null` when nothing recorded it.
+- **Present means measured**, by a file test when the manifest is computed. An
+  empty directory has built nothing.
+- **A store's own layers** are declared in `config/store-extra-layers.json`, each
+  with a path below the store root, a description and optionally
+  `"kind": "answers"` for written answers a reader can serve alongside the
+  library's. A path that is absolute or leaves the store is refused, as is a link
+  inside a layer that resolves outside it.
+- **Freshness is the digest**, never a modification time: a clone and an
+  identical rebuild move every mtime, so nothing here reads one. The top-level
+  `digest` covers every layer, and `sources_as_of` is the newest commit date
+  provenance records. The MCP server compares the `digest` to decide whether the
+  store it holds has changed and reports `sources_as_of` as how recent the
+  sources are; a store with no manifest yet has neither.
+- **The format version** is `format.major` and `format.minor`. The major number
+  changes when a reader written for the old version would misread the store, the
+  minor when a layer or field is added. A reader written for one major number should not read another.
+
+The store's id is `KSB_STORE_ID`, else the repository name of the clone's
+`origin` remote, never the directory name: readers identify a store by it.
+
 ## Reproducibility as a discipline
 
 The repeated pattern across the codebase: a failure that happened once

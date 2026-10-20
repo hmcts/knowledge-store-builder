@@ -559,6 +559,8 @@ class CliTest(SettingsIsolated):
                 "topics",
                 "deepdive",
                 "explorer",
+                # last build stage: it measures the files every stage above wrote
+                "manifest",
                 "status",
                 # a diagnostic, not a build step: it reads the per-repository
                 # graphs before they are merged, which is the only point at

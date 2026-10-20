@@ -196,6 +196,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "extract a repository evidence bundle, or merge written deep dives",
     ),
     "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
+    "manifest": (
+        "build_store_manifest",
+        "write knowledge/store-manifest.json, what the store holds (run last)",
+    ),
     "status": (
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",

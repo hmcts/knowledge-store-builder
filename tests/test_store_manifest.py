@@ -554,6 +554,65 @@ class Digest(_Store):
         self.assertEqual(manifest["digest"], _sha("\n".join(lines).encode()))
 
 
+class Symlinks(_Store):
+    """A link a layer holds must stay inside the store: the manifest is committed
+    and read from another machine, and a digest over a file outside the store
+    names content no clone carries."""
+
+    def setUp(self):
+        super().setUp()
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        self.outside = Path(outside.name)
+        _touch(self.outside, "secret.txt", "outside")
+
+    def test_a_file_layer_linking_outside_the_store_is_refused(self):
+        """Breaks if a file layer that is a link out of the store is hashed as its
+        target: the digest would describe a file no other clone holds."""
+        (self.root / "knowledge").mkdir()
+        (self.root / "knowledge" / "provenance.json").symlink_to(self.outside / "secret.txt")
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            self.compute()
+        self.assertIn("knowledge/provenance.json", str(caught.exception))
+
+    def test_a_directory_entry_linking_outside_the_store_is_refused(self):
+        """Breaks if an entry of a directory layer is hashed through a link that
+        leaves the store."""
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        (self.root / "knowledge" / "git-history" / "stray.ndjson").symlink_to(
+            self.outside / "secret.txt"
+        )
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            self.compute()
+        self.assertIn("stray.ndjson", str(caught.exception))
+
+    def test_a_directory_link_leaving_the_store_is_refused(self):
+        """Breaks if a linked directory inside a layer is skipped silently rather
+        than refused: it would look like part of the layer and be none of it."""
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        (self.root / "knowledge" / "git-history" / "elsewhere").symlink_to(
+            self.outside, target_is_directory=True
+        )
+        with self.assertRaises(store_manifest.UsageError):
+            self.compute()
+
+    def test_a_link_staying_inside_the_store_is_hashed_as_its_target(self):
+        """Breaks if a link within the store is refused, or digested as its own
+        text rather than the bytes it points at: a store may share one file."""
+        _touch(self.root, "knowledge/real.json", "shared")
+        (self.root / "knowledge" / "provenance.json").symlink_to(self.root / "knowledge/real.json")
+        _touch(self.root, "knowledge/git-history/a.ndjson", "history")
+        (self.root / "knowledge" / "git-history" / "b.ndjson").symlink_to(
+            self.root / "knowledge/real.json"
+        )
+        layers = self.compute()["layers"]
+        self.assertEqual(layers["provenance"]["digest"], _sha(b"shared"))
+        direct = _sha(
+            "\n".join([f"a.ndjson\0{_sha(b'history')}", f"b.ndjson\0{_sha(b'shared')}"]).encode()
+        )
+        self.assertEqual(layers["history"]["digest"], direct)
+
+
 class SourcesAsOf(_Store):
     def provenance(self, repositories, external=None) -> None:
         document = {"repositories": repositories}

@@ -795,7 +795,14 @@ and immediately afterwards, and build the page:
 ```bash
 knowledgestore record-clustering   # -> graphify-out/clustering-inputs.json
 knowledgestore explorer            # the self-contained search page
+knowledgestore manifest            # run last: knowledge/store-manifest.json
 ```
+
+`manifest` records what the store holds, measured from the files the other stages
+wrote, so run it after every stage that writes a layer or it describes an older
+store. It refuses and writes nothing when it cannot name the store: set
+`KSB_STORE_ID`, or give the clone an `origin` remote. Its `digest` is how a reader
+tells a store that changed from one that did not.
 
 Stages are independent and idempotent — re-run one without repeating the rest.
 
@@ -1610,6 +1617,7 @@ rather than hunting the store. See `docs/building-a-knowledge-store.md` §9.
 
 ```bash
 knowledgestore explorer
+knowledgestore manifest                     # last: it describes the store as it now is
 knowledgestore check-evidence               # must pass before you commit
 node tests/explorer/estate-regression.mjs   # if the estate has one
 ```
