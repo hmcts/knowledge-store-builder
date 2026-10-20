@@ -6945,6 +6945,106 @@ MUTATIONS = (
             "test_git_env.EveryGitCallPassesTheStrippedEnvironment.test_no_git_call_in_the_library_inherits_the_callers_binding",
         ),
     ),
+    Mutation(
+        "store index: the nodes are written in the order they were staged",
+        "store_index.py",
+        '        " SELECT d.id, d.label, d.kind, f.k, d.url, d.community FROM ("\n'
+        '        "  SELECT *, ROW_NUMBER() OVER ("\n'
+        '        "   PARTITION BY id ORDER BY repo, file, kind, label, url, community) AS rn"\n'
+        '        "  FROM stg_nodes) d"\n'
+        '        " JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo = r.k AND f.path = d.file"\n'
+        '        " WHERE d.rn = 1 ORDER BY d.id"\n',
+        '        " SELECT d.id, d.label, d.kind, f.k, d.url, d.community FROM stg_nodes d"\n'
+        '        " JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo = r.k AND f.path = d.file"\n'
+        '        " WHERE d.rowid = (SELECT min(rowid) FROM stg_nodes WHERE id = d.id)"\n',
+        "a node's integer key, every edge keyed on it, and the copy of a repeated id that "
+        "survives would follow the order the graph listed its nodes in, so two builds of one "
+        "store differ and a committed archive churns on every refresh",
+        (
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_row_or_key",
+        ),
+    ),
+    Mutation(
+        "store index: the full-text index is not optimised",
+        "store_index.py",
+        "    execute(\"INSERT INTO labels(labels) VALUES('optimize')\")\n",
+        "    pass\n",
+        "a bulk build leaves several full-text segments that every search must consult, and their layout follows insertion history rather than content",
+        (
+            "test_store_index.ABulkBuildIsFinished.test_the_full_text_index_is_merged_to_one_segment",
+        ),
+    ),
+    Mutation(
+        "store index: the file is not vacuumed last",
+        "store_index.py",
+        '        connection.execute("VACUUM")\n',
+        "        pass\n",
+        "pages freed by merging the full-text segments stay in the file holding stale bytes, so the index is larger than it needs to be and its bytes follow input order",
+        ("test_store_index.ABulkBuildIsFinished.test_the_file_has_no_free_pages",),
+    ),
+    Mutation(
+        "store index: a dangling edge is written",
+        "store_index.py",
+        '        "         (SELECT k FROM nodes WHERE id = l.target) AS t"\n'
+        '        "  FROM (SELECT DISTINCT source, relation, target FROM stg_links) l)"\n'
+        '        " WHERE s IS NOT NULL AND t IS NOT NULL ORDER BY s, r, t"\n',
+        '        "         ifnull((SELECT k FROM nodes WHERE id = l.target), -1) AS t"\n'
+        '        "  FROM (SELECT DISTINCT source, relation, target FROM stg_links) l)"\n'
+        '        " WHERE s IS NOT NULL ORDER BY s, r, t"\n',
+        "an edge to a node the graph does not contain would reach the edge table, where a reader following it arrives at nothing, and the report would no longer reconcile",
+        (
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_row_or_key",
+            "test_store_index.WhatTheIndexHolds.test_a_dangling_edge_is_counted_and_not_stored",
+            "test_store_index.WhatTheIndexHolds.test_a_repeated_link_is_counted_and_stored_once",
+            "test_store_index.WhatTheIndexHolds.test_the_report_and_row_counts_are_the_fixtures",
+        ),
+    ),
+    Mutation(
+        "store index: an unlabeled node is entered into the full-text index",
+        "store_index.py",
+        '" WHERE label IS NOT NULL ORDER BY k"',
+        '" ORDER BY k"',
+        "a structural node with no label would get an empty row in the full-text index, which is a row a search can never return and a reader of the index cannot explain",
+        (
+            "test_store_index.WhatTheIndexHolds.test_the_unlabeled_node_is_a_node_and_is_not_searchable",
+        ),
+    ),
+    Mutation(
+        "store index: the raw metadata kind is stored",
+        "store_index.py",
+        "            kinds.node_kind(node),\n",
+        '            (node.get("metadata") or {}).get("kind", ""),\n',
+        "a store built before the kind rename would index `gherkin_feature` where a reader filters on `feature`, so a lookup by kind misses every node an older build wrote",
+        ("test_store_index.WhatTheIndexHolds.test_an_old_kind_is_stored_in_its_current_form",),
+    ),
+    Mutation(
+        "store index: the index is written in place",
+        "store_index.py",
+        '    building = out.with_name(out.name + ".building")\n'
+        '    packing = archive.with_name(archive.name + ".building")\n'
+        "    try:\n"
+        "        building.unlink(missing_ok=True)\n"
+        "        counts = _build_database(building, graph, layer, meta)\n"
+        "        _write_archive(building, packing)\n"
+        "        # Both finished before either is renamed, so a failure above leaves the\n"
+        "        # previous pair exactly as it was.\n"
+        "        os.replace(building, out)\n"
+        "        os.replace(packing, archive)\n"
+        "    finally:\n"
+        "        building.unlink(missing_ok=True)\n"
+        "        packing.unlink(missing_ok=True)\n",
+        "    out.unlink(missing_ok=True)\n"
+        "    counts = _build_database(out, graph, layer, meta)\n"
+        "    _write_archive(out, archive)\n",
+        "a graph that is cut short part way through, or a build that dies, would leave a partial "
+        "index at the real path, or delete the previous one, where a reader would trust it",
+        (
+            "test_store_index.NothingIsWrittenHalfDone.test_a_failed_rebuild_leaves_the_previous_index_unchanged",
+            "test_store_index.NothingIsWrittenHalfDone.test_a_truncated_graph_raises_and_creates_no_index",
+        ),
+    ),
 )
 
 
