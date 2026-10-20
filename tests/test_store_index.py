@@ -111,7 +111,7 @@ class IndexCase(unittest.TestCase):
         return store_index.build(self.root, graph or self.graph, self.tickets, out or self.out)
 
     def query(self, sql, *args, path=None):
-        connection = sqlite3.connect(f"file:{path or self.out}?mode=ro", uri=True)
+        connection = sqlite3.connect(Path(path or self.out).as_uri() + "?mode=ro", uri=True)
         try:
             return connection.execute(sql, args).fetchall()
         finally:
@@ -295,7 +295,7 @@ def logical_dump(path: Path) -> dict:
     bytes do, so a graph listed in another order cannot give an identical file. What
     must not change is every row, the key it was given, and the full-text segments.
     """
-    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    connection = sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True)
     try:
         tables = [
             name

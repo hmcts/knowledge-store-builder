@@ -388,9 +388,12 @@ environment give the same bytes in both files, and the archive carries no
 timestamp or filename. The database header records the SQLite library version, so
 two different SQLite builds can write different bytes from the same store.
 
-`status` reports whether the index is current by hashing the graph file that
-`meta.graph` names and comparing it with `meta.graph_sha256`. It reads `meta` from
-the plain file only and never decompresses the archive.
+`status` reports whether the index is current. It reads `meta` from the plain file
+only and never decompresses the archive. When `meta.graph` names the committed
+`.gz`, it hashes that file and the ticket layer and compares them with
+`meta.graph_sha256` and `meta.file_tickets_sha256`. When the index was built from
+the plain graph, which can be gigabytes, `status` says freshness is not checked
+rather than read it.
 
 The queries a reader runs against the index are:
 

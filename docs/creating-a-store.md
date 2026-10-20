@@ -649,21 +649,20 @@ Ignore the plain file and commit the archive, as the graph is handled:
 knowledge/index/store.sqlite
 ```
 
-The archive is what a store commits. It is smaller than the plain file by a factor
-of about five, which is the difference between a file GitHub accepts and one it
-refuses at 100 MB. When the archive passes `KSB_INDEX_WARN_MB` (default 90), the
+The archive is what a store commits, because it is far smaller than the plain
+file and GitHub refuses a file over 100 MB. The stage prints both sizes, so
+measure your own. When the archive passes `KSB_INDEX_WARN_MB` (default 90), the
 stage warns and still exits 0, because whether to commit it is the store's
 decision. A store whose archive cannot stay under 100 MB should also ignore
 `knowledge/index/store.sqlite.gz` and publish the index some other way.
 
 A build needs temporary disk: staging tables live in a file under `TMPDIR`, not in
 memory (`temp_store=FILE`), and the sort spills there too. Allow for that, plus
-the finished `.building` file and its archive beside the output. At 750,000 nodes
-and 1,450,000 links the index is about 380 MB and its archive 66 MB.
+the finished `.building` file and its archive beside the output.
 
-A missing graph, a truncated one or a SQLite without FTS5 exits 1 and writes
-nothing, leaving any existing index as it was. A target that cannot be written
-exits 2.
+A missing graph, a truncated or corrupt graph or ticket layer, or a SQLite
+without FTS5 exits 1 and writes nothing, leaving any existing index as it was. A
+target that cannot be written exits 2.
 
 ### Check that answers cite real code
 

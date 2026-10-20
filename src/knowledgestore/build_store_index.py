@@ -14,6 +14,8 @@ has no FTS5, and 2 when the target cannot be written.
 
 from __future__ import annotations
 
+import gzip
+import json
 import sqlite3
 import sys
 import zlib
@@ -21,6 +23,18 @@ import zlib
 from . import config, graph_files, graph_stream, store_index
 
 GITHUB_LIMIT_MB = 100
+
+# What a graph or ticket layer that cannot be read to its end raises. JSONDecodeError
+# and the decode error are ValueErrors, so these must be caught before the output-path
+# branch that catches ValueError for a target that climbs upward.
+_INPUT_ERRORS: tuple[type[Exception], ...] = (
+    graph_stream.TruncatedJson,
+    json.JSONDecodeError,
+    UnicodeDecodeError,
+    gzip.BadGzipFile,
+    EOFError,
+    zlib.error,
+)
 
 
 def over_warning(archive_bytes: int, warn_mb: float) -> bool:
@@ -57,16 +71,22 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    tickets = config.INTENT_INDEX_PATH
     try:
-        report = store_index.build(config.ROOT, graph, config.INTENT_INDEX_PATH, out)
-    except (graph_stream.TruncatedJson, EOFError, zlib.error) as error:
+        report = store_index.build(config.ROOT, graph, tickets, out)
+    except _INPUT_ERRORS + (RuntimeError,) as error:
+        # Corrupt or unreadable inputs, and the build's own reconciliation failing,
+        # are the graph's problem and not the target's: exit 1, as for a missing graph.
         print(
-            f"Cannot read {graph} to its end ({error}). Nothing was written; any existing "
-            "index is untouched.",
+            f"Cannot index {graph} and {tickets}: {error}. Nothing was written; any "
+            "existing index is untouched.",
             file=sys.stderr,
         )
         return 1
     except (OSError, ValueError) as error:
+        if isinstance(error, OSError) and error.filename in (str(graph), str(tickets)):
+            print(f"Cannot read {error.filename}: {error}", file=sys.stderr)
+            return 1
         print(f"Cannot write the index at {out}: {error}", file=sys.stderr)
         return 2
 

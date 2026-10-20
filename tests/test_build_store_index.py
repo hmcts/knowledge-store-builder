@@ -10,13 +10,19 @@ Each test names the defect it catches.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import io as stdio
+import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated
-from knowledgestore import build_store_index, config, status
+from unittest import mock
+
+from knowledgestore import build_store_index, config, status, store_index
 from test_store_index import LINKS, NODES, TICKETS, node, write_graph, write_tickets
 
 
@@ -63,7 +69,7 @@ class TheStageWritesTheIndex(StageCase):
         self.assertEqual(code, 0)
         self.assertTrue(self.sqlite.is_file())
         self.assertTrue(self.gz.is_file())
-        connection = sqlite3.connect(f"file:{self.sqlite}?mode=ro", uri=True)
+        connection = sqlite3.connect(self.sqlite.as_uri() + "?mode=ro", uri=True)
         try:
             self.assertEqual(connection.execute("SELECT count(*) FROM nodes").fetchone(), (5,))
         finally:
@@ -146,6 +152,64 @@ class TheStageRefusesCleanly(StageCase):
         self.assertFalse(self.sqlite.exists())
 
 
+class InputErrorsAreNotOutputErrors(StageCase):
+    """Exit 2 is for the target. A graph or ticket layer that cannot be read is exit 1."""
+
+    def written(self):
+        return sorted(p.name for p in self.sqlite.parent.glob("*"))
+
+    def assert_refused_as_input(self, expected: str):
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 1, err)
+        self.assertIn(expected, err)
+        self.assertEqual(self.written(), [])
+
+    def test_a_graph_archive_that_is_not_gzip_exits_1(self):
+        """Breaks if BadGzipFile, an OSError, is reported as an unwritable target (2)."""
+        self.plain.unlink()
+        self.archive.write_bytes(b"this is not a gzip stream")
+        self.assert_refused_as_input(str(self.archive))
+
+    def test_a_plain_graph_that_is_not_json_exits_1(self):
+        """Breaks if a JSON error, a ValueError, falls into the branch for a target that
+        climbs upward and exits 2."""
+        self.plain.write_text('{"nodes": [{"id": "a1"}, not json', encoding="utf-8")
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.written(), [])
+
+    def test_a_ticket_layer_that_is_not_gzip_exits_1(self):
+        """Breaks if a corrupt `file-tickets.json.gz` exits 2, or escapes as a traceback."""
+        config.INTENT_INDEX_PATH.write_bytes(b"not gzip")
+        self.assert_refused_as_input(str(config.INTENT_INDEX_PATH))
+
+    def test_a_ticket_layer_that_is_not_json_exits_1(self):
+        """Breaks if valid gzip around invalid JSON exits 2."""
+        with gzip.open(config.INTENT_INDEX_PATH, "wt", encoding="utf-8") as handle:
+            handle.write("{broken")
+        self.assert_refused_as_input(str(config.INTENT_INDEX_PATH))
+
+    def test_an_unreadable_graph_exits_1(self):
+        """Breaks if a permission error on the input is reported as an output error: the
+        path in the error is the graph's, not the target's."""
+        self.plain.chmod(0)
+        self.addCleanup(self.plain.chmod, 0o644)
+        self.assert_refused_as_input(str(self.plain))
+
+    def test_an_edge_the_build_loses_exits_1_with_its_message(self):
+        """Breaks if the reconciliation failure escapes as a traceback: it is the build
+        refusing to write an index whose counts do not add up."""
+        lossy = store_index.DDL + (
+            "CREATE TRIGGER lose BEFORE INSERT ON edges WHEN NEW.source = 1"
+            " BEGIN SELECT RAISE(IGNORE); END;"
+        )
+        with mock.patch.object(store_index, "DDL", lossy):
+            code, _, err = self.run_stage()
+        self.assertEqual(code, 1)
+        self.assertIn("an edge was lost", err)
+        self.assertFalse(self.sqlite.exists())
+
+
 class TheSizeWarning(StageCase):
     def test_the_warning_appears_over_the_threshold_and_the_exit_stays_0(self):
         """Breaks if an archive over the limit is committed without a word, or if the
@@ -153,8 +217,9 @@ class TheSizeWarning(StageCase):
         config.configure(INDEX_WARN_MB=0)
         code, out, err = self.run_stage()
         self.assertEqual(code, 0)
-        self.assertIn("100 MB", out + err)
-        self.assertIn("knowledge/index/store.sqlite", out + err)
+        self.assertIn("100 MB", err)
+        self.assertIn("knowledge/index/store.sqlite", err)
+        self.assertNotIn("100 MB", out, "the report on stdout is what a script parses")
 
     def test_no_warning_at_the_default_for_a_small_archive(self):
         """Breaks if the warning fires for every store, which teaches readers to ignore it."""
@@ -171,6 +236,32 @@ class TheSizeWarning(StageCase):
         self.assertFalse(build_store_index.over_warning(size, size / 1_000_000))
         self.assertTrue(build_store_index.over_warning(size + 1, size / 1_000_000))
 
+    def test_a_threshold_given_as_a_string_through_configure_is_a_number(self):
+        """Breaks if `configure(INDEX_WARN_MB="0")` stores the string: the comparison
+        then raises a TypeError after a full build, instead of warning."""
+        config.configure(INDEX_WARN_MB="0")
+        self.assertEqual(config.INDEX_WARN_MB, 0)
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 0)
+        self.assertIn("100 MB", err)
+
+    def test_the_threshold_is_read_from_the_environment(self):
+        """Breaks if `KSB_INDEX_WARN_MB` is misspelt or ignored: a fresh interpreter,
+        because the value is read when `config` is first imported."""
+        src = Path(__file__).resolve().parent.parent / "src"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from knowledgestore import config; print(config.INDEX_WARN_MB)",
+            ],
+            env={**os.environ, "KSB_INDEX_WARN_MB": "7", "PYTHONPATH": str(src)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.stdout.strip(), "7", result.stderr)
+
     def test_the_default_is_90_mb(self):
         """Breaks if the default moves toward GitHub's refusal point, leaving no room
         to decide before the push fails."""
@@ -178,6 +269,17 @@ class TheSizeWarning(StageCase):
 
 
 class StatusReportsTheIndex(StageCase):
+    def build_from_archive(self):
+        """The case `status` can judge: the index recorded the committed `.gz`."""
+        self.plain.unlink()
+        write_graph(self.archive, NODES, LINKS)
+        code, _, _ = self.run_stage()
+        self.assertEqual(code, 0)
+
+    def unreadable(self, path: Path) -> None:
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o644)
+
     def test_no_index_says_how_to_build_one(self):
         """Breaks if status is silent about the index, so a store never learns it lacks one."""
         line = self.index_line(self.status_text())
@@ -186,7 +288,7 @@ class StatusReportsTheIndex(StageCase):
 
     def test_a_fresh_index_reports_its_archive_size_and_that_it_is_current(self):
         """Breaks if a current index is reported stale, or the archive size is dropped."""
-        self.run_stage()
+        self.build_from_archive()
         line = self.index_line(self.status_text())
         self.assertIn("current with the graph", line)
         self.assertNotIn("stale", line)
@@ -195,41 +297,87 @@ class StatusReportsTheIndex(StageCase):
     def test_a_changed_graph_makes_it_stale(self):
         """Breaks if the comparison reads the wrong file or never compares: a reader
         would open an index describing a graph that is gone."""
-        self.run_stage()
-        write_graph(self.plain, NODES + [node("z9", "One more", file="x.py")], LINKS)
+        self.build_from_archive()
+        write_graph(self.archive, NODES + [node("z9", "One more", file="x.py")], LINKS)
         line = self.index_line(self.status_text())
         self.assertIn("stale", line)
         self.assertIn("knowledgestore index", line)
 
-    def test_an_index_built_from_the_plain_graph_is_not_judged_against_the_archive(self):
-        """Breaks if status hashes a fixed `graph.json.gz` instead of the file
-        `meta.graph` names: an index built from the plain graph would read as stale
-        against the archive beside it, and the reverse."""
-        write_graph(self.archive, NODES + [node("z9", "Archive only", file="x.py")], LINKS)
-        self.run_stage()  # the plain graph wins, so meta.graph is graph.json
-        self.assertIn("current with the graph", self.index_line(self.status_text()))
-
-    def test_an_index_built_from_the_archive_reads_current_after_the_plain_file_is_added(self):
-        """Breaks if status follows whichever graph exists now instead of the one the
-        index recorded."""
-        self.plain.unlink()
-        write_graph(self.archive, NODES, LINKS)
-        self.run_stage()
-        write_graph(self.plain, NODES + [node("z9", "Newer", file="x.py")], LINKS)
-        self.assertIn("current with the graph", self.index_line(self.status_text()))
-        write_graph(self.archive, NODES + [node("z9", "Newer", file="x.py")], LINKS)
+    def test_a_changed_ticket_layer_makes_it_stale(self):
+        """Breaks if only the graph is compared: the tickets table is built from the
+        ticket layer, and a store that re-ran `intent` would read current over
+        tickets the index does not hold."""
+        self.build_from_archive()
+        write_tickets(config.INTENT_INDEX_PATH, {**TICKETS, "svc-b": {}})
         self.assertIn("stale", self.index_line(self.status_text()))
 
-    def test_status_never_decompresses_the_archive_or_fails_on_a_damaged_index(self):
-        """Breaks (CLAUDE.md 6.7) if a plain file that is not a database makes status raise."""
-        self.run_stage()
+    def test_the_file_the_index_names_is_the_one_compared(self):
+        """Breaks if status compares a fixed graph path instead of `meta.graph`: an
+        index built from a gzip elsewhere in the store is current against that file,
+        and stale when that file changes."""
+        other = self.root / "knowledge" / "graph.json.gz"
+        write_graph(other, NODES, LINKS)
+        store_index.build(self.root, other, config.INTENT_INDEX_PATH, self.sqlite)
+        self.assertIn("current with the graph", self.index_line(self.status_text()))
+        write_graph(other, NODES + [node("z9", "Elsewhere", file="x.py")], LINKS)
+        self.assertIn("stale", self.index_line(self.status_text()))
+
+    def test_an_index_built_from_the_archive_ignores_a_plain_graph_that_appears_later(self):
+        """Breaks if status follows whichever graph exists now instead of the one the
+        index recorded in `meta.graph`."""
+        self.build_from_archive()
+        write_graph(self.plain, NODES + [node("z9", "Newer", file="x.py")], LINKS)
+        self.assertIn("current with the graph", self.index_line(self.status_text()))
+
+    def test_an_index_built_from_the_plain_graph_is_never_hashed(self):
+        """Breaks if status reads the plain graph (CLAUDE.md 6.6): it can be gigabytes.
+        The file is made unreadable, so a read would fail rather than answer, and the
+        line must still say why freshness was not checked."""
+        self.run_stage()  # the plain graph wins, so meta.graph is graph.json
+        self.unreadable(self.plain)
+        line = self.index_line(self.status_text())
+        self.assertIn("freshness not checked: built from the plain graph", line)
+        self.assertNotIn("stale", line)
+
+    def test_a_plain_file_that_is_not_a_database_is_reported_unreadable(self):
+        """Breaks (CLAUDE.md 6.7) if a damaged index makes status raise, or reads as
+        current."""
+        self.build_from_archive()
         self.sqlite.write_bytes(b"not a database")
-        self.assertIn("Query index", self.status_text())
+        line = self.index_line(self.status_text())
+        self.assertIn("could not read its meta", line)
+        self.assertNotIn("current with", line)
+
+    def test_an_unreadable_graph_is_not_checked_and_does_not_raise(self):
+        """Breaks (CLAUDE.md 6.7) if a permission error while hashing escapes status."""
+        self.build_from_archive()
+        self.unreadable(self.archive)
+        line = self.index_line(self.status_text())
+        self.assertIn("freshness not checked", line)
+        self.assertNotIn("current with", line)
+
+    def test_a_graph_named_outside_the_store_is_not_checked(self):
+        """Breaks if `meta.graph` can point status at any file on the machine: an
+        absolute path outside the root is not hashed, even when its bytes match."""
+        self.build_from_archive()
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        copy = Path(elsewhere.name) / "graph.json.gz"
+        copy.write_bytes(self.archive.read_bytes())
+        connection = sqlite3.connect(self.sqlite)
+        try:
+            connection.execute("UPDATE meta SET value = ? WHERE key = 'graph'", (str(copy),))
+            connection.commit()
+        finally:
+            connection.close()
+        line = self.index_line(self.status_text())
+        self.assertIn("absent or outside the store", line)
+        self.assertNotIn("current with", line)
 
     def test_only_the_archive_present_is_reported_without_a_freshness_claim(self):
         """Breaks if status claims currency it cannot have checked: `meta` is read from
         the plain file only, so with it absent the comparison is not made."""
-        self.run_stage()
+        self.build_from_archive()
         self.sqlite.unlink()
         line = self.index_line(self.status_text())
         self.assertNotIn("current with the graph", line)
