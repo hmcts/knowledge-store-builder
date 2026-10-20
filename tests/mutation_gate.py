@@ -5447,6 +5447,7 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_linked_count_is_recorded_for_the_store_manifest",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_row_that_gets_no_link_carries_no_line",
             "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
@@ -5512,6 +5513,7 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_real_repositories_directory_is_not_read_as_the_corpus_prefix",
             "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_linked_count_is_recorded_for_the_store_manifest",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
             "test_source_urls.TheBuildRoute.test_a_repository_is_single_root_only_when_every_file_carries_its_prefix",
         ),
