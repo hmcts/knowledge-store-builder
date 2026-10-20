@@ -3313,11 +3313,14 @@ MUTATIONS = (
         "store holds. Losing it leaves the chart name and version on the node, so the fact "
         "reads as fully parsed",
         (
+            "test_build_relationships.ChartResolutionTest.test_a_flux_source_ref_is_the_last_step",
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_hold_keeps_its_repository",
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_a_source_the_estate_does_not_hold_claims_no_repository",
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
             "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
             "test_flux_kustomize_deployments.TheTerraformModuleLayerIsLeftAlone.test_the_module_node_and_its_edge_survive_two_deployment_runs",
+            "test_relationships_parsers.HelmReleaseTest.test_a_helm_release_is_read_through_the_flux_reader",
+            "test_relationships_parsers.HelmReleaseTest.test_the_kind_reports_the_release_as_a_chart_reference",
         ),
     ),
     Mutation(
@@ -4298,6 +4301,7 @@ MUTATIONS = (
         "read the line as one assignment under a key naming no secret and never reached "
         "the parameter inside the URL",
         (
+            "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
             "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
             "test_secret_mask.UrlQuerySecrets.test_a_secret_parameter_is_masked_and_the_rest_of_the_url_kept",
             "test_secret_mask.UrlQuerySecrets.test_a_signature_is_counted_once_by_its_own_rule",
@@ -5466,6 +5470,9 @@ MUTATIONS = (
         "every node would link the top of its file rather than the line `source_location` "
         "names, so a citation of one method in a long class sends the reader to find it",
         (
+            "test_build_relationships.SvcATest.test_a_repository_without_provenance_has_null_commit_and_base_url",
+            "test_build_relationships.SvcATest.test_references_are_never_capped_by_the_example_limit",
+            "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
             "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_each_estate_node_links_to_its_line_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
