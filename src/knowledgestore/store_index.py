@@ -29,6 +29,11 @@ rebuild is byte-identical.
 **Never `io.load_graph`.** The graph is streamed, one object at a time, through
 `graph_stream.iter_array` (CLAUDE.md 6.6).
 
+**Disk.** Staging tables live in SQLite's temp directory (`TMPDIR`), pinned to a
+file rather than memory. Allow for the staging and sort spill there, plus the
+finished `.building` file and its archive beside the output. At 750,000 nodes and
+1,450,000 links the index is about 380 MB and its archive 66 MB.
+
 **Written once or not at all.** The build goes to a temporary file beside the
 output and is renamed into place, so a graph that turns out to be truncated part
 way through leaves the previous index untouched and no partial one behind.
@@ -43,7 +48,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import graph_stream, io, kinds
+from . import graph_files, graph_stream, io, kinds
 
 SCHEMA: tuple[int, int] = (1, 0)
 
@@ -131,7 +136,7 @@ def _node_rows(graph: Path):
 
 
 def _link_rows(graph: Path):
-    for link in graph_stream.iter_array(graph, "links"):
+    for link in graph_files.iter_edges(graph):
         yield (link["source"], link.get("relation") or "", link["target"])
 
 
@@ -186,6 +191,13 @@ def _fill(connection: sqlite3.Connection) -> dict:
     nodes_read = _scalar(connection, "SELECT count(*) FROM stg_nodes")
     distinct_nodes = _scalar(connection, "SELECT count(DISTINCT id) FROM stg_nodes")
     links_read = _scalar(connection, "SELECT count(*) FROM stg_links")
+    live = "source IN (SELECT id FROM stg_nodes) AND target IN (SELECT id FROM stg_nodes)"
+    live_links = _scalar(connection, f"SELECT count(*) FROM stg_links WHERE {live}")
+    distinct_links = _scalar(
+        connection,
+        "SELECT count(*) FROM (SELECT DISTINCT source, relation, target FROM stg_links"
+        f" WHERE {live})",
+    )
     dangling = _scalar(
         connection,
         "SELECT count(*) FROM stg_links WHERE"
@@ -197,6 +209,9 @@ def _fill(connection: sqlite3.Connection) -> dict:
         " WHERE source IN (SELECT id FROM stg_nodes) AND target IN (SELECT id FROM stg_nodes)"
         " ORDER BY relation"
     )
+    # The ORDER BY below stays although the window function happens to emit ids
+    # sorted today: SQLite does not promise that order, and the node keys, every edge
+    # keyed on them and the FTS rowids follow whatever order this insert produces.
     # A repeated id keeps the row that sorts first on its content, so which of two
     # disagreeing copies survives does not depend on the order the graph listed them.
     execute(
@@ -233,6 +248,14 @@ def _fill(connection: sqlite3.Connection) -> dict:
 
     nodes = _scalar(connection, "SELECT count(*) FROM nodes")
     edges = _scalar(connection, "SELECT count(*) FROM edges")
+    # Each term was measured on its own, so the sum can disagree. A residual would
+    # call an edge the insert lost a duplicate (CLAUDE.md 2.7).
+    duplicate_edges = live_links - distinct_links
+    if edges + dangling + duplicate_edges != links_read:
+        raise RuntimeError(
+            f"{links_read} links read but {edges} edges + {dangling} dangling + "
+            f"{duplicate_edges} duplicate accounted for: an edge was lost"
+        )
     return {
         "nodes_read": nodes_read,
         "nodes": nodes,
@@ -240,7 +263,7 @@ def _fill(connection: sqlite3.Connection) -> dict:
         "links_read": links_read,
         "edges": edges,
         "dangling_edges": dangling,
-        "duplicate_edges": links_read - dangling - edges,
+        "duplicate_edges": duplicate_edges,
     }
 
 
@@ -252,6 +275,8 @@ def _build_database(path: Path, graph: Path, layer: dict, meta: dict) -> dict:
         connection.execute("PRAGMA page_size=4096")
         connection.execute("PRAGMA journal_mode=OFF")
         connection.execute("PRAGMA synchronous=OFF")
+        # Staging belongs on disk, not in memory, whatever this SQLite was built with.
+        connection.execute("PRAGMA temp_store=FILE")
         connection.executescript(DDL + STAGING)
         connection.execute("BEGIN")
 
@@ -289,6 +314,10 @@ def build(root: Path, graph: Path, file_tickets: Path, out: Path) -> IndexReport
     Raises, and writes nothing, if FTS5 is missing or the graph cannot be read to
     its end (`graph_stream.TruncatedJson`).
     """
+    if not graph.is_file():
+        # graph_stream yields nothing for an absent file, which would write a valid,
+        # empty index over a good one.
+        raise FileNotFoundError(graph)
     if not fts5_available():
         raise RuntimeError(
             "this SQLite build has no FTS5, which the label search needs. "

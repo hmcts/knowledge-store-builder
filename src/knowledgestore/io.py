@@ -504,7 +504,13 @@ def layer_digests(paths: "list[Path]", root: Path) -> dict:
         if path.is_file():
             # Read policy as above; the path comes from a caller that built it
             # from `--root`, so the same grounds apply.
-            digests[name] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]  # NOSONAR(S8707)
+            # Streamed: a plain graph can be gigabytes, and the digest is the same.
+            # A chunked loop rather than `hashlib.file_digest`, which needs 3.11.
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:  # NOSONAR(S8707)
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+            digests[name] = digest.hexdigest()[:16]
         else:
             digests[name] = None
     return digests

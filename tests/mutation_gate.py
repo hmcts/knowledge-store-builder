@@ -6963,7 +6963,7 @@ MUTATIONS = (
         "survives would follow the order the graph listed its nodes in, so two builds of one "
         "store differ and a committed archive churns on every refresh",
         (
-            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_row_or_key",
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file",
         ),
     ),
     Mutation(
@@ -6995,10 +6995,24 @@ MUTATIONS = (
         '        " WHERE s IS NOT NULL ORDER BY s, r, t"\n',
         "an edge to a node the graph does not contain would reach the edge table, where a reader following it arrives at nothing, and the report would no longer reconcile",
         (
-            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_row_or_key",
+            "test_store_index.ABuildIsReproducible.test_a_rebuild_over_the_same_inputs_is_byte_identical",
+            "test_store_index.ABuildIsReproducible.test_the_archive_is_the_plain_file_without_a_timestamp_or_name",
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file",
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
+            "test_store_index.NothingIsWrittenHalfDone.test_a_failed_rebuild_leaves_the_previous_index_unchanged",
+            "test_store_index.WhatItRefuses.test_a_missing_graph_raises_and_leaves_an_existing_index_alone",
             "test_store_index.WhatTheIndexHolds.test_a_dangling_edge_is_counted_and_not_stored",
+            "test_store_index.WhatTheIndexHolds.test_a_label_search_finds_the_hand_listed_nodes",
+            "test_store_index.WhatTheIndexHolds.test_a_missing_field_is_null_and_a_present_one_is_kept",
+            "test_store_index.WhatTheIndexHolds.test_a_missing_ticket_layer_gives_an_empty_table_and_a_null_digest",
             "test_store_index.WhatTheIndexHolds.test_a_repeated_link_is_counted_and_stored_once",
+            "test_store_index.WhatTheIndexHolds.test_a_repeated_node_id_keeps_the_copy_that_sorts_first",
+            "test_store_index.WhatTheIndexHolds.test_an_old_kind_is_stored_in_its_current_form",
+            "test_store_index.WhatTheIndexHolds.test_the_meta_rows_name_the_sources_and_the_schema",
+            "test_store_index.WhatTheIndexHolds.test_the_neighbours_of_a_node_match_in_both_directions",
             "test_store_index.WhatTheIndexHolds.test_the_report_and_row_counts_are_the_fixtures",
+            "test_store_index.WhatTheIndexHolds.test_the_unlabeled_node_is_a_node_and_is_not_searchable",
+            "test_store_index.WhatTheIndexHolds.test_tickets_join_to_the_node_through_repo_and_path",
         ),
     ),
     Mutation(
@@ -7043,6 +7057,48 @@ MUTATIONS = (
         (
             "test_store_index.NothingIsWrittenHalfDone.test_a_failed_rebuild_leaves_the_previous_index_unchanged",
             "test_store_index.NothingIsWrittenHalfDone.test_a_truncated_graph_raises_and_creates_no_index",
+            "test_store_index.TheReportMustReconcile.test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate",
+        ),
+    ),
+    Mutation(
+        "store index: duplicate edges are the residual of the other counts",
+        "store_index.py",
+        "    duplicate_edges = live_links - distinct_links\n",
+        "    duplicate_edges = links_read - dangling - edges\n",
+        "an edge the insert loses for any other reason is reported as a duplicate, and the links reconciliation holds by construction instead of failing",
+        (
+            "test_store_index.TheReportMustReconcile.test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate",
+        ),
+    ),
+    Mutation(
+        "store index: a missing graph is indexed as empty",
+        "store_index.py",
+        "    if not graph.is_file():\n",
+        "    if False:\n",
+        "the stream reads an absent graph as empty, so a good index would be replaced by a valid empty one with a NULL graph digest",
+        (
+            "test_store_index.WhatItRefuses.test_a_missing_graph_creates_nothing",
+            "test_store_index.WhatItRefuses.test_a_missing_graph_raises_and_leaves_an_existing_index_alone",
+        ),
+    ),
+    Mutation(
+        "store index: an index is built without full-text search",
+        "store_index.py",
+        "    if not fts5_available():\n",
+        "    if False:\n",
+        "a SQLite without FTS5 would fail part way through the schema, after the build had started, instead of refusing first with a message that names the cause",
+        (
+            "test_store_index.WhatItRefuses.test_a_sqlite_without_fts5_is_refused_before_anything_is_written",
+        ),
+    ),
+    Mutation(
+        "store index: edges are read only from the links key",
+        "store_index.py",
+        "for link in graph_files.iter_edges(graph):",
+        'for link in graph_stream.iter_array(graph, "links"):',
+        "a graph that keys its edges as `edges` would index with zero edges and a clean report",
+        (
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
         ),
     ),
 )

@@ -21,9 +21,10 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import settings_isolation  # noqa: F401  (puts the working tree on sys.path first)
-from knowledgestore import graph_stream, store_index
+from knowledgestore import graph_stream, io, store_index
 
 
 def node(id, label=None, repo="svc-a", kind=None, file="", **extra):
@@ -340,49 +341,54 @@ class ABuildIsReproducible(IndexCase):
         self.build()
         self.assertEqual(self.files(self.out), first)
 
-    def test_changing_one_label_changes_both_files(self):
-        """Breaks if the identity test above is vacuous: a build that ignored its
-        input would also be identical. One changed label must change the plain file
-        and the archive."""
-        self.build()
-        before = self.files(self.out)
-        changed = [dict(n) for n in NODES]
-        changed[3]["label"] = "Order service v2"
-        write_graph(self.graph, changed, LINKS)
-        self.build()
-        after = self.files(self.out)
-        self.assertNotEqual(before[0], after[0])
-        self.assertNotEqual(before[1], after[1])
-
-    def test_the_order_the_graph_lists_things_in_reaches_no_row_or_key(self):
+    def test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file(self):
         """Breaks if any table is filled in input order rather than sorted order, so
-        that a node's key, an edge's endpoints or the full-text segments depend on how
-        the graph happened to list its nodes and links. The second graph is the first
-        with nodes and links reversed, and the ticket layer's entries and sections
-        likewise."""
-        self.build()
-        reordered = self.root / "reordered"
-        (reordered / "knowledge").mkdir(parents=True)
-        graph = reordered / "knowledge" / "graph.json.gz"
-        layer = reordered / "knowledge" / "file-tickets.json.gz"
-        write_graph(graph, NODES[::-1], LINKS[::-1])
-        write_tickets(
-            layer,
-            {
-                "svc-a": {
-                    path: {key: entry[key] for key in reversed(list(entry))}
-                    for path, entry in reversed(list(TICKETS["svc-a"].items()))
-                }
-            },
-        )
-        out = reordered / "knowledge" / "index" / "store.sqlite"
-        store_index.build(reordered, graph, layer, out)
-        original = logical_dump(self.out)
-        self.assertEqual(logical_dump(out), original)
+        that a node's key, an edge's endpoints, the full-text segments or the free
+        pages depend on how the graph happened to list its nodes and links.
+
+        `meta` digests the input file's bytes, which differ for a reordered file, so
+        the digest function (the IO boundary) is held to a constant and the two builds
+        are compared byte for byte. The row-and-key diff runs first because it says
+        which table moved. A third build with one label changed shows the comparison
+        can fail: a build that ignored its input would also be identical."""
+
+        def constant(paths, root):
+            return {str(p.relative_to(root)): "f" * 16 for p in paths}
+
+        def build_in(name, nodes, links, layer):
+            top = self.root / name
+            (top / "knowledge").mkdir(parents=True)
+            graph = top / "knowledge" / "graph.json.gz"
+            tickets = top / "knowledge" / "file-tickets.json.gz"
+            write_graph(graph, nodes, links)
+            write_tickets(tickets, layer)
+            out = top / "knowledge" / "index" / "store.sqlite"
+            with mock.patch.object(store_index.io, "layer_digests", constant):
+                store_index.build(top, graph, tickets, out)
+            return out
+
+        reversed_layer = {
+            "svc-a": {
+                path: {key: entry[key] for key in reversed(list(entry))}
+                for path, entry in reversed(list(TICKETS["svc-a"].items()))
+            }
+        }
+        forward = build_in("forward", NODES, LINKS, TICKETS)
+        backward = build_in("backward", NODES[::-1], LINKS[::-1], reversed_layer)
+
+        original = logical_dump(forward)
+        self.assertEqual(logical_dump(backward), original)
         # The comparison reads real rows: a dump of nothing would also be equal.
         self.assertEqual(len(original["nodes"]), 5)
         self.assertEqual(len(original["edges"]), 4)
         self.assertEqual([row[2] for row in original["nodes"]], ["a1", "a2", "a3", "b1", "s1"])
+        self.assertEqual(self.files(backward), self.files(forward))
+
+        changed = [dict(n) for n in NODES]
+        changed[3]["label"] = "Order service v2"
+        different = build_in("different", changed, LINKS, TICKETS)
+        self.assertNotEqual(different.read_bytes(), forward.read_bytes())
+        self.assertNotEqual(self.files(different)[1], self.files(forward)[1])
 
     def test_the_archive_is_the_plain_file_without_a_timestamp_or_name(self):
         """Breaks if the archive carries an mtime or filename, which would change its
@@ -455,6 +461,83 @@ class NothingIsWrittenHalfDone(IndexCase):
             sorted(p.name for p in self.out.parent.iterdir()),
             ["store.sqlite", "store.sqlite.gz"],
         )
+
+
+class WhatItRefuses(IndexCase):
+    def pair_exists(self):
+        return [self.out.exists(), self.out.with_name("store.sqlite.gz").exists()]
+
+    def test_a_missing_graph_raises_and_leaves_an_existing_index_alone(self):
+        """Breaks if an absent graph, which the stream reads as empty, replaces a good
+        index with a valid empty one."""
+        self.build()
+        before = (digest(self.out), digest(self.out.with_name("store.sqlite.gz")))
+        self.graph.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.build()
+        self.assertEqual((digest(self.out), digest(self.out.with_name("store.sqlite.gz"))), before)
+
+    def test_a_missing_graph_creates_nothing(self):
+        """Breaks if the refusal comes after the output directory or file is made."""
+        self.graph.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.build()
+        self.assertFalse(self.out.parent.exists())
+
+    def test_a_sqlite_without_fts5_is_refused_before_anything_is_written(self):
+        """Breaks if the build goes on without full-text search and writes an index
+        whose label table cannot be created, or leaves half of one behind. The
+        capability probe is the boundary stubbed."""
+        with mock.patch.object(store_index, "fts5_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "FTS5"):
+                self.build()
+        self.assertFalse(self.out.parent.exists())
+
+
+class EdgesUnderEitherKey(IndexCase):
+    def test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them(self):
+        """Breaks if only `links` is read: an `edges`-keyed graph would index with zero
+        edges and a clean report."""
+        text = json.dumps({"directed": True, "nodes": NODES, "edges": LINKS})
+        with gzip.open(self.graph, "wt", encoding="utf-8") as handle:
+            handle.write(text)
+        report = self.build()
+        self.assertEqual((report.links_read, report.edges, report.dangling_edges), (5, 4, 1))
+
+
+class TheReportMustReconcile(IndexCase):
+    def test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate(self):
+        """Breaks if `duplicate_edges` is whatever is left over: an edge lost for any
+        other reason would then be reported as a duplicate and the sum would hold by
+        construction. A trigger on the real edge table skips one row, as a constraint
+        or a bug might."""
+        lossy = store_index.DDL + (
+            "CREATE TRIGGER lose BEFORE INSERT ON edges WHEN NEW.source = 1"
+            " BEGIN SELECT RAISE(IGNORE); END;"
+        )
+        with mock.patch.object(store_index, "DDL", lossy):
+            with self.assertRaisesRegex(RuntimeError, "an edge was lost"):
+                self.build()
+        self.assertFalse(self.out.exists())
+
+
+class DigestsAreStreamed(unittest.TestCase):
+    def test_the_digest_is_the_sha256_of_the_bytes_whatever_way_it_is_read(self):
+        """Breaks if streaming the digest changes it: a manifest, a page and an index
+        compare it against digests written by the whole-file read. The literal is the
+        published SHA-256 of b'abc'."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            small = root / "small.bin"
+            small.write_bytes(b"abc")
+            large = root / "large.bin"
+            large.write_bytes(bytes(range(256)) * 20000)  # several read chunks
+            digests = io.layer_digests([small, large, root / "absent"], root)
+            self.assertEqual(digests["small.bin"], "ba7816bf8f01cfea")
+            self.assertEqual(
+                digests["large.bin"], hashlib.sha256(large.read_bytes()).hexdigest()[:16]
+            )
+            self.assertIsNone(digests["absent"])
 
 
 class FullTextSearchIsAvailable(unittest.TestCase):
