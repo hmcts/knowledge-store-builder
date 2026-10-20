@@ -303,6 +303,22 @@ class Layer(SettingsIsolated, unittest.TestCase):
             recorded = json.loads((tmp / "knowledge" / "telemetry.json").read_text())
         self.assertEqual(recorded["measurements"]["deployments.pairs"], 3)
 
+    def test_naming_no_repository_records_zero_pairs(self):
+        """Breaks if the run that names no deployment repository records nothing:
+        the manifest would keep reporting the last configured run's pairs as
+        present after `KSB_DEPLOY_REPOS` is unset, and a store that never had any
+        would read as unknown rather than measured and absent."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            config.configure(DEPLOY_REPOS=set())
+            self.assertEqual(deployments.main(), 0)
+            recorded = json.loads((tmp / "knowledge" / "telemetry.json").read_text())
+        self.assertEqual(recorded["measurements"]["deployments.pairs"], 0)
+
     def test_running_twice_leaves_the_graph_the_same_size(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

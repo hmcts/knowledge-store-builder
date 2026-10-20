@@ -816,6 +816,9 @@ def main() -> int:
             "  Set KSB_DEPLOY_REPOS to the clone holding this estate's deployment\n"
             "  configuration; most estates have none and this stage stays off."
         )
+        # Measured, and nothing is there: the manifest reports `false` rather than
+        # unknown, and a count from an earlier configured run does not outlive it.
+        telemetry.record({"deployments.pairs": 0})
         return 0
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))

@@ -17,9 +17,13 @@ reader acts differently on the two.
 **The graph is never parsed.** It can be 1.6 GB decompressed; its presence is a
 file test and its flags are read from telemetry.
 
-**Deterministic** (CLAUDE.md 1.3). The one time-dependent field, `built`, is the
-newest modification time among the layer files present, never the clock, so
-computing twice over an unchanged store gives the same manifest.
+**Deterministic** (CLAUDE.md 1.3), and stable across clones. Nothing here reads
+a clock or a modification time: a clone and an identical rebuild move every
+mtime, so a field built from one would make the committed manifest churn. What
+says whether a store changed is `digest` - a content digest per layer, and one
+over all of them - and what says how recent its sources are is `sources_as_of`,
+the newest commit date recorded in provenance. Hashing a file is not parsing
+it, so the graph is still never parsed (CLAUDE.md 6.6).
 
 The format version: the major number changes when a reader written for the old
 version would misread the store - a field changes meaning or a file moves. The
@@ -29,22 +33,16 @@ minor number changes when a layer or a field is added.
 from __future__ import annotations
 
 import datetime
-import json
-import os
+import hashlib
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, config
+from . import __version__, config, io, provenance, telemetry
 from .git_env import git_env
 
 FORMAT: tuple[int, int] = (1, 0)
-
-# Declared by a store, not by this library: its own layers, such as a service
-# registry or written journeys. Read from the store root a manifest is computed
-# for, like every other path here.
-EXTRA_LAYERS_CONFIG = "config/store-extra-layers.json"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.
@@ -128,19 +126,36 @@ def _repository_name(url: str) -> str:
     return re.split(r"[/:]", trimmed)[-1]
 
 
+def _top_level(root: Path, run) -> Path | None:
+    """The top of the git repository holding `root`, or None outside one."""
+    try:
+        return Path(run(["-C", str(root), "rev-parse", "--show-toplevel"]).strip()).resolve()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def store_identity(root: Path, run=run_git) -> tuple[str, str]:
     """The store's id and GitHub org.
 
-    The id is `KSB_STORE_ID` when set, else the repository name of the `origin`
-    remote. Never the directory name: a reader identifies a store by this id, and
-    a clone may be checked out under any directory name at all.
+    The id is `config.STORE_ID` (`KSB_STORE_ID`) when set, else the repository
+    name of the `origin` remote. Never the directory name: a reader identifies a
+    store by this id, and a clone may be checked out under any directory name.
     """
-    store_id = os.environ.get("KSB_STORE_ID", "").strip()
-    if not store_id:
-        try:
-            store_id = _repository_name(run(["-C", str(root), "remote", "get-url", "origin"]))
-        except (OSError, subprocess.CalledProcessError):
-            store_id = ""
+    store_id = config.STORE_ID
+    if store_id:
+        return store_id, config.GITHUB_ORG or ""
+    top = _top_level(root, run)
+    if top is not None and top != root.resolve():
+        # The origin of the repository above would name a different store.
+        raise UsageError(
+            f"Cannot name the store at {root}: it is not the top of its git repository "
+            f"({top}), so that repository's `origin` would name another store. Set "
+            "KSB_STORE_ID, or point at the top of the store's own clone."
+        )
+    try:
+        store_id = _repository_name(run(["-C", str(root), "remote", "get-url", "origin"]))
+    except (OSError, subprocess.CalledProcessError):
+        store_id = ""
     if not store_id:
         raise UsageError(
             f"Cannot name the store at {root}: KSB_STORE_ID is not set and the clone has "
@@ -161,48 +176,64 @@ def _listed(rel: str, kind: str) -> str:
     return rel + "/" if kind == "dir" else rel
 
 
-def _measurements(root: Path) -> dict[str, int] | None:
-    """What the stages recorded, or None when there is no readable record.
+def _measurements(root: Path) -> dict[str, int]:
+    """What the stages recorded, or {} when there is no readable record.
 
     A malformed record is unknown rather than a failure: the file is committed,
     so it is hand-edited and merge-resolved, and a damaged one must not stop the
     manifest saying what the files show.
     """
-    path = root / _rel(config.TELEMETRY_PATH)
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        return telemetry.read(root / _rel(config.TELEMETRY_PATH))
     except (OSError, ValueError):
-        return None
-    measurements = document.get("measurements") if isinstance(document, dict) else None
-    if not isinstance(measurements, dict):
-        return None
-    return {
-        metric: value
-        for metric, value in measurements.items()
-        if isinstance(value, int) and not isinstance(value, bool)
-    }
+        return {}
 
 
-def _flag(measurements: dict[str, int] | None, metric: str, test) -> bool | None:
+def _flag(measurements: dict[str, int], metric: str, test) -> bool | None:
     """`test(value)` for a recorded metric; None when nothing recorded it."""
-    if measurements is None or metric not in measurements:
+    if metric not in measurements:
         return None
     return test(measurements[metric])
 
 
-def _newest(path: Path, kind: str) -> float:
-    if kind == "dir":
-        return max(
-            (entry.stat().st_mtime for entry in path.rglob("*") if entry.is_file()),
-            default=path.stat().st_mtime,
-        )
-    return path.stat().st_mtime
+def _file_digest(path: Path) -> str:
+    """The first 16 hex digits of the file's sha256, streamed.
+
+    Streamed in 1 MiB chunks because a plain `graph.json` can be several
+    gigabytes. A loop rather than `hashlib.file_digest`, which needs Python 3.11
+    while this package supports 3.10. The value is the one `io.layer_digests`
+    records for the same file.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()[:16]
 
 
-def _layers(root: Path) -> tuple[dict, float | None]:
-    """Each layer's entry, and the newest modification time among those present."""
+def _digest(path: Path, kind: str) -> str:
+    """A content digest: the file's, or for a directory one over its files.
+
+    A directory's is taken over `relative path NUL file digest` lines, sorted, so
+    a renamed file changes it as surely as an edited one.
+    """
+    if kind != "dir":
+        return _file_digest(path)
+    lines = sorted(
+        f"{entry.relative_to(path).as_posix()}\0{_file_digest(entry)}"
+        for entry in path.rglob("*")
+        if entry.is_file()
+    )
+    return _text_digest(lines)
+
+
+def _text_digest(lines: list[str]) -> str:
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+
+
+def _layers(root: Path) -> dict:
+    """Each layer's entry: its paths, whether it is present, and its digest."""
     layers: dict[str, dict] = {}
-    newest: float | None = None
     for layer in LAYERS:
         found = [rel for rel in layer.paths if _present(root / rel, layer.kind)]
         chosen = found[0] if found else layer.paths[0]
@@ -210,17 +241,14 @@ def _layers(root: Path) -> tuple[dict, float | None]:
         layers[layer.name] = {
             "paths": [_listed(rel, layer.kind) for rel in ordered],
             "present": bool(found),
+            "digest": _digest(root / chosen, layer.kind) if found else None,
         }
-        for rel in found:
-            mtime = _newest(root / rel, layer.kind)
-            newest = mtime if newest is None else max(newest, mtime)
-    return layers, newest
+    return layers
 
 
 def _within(root: Path, rel: str) -> bool:
-    resolved_root = root.resolve()
-    target = (root / rel).resolve()
-    return target == resolved_root or resolved_root in target.parents
+    """Strictly below the root once resolved: `.` names the whole store."""
+    return root.resolve() in (root / rel).resolve().parents
 
 
 def extra_layers(root: Path) -> dict:
@@ -230,17 +258,22 @@ def extra_layers(root: Path) -> dict:
     against its own clone, so an absolute path or one that climbs out names a
     file no other clone holds - or one that is not the store's to publish.
     """
-    path = root / EXTRA_LAYERS_CONFIG
+    declared_at = _rel(config.STORE_EXTRA_LAYERS_PATH)
+    path = root / declared_at
     if not path.is_file():
         return {}
     try:
-        declared = json.loads(path.read_text(encoding="utf-8"))
+        declared = io.read_json(path)
     except ValueError as error:
-        raise UsageError(f"{EXTRA_LAYERS_CONFIG} is not valid JSON: {error}") from error
+        raise UsageError(f"{declared_at} is not valid JSON: {error}") from error
     if not isinstance(declared, dict):
-        raise UsageError(f"{EXTRA_LAYERS_CONFIG} must map each layer name to its declaration")
+        raise UsageError(f"{declared_at} must map each layer name to its declaration")
     result: dict[str, dict] = {}
+    library = {layer.name for layer in LAYERS} | {"deployments"}
     for name, entry in sorted(declared.items()):
+        if name in library:
+            # The store digest is keyed by layer name across both tables.
+            raise UsageError(f"extra layer {name!r} takes the name of a library layer")
         if not isinstance(entry, dict):
             raise UsageError(f"extra layer {name!r} must be an object with a path and description")
         rel, description = entry.get("path"), entry.get("description")
@@ -248,14 +281,23 @@ def extra_layers(root: Path) -> dict:
             raise UsageError(f"extra layer {name!r} declares no path")
         if not isinstance(description, str) or not description:
             raise UsageError(f"extra layer {name!r} declares no description")
-        # One test covers both: joining an absolute path to the root yields the
-        # absolute path, which then resolves outside it.
-        if not _within(root, rel):
+        # Absolute is refused even when it resolves inside this clone: it names
+        # this checkout's directory, which no other clone has.
+        if Path(rel).is_absolute() or not _within(root, rel):
             raise UsageError(
-                f"extra layer {name!r} points outside the store: {rel!r}. Declare a path "
-                "relative to the store root, inside it."
+                f"extra layer {name!r} must name a path below the store root, relative "
+                f"to it: {rel!r} does not."
             )
-        described = {"path": rel, "description": description, "present": (root / rel).exists()}
+        target = root / rel
+        # The library's own rule: a file, or a directory holding something.
+        kind = "dir" if target.is_dir() else "file"
+        present = _present(target, kind)
+        described = {
+            "path": rel,
+            "description": description,
+            "present": present,
+            "digest": _digest(target, kind) if present else None,
+        }
         if "kind" in entry:
             if entry["kind"] not in EXTRA_KINDS:
                 raise UsageError(
@@ -267,17 +309,55 @@ def extra_layers(root: Path) -> dict:
     return result
 
 
-def _timestamp(mtime: float | None) -> str | None:
-    if mtime is None:
+def _commit_moment(recorded) -> datetime.datetime | None:
+    if not isinstance(recorded, str):
         return None
-    moment = datetime.datetime.fromtimestamp(int(mtime), tz=datetime.timezone.utc)
-    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        moment = datetime.datetime.fromisoformat(recorded)
+    except ValueError:
+        return None
+    # `git log --format=%cI` always carries an offset; a hand-edited date
+    # without one is read as UTC rather than as this machine's local time.
+    return moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc)
+
+
+def sources_as_of(root: Path) -> str | None:
+    """The newest commit date provenance records for the estate, as recorded.
+
+    Repositories only: fetch-only `external` sources are not in the graph. Dates
+    are compared as instants, because `%cI` keeps each committer's offset and two
+    offsets do not sort as text. None when nothing is recorded.
+    """
+    try:
+        recorded = provenance.read(root / _rel(config.PROVENANCE_PATH))
+    except (OSError, ValueError):
+        return None
+    dated = [
+        (moment, entry["committed"])
+        for entry in recorded.values()
+        if isinstance(entry, dict)
+        and (moment := _commit_moment(entry.get("committed"))) is not None
+    ]
+    return max(dated)[1] if dated else None
+
+
+def store_digest(layers: dict, extra: dict) -> str:
+    """One digest over every layer's, extra layers included.
+
+    An absent layer contributes `-` rather than nothing, so a layer appearing or
+    vanishing moves it as surely as one changing.
+    """
+    entries = {**layers, **extra}
+    return _text_digest(
+        sorted(f"{name}\0{entry.get('digest') or '-'}" for name, entry in entries.items())
+    )
 
 
 def compute(root: Path) -> dict:
     """The full manifest for the store at `root`."""
     store_id, github_org = store_identity(root)
-    layers, newest = _layers(root)
+    layers = _layers(root)
+    extra = extra_layers(root)
     measurements = _measurements(root)
     layers["graph"]["source_urls"] = _flag(measurements, "source_urls.linked", lambda n: n > 0)
     layers["intent"]["reach"] = _flag(
@@ -288,12 +368,14 @@ def compute(root: Path) -> dict:
     layers["deployments"] = {
         "paths": [],
         "present": _flag(measurements, "deployments.pairs", lambda n: n > 0),
+        "digest": None,
     }
     return {
         "format": {"major": FORMAT[0], "minor": FORMAT[1]},
         "store": {"id": store_id, "github_org": github_org},
         "library_version": __version__,
-        "built": _timestamp(newest),
+        "digest": store_digest(layers, extra),
+        "sources_as_of": sources_as_of(root),
         "layers": layers,
-        "extra_layers": extra_layers(root),
+        "extra_layers": extra,
     }

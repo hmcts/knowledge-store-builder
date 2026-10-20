@@ -9,15 +9,13 @@ hand. Each test names the break it catches.
 
 from __future__ import annotations
 
-import contextlib
-import datetime
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from settings_isolation import SettingsIsolated
 from knowledgestore import config, store_manifest
@@ -55,14 +53,9 @@ def _telemetry(root: Path, measurements) -> None:
     _touch(root, "knowledge/telemetry.json", json.dumps({"measurements": measurements}))
 
 
-@contextlib.contextmanager
-def _store_id(value: str | None):
-    """`KSB_STORE_ID` set to `value`, or unset, for the duration only."""
-    with mock.patch.dict(os.environ):
-        os.environ.pop("KSB_STORE_ID", None)
-        if value is not None:
-            os.environ["KSB_STORE_ID"] = value
-        yield
+def _sha(data: bytes) -> str:
+    """The digest form the manifest uses, derived here without the code under test."""
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 def _git_repo(root: Path, origin: str | None) -> None:
@@ -83,24 +76,28 @@ class _Store(SettingsIsolated):
         self.root = Path(tmp.name)
 
     def compute(self) -> dict:
-        with _store_id("example-store"):
-            return store_manifest.compute(self.root)
+        config.configure(STORE_ID="example-store")
+        return store_manifest.compute(self.root)
 
     def present(self) -> dict:
         return {name: layer["present"] for name, layer in self.compute()["layers"].items()}
 
 
 class AnEmptyStore(_Store):
-    def test_every_layer_is_absent_and_built_is_null(self):
-        """Breaks if a layer is reported present without its file, or `built` reads a
-        clock: a fresh `discover` has built nothing, and the manifest must say so."""
+    def test_every_layer_is_absent_with_no_digest(self):
+        """Breaks if a layer is reported present without its file, or an absent
+        layer carries a digest: a fresh `discover` has built nothing, and the
+        manifest must say so."""
         manifest = self.compute()
         self.assertEqual(sorted(manifest["layers"]), list(ALL_LAYERS))
         expected: dict[str, bool | None] = {name: False for name in ALL_LAYERS}
         expected["deployments"] = None  # nothing measured, so unknown rather than absent
         self.assertEqual(self.present(), expected)
-        self.assertIsNone(manifest["built"])
+        digests = {name: layer["digest"] for name, layer in manifest["layers"].items()}
+        self.assertEqual(digests, {name: None for name in ALL_LAYERS})
+        self.assertIsNone(manifest["sources_as_of"])
         self.assertEqual(manifest["extra_layers"], {})
+        self.assertNotIn("built", manifest)
 
     def test_the_top_level_carries_the_format_identity_and_library_version(self):
         """Breaks if the format version, the store identity or the library version
@@ -212,12 +209,13 @@ class StoreIdentity(SettingsIsolated):
         self.root = Path(tmp.name)
 
     def identity(self, store_id: str | None) -> tuple[str, str]:
-        with _store_id(store_id):
-            return store_manifest.store_identity(self.root)
+        config.configure(STORE_ID=store_id or "")
+        return store_manifest.store_identity(self.root)
 
-    def test_the_environment_names_the_store_first(self):
-        """Breaks if `KSB_STORE_ID` is ignored, or loses to the origin remote: the
-        override exists for the clone whose remote name is not the store's name."""
+    def test_the_configured_id_names_the_store_first(self):
+        """Breaks if `config.STORE_ID` (`KSB_STORE_ID`) is ignored, or loses to the
+        origin remote: the override exists for the clone whose remote name is not
+        the store's name."""
         _git_repo(self.root, "https://github.com/example-org/a-fork-name.git")
         self.assertEqual(self.identity("example-store"), ("example-store", ""))
 
@@ -225,6 +223,33 @@ class StoreIdentity(SettingsIsolated):
         """Breaks if the `.git` suffix is kept or the wrong path segment is taken."""
         _git_repo(self.root, "https://github.com/example-org/example-store.git")
         self.assertEqual(self.identity(None)[0], "example-store")
+
+    def test_an_https_origin_without_the_suffix_names_the_store(self):
+        """Breaks if the suffix is removed by length rather than by match, which
+        would cut a name that never had one."""
+        _git_repo(self.root, "https://github.com/example-org/example-store")
+        self.assertEqual(self.identity(None)[0], "example-store")
+
+    def test_a_root_below_the_repository_top_is_refused(self):
+        """Breaks if a store nested inside another repository takes that
+        repository's origin as its name: the id would name a different store."""
+        _git_repo(self.root, "https://github.com/example-org/a-parent-repo.git")
+        nested = self.root / "nested-store"
+        nested.mkdir()
+        config.configure(STORE_ID="")
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.store_identity(nested)
+        self.assertIn("KSB_STORE_ID", str(caught.exception))
+        self.assertIn("not the top", str(caught.exception))
+
+    def test_a_nested_root_is_named_when_the_id_is_configured(self):
+        """Breaks if the top-level check runs even when the id is configured, which
+        would leave a nested store no way to be named."""
+        _git_repo(self.root, "https://github.com/example-org/a-parent-repo.git")
+        nested = self.root / "nested-store"
+        nested.mkdir()
+        config.configure(STORE_ID="example-store")
+        self.assertEqual(store_manifest.store_identity(nested)[0], "example-store")
 
     def test_an_ssh_origin_names_the_store(self):
         """Breaks if only `/` separates segments: the scp-like ssh form puts a `:`
@@ -335,6 +360,7 @@ class ExtraLayers(_Store):
             }
         )
         _touch(self.root, "docs/journeys/apply.md", "# Apply")
+        journeys_digest = _sha(b"apply.md\0" + _sha(b"# Apply").encode())
         self.assertEqual(
             self.compute()["extra_layers"],
             {
@@ -343,11 +369,13 @@ class ExtraLayers(_Store):
                     "description": "Written user journeys.",
                     "kind": "answers",
                     "present": True,
+                    "digest": journeys_digest,
                 },
                 "registry": {
                     "path": "knowledge/registry.json",
                     "description": "A registry.",
                     "present": False,
+                    "digest": None,
                 },
             },
         )
@@ -359,6 +387,50 @@ class ExtraLayers(_Store):
         with self.assertRaises(store_manifest.UsageError) as caught:
             store_manifest.extra_layers(self.root)
         self.assertIn("outside", str(caught.exception))
+
+    def test_an_absolute_path_inside_the_store_is_refused(self):
+        """Breaks if only containment is checked: an absolute path to this clone's
+        own file resolves inside it here and names nothing in any other clone."""
+        self.declare({"mine": {"path": str(self.root / "docs" / "x.md"), "description": "x"}})
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.extra_layers(self.root)
+        self.assertIn("mine", str(caught.exception))
+
+    def test_a_symlink_out_of_the_store_is_refused(self):
+        """Breaks if containment is checked on the spelled path rather than the
+        resolved one: a link inside the store can name any file outside it."""
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        _touch(Path(outside.name), "secret.txt", "x")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "link").symlink_to(outside.name, target_is_directory=True)
+        self.declare({"linked": {"path": "docs/link/secret.txt", "description": "x"}})
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.extra_layers(self.root)
+        self.assertIn("linked", str(caught.exception))
+
+    def test_the_store_root_itself_is_refused(self):
+        """Breaks if a layer may name the whole store: `.` resolves to the root,
+        which is inside nothing, and would digest every file the store holds."""
+        self.declare({"everything": {"path": ".", "description": "x"}})
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.extra_layers(self.root)
+        self.assertIn("everything", str(caught.exception))
+
+    def test_a_name_the_library_uses_is_refused(self):
+        """Breaks if an extra layer may take a library layer's name: the store digest
+        is keyed by name, so the extra layer would replace the graph's line in it."""
+        self.declare({"graph": {"path": "docs/x.md", "description": "x"}})
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.extra_layers(self.root)
+        self.assertIn("graph", str(caught.exception))
+
+    def test_an_empty_declared_directory_is_not_present(self):
+        """Breaks if an extra layer counts an empty directory as present, which the
+        library's own directory layers do not."""
+        (self.root / "docs" / "journeys").mkdir(parents=True)
+        self.declare({"journeys": {"path": "docs/journeys/", "description": "x"}})
+        self.assertFalse(store_manifest.extra_layers(self.root)["journeys"]["present"])
 
     def test_a_path_climbing_out_of_the_store_is_refused(self):
         """Breaks if containment is checked lexically on the first segment only:
@@ -400,18 +472,129 @@ class Determinism(_Store):
         second = json.dumps(self.compute(), indent=1, sort_keys=True)
         self.assertEqual(first, second)
 
-    def test_built_is_the_newest_present_layer_files_modification_time(self):
-        """Breaks if `built` reads the clock, takes the oldest file, ignores a file
-        inside a directory layer, or counts a file that is not a layer."""
-        older = _touch(self.root, "knowledge/provenance.json")
-        newest = _touch(self.root, "knowledge/git-history/example-repo.ndjson", "")
-        unrelated = _touch(self.root, "knowledge/telemetry.json", '{"measurements": {}}')
-        os.utime(older, (1_700_000_000, 1_700_000_000))
-        os.utime(newest, (1_760_950_800, 1_760_950_800))
-        os.utime(unrelated, (1_800_000_000, 1_800_000_000))
-        expected = datetime.datetime(2025, 10, 20, 9, 0, 0, tzinfo=datetime.timezone.utc)
-        self.assertEqual(expected.timestamp(), 1_760_950_800)
-        self.assertEqual(self.compute()["built"], "2025-10-20T09:00:00Z")
+    def test_a_file_layer_digest_is_the_sha256_of_its_bytes(self):
+        """Breaks if a layer digest hashes anything but the file's content, or
+        a directory layer's digest leaves out its file names."""
+        _touch(self.root, "knowledge/provenance.json", '{"repositories": {}}')
+        _touch(self.root, "knowledge/git-history/a.ndjson", "one")
+        _touch(self.root, "knowledge/git-history/b.ndjson", "two")
+        layers = self.compute()["layers"]
+        self.assertEqual(layers["provenance"]["digest"], _sha(b'{"repositories": {}}'))
+        lines = sorted([f"a.ndjson\0{_sha(b'one')}", f"b.ndjson\0{_sha(b'two')}"])
+        self.assertEqual(layers["history"]["digest"], _sha("\n".join(lines).encode()))
+
+
+class Digest(_Store):
+    """A store's digest names its content, so a reader can tell a rebuild that
+    changed something from one that did not, across clones."""
+
+    def setUp(self):
+        super().setUp()
+        _touch(self.root, "graphify-out/graph.json.gz", "graph")
+        _touch(self.root, "knowledge/summaries/communities.json", '{"1": "a"}')
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+
+    def digest(self) -> str:
+        return self.compute()["digest"]
+
+    def test_moving_every_modification_time_leaves_the_digest_unchanged(self):
+        """Breaks if the digest reads a modification time: a fresh clone and an
+        identical rebuild move every mtime, and the committed manifest would churn."""
+        before = self.digest()
+        for path in self.root.rglob("*"):
+            if path.is_file():
+                os.utime(path, (1_700_000_000, 1_700_000_000))
+        self.assertEqual(self.digest(), before)
+
+    def test_one_changed_byte_changes_the_digest(self):
+        """Breaks if the digest reads a file's size or name rather than its bytes:
+        the edit below keeps the size."""
+        before = self.digest()
+        _touch(self.root, "knowledge/summaries/communities.json", '{"1": "b"}')
+        self.assertNotEqual(self.digest(), before)
+
+    def test_a_changed_file_inside_a_directory_layer_changes_the_digest(self):
+        """Breaks if a directory layer's digest stops at the directory."""
+        before = self.digest()
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "histORY")
+        self.assertNotEqual(self.digest(), before)
+
+    def test_a_renamed_file_inside_a_directory_layer_changes_the_digest(self):
+        """Breaks if a directory digest hashes contents without their names."""
+        before = self.digest()
+        history = self.root / "knowledge" / "git-history"
+        (history / "example-repo.ndjson").rename(history / "other-repo.ndjson")
+        self.assertNotEqual(self.digest(), before)
+
+    def test_removing_a_layer_changes_the_digest(self):
+        """Breaks if an absent layer contributes nothing distinguishable."""
+        before = self.digest()
+        (self.root / "knowledge" / "summaries" / "communities.json").unlink()
+        self.assertNotEqual(self.digest(), before)
+
+    def test_an_extra_layer_changing_changes_the_digest(self):
+        """Breaks if the store digest leaves out the store's own layers."""
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"registry": {"path": "knowledge/registry.json", "description": "x"}}),
+        )
+        _touch(self.root, "knowledge/registry.json", "one")
+        before = self.digest()
+        _touch(self.root, "knowledge/registry.json", "two")
+        self.assertNotEqual(self.digest(), before)
+
+    def test_the_store_digest_is_derived_from_the_layer_lines(self):
+        """Breaks if the store digest's construction drifts from what a second
+        reader can recompute from the manifest alone."""
+        manifest = self.compute()
+        lines = sorted(
+            f"{name}\0{layer['digest'] or '-'}" for name, layer in manifest["layers"].items()
+        )
+        self.assertEqual(manifest["digest"], _sha("\n".join(lines).encode()))
+
+
+class SourcesAsOf(_Store):
+    def provenance(self, repositories, external=None) -> None:
+        document = {"repositories": repositories}
+        if external is not None:
+            document["external"] = external
+        _touch(self.root, "knowledge/provenance.json", json.dumps(document))
+
+    def test_the_newest_commit_date_is_reported_as_recorded(self):
+        """Breaks if dates are compared as strings: the first date below sorts
+        last as text but is the earlier instant, five hours east of UTC."""
+        self.provenance(
+            {
+                "a": {"sha": "1", "committed": "2026-01-02T03:00:00+05:00"},
+                "b": {"sha": "2", "committed": "2026-01-01T23:00:00+00:00"},
+                "c": {"sha": "3", "committed": "2025-06-01T00:00:00+00:00"},
+            }
+        )
+        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T23:00:00+00:00")
+
+    def test_fetch_only_repositories_are_not_sources(self):
+        """Breaks if `external` counts: a fetch-only repository is not in the
+        graph, so its date says nothing about what the store describes."""
+        self.provenance(
+            {"a": {"sha": "1", "committed": "2026-01-01T00:00:00+00:00"}},
+            external={"x": {"sha": "9", "committed": "2027-01-01T00:00:00+00:00"}},
+        )
+        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T00:00:00+00:00")
+
+    def test_without_provenance_it_is_null(self):
+        """Breaks if a store that recorded no source invents a date."""
+        self.assertIsNone(self.compute()["sources_as_of"])
+
+    def test_an_unparseable_date_is_skipped(self):
+        """Breaks if one blank or damaged `committed` stops the manifest."""
+        self.provenance(
+            {
+                "a": {"sha": "1", "committed": ""},
+                "b": {"sha": "2", "committed": "2026-01-01T00:00:00+00:00"},
+            }
+        )
+        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T00:00:00+00:00")
 
 
 if __name__ == "__main__":
