@@ -358,6 +358,50 @@ drives every answer shape and asserts the built page inlines the application
 source **byte-for-byte** — so the code the tests exercise is provably the
 code that ships.
 
+## Query index
+
+`knowledgestore index` (`src/knowledgestore/build_store_index.py`) writes
+`knowledge/index/store.sqlite` and its archive `store.sqlite.gz`, so that a reader
+opens one file read-only instead of parsing a graph of hundreds of thousands of
+nodes. The graph is streamed in and never loaded (the module `store_index` holds
+the schema).
+
+Every long node id is stored once. Edges, files and tickets hold integer keys, and
+repositories, files and relation names are interned. Repeating the id strings was
+measured at five times the size on the largest local store graph.
+
+| Table | Holds |
+|---|---|
+| `meta` | `index_schema`, the store-relative `graph` path that was read, and the first 16 hex characters of `graph_sha256` and `file_tickets_sha256` |
+| `repos`, `files`, `relations` | the interned names; `files` is unique on `(repo, path)` |
+| `nodes` | `id`, `label` (NULL on a structural node), `kind` in its current form, `file`, `url` and `community` (NULL when absent) |
+| `edges` | `source`, `relation`, `target` as integer keys, with an index on `(target, relation, source)` for incoming edges |
+| `tickets` | `file`, `ticket`, `count` and `landed`, from `file-tickets.json.gz`, joined to a node through `(repo, path)` |
+| `labels` | an FTS5 index over the node labels, with the `nodes` table as its content; an unlabelled node is not in it |
+
+An edge whose endpoint is not a node, and a repeated node id or link, is counted
+and reported rather than stored, so the stage's report reconciles: nodes read =
+nodes + duplicates, and links read = edges + dangling + duplicates.
+
+**Determinism holds per SQLite build.** Two runs on the same inputs in one
+environment give the same bytes in both files, and the archive carries no
+timestamp or filename. The database header records the SQLite library version, so
+two different SQLite builds can write different bytes from the same store.
+
+`status` reports whether the index is current by hashing the graph file that
+`meta.graph` names and comparing it with `meta.graph_sha256`. It reads `meta` from
+the plain file only and never decompresses the archive.
+
+The queries a reader runs against the index are:
+
+| Query | Answers |
+|---|---|
+| `find` | nodes whose label matches a full-text search, best match first |
+| `node` | one node by id |
+| `neighbours` | the outgoing and incoming edges of one node, with the relation and the other end's id |
+| `tickets_for_file` | the tickets that touched a `(repo, path)`, and whether each landed |
+| `files_for_ticket` | the files a ticket touched, landed ones first |
+
 ## Reproducibility as a discipline
 
 The repeated pattern across the codebase: a failure that happened once

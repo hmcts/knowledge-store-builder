@@ -19,6 +19,7 @@ import datetime
 import gzip
 import re
 import shutil
+import sqlite3
 import subprocess
 import zlib
 from collections.abc import Callable
@@ -799,6 +800,63 @@ def _report_graph_report(verify: bool) -> None:
         )
 
 
+def index_state() -> dict:
+    """Whether the query index is there, how big its archive is, and whether it is current.
+
+    `current` is True, False, or None when the comparison cannot be made. It is made
+    on the file `meta.graph` names, which is the one the index was built from: the
+    plain graph when it existed at build time, the archive otherwise. Hashing a fixed
+    `graph.json.gz` would call an index built from the plain graph stale, and the
+    reverse. `meta` is read from the plain file only; the archive is never
+    decompressed, so with only the archive present there is no comparison to make.
+    Never raises (CLAUDE.md 6.7): a file that is not a database is `current=None`.
+    """
+    plain = config.INDEX_PATH
+    archive = plain.with_name(plain.name + ".gz")
+    state: dict = {
+        "plain": plain.is_file(),
+        "archive_bytes": archive.stat().st_size if archive.is_file() else None,
+        "current": None,
+    }
+    if not state["plain"]:
+        return state
+    try:
+        connection = sqlite3.connect(f"file:{plain}?mode=ro", uri=True)
+        try:
+            meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return state
+    named, recorded = meta.get("graph"), meta.get("graph_sha256")
+    if not named or not recorded:
+        return state
+    graph = (config.ROOT / named).resolve()
+    if not graph.is_relative_to(config.ROOT.resolve()) or not graph.is_file():
+        return state
+    state["current"] = io.layer_digests([graph], graph.parent)[graph.name] == recorded
+    return state
+
+
+def _report_index() -> None:
+    state = index_state()
+    if not state["plain"] and state["archive_bytes"] is None:
+        print("Query index: none - run `knowledgestore index` to build it")
+        return
+    size = (
+        f"archive {state['archive_bytes']:,} bytes"
+        if state["archive_bytes"] is not None
+        else "no archive"
+    )
+    if state["current"] is True:
+        verdict = "current with the graph it was built from"
+    elif state["current"] is False:
+        verdict = "stale: the graph has changed since it was built - run `knowledgestore index`"
+    else:
+        verdict = "whether it is current was not checked (needs the plain store.sqlite)"
+    print(f"Query index: {size}, {verdict}")
+
+
 def _report_drift(recorded: dict) -> None:
     """Print the --drift section: gh availability, provenance, then results."""
     if not shutil.which("gh"):
@@ -1433,6 +1491,8 @@ def main(argv=None) -> int:
     _report_telemetry()
 
     _report_graph_report(arguments.verify_graph)
+
+    _report_index()
 
     if arguments.drift:
         _report_drift(recorded)

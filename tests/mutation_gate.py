@@ -7101,6 +7101,39 @@ MUTATIONS = (
             "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
         ),
     ),
+    Mutation(
+        "index stage: an archive exactly at the limit is warned about",
+        "build_store_index.py",
+        "    return archive_bytes > warn_mb * 1_000_000\n",
+        "    return archive_bytes >= warn_mb * 1_000_000\n",
+        "a store whose archive is exactly at its configured limit is told it is over it",
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_exclusive_of_an_archive_exactly_at_it",
+        ),
+    ),
+    Mutation(
+        "status: the index is always current",
+        "status.py",
+        '    state["current"] = io.layer_digests([graph], graph.parent)[graph.name] == recorded\n',
+        '    state["current"] = True\n',
+        "an index describing a graph that has since changed is reported current, so a reader opens answers about nodes that are gone",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_graph_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_archive_reads_current_after_the_plain_file_is_added",
+        ),
+    ),
+    Mutation(
+        "status: the index is compared against a fixed graph file",
+        "status.py",
+        "    graph = (config.ROOT / named).resolve()\n",
+        '    graph = config.GRAPH_PATH.with_suffix(".json.gz").resolve()\n',
+        "an index built from the plain graph is judged against the archive beside it (and the reverse), so a fresh index reads stale or a stale one reads current",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_graph_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_fresh_index_reports_its_archive_size_and_that_it_is_current",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_plain_graph_is_not_judged_against_the_archive",
+        ),
+    ),
 )
 
 

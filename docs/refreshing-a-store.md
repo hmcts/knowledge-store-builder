@@ -224,10 +224,17 @@ Recompress the graph, rebuild the page and check store health and source drift:
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore content-set
 knowledgestore explorer
+knowledgestore index
 knowledgestore check-evidence
 knowledgestore status
 knowledgestore status --drift
 ```
+
+`index` rewrites the query index from the graph and the ticket layer. Re-run it
+after any change to either: `status` reports the index as stale when the graph it
+was built from has changed, and a reader that opens a stale index answers about a
+graph that is gone. A rebuild over unchanged inputs gives the same bytes, so an
+unchanged store commits no diff.
 
 `content-set` rewrites `knowledge/corpus/content-files.txt`, the list a corpus
 search reads instead of the raw tree. A refresh changes which files exist, so a
