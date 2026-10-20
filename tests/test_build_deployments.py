@@ -289,6 +289,20 @@ class Layer(SettingsIsolated, unittest.TestCase):
         names = {n["community_name"] for n in added}
         self.assertTrue(all(x.startswith("Deployments: ") for x in names), names)
 
+    def test_the_pair_count_is_recorded_for_the_store_manifest(self):
+        """Breaks if the stage stops recording `deployments.pairs`, or records a
+        count other than the pairs it wrote: the store manifest's `deployments`
+        layer reads it. Three values files - the base layer, prd and dev - each one
+        (service, environment) pair."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _graph(tmp)
+            _deploy_repo(tmp)
+            config.configure(root=tmp, DEPLOY_REPOS={"estate-deploy"})
+            deployments.main()
+            recorded = json.loads((tmp / "knowledge" / "telemetry.json").read_text())
+        self.assertEqual(recorded["measurements"]["deployments.pairs"], 3)
+
     def test_running_twice_leaves_the_graph_the_same_size(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)

@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, deploy_flux, deploy_values, graph_files, io
+from . import config, deploy_flux, deploy_values, graph_files, io, telemetry
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -848,6 +848,10 @@ def main() -> int:
     )
 
     _report(tally, graph)
+    # The store manifest's `deployments` layer reads this. Recorded only when a
+    # deployment repository is named: an estate that names none returns above with
+    # no key, which the manifest reports as unknown rather than absent.
+    telemetry.record({"deployments.pairs": tally.pairs})
     return 0
 
 
