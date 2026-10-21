@@ -89,6 +89,12 @@ def _no_skips(_clone: Path, _rel: str, _text: str) -> dict[str, int]:
     return {}
 
 
+# What a pin is, per kind: `kinds.json` says so, because a chart version, a git ref
+# and a version range are different quantities that share `refs_pinned`. A fixed
+# phrase from the library for every kind, a store's included - never store text.
+STORE_PINS = "as the store's parser writes them"
+
+
 @dataclass(frozen=True)
 class Kind:
     """A registered way of declaring a dependency between repositories.
@@ -99,7 +105,8 @@ class Kind:
     returns `(target key, declaring path)` for what the clone offers to others.
     `skips(clone, rel, text)` counts, by reason, declarations in the file that are
     deliberately not references (a local module path), so the layer can say how
-    many it set aside.
+    many it set aside. `pins` says what the kind's pins are (`STORE_PINS` for a
+    store's kind).
     """
 
     name: str
@@ -108,6 +115,7 @@ class Kind:
     references: Callable[[Path, str, str], list[Reference]]
     publishes: Callable[[Path], list[tuple[str, str]]]
     skips: Callable[[Path, str, str], dict[str, int]] = _no_skips
+    pins: str = STORE_PINS
 
 
 _USERINFO = re.compile(r"(?P<scheme>[a-z][a-z0-9+.-]*)://(?P<userinfo>[^/@\s\"']+)@")
@@ -940,6 +948,7 @@ BUILTIN: tuple[Kind, ...] = (
         _terraform_references,
         lambda _clone: [],
         _terraform_skips,
+        pins="git refs",
     ),
     Kind(
         "helm_chart",
@@ -947,9 +956,24 @@ BUILTIN: tuple[Kind, ...] = (
         ("**/Chart.yaml", "**/*.yaml", "**/*.yml"),
         _helm_references,
         _helm_publishes,
+        pins="chart versions",
     ),
-    Kind("maven_artifact", "builtin", ("**/pom.xml",), _maven_references, _maven_publishes),
-    Kind("npm_package", "builtin", ("**/package.json",), _npm_references, npm_publishes),
+    Kind(
+        "maven_artifact",
+        "builtin",
+        ("**/pom.xml",),
+        _maven_references,
+        _maven_publishes,
+        pins="version specs",
+    ),
+    Kind(
+        "npm_package",
+        "builtin",
+        ("**/package.json",),
+        _npm_references,
+        npm_publishes,
+        pins="version specs",
+    ),
 )
 
 
@@ -1209,6 +1233,7 @@ class _Edge:
     references: int = 0
     kinds: Counter = field(default_factory=Counter)
     refs: Counter = field(default_factory=Counter)
+    unpinned: int = 0
     examples: list = field(default_factory=list)
 
 
@@ -1352,6 +1377,7 @@ def _edge_body(edge: _Edge, consumer: str, chart: str, examples: int, urls) -> d
         "references": edge.references,
         "kinds": dict(sorted(edge.kinds.items())),
         "refs_pinned": dict(sorted(edge.refs.items())),
+        "refs_unpinned": edge.unpinned,
         "examples": [
             {
                 "url": urls.resolve(consumer, rel, f"L{line}").url if urls is not None else None,
@@ -1480,8 +1506,12 @@ def _scan_layer(clones, kinds, resolver, root):
                         edge.references += 1
                         edge.kinds[kind.name] += 1
                         # A pin is store text and a key of a committed file: an npm
-                        # spec can be a URL carrying `access_token=`.
-                        edge.refs[secret_mask.mask(ref.ref)] += 1
+                        # spec can be a URL carrying `access_token=`. A reference that
+                        # gives none is counted beside the pins, not under a "" key.
+                        if ref.ref:
+                            edge.refs[secret_mask.mask(ref.ref)] += 1
+                        else:
+                            edge.unpinned += 1
                         edge.examples.append((ref.rel, ref.line, ref.text))
     _check_conservation(read, edges, unresolved, skipped)
     return edges, unresolved, skipped, sorted(unreadable)
@@ -1551,6 +1581,7 @@ def build(
         carrying = [edge for edge in edges.values() if kind.name in edge.kinds]
         kinds_body[kind.name] = {
             "origin": kind.origin,
+            "pins": kind.pins,
             "edges": len(carrying),
             "references": sum(edge.kinds[kind.name] for edge in carrying),
             "unresolved": len(unresolved[kind.name]),

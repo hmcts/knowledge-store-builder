@@ -146,8 +146,9 @@ SVC_A_LINE = 'source = "git::https://github.com/example-org/tf-network.git?ref=v
 class SvcATest(_Store):
     def test_svc_a_depends_on_and_depended_on_by_exactly(self):
         """Break caught: any field of the edge object wrong - the other end, the
-        chart key, the uncapped count, the per-kind count, a pin read as another or
-        floating lost as `""`, an example's link or line - or the per-repository
+        chart key, the uncapped count, the per-kind count, a pin read as another, a
+        floating reference counted as a pin rather than under `refs_unpinned`, an
+        example's link or line - or the per-repository
         file's commit and base URL not taken from provenance."""
         self.estate()
         layer = self.build()
@@ -164,6 +165,7 @@ class SvcATest(_Store):
                         "references": 1,
                         "kinds": {"terraform_module": 1},
                         "refs_pinned": {"v4.2.0": 1},
+                        "refs_unpinned": 0,
                         "examples": [
                             {
                                 "url": f"https://github.com/example-org/svc-a/blob/{SHA_A}/main.tf#L2",
@@ -176,7 +178,8 @@ class SvcATest(_Store):
                         "chart": "",
                         "references": 1,
                         "kinds": {"terraform_module": 1},
-                        "refs_pinned": {"": 1},
+                        "refs_pinned": {},
+                        "refs_unpinned": 1,
                         "examples": [
                             {
                                 "url": f"https://github.com/example-org/svc-a/blob/{SHA_A}/main.tf#L6",
@@ -191,7 +194,8 @@ class SvcATest(_Store):
                         "chart": "",
                         "references": 2,
                         "kinds": {"terraform_module": 2},
-                        "refs_pinned": {"": 1, "v2": 1},
+                        "refs_pinned": {"v2": 1},
+                        "refs_unpinned": 1,
                         "examples": [
                             {
                                 "url": f"https://github.com/example-org/svc-c/blob/{SHA_C}/main.tf#L2",
@@ -314,6 +318,7 @@ class SvcATest(_Store):
             layer.kinds["terraform_module"],
             {
                 "origin": "builtin",
+                "pins": "git refs",
                 "edges": 3,
                 "references": 4,
                 "unresolved": 4,
@@ -323,6 +328,22 @@ class SvcATest(_Store):
         self.assertEqual(
             (layer.kinds["maven_artifact"]["edges"], layer.kinds["maven_artifact"]["references"]),
             (1, 1),
+        )
+
+    def test_kinds_json_says_what_a_pin_is_for_each_kind(self):
+        """Break caught: `refs_pinned` read as one quantity across kinds - a chart
+        version, a git ref and an npm range are compared as if alike - because the
+        manifest does not say which each kind's pins are."""
+        self.estate()
+        layer = self.build()
+        self.assertEqual(
+            {name: counts["pins"] for name, counts in layer.kinds.items()},
+            {
+                "helm_chart": "chart versions",
+                "maven_artifact": "version specs",
+                "npm_package": "version specs",
+                "terraform_module": "git refs",
+            },
         )
 
 
@@ -997,6 +1018,24 @@ class StageTest(_Store):
         self.assertIn("terraform_module", out)
         self.assertIn("react", out)
 
+    def test_compare_reports_a_difference_in_unpinned_references(self):
+        """Break caught: `refs_unpinned` left out of the comparison, so a parity run
+        passes while floating references moved between pinned and not."""
+        self.estate()
+        self.run_stage()
+        written = self.root / "knowledge" / "relationships" / "repository-dependencies.json"
+        other = json.loads(written.read_text())
+        for edge in other["edges"]:
+            if (edge["consumer"], edge["provider"]) == ("svc-c", "svc-a"):
+                edge["refs_unpinned"] = 0
+                edge["refs_pinned"] = {"v2": 2}
+        differing = self.root / "differing.json"
+        differing.write_text(json.dumps(other), encoding="utf-8")
+        code, out, _ = self.run_stage("--compare", str(differing))
+        self.assertEqual(code, 1)
+        self.assertIn("svc-c -> svc-a", out)
+        self.assertIn("refs_unpinned 1 here, 0 there", out)
+
     def test_compare_refuses_a_file_of_the_wrong_shape_cleanly(self):
         """Break caught: a malformed comparison file ending in a traceback rather
         than an exit 1 that says what is wrong with it."""
@@ -1006,6 +1045,7 @@ class StageTest(_Store):
             {"edges": {"not": "a list"}},
             {"edges": [], "unresolved_targets_outside_estate": ["x"]},
             {"edges": [], "unresolved_targets_outside_estate": {"npm_package": {"x": 3}}},
+            {"edges": [{"consumer": "a", "provider": "b", "refs_unpinned": "2"}]},
             [],
         ):
             with self.subTest(body=body):

@@ -120,6 +120,9 @@ class StoreKindLayerTest(_StoreKinds):
         )
         kinds = self.read("kinds.json")
         self.assertEqual(kinds[KIND]["origin"], "store")
+        # A fixed phrase from the library, never text the store wrote.
+        self.assertEqual(kinds[KIND]["pins"], relationships.STORE_PINS)
+        self.assertEqual(relationships.STORE_PINS, "as the store's parser writes them")
         self.assertEqual(
             (kinds[KIND]["edges"], kinds[KIND]["references"], kinds[KIND]["unresolved"]),
             (1, 1, 1),

@@ -87,6 +87,9 @@ def shape_error(body: object) -> str:
         for name in ("kinds", "refs_pinned"):
             if not isinstance(edge.get(name, {}), dict):
                 return f"edge {number}'s `{name}` is not an object"
+        unpinned = edge.get("refs_unpinned", 0)
+        if not isinstance(unpinned, int) or isinstance(unpinned, bool):
+            return f"edge {number}'s `refs_unpinned` is not an integer"
     unresolved = body.get("unresolved_targets_outside_estate", {})
     if not isinstance(unresolved, dict):
         return "`unresolved_targets_outside_estate` is not an object"
@@ -96,35 +99,42 @@ def shape_error(body: object) -> str:
     return ""
 
 
-def _edge_index(body: dict) -> dict[tuple[str, str, str], tuple[dict, dict]]:
+def _edge_index(body: dict) -> dict[tuple[str, str, str], tuple[dict, dict, int]]:
     index = {}
     for edge in body.get("edges") or []:
         if not isinstance(edge, dict):
             continue
         key = (str(edge.get("consumer")), str(edge.get("provider")), str(edge.get("chart", "")))
-        index[key] = (edge.get("kinds") or {}, edge.get("refs_pinned") or {})
+        index[key] = (
+            edge.get("kinds") or {},
+            edge.get("refs_pinned") or {},
+            edge.get("refs_unpinned", 0),
+        )
     return index
 
 
 def differences(here: dict, there: dict) -> list[str]:
-    """Every (consumer, provider, chart, kind) whose references or pins differ, then
-    every unresolved target that differs. Empty when the two agree."""
+    """Every (consumer, provider, chart, kind) whose references, pins or unpinned
+    count differ, then every unresolved target that differs. Empty when the two
+    agree."""
     found = []
     ours, theirs = _edge_index(here), _edge_index(there)
     for key in sorted(set(ours) | set(theirs)):
         consumer, provider, chart = key
         name = f"{consumer} -> {provider}" + (f" [{chart}]" if chart else "")
-        kinds_a, pins_a = ours.get(key, ({}, {}))
-        kinds_b, pins_b = theirs.get(key, ({}, {}))
+        kinds_a, pins_a, unpinned_a = ours.get(key, ({}, {}, 0))
+        kinds_b, pins_b, unpinned_b = theirs.get(key, ({}, {}, 0))
         for kind in sorted(set(kinds_a) | set(kinds_b)):
             if kinds_a.get(kind, 0) != kinds_b.get(kind, 0):
                 found.append(
                     f"{name} {kind}: {kinds_a.get(kind, 0)} references here, "
                     f"{kinds_b.get(kind, 0)} there"
                 )
+        kinds = ",".join(sorted(set(kinds_a) | set(kinds_b)))
         if pins_a != pins_b:
-            kinds = ",".join(sorted(set(kinds_a) | set(kinds_b)))
             found.append(f"{name} {kinds}: refs_pinned {pins_a} here, {pins_b} there")
+        if unpinned_a != unpinned_b:
+            found.append(f"{name} {kinds}: refs_unpinned {unpinned_a} here, {unpinned_b} there")
     unresolved_a = here.get("unresolved_targets_outside_estate") or {}
     unresolved_b = there.get("unresolved_targets_outside_estate") or {}
     for kind in sorted(set(unresolved_a) | set(unresolved_b)):

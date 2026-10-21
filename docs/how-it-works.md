@@ -126,8 +126,8 @@ with how often it is referenced and every repository that references it.
   writes one. The stage never interprets `extra`.
 - `repository-dependencies.json`: every edge with both ends, the unresolved
   targets, and `conflicts`.
-- `kinds.json`: per kind, its origin and its counts of edges, references and
-  unresolved targets, plus what was skipped and why. It is small enough to read
+- `kinds.json`: per kind, its origin, what its pins are (`pins`), and its counts
+  of edges, references and unresolved targets, plus what was skipped and why. It is small enough to read
   without opening the others.
 
 **An edge** aggregates every reference from one repository to another, per chart:
@@ -135,13 +135,25 @@ with how often it is referenced and every repository that references it.
 ```json
 {"repository": "<other end>", "chart": "", "references": 7,
  "kinds": {"terraform_module": 7},
- "refs_pinned": {"v4.2.0": 5, "": 2},
+ "refs_pinned": {"v4.2.0": 5}, "refs_unpinned": 2,
  "examples": [{"url": "https://github.com/<org>/<repo>/blob/<sha>/<path>#L12",
                "line": "source = \"git::…?ref=v4.2.0\""}]}
 ```
 
-`refs_pinned` counts each pin as written, and `""` means none (floating).
-`references` is the full count. `examples` holds at most
+`refs_pinned` counts each pin as written, and `refs_unpinned` counts the
+references that give none (floating), so the two sum to `references`, the full
+count. What a pin is depends on the kind, and `kinds.json` says so in each kind's
+`pins`:
+
+| Kind | `pins` | A pin is |
+|---|---|---|
+| `helm_chart` | `chart versions` | a `Chart.yaml` dependency's `version`, or a `HelmRelease`'s chart `version` |
+| `terraform_module` | `git refs` | the `ref=` of a module source |
+| `maven_artifact` | `version specs` | a dependency's `<version>`, properties resolved within the POM |
+| `npm_package` | `version specs` | the version range as written (`^2.1.0`) |
+
+A store's own kind has `pins` `as the store's parser writes them`: the phrase is
+the library's, never text from the store. `examples` holds at most
 `KSB_RELATIONSHIP_EXAMPLES` (default 3), sorted by path and line, and each `line`
 is passed through the secret mask before it is written, as is every pin, unresolved
 target and conflict key. `chart` is `""` for every

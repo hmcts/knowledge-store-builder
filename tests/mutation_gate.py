@@ -7417,6 +7417,48 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "relationships: a floating reference is counted as a pin",
+        "relationships.py",
+        "                        if ref.ref:\n",
+        "                        if True:\n",
+        "#460 parity: a reference with no pin was counted in `refs_pinned` under an empty-string key, so a reader summing pins counted floating references as pinned and a store converting its own output had to invent the key",
+        (
+            "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
+            "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
+        ),
+    ),
+    Mutation(
+        "relationships: --compare ignores unpinned references",
+        "build_relationships.py",
+        "        if unpinned_a != unpinned_b:\n",
+        "        if False:\n",
+        "#460 parity: the parity gate must see every field it is used to retire a script on; a pinned reference turned floating would otherwise compare equal",
+        (
+            "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
+        ),
+    ),
+    Mutation(
+        "relationships: kinds.json does not say what a kind's pins are",
+        "relationships.py",
+        '            "pins": kind.pins,\n',
+        '            "pins": STORE_PINS,\n',
+        "#460 parity: `refs_pinned` holds chart versions, git refs and version ranges under one name, and without the kind's `pins` a reader compares them as one quantity",
+        (
+            "test_build_relationships.SvcATest.test_kinds_json_counts_each_kind",
+            "test_build_relationships.SvcATest.test_kinds_json_says_what_a_pin_is_for_each_kind",
+        ),
+    ),
+    Mutation(
+        "relationships: a store kind is described as a built-in's pins",
+        "relationships.py",
+        "    pins: str = STORE_PINS\n",
+        '    pins: str = "version specs"\n',
+        "#460 parity: a store's kind writes whatever its parser puts in `ref`, and describing that with a built-in's phrase claims a meaning the library cannot vouch for",
+        (
+            "test_relationships_store_kinds.StoreKindLayerTest.test_a_store_kind_produces_edges_unresolved_targets_and_an_origin",
+        ),
+    ),
+    Mutation(
         "relationships: a store kind's module path may climb with `..`",
         "relationships.py",
         '    if given.is_absolute() or ".." in given.parts:\n',
