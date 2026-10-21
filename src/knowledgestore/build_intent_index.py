@@ -683,6 +683,10 @@ def _fold_tickets(
         text_landed = is_landed or any(
             link_landed(commit, f, ticket, promoted) for f in commit.get("files", [])
         )
+        # Under `omit` the commit was kept for its landed links only, and a
+        # ticket with none of them is a proposal like any other.
+        if omit_proposed and not text_landed:
+            continue
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])

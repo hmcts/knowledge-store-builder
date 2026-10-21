@@ -5393,6 +5393,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_out_branch_only_material_entirely",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
@@ -5566,6 +5567,17 @@ MUTATIONS = (
         "configure(TICKET_PREFIX_DENY='QX, CVE') denied single letters rather than prefixes (#464)",
         (
             "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+        ),
+    ),
+    Mutation(
+        "omit publishes the unpromoted tickets of a kept branch commit",
+        "build_intent_index.py",
+        "        if omit_proposed and not text_landed:\n            continue\n",
+        "",
+        "under KSB_PROPOSED_LINKS=omit a branch commit kept for one promoted ticket "
+        "published its other tickets as proposals (#453 reimplementation review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(

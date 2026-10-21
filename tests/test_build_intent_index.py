@@ -2037,6 +2037,21 @@ class SquashPromotionTest(SettingsIsolated):
         self.assertNotIn("src/c.ts", index)
         self.assertNotIn("proposed", records["QX-2"])
 
+    def test_omit_leaves_out_a_ticket_the_squash_did_not_promote(self):
+        """Catches `omit` publishing a proposal because it shares a branch commit
+        with a promoted ticket: the commit is kept for QX-2 alone."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = index_commits(
+            [
+                draft_commit("QX-2 QX-3: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("proposed", index["src/a.ts"])
+        self.assertNotIn("QX-3", records)
+        self.assertNotIn("proposed", records["QX-2"])
+
     def test_two_runs_under_different_hash_seeds_write_identical_bytes(self):
         """Catches promotion output ordered by set iteration, which differs
         between processes (CLAUDE.md 1.3) and is invisible within one."""
