@@ -24,6 +24,7 @@
 # lives in the two persona guides, so these are where that link resolves today.
 docs/asking-questions.md
 docs/asking-questions.md#install-the-plugin
+docs/asking-questions.md#my-clone-has-no-graph
 docs/asking-questions.md#update-the-plugin
 docs/creating-a-store.md
 docs/creating-a-store.md#install-the-prerequisites
