@@ -250,6 +250,26 @@ def _prefix_list(given: str | Iterable[str]) -> list[str]:
 # genuinely uses one of these keys.
 TICKET_PREFIX_DENY = _prefix_list(os.environ.get("KSB_TICKET_PREFIX_DENY", "CVE,GHSA"))
 
+
+def ticket_ids(text: str) -> list[str]:
+    """Every ticket id text names, in order, less those whose prefix is denied.
+
+    The one place a ticket is read from text, so commit messages and Gherkin
+    tags agree on what a ticket is. Filtered after matching, on the prefix,
+    rather than written into the pattern, so a store whose tracker genuinely uses
+    a denied key restores it with `KSB_TICKET_PREFIX_DENY` instead of rewriting
+    `KSB_TICKET_PATTERN`. The prefix is upper-cased before the comparison, as the
+    list is, so a case-insensitive pattern still denies `cve-2024-1234`. Reads
+    both settings when called, so `configure()` reaches it.
+    """
+    denied = frozenset(TICKET_PREFIX_DENY)
+    return [
+        ticket
+        for ticket in TICKET_PATTERN.findall(text)
+        if ticket.split("-", 1)[0].upper() not in denied
+    ]
+
+
 # Ticket ids in the explorer link here, with the id appended. Empty renders
 # them as plain text, which is right until you say where your tracker lives.
 # Automation identities whose commit bodies are not evidence, beyond the GitHub

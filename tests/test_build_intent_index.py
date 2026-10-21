@@ -331,14 +331,27 @@ class TicketPrefixDenyTest(SettingsIsolated):
         self.assertEqual(intent.body_ticket_ids(self.BODY + " See ZZ-9."), ["ZZ-9"])
 
     def test_the_environment_sets_the_list_and_defaults_it(self):
-        self.assertEqual(config.TICKET_PREFIX_DENY, ["CVE", "GHSA"])
-        with mock.patch.dict(os.environ, {"KSB_TICKET_PREFIX_DENY": ""}):
-            importlib.reload(config)
+        # The default is asserted with the variable removed, so an operator who
+        # exports it does not fail the suite.
+        unset = {k: v for k, v in os.environ.items() if k != "KSB_TICKET_PREFIX_DENY"}
         try:
+            with mock.patch.dict(os.environ, unset, clear=True):
+                importlib.reload(config)
+            self.assertEqual(config.TICKET_PREFIX_DENY, ["CVE", "GHSA"])
+            with mock.patch.dict(os.environ, {"KSB_TICKET_PREFIX_DENY": ""}):
+                importlib.reload(config)
             self.assertEqual(config.TICKET_PREFIX_DENY, [])
             self.assertEqual(intent.body_ticket_ids(self.BODY), ["CVE-2024", "QX-1"])
         finally:
             importlib.reload(config)
+
+    def test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix(self):
+        """Catches the prefix compared as matched: a `(?i)` KSB_TICKET_PATTERN
+        reads `cve-2024-1234` as `cve-2024`, which the upper-cased list misses."""
+        config.configure(TICKET_PATTERN=re.compile(r"(?i)\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b"))
+        body = "Raises the parser floor past cve-2024-1234 for QX-1 before the scan runs."
+        self.assertEqual(config.TICKET_PATTERN.findall(body), ["cve-2024", "QX-1"])
+        self.assertEqual(intent.body_ticket_ids(body), ["QX-1"])
 
 
 class ApplyCommitTest(SettingsIsolated):

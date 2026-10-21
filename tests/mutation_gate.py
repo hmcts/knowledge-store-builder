@@ -5520,12 +5520,13 @@ MUTATIONS = (
     ),
     Mutation(
         "a denied ticket prefix is linked again",
-        "build_intent_index.py",
-        '        if ticket.split("-", 1)[0] not in denied',
+        "config.py",
+        '        if ticket.split("-", 1)[0].upper() not in denied',
         "        if True",
         "dependency bumps citing advisories linked their files to `CVE-<year>` as though "
         "it were a ticket (#453 review)",
         (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
@@ -5533,12 +5534,13 @@ MUTATIONS = (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
             "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
         ),
     ),
     Mutation(
         "a subject's denied ticket prefix is linked again",
         "build_intent_index.py",
-        '    subject_tickets = list(dict.fromkeys(ticket_ids(commit["subject"])))',
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))',
         '    subject_tickets = list(dict.fromkeys(config.TICKET_PATTERN.findall(commit["subject"])))',
         "a dependency bump's subject citing an advisory became a ticketed commit (#453 review)",
         (
@@ -5550,10 +5552,11 @@ MUTATIONS = (
     Mutation(
         "a body's denied ticket prefix is linked again",
         "build_intent_index.py",
-        "    for ticket in ticket_ids(clean_body(body, boilerplate)):",
+        "    for ticket in config.ticket_ids(clean_body(body, boilerplate)):",
         "    for ticket in config.TICKET_PATTERN.findall(clean_body(body, boilerplate)):",
         "a body citing an advisory linked its files to `CVE-<year>` (#453 review)",
         (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
             "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
@@ -5578,6 +5581,50 @@ MUTATIONS = (
         "published its other tickets as proposals (#453 reimplementation review)",
         (
             "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
+        ),
+    ),
+    Mutation(
+        "a lower-case advisory prefix is linked again",
+        "config.py",
+        '        if ticket.split("-", 1)[0].upper() not in denied',
+        '        if ticket.split("-", 1)[0] not in denied',
+        "a case-insensitive KSB_TICKET_PATTERN read `cve-2024` past the deny-list (#464 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
+        ),
+    ),
+    Mutation(
+        "a Gherkin tag's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '        feature["tags"].update(tag.lstrip("@") for tag in line.split())\n'
+        '        feature["tickets"].update(config.ticket_ids(line))',
+        '        feature["tags"].update(tag.lstrip("@") for tag in line.split())\n'
+        '        feature["tickets"].update(config.TICKET_PATTERN.findall(line))',
+        "a feature tagged with an advisory was linked to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "a Gherkin scenario's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '            feature["scenarios"].append(name)\n'
+        '        feature["tickets"].update(config.ticket_ids(line))',
+        '            feature["scenarios"].append(name)\n'
+        '        feature["tickets"].update(config.TICKET_PATTERN.findall(line))',
+        "a scenario naming an advisory linked its feature to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "a feature file name's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '        "tickets": set(config.ticket_ids(path.stem)),',
+        '        "tickets": set(config.TICKET_PATTERN.findall(path.stem)),',
+        "a feature file named after an advisory was linked to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
         ),
     ),
     Mutation(

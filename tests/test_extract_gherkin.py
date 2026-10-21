@@ -65,6 +65,25 @@ class ParseFeatureTest(SettingsIsolated):
         self.assertIn("DD-999", feature["tickets"])  # from filename
         self.assertIn("regression", feature["tags"])
 
+    def test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name(self):
+        """Catches a feature linked to `CVE-<year>` as though it were a ticket (#464).
+
+        The tag, the scenario line and the file name are the three places a
+        feature's tickets are read from, and each is read separately."""
+        text = (
+            "@regression @CVE-2024-1234 @QX-7\n"
+            "Feature: Pin the parser\n\n"
+            "  Scenario: Reject the payload in CVE-2023-4567 for QX-8\n"
+            "    Then the payload is rejected\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "features" / "CVE-2022-9999-QX-9-pin-parser.feature"
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+            feature = gherkin.parse_feature(path, root)
+        self.assertEqual(sorted(feature["tickets"]), ["QX-7", "QX-8", "QX-9"])
+
     def test_file_without_feature_header_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
