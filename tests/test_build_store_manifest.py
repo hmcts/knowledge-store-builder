@@ -118,6 +118,19 @@ class WritingTheManifest(_Run):
         self.assertIn("id example-store", lines[-1])
 
 
+class LocalOnlyLayers(_Run):
+    def test_a_layer_git_ignores_is_printed_as_local_only(self):
+        """Breaks if the stage prints an ignored layer as plainly absent: the
+        operator would rebuild a layer that exists and only needs committing."""
+        _git_repo(self.root, "https://example.com/example-org/example-store.git")
+        _touch(self.root, ".gitignore", "knowledge/git-history/\n")
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        code, out, _ = self.run_stage()
+        self.assertEqual(code, 0)
+        self.assertIn("✗ history (local only: git ignores it)", out)
+        self.assertIn("✗ graph\n", out)
+
+
 class Refusals(_Run):
     def test_an_undeterminable_id_exits_1_naming_both_sources(self):
         """Breaks if the stage writes a manifest with no store id, or exits with

@@ -165,11 +165,75 @@ def store_identity(root: Path, run=run_git) -> tuple[str, str]:
     return store_id, config.GITHUB_ORG or ""
 
 
-def _present(path: Path, kind: str) -> bool:
-    if kind == "dir":
-        # A directory a stage created and left empty has built nothing.
-        return path.is_dir() and any(path.iterdir())
-    return path.is_file()
+# Paths per `git check-ignore` call, well under any argument-length limit.
+_BATCH = 200
+
+
+_ESCAPES = {'"': '"', "\\": "\\", "t": "\t", "n": "\n"}
+
+
+def _unquoted(line: str) -> str:
+    """A path as `git check-ignore` prints it: quoted when it holds `"`, a
+    backslash or a control character, plain otherwise (`-z` needs `--stdin`)."""
+    if not (len(line) >= 2 and line[0] == line[-1] == '"'):
+        return line
+    out, body, i = [], line[1:-1], 0
+    while i < len(body):
+        if body[i] == "\\" and i + 1 < len(body):
+            out.append(_ESCAPES.get(body[i + 1], body[i : i + 2]))
+            i += 2
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
+
+
+def _ignored(root: Path, rels: list[str], run) -> set[str]:
+    """The store-relative paths git would not commit, because a rule ignores them.
+
+    `--no-index` asks what the rules say, not whether a file is tracked: a clone
+    receives what is committed, and the builder's own files are the ones asked
+    about. Exit 1 (none ignored) and exit 128 (not a repository, so no rules to
+    judge by) both raise from `run`; both mean nothing is known to be ignored, and
+    a store outside git is described as it is on disk.
+    """
+    ignored: set[str] = set()
+    for start in range(0, len(rels), _BATCH):
+        batch = rels[start : start + _BATCH]
+        try:
+            out = run(
+                ["-C", str(root), "-c", "core.quotePath=false", "check-ignore", "--no-index"]
+                + ["--", *batch]
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        ignored.update(_unquoted(line) for line in out.splitlines() if line)
+    return ignored
+
+
+def _probe(root: Path, rel: str, kind: str, run) -> tuple[bool, bool, list[Path]]:
+    """(on disk, received by a clone, the entries a clone receives).
+
+    A directory is received when at least one non-ignored file is in it, and a
+    directory a stage created and left empty has built nothing. The entries are
+    what its digest reads, so builder and clone hash the same files.
+    """
+    path = root / rel
+    if kind != "dir":
+        if not path.is_file():
+            return False, False, []
+        return True, not _ignored(root, [rel], run), []
+    if not path.is_dir():
+        return False, False, []
+    entries = sorted(path.rglob("*"))
+    rels = {entry: entry.relative_to(root).as_posix() for entry in entries}
+    skipped = _ignored(root, list(rels.values()), run)
+    kept = [entry for entry in entries if rels[entry] not in skipped]
+    return (
+        any(entry.is_file() for entry in entries),
+        any(entry.is_file() for entry in kept),
+        kept,
+    )
 
 
 def _listed(rel: str, kind: str) -> str:
@@ -228,17 +292,17 @@ def _held(path: Path, root: Path) -> None:
         )
 
 
-def _digest(path: Path, kind: str, root: Path) -> str:
+def _digest(path: Path, kind: str, root: Path, entries: list[Path]) -> str:
     """A content digest: the file's, or for a directory one over its files.
 
     A directory's is taken over `relative path NUL file digest` lines, sorted, so
-    a renamed file changes it as surely as an edited one. Every link met on the
-    way must stay inside `root` (see `_held`).
+    a renamed file changes it as surely as an edited one. `entries` are the ones
+    a clone receives (see `_probe`). Every link met on the way must stay inside
+    `root` (see `_held`).
     """
     _held(path, root)
     if kind != "dir":
         return _file_digest(path)
-    entries = list(path.rglob("*"))
     for entry in entries:
         _held(entry, root)
     lines = sorted(
@@ -253,18 +317,29 @@ def _text_digest(lines: list[str]) -> str:
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
 
 
-def _layers(root: Path) -> dict:
-    """Each layer's entry: its paths, whether it is present, and its digest."""
+def _layers(root: Path, run) -> dict:
+    """Each layer's entry: its paths, whether a clone receives it, and its digest.
+
+    `present` says a clone of the store has the layer. One that exists only on
+    this machine - ignored by git, or an uncompressed twin of a committed archive
+    - is `local_only` with no digest.
+    """
     layers: dict[str, dict] = {}
     for layer in LAYERS:
-        found = [rel for rel in layer.paths if _present(root / rel, layer.kind)]
+        probes = {rel: _probe(root, rel, layer.kind, run) for rel in layer.paths}
+        found = [rel for rel in layer.paths if probes[rel][1]]
         chosen = found[0] if found else layer.paths[0]
         ordered = [chosen, *(rel for rel in layer.paths if rel != chosen)]
-        layers[layer.name] = {
+        described = {
             "paths": [_listed(rel, layer.kind) for rel in ordered],
             "present": bool(found),
-            "digest": _digest(root / chosen, layer.kind, root) if found else None,
+            "digest": _digest(root / chosen, layer.kind, root, probes[chosen][2])
+            if found
+            else None,
         }
+        if not found and any(probes[rel][0] for rel in layer.paths):
+            described["local_only"] = True
+        layers[layer.name] = described
     return layers
 
 
@@ -273,7 +348,7 @@ def _within(root: Path, rel: str) -> bool:
     return root.resolve() in (root / rel).resolve().parents
 
 
-def extra_layers(root: Path) -> dict:
+def extra_layers(root: Path, run=run_git) -> dict:
     """The store's own layers, from `config/store-extra-layers.json` when it exists.
 
     Each declared path is held inside the store root: a reader resolves it
@@ -313,13 +388,15 @@ def extra_layers(root: Path) -> dict:
         target = root / rel
         # The library's own rule: a file, or a directory holding something.
         kind = "dir" if target.is_dir() else "file"
-        present = _present(target, kind)
+        exists, present, entries = _probe(root, rel, kind, run)
         described = {
             "path": rel,
             "description": description,
             "present": present,
-            "digest": _digest(target, kind, root) if present else None,
+            "digest": _digest(target, kind, root, entries) if present else None,
         }
+        if exists and not present:
+            described["local_only"] = True
         if "kind" in entry:
             if entry["kind"] not in EXTRA_KINDS:
                 raise UsageError(
@@ -375,11 +452,11 @@ def store_digest(layers: dict, extra: dict) -> str:
     )
 
 
-def compute(root: Path) -> dict:
+def compute(root: Path, run=run_git) -> dict:
     """The full manifest for the store at `root`."""
-    store_id, github_org = store_identity(root)
-    layers = _layers(root)
-    extra = extra_layers(root)
+    store_id, github_org = store_identity(root, run)
+    layers = _layers(root, run)
+    extra = extra_layers(root, run)
     measurements = _measurements(root)
     layers["graph"]["source_urls"] = _flag(measurements, "source_urls.linked", lambda n: n > 0)
     layers["intent"]["reach"] = _flag(

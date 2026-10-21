@@ -613,6 +613,125 @@ class Symlinks(_Store):
         self.assertEqual(layers["history"]["digest"], direct)
 
 
+class WhatACloneReceives(_Store):
+    """The manifest describes what a clone of the store gets, so a layer whose
+    files git would not commit is local to the builder and not offered to askers.
+    Every test uses a real `git init` store and a real `.gitignore`."""
+
+    def setUp(self):
+        super().setUp()
+        _git_repo(self.root, "https://example.com/example-org/example-store.git")
+        _touch(self.root, ".gitignore", "knowledge/git-history/\ngraphify-out/graph.json\n")
+
+    def layers(self) -> dict:
+        return self.compute()["layers"]
+
+    def test_an_ignored_directory_layer_is_local_only(self):
+        """Breaks if a gitignored directory layer is offered to askers: `history`
+        is never committed, so a clone would be told it can read files it lacks."""
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        history = self.layers()["history"]
+        self.assertFalse(history["present"])
+        self.assertTrue(history["local_only"])
+        self.assertIsNone(history["digest"])
+        self.assertEqual(history["paths"], ["knowledge/git-history/"])
+
+    def test_a_plain_graph_whose_file_is_ignored_is_local_only(self):
+        """Breaks if an ignored plain `graph.json` with no archive counts as the
+        graph: no clone receives it."""
+        _touch(self.root, "graphify-out/graph.json", "plain")
+        graph = self.layers()["graph"]
+        self.assertFalse(graph["present"])
+        self.assertTrue(graph["local_only"])
+        self.assertIsNone(graph["digest"])
+
+    def test_a_committed_archive_beside_an_ignored_plain_file_stays_present(self):
+        """Breaks if the ignored plain file hides the `.gz` that clones do get, or
+        the digest is taken over the file that is not committed."""
+        _touch(self.root, "graphify-out/graph.json", "plain")
+        _touch(self.root, "graphify-out/graph.json.gz", "archive")
+        graph = self.layers()["graph"]
+        self.assertTrue(graph["present"])
+        self.assertNotIn("local_only", graph)
+        self.assertEqual(graph["paths"][0], "graphify-out/graph.json.gz")
+        self.assertEqual(graph["digest"], _sha(b"archive"))
+
+    def test_a_directory_digest_covers_only_the_files_a_clone_receives(self):
+        """Breaks if an ignored file inside a layer that is otherwise committed
+        changes its digest: builder and clone would then disagree."""
+        _touch(self.root, ".gitignore", "docs/journeys/draft.md\n")
+        _touch(self.root, "docs/journeys/apply.md", "# Apply")
+        _touch(self.root, "docs/journeys/draft.md", "# Draft")
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
+        )
+        journeys = self.compute()["extra_layers"]["journeys"]
+        self.assertTrue(journeys["present"])
+        self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
+
+    def test_an_ignored_file_with_a_quote_in_its_name_is_still_ignored(self):
+        """Breaks if git's quoted spelling of an unusual name is not read back:
+        `check-ignore` prints it as `"odd\\"name"`, which would match no file, so the
+        ignored file would be counted into the digest."""
+        _touch(self.root, ".gitignore", 'docs/journeys/odd"name.md\n')
+        _touch(self.root, "docs/journeys/apply.md", "# Apply")
+        _touch(self.root, 'docs/journeys/odd"name.md', "# Odd")
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
+        )
+        journeys = self.compute()["extra_layers"]["journeys"]
+        self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
+
+    def test_an_ignored_extra_layer_is_local_only(self):
+        """Breaks if the rule stops at the library's layers: a store's own layer
+        that git ignores is as unavailable to a clone."""
+        _touch(self.root, ".gitignore", "knowledge/registry.json\n")
+        _touch(self.root, "knowledge/registry.json", "one")
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"registry": {"path": "knowledge/registry.json", "description": "x"}}),
+        )
+        registry = self.compute()["extra_layers"]["registry"]
+        self.assertFalse(registry["present"])
+        self.assertTrue(registry["local_only"])
+        self.assertIsNone(registry["digest"])
+
+    def test_a_local_only_layer_counts_as_absent_in_the_store_digest(self):
+        """Breaks if a layer clones lack still moves the store digest: it must
+        contribute `-`, exactly as if the files were never built."""
+        _touch(self.root, "knowledge/summaries/communities.json", "{}")
+        without = self.compute()["digest"]
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        self.assertEqual(self.compute()["digest"], without)
+
+    def test_a_clone_computes_the_builders_store_digest(self):
+        """Breaks if builder and clone disagree on the store digest: the one value
+        a reader compares across machines. The clone is a real `git clone`."""
+        _touch(self.root, "graphify-out/graph.json", "plain")
+        _touch(self.root, "graphify-out/graph.json.gz", "archive")
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        _touch(self.root, "knowledge/summaries/communities.json", '{"1": "a"}')
+        git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(self.root)]
+        subprocess.run([*git, "add", "."], check=True, env=git_env())
+        subprocess.run([*git, "commit", "-q", "-m", "store"], check=True, env=git_env())
+        builder = self.compute()
+        clones = tempfile.TemporaryDirectory()
+        self.addCleanup(clones.cleanup)
+        clone = Path(clones.name) / "clone"
+        subprocess.run(
+            ["git", "clone", "-q", str(self.root), str(clone)], check=True, env=git_env()
+        )
+        self.assertFalse((clone / "knowledge" / "git-history").exists())
+        copy = store_manifest.compute(clone)
+        self.assertEqual(copy["digest"], builder["digest"])
+        self.assertEqual(copy["layers"]["graph"], builder["layers"]["graph"])
+
+
 class SourcesAsOf(_Store):
     def provenance(self, repositories, external=None) -> None:
         document = {"repositories": repositories}

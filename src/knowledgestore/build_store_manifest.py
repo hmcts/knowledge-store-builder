@@ -28,6 +28,11 @@ def _mark(present) -> str:
     return "✓" if present else "✗"
 
 
+def _local(layer: dict) -> str:
+    """Said beside a layer git ignores: it exists here, and no clone receives it."""
+    return " (local only: git ignores it)" if layer.get("local_only") else ""
+
+
 def render(manifest: dict) -> str:
     """The manifest's text: sorted keys, indent 1, a trailing newline.
 
@@ -56,9 +61,9 @@ def write_atomically(path: Path, text: str) -> None:
 
 def report(manifest: dict) -> None:
     for name, layer in manifest["layers"].items():
-        print(f"  {_mark(layer['present'])} {name}")
+        print(f"  {_mark(layer['present'])} {name}{_local(layer)}")
     for name, layer in manifest["extra_layers"].items():
-        print(f"  {_mark(layer['present'])} {name} (extra)")
+        print(f"  {_mark(layer['present'])} {name} (extra){_local(layer)}")
     format_ = manifest["format"]
     print(
         f"Store manifest: format {format_['major']}.{format_['minor']}, "

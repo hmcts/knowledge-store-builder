@@ -370,8 +370,14 @@ last by `knowledgestore manifest` and committed with the store.
   hashed, never parsed. A layer a stage can measure but a file cannot - source
   links, deployments, ticket reach - carries a flag read from
   `knowledge/telemetry.json`, and `null` when nothing recorded it.
-- **Present means measured**, by a file test when the manifest is computed. An
-  empty directory has built nothing.
+- **Present means a clone receives it.** Measured when the manifest is
+  computed, from files git would commit: a path a `.gitignore` rule ignores does
+  not count, and a directory counts when it holds at least one such file. A layer
+  that exists only on the builder's machine - `git-history/`, or a plain
+  `graph.json` with no committed `.gz` - is `"present": false` with
+  `"local_only": true`, no digest, and contributes nothing to the store digest, so
+  a builder and every clone compute the same one. An empty directory has built
+  nothing.
 - **A store's own layers** are declared in `config/store-extra-layers.json`, each
   with a path below the store root, a description and optionally
   `"kind": "answers"` for written answers a reader can serve alongside the
