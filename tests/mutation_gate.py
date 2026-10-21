@@ -7472,6 +7472,37 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "store manifest: any relationships major is recognised",
+        "store_manifest.py",
+        "        and major == RELATIONSHIPS_MAJOR\n",
+        "        and major > 0\n",
+        "a reader that trusts `recognised` would parse a relationships layer written at a major this library cannot read",
+        (
+            "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
+        ),
+    ),
+    Mutation(
+        "store manifest: the relationships stamp is not read",
+        "store_manifest.py",
+        '        _relationships_recognised(root) if layers["relationships"]["present"] else None\n',
+        '        True if layers["relationships"]["present"] else None\n',
+        "every present relationships layer would read as recognised whatever its stamp says, or lacks",
+        (
+            "test_store_manifest.RelationshipsLayerIsRecognised.test_a_damaged_stamp_file_is_not_recognised_and_not_a_failure",
+            "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
+            "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
+            "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+        ),
+    ),
+    Mutation(
+        "store manifest: status counts every file as covered",
+        "status.py",
+        '        if path.is_file() and not any(rel == c or rel.startswith(c + "/") for c in claimed):\n',
+        "        if path.is_file() and not any(rel == c or rel.startswith(c) for c in claimed):\n",
+        "a file whose name merely begins with a layer's path (`knowledge/intent` and `knowledge/intent-notes.md`) would read as covered, and a file no layer names would go unreported",
+        ("test_build_store_manifest.StatusReadsTheManifest.test_files_no_layer_covers_are_listed",),
+    ),
+    Mutation(
         "store manifest: a file layer linking out of the store is hashed",
         "store_manifest.py",
         '    _held(path, root)\n    if kind != "dir":\n',

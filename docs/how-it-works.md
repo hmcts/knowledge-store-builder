@@ -532,7 +532,15 @@ last by `knowledgestore manifest` and committed with the store.
   sha256; for a directory, one over its files' names and digests). The graph is
   hashed, never parsed. A layer a stage can measure but a file cannot - source
   links, deployments, ticket reach - carries a flag read from
-  `knowledge/telemetry.json`, and `null` when nothing recorded it.
+  `knowledge/telemetry.json`. A flag that is `null` means a library stage has not
+  measured it, which is unknown and never "absent": `false` is what says the store
+  was measured and lacks it.
+- **The relationships layer says whether this library knows it.** Its
+  `recognised` flag is true when `knowledge/relationships/repository-dependencies.json`
+  carries a top-level `format` stamp naming the layer `relationships` at a major
+  this library reads (1), and false for a missing, damaged or foreign stamp; the
+  layer is still `present` and digested either way, so the reader decides. It is
+  `null` when the layer is absent.
 - **Present means a clone receives it.** Measured when the manifest is
   computed, from files git would commit: a path a `.gitignore` rule ignores does
   not count, and a directory counts when it holds at least one such file. A layer
@@ -552,7 +560,9 @@ last by `knowledgestore manifest` and committed with the store.
   `digest` covers every layer, and `sources_as_of` is the newest commit date
   provenance records. The MCP server compares the `digest` to decide whether the
   store it holds has changed and reports `sources_as_of` as how recent the
-  sources are; a store with no manifest yet has neither.
+  sources are; a store with no manifest yet has neither. `status` also lists the files under `knowledge/` that no layer, declared
+  extra layer or library-excused path covers, so a file a reader would never be told
+  about is visible.
 - **The format version** is `format.major` and `format.minor`. The major number
   changes when a reader written for the old version would misread the store, the
   minor when a layer or field is added. A reader written for one major number

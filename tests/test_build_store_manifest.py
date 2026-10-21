@@ -114,7 +114,7 @@ class WritingTheManifest(_Run):
         self.assertIn("✗ graph", out)
         # Nothing recorded whether the deployments stage added any: unknown, not absent.
         self.assertIn("? deployments", out)
-        self.assertEqual(lines[-1].split()[:4], ["Store", "manifest:", "format", "1.0,"])
+        self.assertEqual(lines[-1].split()[:4], ["Store", "manifest:", "format", "1.1,"])
         self.assertIn("id example-store", lines[-1])
 
 
@@ -218,7 +218,7 @@ class StatusReadsTheManifest(_Run):
         self.run_stage()
         document = json.loads(self.path.read_text(encoding="utf-8"))
         out = self.status_output()
-        self.assertIn("Store manifest: format 1.0", out)
+        self.assertIn("Store manifest: format 1.1", out)
         self.assertIn(f"digest {document['digest']}", out)
         self.assertIn("sources as of 2026-01-01T00:00:00+00:00", out)
         self.assertIn("absent: ", out)
@@ -227,6 +227,35 @@ class StatusReadsTheManifest(_Run):
         self.assertNotIn("provenance", absent)
         # Nothing recorded whether deployments were added: unknown, which is not absent.
         self.assertNotIn("deployments", absent)
+
+    def test_files_no_layer_covers_are_listed(self):
+        """Breaks if a file under `knowledge/` that no layer and no declared extra
+        layer names goes unreported: a reader is never told the store holds it."""
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"journeys": {"path": "knowledge/journeys", "description": "J."}}),
+        )
+        _touch(self.root, "knowledge/journeys/apply.md", "# Apply")
+        _touch(self.root, "knowledge/provenance.json")
+        _touch(self.root, "knowledge/history-notes/stray.md", "stray")
+        # Begins with a layer's path without being inside it.
+        _touch(self.root, "knowledge/provenance.json.bak", "stray")
+        _touch(self.root, "knowledge/intent/tracker-undecided.json", "an excused report")
+        self.run_stage()
+        line = next(line for line in self.status_output().splitlines() if "uncovered: " in line)
+        # Whole items, not substrings: the stray backup's name contains a covered path.
+        self.assertEqual(
+            line.split("uncovered: ", 1)[1].split(", "),
+            ["knowledge/history-notes/stray.md", "knowledge/provenance.json.bak"],
+        )
+
+    def test_a_store_with_no_uncovered_files_says_none(self):
+        """Breaks if the section prints nothing when all is covered, which reads as
+        a check that did not run."""
+        _touch(self.root, "knowledge/provenance.json")
+        self.run_stage()
+        self.assertIn("uncovered: none", self.status_output())
 
     def test_a_local_only_layer_is_listed_as_local_only(self):
         """Breaks if `status` lists a layer git ignores as plainly absent."""

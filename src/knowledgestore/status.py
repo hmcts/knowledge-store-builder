@@ -35,6 +35,7 @@ from . import (
     merge_inputs,
     provenance,
     record_clustering,
+    store_manifest,
     store_paths,
     telemetry,
 )
@@ -1176,6 +1177,35 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _uncovered(manifest: dict) -> list[str]:
+    """Files under `knowledge/` that no layer, declared extra layer or excused
+    path accounts for.
+
+    Judged against the manifest as written, like the rest of its report: a layer
+    or declaration added since is not in it. Paths the library has decided are not
+    layers (`store_manifest.NOT_A_LAYER`) are excused, so what is left is a file
+    nobody has said a reader should know about.
+    """
+    root = config.ROOT
+    claimed = [
+        path.rstrip("/")
+        for entry in (*manifest["layers"].values(), *manifest.get("extra_layers", {}).values())
+        for path in (entry.get("paths") or [entry.get("path", "")])
+        if path
+    ]
+    for name in store_manifest.NOT_A_LAYER:
+        value = getattr(config, name, None)
+        if isinstance(value, Path) and root in value.parents:
+            claimed.append(value.relative_to(root).as_posix())
+    claimed.append(config.STORE_MANIFEST_PATH.relative_to(root).as_posix())
+    found = []
+    for path in sorted((root / "knowledge").rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        if path.is_file() and not any(rel == c or rel.startswith(c + "/") for c in claimed):
+            found.append(rel)
+    return found
+
+
 def _report_manifest() -> None:
     """What the store's manifest says is built, and which layers it says are not.
 
@@ -1218,6 +1248,8 @@ def _report_manifest() -> None:
         return
     print(summary)
     print(f"  absent: {', '.join(absent) if absent else 'none'}")
+    uncovered = _uncovered(manifest)
+    print(f"  uncovered: {', '.join(uncovered) if uncovered else 'none'}")
 
 
 def _report_telemetry() -> None:
