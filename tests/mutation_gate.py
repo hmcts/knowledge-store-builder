@@ -7321,17 +7321,39 @@ MUTATIONS = (
         "        return []\n",
         "#460 parity: without PyYAML every Flux `HelmRelease` was reported as not read while the stage exited 0, so a store comparing layers lost every reference in its releases from a layer that read as complete",
         (
+            "test_build_relationships.MissingPyYamlTest.test_a_quoted_kind_line_is_a_release_that_needs_pyyaml",
             "test_build_relationships.MissingPyYamlTest.test_a_release_without_pyyaml_fails_the_stage_and_compare_naming_the_extra",
         ),
     ),
     Mutation(
         "relationships: every YAML file needs PyYAML",
         "relationships.py",
-        '    if "HelmRelease" not in text:\n        return []\n    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n',
-        '    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n    if "HelmRelease" not in text:\n        return []\n',
+        '    if not _HELM_RELEASE_KIND.search(text):\n        return []\n    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n',
+        '    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n    if not _HELM_RELEASE_KIND.search(text):\n        return []\n',
         "#460 parity: PyYAML is the `deploy` extra and stays optional; asking for it before a file is known to hold a release refuses every estate with a `values.yaml` on the default install",
         (
+            "test_build_relationships.MissingPyYamlTest.test_a_file_that_only_mentions_a_release_builds_without_pyyaml",
             "test_build_relationships.MissingPyYamlTest.test_an_estate_with_no_release_builds_without_pyyaml",
+        ),
+    ),
+    Mutation(
+        "relationships: a file mentioning HelmRelease needs PyYAML",
+        "relationships.py",
+        "    if not _HELM_RELEASE_KIND.search(text):\n",
+        '    if "HelmRelease" not in text:\n',
+        "#455: a pipeline that runs `flux reconcile helmrelease` or echoes the kind declares no release, and taking the word anywhere as one refused the default install's whole run",
+        (
+            "test_build_relationships.MissingPyYamlTest.test_a_file_that_only_mentions_a_release_builds_without_pyyaml",
+        ),
+    ),
+    Mutation(
+        'relationships: a quoted `kind: "HelmRelease"` is not a release',
+        "relationships.py",
+        """_HELM_RELEASE_KIND = re.compile(r\"\"\"^\\s*kind:\\s*["']?HelmRelease["']?\\s*$\"\"\", re.MULTILINE)\n""",
+        '_HELM_RELEASE_KIND = re.compile(r"^kind: HelmRelease$", re.MULTILINE)\n',
+        '#455: the trigger narrowed to the unquoted form reads a release written `kind: "HelmRelease"` as no release, so on the default install its chart reference vanishes rather than stopping the run',
+        (
+            "test_build_relationships.MissingPyYamlTest.test_a_quoted_kind_line_is_a_release_that_needs_pyyaml",
         ),
     ),
     Mutation(

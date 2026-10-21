@@ -609,14 +609,22 @@ class MissingDependency(Exception):
         self.extra = extra
 
 
+# A line declaring a document's kind a `HelmRelease`, the only thing that makes a
+# file need PyYAML. The word anywhere is not enough: a pipeline that runs
+# `flux reconcile helmrelease` or echoes the kind declares no release, and would
+# otherwise refuse the default install's whole run.
+_HELM_RELEASE_KIND = re.compile(r"""^\s*kind:\s*["']?HelmRelease["']?\s*$""", re.MULTILINE)
+
+
 def _helm_releases(rel: str, text: str) -> list[Reference]:
     """Flux `HelmRelease`s in a YAML file, through the one reader of them.
 
     Raises `MissingDependency` without PyYAML, because there is nothing to read them
     with and the file is not therefore free of references; and `ValueError` for a
-    file naming `HelmRelease` that will not parse (a Helm template full of `{{ }}`),
+    file with a `kind: HelmRelease` line that will not parse (a Helm template full
+    of `{{ }}`),
     so the layer counts it as unreadable rather than as holding no release."""
-    if "HelmRelease" not in text:
+    if not _HELM_RELEASE_KIND.search(text):
         return []
     try:
         import yaml

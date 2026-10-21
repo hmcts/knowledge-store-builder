@@ -219,7 +219,9 @@ A Flux `HelmRelease` is read with PyYAML, which the `deploy` extra installs
 (`pip install 'hmcts-knowledge-store-builder[deploy]'`). Without it, a run over a
 clone holding a release stops with exit 1 and writes nothing, naming the file, the
 missing library and the extra, because a release the stage cannot read would
-leave its references out of a layer that reads as complete. An estate holding no
+leave its references out of a layer that reads as complete. A release is a file
+with a `kind: HelmRelease` line; one that only mentions the word, such as a
+pipeline running `flux reconcile helmrelease`, is not. An estate holding no
 release builds without PyYAML.
 
 ### A store's own kinds

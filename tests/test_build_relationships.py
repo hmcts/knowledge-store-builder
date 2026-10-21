@@ -845,6 +845,36 @@ class MissingPyYamlTest(_Store):
         )
         self.assertEqual([e["repository"] for e in body["depends_on"]], ["web-charts"])
 
+    def test_a_file_that_only_mentions_a_release_builds_without_pyyaml(self):
+        """Break caught: the word `HelmRelease` anywhere in a file taken as a release,
+        so a pipeline that reconciles one - or echoes its kind - refuses the whole
+        run on the default install although it declares nothing PyYAML could read.
+        Only a `kind: HelmRelease` line declares one."""
+        self.repos.mkdir()
+        pipeline = (
+            "trigger: [main]\nsteps:\n"
+            "  - script: flux reconcile helmrelease web  # bump the HelmRelease\n"
+            '  - script: echo "kind: HelmRelease"\n'
+        )
+        _write(self.repos / "app", {"azure-pipelines.yml": pipeline})
+        self.without_pyyaml()
+        code, out, err = self.run_stage()
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("PyYAML", err)
+
+    def test_a_quoted_kind_line_is_a_release_that_needs_pyyaml(self):
+        """Break caught: the trigger narrowed to the exact text `kind: HelmRelease`,
+        so a release written `kind: "HelmRelease"` reads as no release and its chart
+        reference vanishes on the default install instead of stopping the run."""
+        release = RELEASE.replace("kind: HelmRelease", 'kind: "HelmRelease"', 1)
+        self.assertNotEqual(release, RELEASE)
+        self.estate({"deployer": {"apps/x/release.yaml": release}})
+        self.without_pyyaml()
+        code, out, err = self.run_stage()
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("PyYAML", err)
+        self.assertIn("deployer/apps/x/release.yaml", err)
+
 
 class UnparsedReleaseTest(_Store):
     def test_a_release_that_will_not_parse_is_counted_and_named(self):
