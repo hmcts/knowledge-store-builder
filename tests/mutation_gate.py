@@ -5392,10 +5392,13 @@ MUTATIONS = (
             "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
             "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
             "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_bot_authored_squash_body_promotes_nothing",
             "test_build_intent_index.SquashPromotionTest.test_a_bulleted_body_without_a_pull_request_number_promotes_nothing",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_single_bullet_is_not_a_list_of_collapsed_commits",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
             "test_build_intent_index.SquashPromotionTest.test_a_squash_into_another_branch_promotes_nothing",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_a_ticket_outside_the_bullets_is_not_promoted",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
@@ -5426,6 +5429,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
@@ -5514,6 +5518,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
@@ -5534,6 +5539,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
@@ -5570,6 +5576,7 @@ MUTATIONS = (
         "a body that is not GitHub's list of collapsed commits vouched for its tickets",
         (
             "test_build_intent_index.SquashPromotionTest.test_a_single_bullet_is_not_a_list_of_collapsed_commits",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
         ),
     ),
     Mutation(
@@ -5594,6 +5601,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
             "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
             "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
@@ -5619,6 +5627,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
@@ -5782,6 +5791,41 @@ MUTATIONS = (
         (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
             "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
+        ),
+    ),
+    Mutation(
+        "a squash reachable only from a tag promotes nothing",
+        "build_intent_index.py",
+        '    if commit.get("is_merge") or not landed(commit):',
+        '    if commit.get("is_merge") or commit.get("reach", "default") != "default":',
+        "a squash on a tagged release line left its landed branch work published as "
+        "`proposed`, against the rule `landed()` applies to every commit (#466 review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+        ),
+    ),
+    Mutation(
+        "a bot-authored squash body vouches for its bullets",
+        "build_intent_index.py",
+        "    blocks = _body_blocks(commit_body(commit), boilerplate)",
+        '    blocks = _body_blocks(str(commit.get("body") or ""), boilerplate)',
+        "a machine's bullet list promoted links as though a person had listed the "
+        "collapsed commits (#466 review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_bot_authored_squash_body_promotes_nothing",
+        ),
+    ),
+    Mutation(
+        "a body listing squashed authors is not rejected",
+        "build_intent_index.py",
+        "    if any(line.lower().startswith(AUTHOR_LINE) for line in lines):\n"
+        '        return "squashed-authors"\n',
+        "",
+        "a squashed range's author list read as prose, and under a squash subject as "
+        "its list of collapsed commits (#466 review)",
+        (
+            "test_build_intent_index.CleanBodyTest.test_body_embedding_original_authors_is_rejected",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
         ),
     ),
     Mutation(

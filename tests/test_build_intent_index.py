@@ -2008,6 +2008,51 @@ class SquashPromotionTest(SettingsIsolated):
         self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
         self.assertEqual(index["src/c.ts"]["proposed"], {"QX-2": 1})
 
+    def test_a_squash_reachable_only_from_a_tag_promotes(self):
+        """Catches promotion narrowed to the default branch: a squash on a release
+        line that was tagged landed by the same rule `landed()` applies to every
+        commit, and its branch's links are landed work."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/b.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"], reach="tag"),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("proposed", index["src/a.ts"])
+        self.assertEqual(index["src/b.ts"]["proposed"], {"QX-2": 1})
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_a_bot_authored_squash_body_promotes_nothing(self):
+        """Catches a machine's bullet list read as evidence: a body an automated
+        author wrote is no evidence of anything, bullets or not."""
+        squash = squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"])
+        squash["author"] = squash["committer"] = {
+            "name": "dependabot[bot]",
+            "email": "support@example.example",
+        }
+        index, records = index_commits(
+            [draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]), squash]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+        self.assertTrue(records["QX-2"]["proposed"])
+
+    def test_a_squash_body_listing_squashed_authors_promotes_nothing(self):
+        """Catches a body carrying a squashed range's authors read as a list of
+        collapsed commits: that shape is rejected before the bullets are read."""
+        squash = squash_commit(
+            self.SQUASH,
+            self.BULLETS,
+            ["src/a.ts"],
+            prose="Author: A Person <a.person@example.example>",
+        )
+        index, _ = index_commits(
+            [draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]), squash]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
     def test_a_bulleted_body_without_a_pull_request_number_promotes_nothing(self):
         """Catches a hand-written bulleted description read as a squash merge.
 
