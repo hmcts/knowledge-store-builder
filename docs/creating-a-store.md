@@ -514,6 +514,38 @@ A run also compares each repository's node count with the last run and reports
 decreases, absences and new repositories. It reports and does not refuse, because
 deleted code is a legitimate reason for a smaller layer.
 
+**It refuses before extracting when graphify cannot parse a file type the content
+set holds.** graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` files as nothing
+when its grammar package is absent, with no error, so a green run proves nothing
+about them. `extract-ast` probes the interpreter it imports graphify from and
+exits non-zero, naming the missing grammar, how many files need it and the fix:
+install the `[ast]` extra in that environment. Content sets with no such files
+are never probed.
+
+### Check the grammars before any store-owned AST route
+
+```bash
+knowledgestore check-grammars
+```
+
+A store that drives graphify itself, rather than through `extract-ast`, runs this
+as the first step of its own driver. It reads the same content set as
+`extract-ast` and applies the same refusal, with no extraction and nothing
+written. It probes the interpreter that will run graphify, chosen most-specific
+first, and prints which rule chose it and the path probed, whether it passes or
+refuses:
+
+1. `--interpreter PATH`, the python that will run graphify.
+2. The repository's own `graphify-out/.graphify_python`, where graphify records
+   its interpreter.
+3. The store-level `graphify-out/.graphify_python`.
+4. `sys.executable`, the interpreter running `knowledgestore`. It is never a
+   `graphify` found on `PATH`, because a machine can hold several.
+
+It exits 0 when no grammar is missing or none of those extensions occur, and
+non-zero otherwise. `--detect` and `--files` move the input as they do for
+`extract-ast`.
+
 ### Check each semantic chunk before merging
 
 ```bash

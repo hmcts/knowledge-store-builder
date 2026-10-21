@@ -506,6 +506,9 @@ class CliTest(SettingsIsolated):
                 # `convert` because conversion is what makes an Office document
                 # visible to a parser at all
                 "extract-ast",
+                # the same grammar probe extract-ast runs first, for a store whose
+                # own driver extracts instead
+                "check-grammars",
                 "export-history",
                 "context",
                 "intent",

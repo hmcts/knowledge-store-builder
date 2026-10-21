@@ -45,6 +45,7 @@ SELF_PARSING = frozenset(
         "record-clustering",
         "dangling-endpoints",
         "extract-ast",
+        "check-grammars",
         "gaps",
         "size-cuts",
         "cost",
@@ -105,6 +106,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "extract-ast": (
         "extract_ast",
         "extract the AST layer one repository at a time (needs the `ast` extra)",
+    ),
+    "check-grammars": (
+        "check_grammars",
+        "refuse when the interpreter that runs graphify lacks the HCL or SQL grammar",
     ),
     "export-history": ("export_git_history", "export per-repository commit history datasets"),
     "context": (

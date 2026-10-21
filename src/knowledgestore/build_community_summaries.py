@@ -364,6 +364,8 @@ def _write_merged_summaries(
 # when a module suppresses the rule without appearing here.
 #   S8707 policy site: build_community_summaries.py - _take_batches, where the grounds are
 #   S8707 policy site: extract_ast.py - read_file_list, citing merge
+#   S8707 policy site: check_grammars.py - pointer, citing merge; it reads the
+#     `.graphify_python` file graphify wrote, at a path the operator's store names
 #   S8707 policy site: chunk_status.py - log_tokens, citing merge
 #   S8707 policy site: io.py - every read, citing merge; its two writes are
 #     validated by checked_write_target, which is a check rather than grounds
