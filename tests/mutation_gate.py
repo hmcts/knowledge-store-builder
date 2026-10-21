@@ -3329,6 +3329,7 @@ MUTATIONS = (
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_chart_resolves_to_the_repository_that_provides_it",
             "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_a_flux_tree_with_a_module_beside_it",
             "test_relationships_parsers.HelmReleaseTest.test_a_helm_release_is_read_through_the_flux_reader",
+            "test_relationships_parsers.HelmReleaseTest.test_a_release_whose_values_hold_a_bare_equals_sign_is_read",
             "test_relationships_parsers.HelmReleaseTest.test_the_kind_reports_the_release_as_a_chart_reference",
         ),
     ),
@@ -6976,6 +6977,7 @@ MUTATIONS = (
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
             "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
+            "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
             "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
             "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
             "test_relationships_parsers.CredentialTest.test_an_ssh_source_with_any_login_or_a_credential_names_its_repository",
@@ -6991,6 +6993,7 @@ MUTATIONS = (
         '    holders = [project, *project.kids("dependencyManagement")]',
         "#455: `<dependencyManagement>` declares a version without using the artifact, so reading it invents a dependency edge for every managed coordinate - on a parent POM that is every artifact the estate could use, attributed to the repository that merely lists it",
         (
+            "test_build_relationships.ConservationTest.test_every_declaration_in_the_estate_is_placed_exactly_once",
             "test_relationships_parsers.PomTest.test_dependency_management_and_plugins_are_not_read",
             "test_relationships_parsers.PomTest.test_the_kind_reports_group_artifact_and_version_spec",
         ),
@@ -7014,6 +7017,7 @@ MUTATIONS = (
         'IGNORED_DIRS = frozenset({".git", "node_modules", "target"})',
         "#455: `.terraform` holds copies of the upstream modules, whose sources would read as this repository's dependencies; a cache committed once would quietly invent reuse. The graph stage reads its Terraform files through this same walk, so losing the guard here loses it in the graph too",
         (
+            "test_build_relationships.ConservationTest.test_every_declaration_in_the_estate_is_placed_exactly_once",
             "test_build_relationships.StageTest.test_the_stage_prints_one_line_per_kind_and_records_telemetry",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
             "test_build_relationships.SvcATest.test_kinds_json_counts_each_kind",
@@ -7370,6 +7374,7 @@ MUTATIONS = (
             "test_build_relationships.StageTest.test_an_unwritable_output_exits_2",
             "test_build_relationships.StageTest.test_compare_exits_0_on_an_equal_file_and_1_on_a_difference",
             "test_build_relationships.StageTest.test_compare_refuses_a_file_of_the_wrong_shape_cleanly",
+            "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
             "test_build_relationships.StageTest.test_compare_writes_nothing",
             "test_build_relationships.StageTest.test_extra_is_read_from_its_input_file",
             "test_build_relationships.StageTest.test_the_stage_prints_one_line_per_kind_and_records_telemetry",
@@ -7380,6 +7385,7 @@ MUTATIONS = (
             "test_build_relationships.SvcATest.test_a_repository_without_provenance_has_null_commit_and_base_url",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
             "test_build_relationships.SvcATest.test_kinds_json_counts_each_kind",
+            "test_build_relationships.SvcATest.test_kinds_json_says_what_a_pin_is_for_each_kind",
             "test_build_relationships.SvcATest.test_referenced_by_is_complete_and_sorted",
             "test_build_relationships.SvcATest.test_references_are_never_capped_by_the_example_limit",
             "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
