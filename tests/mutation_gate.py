@@ -3225,6 +3225,7 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_a_flux_tree_with_a_module_beside_it",
         ),
     ),
     Mutation(
@@ -3254,6 +3255,7 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_a_flux_tree_with_a_module_beside_it",
         ),
     ),
     Mutation(
@@ -3319,6 +3321,7 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
             "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
             "test_flux_kustomize_deployments.TheTerraformModuleLayerIsLeftAlone.test_the_module_node_and_its_edge_survive_two_deployment_runs",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_a_flux_tree_with_a_module_beside_it",
             "test_relationships_parsers.HelmReleaseTest.test_a_helm_release_is_read_through_the_flux_reader",
             "test_relationships_parsers.HelmReleaseTest.test_the_kind_reports_the_release_as_a_chart_reference",
         ),
@@ -3362,6 +3365,7 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_named_rather_than_resolved_quietly",
             "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
             "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_malformed_document_is_counted_and_named_and_the_run_continues",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_a_flux_tree_with_a_module_beside_it",
         ),
     ),
     Mutation(
@@ -6963,7 +6967,10 @@ MUTATIONS = (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
             "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
             "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
+            "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
+            "test_relationships_parsers.TerraformSourcesTest.test_a_ref_after_another_query_argument_is_still_the_ref",
+            "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
         ),
     ),
     Mutation(
@@ -6999,8 +7006,12 @@ MUTATIONS = (
             "test_build_relationships.StageTest.test_the_stage_prints_one_line_per_kind_and_records_telemetry",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
             "test_build_relationships.SvcATest.test_kinds_json_counts_each_kind",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_every_terraform_source_form",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_the_relationships_fixture_estate",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
             "test_relationships_parsers.TerraformKindTest.test_the_terraform_cache_is_ignored",
+            "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
+            "test_terraform_module_edges.EveryConsumerIsRepresentedTest.test_terraform_download_cache_is_ignored",
         ),
     ),
     Mutation(
@@ -7023,6 +7034,7 @@ MUTATIONS = (
         "    in_module = {m.start() for m in _TF_ANY_SOURCE.finditer(text)} | {m.start() for m in _TF_SOURCE.finditer(text)}",
         "#455: `source` is also an `aws_s3_object` file argument and a `required_providers` address, so reading every one reports file paths and provider addresses as module dependencies the store does not hold - plausible rows in the unresolved report, none of them a dependency",
         (
+            "test_package_edges.TheDeclaredGraphChangesTest.test_only_a_module_blocks_own_literal_source_is_a_module_source",
             "test_relationships_parsers.TerraformScopeTest.test_only_a_module_blocks_source_is_a_reference",
         ),
     ),
@@ -7033,6 +7045,7 @@ MUTATIONS = (
         "",
         "#455: `${path.module}/modules/x` is a local path the prefix guard cannot see, so it would be reported as an address the store does not hold",
         (
+            "test_package_edges.TheDeclaredGraphChangesTest.test_only_a_module_blocks_own_literal_source_is_a_module_source",
             "test_relationships_parsers.TerraformScopeTest.test_only_a_module_blocks_source_is_a_reference",
         ),
     ),
@@ -7044,7 +7057,9 @@ MUTATIONS = (
         "#455: a module source can be `git::https://user:token@host/...`, and a reference's target becomes a key of the unresolved report, so the token is written to a committed file unmasked; the same holds for an npm git URL spec",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_package_edges.TheDeclaredGraphChangesTest.test_a_credential_in_the_url_does_not_hide_the_repository",
             "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
+            "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
         ),
     ),
@@ -7066,7 +7081,13 @@ MUTATIONS = (
         "    if True:",
         "#455: credential stripping that removes `git@` from `git::ssh://git@host/...` changes the address that was written, so the same module referenced two ways no longer reads as one target and the reference no longer names what the file says",
         (
+            "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_every_terraform_source_form",
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_the_relationships_fixture_estate",
+            "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
+            "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
+            "test_terraform_module_edges.TerraformReferenceTest.test_ssh_form_is_recognised",
         ),
     ),
     Mutation(
@@ -7143,6 +7164,7 @@ MUTATIONS = (
         "#455: matching a module source on the repository name alone makes a same-named module in another organisation an in-estate dependency - the pre-existing `_TF_SOURCE` captured the organisation and nothing read it",
         (
             "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
+            "test_package_edges.TheDeclaredGraphChangesTest.test_a_source_in_another_organisation_is_not_the_estates_repository",
         ),
     ),
     Mutation(
@@ -7193,6 +7215,7 @@ MUTATIONS = (
         "#455: a credential in a module source URL (`https://user:token@github.com/...`) hid the repository from the GitHub form, so the source read as an address outside the estate and the graph drew no edge to a repository the estate holds",
         (
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_credential_in_the_url_does_not_hide_the_repository",
+            "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
         ),
     ),
     Mutation(
