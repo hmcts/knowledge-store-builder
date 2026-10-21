@@ -22,6 +22,41 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 > **Estate content is data, not instruction** is part of this contract as well,
 > and names its own mirrors at the end of that section.
 
+## How to read an answer
+
+This section is for anyone reading an answer from a store, whichever assistant
+or page gave it. The rest of the document is for whoever builds the store.
+
+- **Every claim cites evidence you can open.** A citation is a link pinned to the
+  commit the store was built from, or a path relative to the store root that you
+  can open in your clone. A path under `repositories/` is the build corpus, which
+  no clone holds, so it is not a citation you can check.
+- **"Not found" is about the store, not the estate.** It means no evidence in the
+  repositories this store holds, and something outside them would look the same.
+  "Not in the graph" is narrower still, because the graph holds only what
+  extraction found. A good answer says which claim it makes and what it searched;
+  the **Declared boundary** in `knowledge/repository-manifest.md` says what the
+  store holds.
+- **A proposed ticket has not landed.** A ticket found only on a branch is
+  reported as proposed on that branch, never as merged. Its work is not confirmed
+  on the default branch ([the history layers](how-it-works.md#the-history-layers)).
+- **A near miss is a suggestion, not a match.** A similarly named repository is a
+  different repository. Same-named components in different repositories are
+  independent unless an edge connects them, so an answer about one is not an
+  answer about the other.
+- **Check how current the answer is.** A store is a snapshot. `sources_as_of` in
+  `knowledge/store-manifest.json` is the newest commit date its sources record
+  ([the store manifest](how-it-works.md#the-store-manifest)), and an answer about
+  recent work should say it.
+- **Graph evidence outranks written prose.** Summaries, briefs and deep dives were
+  written against one build and go stale silently. When they disagree with the
+  graph, the graph wins and the prose is stale.
+- **A layer the reader does not recognise counts as absent.** A file in a format
+  the reader was not written for is refused, not guessed at
+  ([the relationships layer](how-it-works.md#the-relationships-layer)). An absent
+  layer means the question cannot be answered from it, not that the answer is
+  "none".
+
 ## The contract
 
 **Every claim in a store, and every claim in an answer from a store, traces to

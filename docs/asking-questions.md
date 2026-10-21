@@ -13,6 +13,7 @@ answer from sources that were not included in the store.
 | Claude Code | The Knowledge Store plugin | Evidence-backed answers in ordinary language, including questions that need several store layers |
 | `graphify-out/explorer.html` | A browser | Search and basic answers from a self-contained page |
 | `graphify query` | A terminal and the `graphify` CLI | Graph results for a question written in ordinary language |
+| GitHub Copilot or another MCP client | The knowledge-store MCP server | The same cited answers, in the assistant you already use; see [Use another assistant](#use-another-assistant-github-copilot-a-hosted-agent) |
 
 For a command-only reference, see [CHEATSHEET.md](../CHEATSHEET.md).
 
@@ -122,6 +123,10 @@ later clone or pull can still contain a store built before recent source
 changes. Answers about recent work should report possible staleness; authored
 briefs and summaries can also be older than the graph evidence.
 
+To learn how to read an answer, whichever route gave it, see
+[How to read an answer](grounding-and-verification.md#how-to-read-an-answer):
+citations, negatives, proposed tickets, near misses and how current it is.
+
 ## Ask without Claude Code
 
 ### Use `explorer.html`
@@ -186,6 +191,27 @@ store-relative path per line. It arrives with a sparse clone; the corpus it name
 does not, so this route needs a full `git clone`. If the file is missing, the store
 predates it — a builder adds it with `knowledgestore content-set`, and
 `knowledgestore status` reports whether it is present and current.
+
+## Use another assistant (GitHub Copilot, a hosted agent)
+
+Ask from GitHub Copilot, or any other MCP client, through the knowledge-store
+MCP server. It answers from a local clone of the store, with the same read-only
+tools in every client. Setup for each client is in the server's
+[Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) section,
+and the server is available from the first knowledge-store-mcp release.
+
+| You use | Take |
+|---|---|
+| Claude Code | The plugin: [Ask with Claude Code](#ask-with-claude-code) |
+| GitHub Copilot in VS Code, the Copilot CLI or the Copilot coding agent, or any other MCP client | The MCP server: [Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) |
+| A browser, to look around | The explorer: [Use `explorer.html`](#use-explorerhtml) |
+| A terminal or a script | The CLI: [Use the terminal](#use-the-terminal) |
+
+Every route reads the same store and gives the same cited answers. The explorer
+and the terminal answer fewer kinds of question; they do not answer differently.
+
+Read the coding agent's privacy note in Front doors before enabling it: the agent
+repeats what it reads into the repository it works in.
 
 ## Other knowledge-store tasks
 

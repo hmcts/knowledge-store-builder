@@ -29,3 +29,8 @@ docs/creating-a-store.md
 docs/creating-a-store.md#install-the-prerequisites
 docs/creating-a-store.md#install-the-pipeline
 docs/refreshing-a-store.md#update-the-library-version
+
+# The asker's routing section and reading guide. A consuming store's README links
+# these instead of restating which route to take and how to read an answer.
+docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent
+docs/grounding-and-verification.md#how-to-read-an-answer
