@@ -3350,9 +3350,6 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",
-            "test_version.VersionTest.test_dunder_version_is_the_distribution_version",
-            "test_version.VersionTest.test_the_first_line_is_the_version_alone_and_unchanged",
-            "test_version.VersionTest.test_the_version_is_askable_from_the_command_line",
         ),
     ),
     Mutation(
@@ -4140,9 +4137,7 @@ MUTATIONS = (
         "a resolve they are not about. They now resolve once and compare against that, so "
         "the only observer is the test that builds its own symlink and holds everywhere",
         (
-            "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_harness_root_spelling.ConfiguredRootHasOneSpelling.test_configure_resolves_a_root_reached_through_a_symlink",
-            "test_settings_isolation.StoreRootMatchesConfig.test_an_unresolved_root_is_what_this_prevents",
         ),
     ),
     Mutation(
