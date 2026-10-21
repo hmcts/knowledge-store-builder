@@ -206,6 +206,7 @@ and the server is available from the first knowledge-store-mcp release.
 | GitHub Copilot in VS Code, the Copilot CLI or the Copilot coding agent, or any other MCP client | The MCP server: [Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) |
 | A browser, to look around | The explorer: [Use `explorer.html`](#use-explorerhtml) |
 | A terminal or a script | The CLI: [Use the terminal](#use-the-terminal) |
+| Microsoft 365 Copilot or Teams | Not available yet. [Microsoft 365 Copilot](https://github.com/hmcts/knowledge-store-mcp#microsoft-365-copilot) gives the planned route and what it waits on |
 
 Every route reads the same store and gives the same cited answers. The explorer
 and the terminal answer fewer kinds of question; they do not answer differently.
