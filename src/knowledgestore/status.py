@@ -1126,7 +1126,11 @@ def _report_manifest() -> None:
             )
         )
         # `False` only: a layer nothing measured is unknown, which is not absent.
-        absent = sorted(name for name, layer in layers.items() if layer["present"] is False)
+        absent = sorted(
+            name + (" (local only)" if layer.get("local_only") else "")
+            for name, layer in layers.items()
+            if layer["present"] is False
+        )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         print(f"Store manifest: unreadable ({path}) - rewrite it with `knowledgestore manifest`")
         return

@@ -672,9 +672,8 @@ class WhatACloneReceives(_Store):
         self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
 
     def test_an_ignored_file_with_a_quote_in_its_name_is_still_ignored(self):
-        """Breaks if git's quoted spelling of an unusual name is not read back:
-        `check-ignore` prints it as `"odd\\"name"`, which would match no file, so the
-        ignored file would be counted into the digest."""
+        """Breaks if a name holding a quote is mis-read when git lists the ignored
+        files: the ignored file would be counted into the digest."""
         _touch(self.root, ".gitignore", 'docs/journeys/odd"name.md\n')
         _touch(self.root, "docs/journeys/apply.md", "# Apply")
         _touch(self.root, 'docs/journeys/odd"name.md', "# Odd")
@@ -685,6 +684,80 @@ class WhatACloneReceives(_Store):
         )
         journeys = self.compute()["extra_layers"]["journeys"]
         self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
+
+    def journeys(self) -> dict:
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
+        )
+        return self.compute()["extra_layers"]["journeys"]
+
+    def test_unusual_file_names_that_are_ignored_are_excluded(self):
+        """Breaks if an ignored file is counted because its name defeats the
+        parsing of git's list: a carriage return, a bell, U+2028 and U+0085 are all
+        legal in a file name and each splits or quotes in a line-based reader."""
+        _touch(self.root, ".gitignore", "docs/journeys/*\n!docs/journeys/apply.md\n")
+        _touch(self.root, "docs/journeys/apply.md", "# Apply")
+        for name in ("cr\rx.md", "bell\x07.md", "line\u2028sep.md", "next\u0085line.md"):
+            _touch(self.root, f"docs/journeys/{name}", "# Odd")
+        journeys = self.journeys()
+        self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
+
+    def test_a_force_added_file_that_a_rule_ignores_counts_as_committed(self):
+        """Breaks if a tracked file is dropped because a rule matches it: git
+        commits it, so a clone receives it."""
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(self.root)]
+        subprocess.run(
+            [*git, "add", "-f", "knowledge/git-history/example-repo.ndjson"],
+            check=True,
+            env=git_env(),
+        )
+        history = self.layers()["history"]
+        self.assertTrue(history["present"])
+        self.assertNotIn("local_only", history)
+        self.assertEqual(
+            history["digest"], _sha(b"example-repo.ndjson\0" + _sha(b"history").encode())
+        )
+
+    def test_an_ignored_file_far_down_a_long_listing_is_still_excluded(self):
+        """Breaks if only the first part of a large directory is checked: 250
+        files, one ignored near the end."""
+        _touch(self.root, ".gitignore", "docs/journeys/page-249.md\n")
+        names = [f"page-{number:03d}.md" for number in range(250)]
+        for name in names:
+            _touch(self.root, f"docs/journeys/{name}", name)
+        lines = sorted(f"{n}\0{_sha(n.encode())}" for n in names if n != "page-249.md")
+        self.assertEqual(self.journeys()["digest"], _sha("\n".join(lines).encode()))
+
+    def test_a_layer_under_a_symlinked_directory_is_never_given_a_wrong_digest(self):
+        """Breaks if a layer below a linked directory is hashed: git lists nothing
+        there and says nothing, so the ignored file would be counted and a clone
+        would disagree."""
+        _touch(self.root, ".gitignore", "real/git-history/\n")
+        _touch(self.root, "real/git-history/example-repo.ndjson", "history")
+        (self.root / "knowledge").symlink_to(self.root / "real", target_is_directory=True)
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            self.layers()
+        self.assertIn("knowledge/git-history", str(caught.exception))
+        self.assertIn("link to a directory", str(caught.exception))
+
+    def test_a_git_error_inside_a_repository_is_a_refusal_naming_the_layer(self):
+        """Breaks if a git failure is taken as "nothing is ignored": the manifest
+        would offer files a clone may not receive and say nothing."""
+        _touch(self.root, "knowledge/provenance.json")
+        real = store_manifest.run_git
+
+        def failing(arguments):
+            if "ls-files" in arguments:
+                raise subprocess.CalledProcessError(128, "git", stderr="fatal: example failure")
+            return real(arguments)
+
+        with self.assertRaises(store_manifest.UsageError) as caught:
+            store_manifest.compute(self.root, run=failing)
+        self.assertIn("knowledge/provenance.json", str(caught.exception))
+        self.assertIn("example failure", str(caught.exception))
 
     def test_an_ignored_extra_layer_is_local_only(self):
         """Breaks if the rule stops at the library's layers: a store's own layer

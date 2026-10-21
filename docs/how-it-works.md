@@ -376,7 +376,9 @@ last by `knowledgestore manifest` and committed with the store.
   that exists only on the builder's machine - `git-history/`, or a plain
   `graph.json` with no committed `.gz` - is `"present": false` with
   `"local_only": true`, no digest, and contributes nothing to the store digest, so
-  a builder and every clone compute the same one. An empty directory has built
+  a builder and every clone compute the same one. A clone compares the manifest's
+  `digest`, not the file's bytes or its own `local_only` flags: those describe the
+  builder's tree. An empty directory has built
   nothing.
 - **A store's own layers** are declared in `config/store-extra-layers.json`, each
   with a path below the store root, a description and optionally

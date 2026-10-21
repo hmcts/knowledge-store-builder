@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -103,17 +104,22 @@ LAYERS: tuple[Layer, ...] = (
 def run_git(arguments: list[str]) -> str:
     """Run git and return stdout. The IO boundary; tests may replace it.
 
-    stderr is dropped because the expected failure - no `origin` remote - is
-    answered by the refusal `store_identity` raises, which names both remedies.
+    stderr rides on the `CalledProcessError`, not the terminal: the expected
+    failure - no `origin` remote - is answered by the refusal `store_identity`
+    raises, which names both remedies, while a refusal about a layer quotes git.
     """
-    return subprocess.run(
-        ["git", *arguments],
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        env=git_env(),
-    ).stdout
+    # Bytes, decoded as the file system decodes names: text mode translates a
+    # carriage return in a file name to a newline, so a listing of paths would
+    # name files that are not there.
+    return os.fsdecode(
+        subprocess.run(
+            ["git", *arguments],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=git_env(),
+        ).stdout
+    )
 
 
 def _repository_name(url: str) -> str:
@@ -165,50 +171,39 @@ def store_identity(root: Path, run=run_git) -> tuple[str, str]:
     return store_id, config.GITHUB_ORG or ""
 
 
-# Paths per `git check-ignore` call, well under any argument-length limit.
-_BATCH = 200
+def _ignored(root: Path, rel: str, run) -> set[str]:
+    """The store-relative files under `rel` that git ignores and does not track.
 
-
-_ESCAPES = {'"': '"', "\\": "\\", "t": "\t", "n": "\n"}
-
-
-def _unquoted(line: str) -> str:
-    """A path as `git check-ignore` prints it: quoted when it holds `"`, a
-    backslash or a control character, plain otherwise (`-z` needs `--stdin`)."""
-    if not (len(line) >= 2 and line[0] == line[-1] == '"'):
-        return line
-    out, body, i = [], line[1:-1], 0
-    while i < len(body):
-        if body[i] == "\\" and i + 1 < len(body):
-            out.append(_ESCAPES.get(body[i + 1], body[i : i + 2]))
-            i += 2
-        else:
-            out.append(body[i])
-            i += 1
-    return "".join(out)
-
-
-def _ignored(root: Path, rels: list[str], run) -> set[str]:
-    """The store-relative paths git would not commit, because a rule ignores them.
-
-    `--no-index` asks what the rules say, not whether a file is tracked: a clone
-    receives what is committed, and the builder's own files are the ones asked
-    about. Exit 1 (none ignored) and exit 128 (not a repository, so no rules to
-    judge by) both raise from `run`; both mean nothing is known to be ignored, and
-    a store outside git is described as it is on disk.
+    `ls-files -o -i --exclude-standard` lists exactly those: untracked, so a file
+    force-added past a rule is committed and not listed, and ignored, so what a
+    clone will not receive. NUL-separated, because a name may hold any other
+    character. Outside a repository there are no rules to judge by and nothing is
+    ignored. Inside one, a git failure is a refusal and never "none ignored": the
+    manifest would offer files a clone may lack and say nothing (a layer below a
+    symlinked directory is one such failure).
     """
-    ignored: set[str] = set()
-    for start in range(0, len(rels), _BATCH):
-        batch = rels[start : start + _BATCH]
-        try:
-            out = run(
-                ["-C", str(root), "-c", "core.quotePath=false", "check-ignore", "--no-index"]
-                + ["--", *batch]
+    if _top_level(root, run) is None:
+        return set()
+    below = root
+    for part in Path(rel).parts:
+        below = below / part
+        # git does not look beyond a link to a directory: it lists nothing, with
+        # no error, which would read as "nothing is ignored" and hash files it
+        # should not.
+        if below.is_symlink() and below.is_dir():
+            raise UsageError(
+                f"Cannot tell which files of {rel} git would commit: {below.relative_to(root)} "
+                "is a link to a directory, and git does not look through it. Replace the link "
+                "with the directory."
             )
-        except (OSError, subprocess.CalledProcessError):
-            continue
-        ignored.update(_unquoted(line) for line in out.splitlines() if line)
-    return ignored
+    try:
+        listing = run(
+            ["-C", str(root), "ls-files", "-z", "-o", "-i", "--exclude-standard", "--", rel]
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        detail = os.fsdecode(getattr(error, "stderr", None) or str(error)).strip()
+        raise UsageError(f"Cannot tell which files of {rel} git would commit: {detail}") from error
+    return {name for name in listing.split("\0") if name}
 
 
 def _probe(root: Path, rel: str, kind: str, run) -> tuple[bool, bool, list[Path]]:
@@ -222,13 +217,12 @@ def _probe(root: Path, rel: str, kind: str, run) -> tuple[bool, bool, list[Path]
     if kind != "dir":
         if not path.is_file():
             return False, False, []
-        return True, not _ignored(root, [rel], run), []
+        return True, rel not in _ignored(root, rel, run), []
     if not path.is_dir():
         return False, False, []
     entries = sorted(path.rglob("*"))
-    rels = {entry: entry.relative_to(root).as_posix() for entry in entries}
-    skipped = _ignored(root, list(rels.values()), run)
-    kept = [entry for entry in entries if rels[entry] not in skipped]
+    skipped = _ignored(root, rel, run)
+    kept = [entry for entry in entries if entry.relative_to(root).as_posix() not in skipped]
     return (
         any(entry.is_file() for entry in entries),
         any(entry.is_file() for entry in kept),

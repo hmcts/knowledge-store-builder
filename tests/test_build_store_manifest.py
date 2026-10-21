@@ -211,6 +211,16 @@ class StatusReadsTheManifest(_Run):
         # Nothing recorded whether deployments were added: unknown, which is not absent.
         self.assertNotIn("deployments", absent)
 
+    def test_a_local_only_layer_is_listed_as_local_only(self):
+        """Breaks if `status` lists a layer git ignores as plainly absent."""
+        _git_repo(self.root, "https://example.com/example-org/example-store.git")
+        _touch(self.root, ".gitignore", "knowledge/git-history/\n")
+        _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
+        self.run_stage()
+        out = self.status_output()
+        self.assertIn("history (local only)", out)
+        self.assertNotIn("graph (local only)", out)
+
     def test_without_a_manifest_it_says_how_to_write_one_and_does_not_fail(self):
         """Breaks if a store with no manifest makes `status` fail or go silent
         (CLAUDE.md 6.7)."""
