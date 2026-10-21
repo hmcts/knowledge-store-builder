@@ -72,10 +72,14 @@ source .venv/bin/activate
 ```bash
 pip install --extra-index-url \
   https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
-  hmcts-knowledge-store-builder
-pip install graphifyy
+  'hmcts-knowledge-store-builder[ast]'
 knowledgestore --help
 ```
+
+The `[ast]` extra installs graphify together with its `terraform` and `sql`
+grammars, so a store takes graphify from this library and does not pin or install
+it separately. Without those grammars graphify reads `.tf`, `.tfvars`, `.hcl` and
+`.sql` files as nothing, with no error.
 
 The `hmcts-lib` Azure Artifacts feed serves this package anonymously even though
 opening the feed root in a browser prompts for sign-in. Credentials are needed

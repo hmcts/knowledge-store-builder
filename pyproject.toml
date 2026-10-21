@@ -39,7 +39,7 @@ documents = ["markitdown>=0.1.8"]
 # that already produces its own AST layer should not carry a parser it never
 # calls, and because extraction is the one part of this pipeline that is not
 # standard library by nature.
-ast = ["graphifyy>=0.9.93"]
+ast = ["graphifyy[terraform,sql]>=0.9.93"]
 # Lint, format and type-check tooling, pinned to what CI runs.
 dev = ["ruff==0.16.10", "pyright==1.1.414"]
 

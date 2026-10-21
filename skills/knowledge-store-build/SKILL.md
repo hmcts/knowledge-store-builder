@@ -57,8 +57,8 @@ Two things this check cannot tell you, so ask rather than assume:
   the three commands that refresh it.
 
 ```bash
-pip install hmcts-knowledge-store-builder   # or: pip install git+https://github.com/hmcts/knowledge-store-builder.git@main
-pip install graphifyy                       # graph extraction
+pip install 'hmcts-knowledge-store-builder[ast]'   # or: pip install 'hmcts-knowledge-store-builder[ast] @ git+https://github.com/hmcts/knowledge-store-builder.git@main'
+                                            # [ast] carries graphify with its terraform and sql grammars; without them .tf and .sql extract to nothing
 gh auth status                              # discovery needs an authenticated gh
 knowledgestore --version                    # last line: git must meet the 2.48 floor
 ```
