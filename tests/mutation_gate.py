@@ -7385,8 +7385,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a self reference is placed nowhere",
         "relationships.py",
-        '                        skipped[kind.name]["self"] += 1\n',
-        "                        pass\n",
+        '        skipped[kind_name]["self"] += 1\n',
+        "        pass\n",
         "#460 parity: a reference read and then neither drawn, listed as unresolved nor counted as skipped is a dependency missing from a layer that reads as complete; the conservation check is what stops the build on it (CLAUDE.md 2.5)",
         (
             "test_build_relationships.ConservationTest.test_every_declaration_in_the_estate_is_placed_exactly_once",
@@ -7546,8 +7546,8 @@ MUTATIONS = (
     Mutation(
         "relationships: an edge's chart is written unmasked",
         "relationships.py",
-        "(clone.name, value, secret_mask.mask(ref.chart))",
-        "(clone.name, value, ref.chart)",
+        "(consumer, value, secret_mask.mask(ref.chart))",
+        "(consumer, value, ref.chart)",
         "#455: the chart is a key of a committed file like a pin or target, and gets the same masking as defence in depth behind the helm-only rule",
         (
             "test_relationships_store_kinds.StoreKindMaskingTest.test_a_chart_on_an_edge_key_is_masked_whatever_wrote_it",

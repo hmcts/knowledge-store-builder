@@ -209,7 +209,7 @@ def _line_of(text: str, offset: int) -> tuple[int, str]:
 # name, and none once a `user:token@` credential has been stripped.
 _TF_SCHEME = re.compile(r'(?:git::)?(?:https://|git@|ssh://(?:[^@/"]+@)?)?')
 _TF_GITHUB = re.compile(
-    r"github\.com[/:](?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?(?P<tail>[?/].*)?"
+    r'github\.com[/:](?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?(?P<tail>[?/][^"]*)?\Z'
 )
 _TF_ANY_SOURCE = re.compile(r'source\s*=\s*"(?P<address>[^"]*)"')
 _LOCAL_SOURCE = ("./", "../", "/")
@@ -221,7 +221,7 @@ _MODULE_BLOCK = re.compile(r'(?<![\w-])module\s+"[^"]*"\s*\{')
 def _github_source(address: str) -> re.Match | None:
     """The organisation, repository and tail of a GitHub module source, or None."""
     prefix = _TF_SCHEME.match(address)
-    return _TF_GITHUB.fullmatch(address, prefix.end() if prefix else 0)
+    return _TF_GITHUB.match(address, prefix.end() if prefix else 0)
 
 
 def _ref_of(tail: str | None) -> str:
@@ -1533,18 +1533,21 @@ def _scan_layer(clones, kinds, resolver, root):
                 _check_references(kind, clone, rel, found)
                 read[kind.name] += len(found) + sum(set_aside.values())
                 for ref in found:
-                    outcome, value = resolver.resolve(clone.name, ref)
-                    if outcome == "self":
-                        skipped[kind.name]["self"] += 1
-                    elif outcome == "unresolved":
-                        _add_unresolved(unresolved[kind.name], value, clone.name)
-                    else:
-                        edge = edges.setdefault(
-                            (clone.name, value, secret_mask.mask(ref.chart)), _Edge()
-                        )
-                        _add_to_edge(edge, kind.name, ref)
+                    _place(ref, kind.name, clone.name, resolver, edges, unresolved, skipped)
     _check_conservation(read, edges, unresolved, skipped)
     return edges, unresolved, skipped, sorted(unreadable)
+
+
+def _place(ref, kind_name, consumer, resolver, edges, unresolved, skipped) -> None:
+    """One reference, as a `self` skip, an unresolved target or part of an edge."""
+    outcome, value = resolver.resolve(consumer, ref)
+    if outcome == "self":
+        skipped[kind_name]["self"] += 1
+    elif outcome == "unresolved":
+        _add_unresolved(unresolved[kind_name], value, consumer)
+    else:
+        edge = edges.setdefault((consumer, value, secret_mask.mask(ref.chart)), _Edge())
+        _add_to_edge(edge, kind_name, ref)
 
 
 def _parse_file(kind: Kind, clone: Path, rel: str, root: Path):
@@ -1695,7 +1698,9 @@ def write(layer: Layer, cfg) -> None:
         files[by_repo_dir / f"{repo}.json"] = body
     for path in files:
         io.checked_write_target(path)
-    umask = os.umask(0)
+    # NOSONAR(S2612) - reads the process umask, which Python can only do by
+    # setting one; the next line puts it back before any file is created.
+    umask = os.umask(0)  # NOSONAR(S2612)
     os.umask(umask)
     staged: list[tuple[str, Path]] = []
     try:

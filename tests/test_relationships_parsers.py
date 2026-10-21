@@ -62,7 +62,7 @@ class TerraformSourcesTest(SettingsIsolated):
     def test_every_documented_form_gives_org_repo_ref_and_line(self):
         """Break caught: a form the regex stops matching, a `.git` suffix left in
         the repo name, or a `?ref=` that is read as part of the repository or lost.
-        The five forms are the ones `_TF_SOURCE` documents; the line numbers are
+        The five forms are the ones `_TF_SCHEME` documents; the line numbers are
         those of `tests/fixtures/relationships/svc-a/main.tf`."""
         got = [
             (ref.org, ref.target, ref.ref, ref.line, ref.text)
