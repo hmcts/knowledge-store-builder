@@ -59,6 +59,7 @@ is the stage that discovers which tickets exist:
 
 ```bash
 knowledgestore fetch-tickets
+knowledgestore manifest
 ```
 
 It asks the tracker about tickets it has never had an answer for, and about up
@@ -226,6 +227,7 @@ gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore content-set
 knowledgestore explorer
 knowledgestore index
+knowledgestore manifest
 knowledgestore check-evidence
 knowledgestore status
 knowledgestore status --drift
@@ -240,6 +242,10 @@ file or the ticket layer has changed; an index built from the plain `graph.json`
 reported as not checked, because `status` reads no graph. A rebuild over unchanged
 inputs gives the same bytes, whether or not `graph.json` is on disk, so an
 unchanged store commits no diff.
+
+`manifest` runs after every stage that changes a layer. Its `digest` moves when
+any layer's content does, which is how a reader holding an older clone learns it
+is stale; a manifest written before the last stage describes the store as it was.
 
 `content-set` rewrites `knowledge/corpus/content-files.txt`, the list a corpus
 search reads instead of the raw tree. A refresh changes which files exist, so a
@@ -289,6 +295,18 @@ had members and now has none needs no judgement about the estate.
 `knowledgestore status` prints the record and compares nothing. It measures none
 of these itself, so a fresh figure beside a recorded one would claim a
 comparison it never made.
+
+Two more measurements are recorded, compared like the others, and read by the
+store manifest: `source_urls.linked`, the number of graph nodes `source-urls` gave a
+`url`, and `deployments.pairs`, the number of service/environment pairs
+`deployments` added (recorded as 0 when no deployment repository is named). The
+manifest's flags for source links, deployments and ticket reach are read from the
+record, so each is the **last recorded measurement**. A re-extract changes the
+graph without changing the record, so a flag can lag until `source-urls`,
+`deployments` or `intent` run again; a flag nothing has recorded is `null`,
+unknown, never `false`. Re-run those stages, then `manifest`. Because
+`deployments.pairs` is compared too, unsetting `KSB_DEPLOY_REPOS` after a
+configured run prints the "fell to zero" warning; that is expected, not a break.
 
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages

@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, deploy_flux, deploy_values, graph_files, io, relationships
+from . import config, deploy_flux, deploy_values, graph_files, io, relationships, telemetry
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -870,6 +870,9 @@ def main() -> int:
             "  Set KSB_DEPLOY_REPOS to the clone holding this estate's deployment\n"
             "  configuration; most estates have none and this stage stays off."
         )
+        # Measured, and nothing is there: the manifest reports `false` rather than
+        # unknown, and a count from an earlier configured run does not outlive it.
+        telemetry.record({"deployments.pairs": 0})
         return 0
     problem = relationships.chart_pattern_problem(config.CHART_REPO_PATTERN)
     if problem:
@@ -906,6 +909,10 @@ def main() -> int:
     )
 
     _report(tally, graph)
+    # The store manifest's `deployments` layer reads this. An estate that names no
+    # deployment repository records 0 on the early return above, so the manifest
+    # reports it as absent rather than unknown.
+    telemetry.record({"deployments.pairs": tally.pairs})
     return 0
 
 

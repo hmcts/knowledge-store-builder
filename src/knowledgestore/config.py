@@ -93,6 +93,11 @@ ROOT = _env_path("KSB_ROOT", Path.cwd())
 # default - a library cannot guess whose estate you mean.
 GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
 
+# The store's name in its manifest, which a reader holding several stores uses to
+# tell them apart. Optional: when unset, the manifest takes the repository name
+# of the store's `origin` remote.
+STORE_ID = os.environ.get("KSB_STORE_ID", "").strip()
+
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
 REPOSITORIES_CONFIG = ROOT / "config" / "repositories.txt"
@@ -186,6 +191,11 @@ PROVENANCE_PATH = ROOT / "knowledge" / "provenance.json"
 # back by each of them before it overwrites its own; `status` prints it.
 # Committed on purpose: the diff is the record of what a refresh changed.
 TELEMETRY_PATH = ROOT / "knowledge" / "telemetry.json"
+# A store's own manifest layers, declared by hand. Optional.
+STORE_EXTRA_LAYERS_PATH = ROOT / "config" / "store-extra-layers.json"
+# What the store contains, written last by `knowledgestore manifest`. Committed:
+# a reader on another machine opens it before any layer.
+STORE_MANIFEST_PATH = ROOT / "knowledge" / "store-manifest.json"
 TOPICS_INPUT_PATH = ROOT / "knowledge" / "topics" / "topics-input.json"
 TOPICS_BRIEFS_PATH = ROOT / "knowledge" / "topics" / "briefs.json"
 TOPICS_DOCS_DIR = ROOT / "docs" / "topics"
@@ -684,6 +694,8 @@ def _recompute_paths() -> None:
         CONTENT_SET_PATH=root / "knowledge" / "corpus" / "content-set.json",
         PROVENANCE_PATH=root / "knowledge" / "provenance.json",
         TELEMETRY_PATH=root / "knowledge" / "telemetry.json",
+        STORE_EXTRA_LAYERS_PATH=root / "config" / "store-extra-layers.json",
+        STORE_MANIFEST_PATH=root / "knowledge" / "store-manifest.json",
         TOPICS_INPUT_PATH=root / "knowledge" / "topics" / "topics-input.json",
         TOPICS_BRIEFS_PATH=root / "knowledge" / "topics" / "briefs.json",
         TOPICS_DOCS_DIR=root / "docs" / "topics",

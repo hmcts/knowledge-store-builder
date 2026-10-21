@@ -46,7 +46,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import config, graph_files, io, provenance
+from . import config, graph_files, io, provenance, telemetry
 from .source_urls import NOT_CONFIGURED, SourceUrls, single_root_repositories
 
 
@@ -162,6 +162,9 @@ def main() -> int:
         out.write(serialised)
 
     print(report(outcome))
+    # The store manifest's `graph.source_urls` flag reads this; a store that never
+    # ran the stage has no key, which the manifest reports as unknown.
+    telemetry.record({"source_urls.linked": outcome.linked})
     return 0
 
 
