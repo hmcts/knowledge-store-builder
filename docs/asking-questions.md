@@ -203,16 +203,21 @@ and the server is available from the first knowledge-store-mcp release.
 | You use | Take |
 |---|---|
 | Claude Code | The plugin: [Ask with Claude Code](#ask-with-claude-code) |
-| GitHub Copilot in VS Code, the Copilot CLI or the Copilot coding agent, or any other MCP client | The MCP server: [Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) |
+| Claude Desktop | The MCP server: [Claude Code and Claude Desktop](https://github.com/hmcts/knowledge-store-mcp#claude-code-and-claude-desktop) |
+| GitHub Copilot in VS Code | The MCP server: [GitHub Copilot in VS Code](https://github.com/hmcts/knowledge-store-mcp#github-copilot-in-vs-code) |
+| The GitHub Copilot CLI | The MCP server: [GitHub Copilot CLI](https://github.com/hmcts/knowledge-store-mcp#github-copilot-cli) |
+| The Copilot coding agent, on GitHub | The MCP server: [The Copilot coding agent](https://github.com/hmcts/knowledge-store-mcp#the-copilot-coding-agent). Read its privacy note first |
+| A hosted agent (in design) | The MCP server, run by the agent: [A hosted agent](https://github.com/hmcts/knowledge-store-mcp#a-hosted-agent) |
+| Any other MCP client | The MCP server: [Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) |
 | A browser, to look around | The explorer: [Use `explorer.html`](#use-explorerhtml) |
 | A terminal or a script | The CLI: [Use the terminal](#use-the-terminal) |
-| Microsoft 365 Copilot or Teams | Not available yet. [Microsoft 365 Copilot](https://github.com/hmcts/knowledge-store-mcp#microsoft-365-copilot) gives the planned route and what it waits on |
+| Microsoft 365 Copilot or Teams | Not available yet. [Microsoft 365 Copilot](https://github.com/hmcts/knowledge-store-mcp#microsoft-365-copilot) gives the planned route and what enabling it for a store involves |
 
 Every route reads the same store and gives the same cited answers. The explorer
 and the terminal answer fewer kinds of question; they do not answer differently.
 
-Read the coding agent's privacy note in Front doors before enabling it: the agent
-repeats what it reads into the repository it works in.
+The coding agent repeats what it reads into the repository it works in, which is
+why its row says to read the privacy note first.
 
 ## Other knowledge-store tasks
 
