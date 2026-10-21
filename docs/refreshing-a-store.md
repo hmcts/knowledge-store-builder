@@ -609,6 +609,31 @@ release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer
 skills.
 
+### Moving to a newer graphify
+
+Raising graphify across a wide version gap, for example from 0.9.40 to 0.9.93,
+changes the AST layer's content. Treat it as a planned migration, not a routine
+refresh:
+
+- **Re-extract everything.** graphify's cache schema changes, so the first
+  `extract-ast` after the upgrade re-reads every file.
+- **Expect most Terraform node ids to change.** Terraform file nodes become
+  path-qualified. Re-cluster, then expect community summaries to need
+  re-authoring, because they are keyed by community id and carried only onto an
+  identical set.
+- **Expect other nodes to appear.** SQL gains index nodes, and Java gains nodes
+  for annotations and external types. Dangling Terraform edges disappear.
+- **Re-check any AST-share threshold the store uses.** Nodes grow by roughly a
+  tenth while edges stay about flat, so a ratio or percentage tuned on the old
+  layer will move.
+
+Compare node and edge counts before and after with the `extract-ast` summary,
+and run the extraction on one repository with Terraform first.
+
+A store pins a library release and installs graphify itself, so it can stay on
+its current graphify until it plans this. Nothing in the library checks the
+installed graphify version at runtime.
+
 ### A lock you maintain by hand
 
 Not every lock is compiled. If yours is written by hand, say so in the lock
