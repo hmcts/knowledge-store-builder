@@ -776,8 +776,9 @@ store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
 (for example `chart-{name}`) only when the estate names chart repositories by a
 rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle others' charts.
 A conflict (two clones publishing one chart, coordinate or package) is printed
-and resolved to the first by name. It exits 1 on a parser failure or an
-unreadable input, and 2 when it cannot write. A store whose clones declare a
+and resolved to the first by name. It exits 1 on a parser failure, an
+unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
+extra), and 2 when it cannot write. A store whose clones declare a
 dependency the four built-in kinds do not read registers its own kind in
 `config/relationship-kinds.json`, and `KSB_RELATIONSHIP_EXAMPLES` caps the
 example lines per edge; see

@@ -27,8 +27,9 @@ and every unresolved target that differs. It exits 1 on any difference: it is th
 tool a store uses to retire a script that wrote the same file.
 
 Exit codes: 0 on success; 1 on a parser failure, a kind declaration that cannot be used, an unreadable configuration or
-`extra` input, a missing `repositories/`, or a `--compare` difference; 2 when the
-layer cannot be written.
+`extra` input, a missing `repositories/`, a Flux `HelmRelease` with PyYAML not
+installed (the `deploy` extra), or a `--compare` difference; 2 when the layer
+cannot be written.
 """
 
 from __future__ import annotations
@@ -62,8 +63,6 @@ def report(layer: relationships.Layer) -> list[str]:
             f"{sum(skipped.values())} skipped"
         )
         line += f" ({reasons})" if reasons else ""
-        for note, text in counts["notes"].items():
-            line += f"; {note}: {text}"
         lines.append(line)
     for kind, targets in layer.conflicts.items():
         for target, repos in targets.items():

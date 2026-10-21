@@ -14,8 +14,10 @@ import io as _io
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_relationships, config, relationships, status  # noqa: E402
@@ -94,6 +96,11 @@ class _Store(SettingsIsolated):
             (clone / ".git").mkdir()
         for name, files in {**EXTRA_CLONES, **(extra or {})}.items():
             _write(self.repos / name, files)
+        if not HAS_YAML:
+            # The stage refuses an estate holding a release it cannot read without
+            # PyYAML (`MissingPyYamlTest`), so the default-install job builds the
+            # rest of the estate without it.
+            (self.repos / "svc-b" / "flux" / "helmrelease.yaml").unlink()
 
     def clones(self) -> list[Path]:
         return sorted(p for p in self.repos.iterdir() if (p / ".git").is_dir())
@@ -311,7 +318,6 @@ class SvcATest(_Store):
                 "references": 4,
                 "unresolved": 4,
                 "skipped": {"local": 1, "self": 1},
-                "notes": {},
             },
         )
         self.assertEqual(
@@ -747,6 +753,60 @@ class UnreadableTest(_Store):
         )
         self.assertEqual(layer.skipped["terraform_module"].get("unreadable"), 1)
         self.assertEqual(layer.skipped["helm_chart"].get("unreadable"), 2)
+
+
+RELEASE = (
+    "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n  name: x\n"
+    "spec:\n  chart:\n    spec:\n      chart: xchart\n      version: 1.2.3\n"
+    "      sourceRef:\n        kind: HelmRepository\n        name: some-helm-repo\n"
+)
+
+
+class MissingPyYamlTest(_Store):
+    """PyYAML stays optional, and a file that needs it is never skipped for want of it."""
+
+    def without_pyyaml(self) -> None:
+        # `import yaml` raises ImportError while the module's entry is None: the
+        # import boundary at which the reader finds PyYAML missing.
+        patcher = mock.patch.dict(sys.modules, {"yaml": None})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_release_without_pyyaml_fails_the_stage_and_compare_naming_the_extra(self):
+        """Break caught: a Flux `HelmRelease` reported as "not read" while the stage
+        exits 0, so every reference in it is lost from a layer that reads as
+        complete. The run and `--compare` both stop, name the file, the missing
+        library and the extra that provides it, and write nothing."""
+        self.estate({"deployer": {"apps/x/release.yaml": RELEASE}})
+        same = self.root / "same.json"
+        same.write_text('{"edges": []}\n', encoding="utf-8")
+        self.without_pyyaml()
+        for argv in ((), ("--compare", str(same))):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_stage(*argv)
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("PyYAML", err)
+                self.assertIn("hmcts-knowledge-store-builder[deploy]", err)
+                self.assertIn("deployer/apps/x/release.yaml", err)
+                self.assertFalse((self.root / "knowledge" / "relationships").exists())
+
+    def test_an_estate_with_no_release_builds_without_pyyaml(self):
+        """Break caught: PyYAML made a requirement of every run, or of every YAML
+        file, so an estate with no Flux release cannot build its layer on the
+        default install."""
+        self.repos.mkdir()
+        _write(
+            self.repos / "app",
+            {"Chart.yaml": _chart("app", "web"), "values.yaml": "replicaCount: 2\n"},
+        )
+        _write(self.repos / "web-charts", {"web/Chart.yaml": _chart("web")})
+        self.without_pyyaml()
+        code, out, err = self.run_stage()
+        self.assertEqual(code, 0, out + err)
+        body = json.loads(
+            (self.root / "knowledge" / "relationships" / "by-repo" / "app.json").read_text()
+        )
+        self.assertEqual([e["repository"] for e in body["depends_on"]], ["web-charts"])
 
 
 class StageTest(_Store):

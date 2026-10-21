@@ -15,7 +15,9 @@ inside the repository.
 
 The library stays dependency-free: Maven is read with the stdlib's expat, `Chart.yaml`
 with a small reader held to PyYAML's output by a test, and PyYAML is imported only
-to read a Flux `HelmRelease`, which is arbitrary YAML.
+to read a Flux `HelmRelease`, which is arbitrary YAML. Without it a release is not
+skipped: `MissingDependency` stops the layer, because a reference it never read
+would be absent from a layer that reads as complete.
 """
 
 from __future__ import annotations
@@ -589,16 +591,28 @@ def _chart_dependencies(rel: str, text: str) -> list[Reference]:
     return found
 
 
+class MissingDependency(Exception):
+    """A file needs an optional library that is not installed. Raised rather than
+    read as empty: the layer stops, naming the library and the extra providing it."""
+
+    def __init__(self, library: str, extra: str) -> None:
+        super().__init__(f"needs {library}, which is not installed")
+        self.library = library
+        self.extra = extra
+
+
 def _helm_releases(rel: str, text: str) -> list[Reference]:
-    """Flux `HelmRelease`s in a YAML file, through the one reader of them. Without
-    PyYAML there is nothing to read them with, and a file that is not YAML (a Helm
-    template full of `{{ }}`) is not a release."""
+    """Flux `HelmRelease`s in a YAML file, through the one reader of them.
+
+    Raises `MissingDependency` without PyYAML, because there is nothing to read them
+    with and the file is not therefore free of references; a file that is not YAML
+    (a Helm template full of `{{ }}`) is not a release."""
     if "HelmRelease" not in text:
         return []
     try:
         import yaml
     except ImportError:
-        return []
+        raise MissingDependency("PyYAML", "deploy") from None
     try:
         documents = list(yaml.safe_load_all(text))
     except yaml.YAMLError:
@@ -1049,7 +1063,7 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
 # dependency of nearly everything, with no way to ask which chart.
 
 FORMAT = {"major": 1, "minor": 0}
-FLUX_UNREAD = "not read: PyYAML is not installed"
+PACKAGE = "hmcts-knowledge-store-builder"
 
 
 class KindError(Exception):
@@ -1356,6 +1370,11 @@ def _scan_layer(clones, kinds, resolver, root):
                     text = read_text_or_raise(clone / rel)
                     found = kind.references(clone, rel, text)
                     skipped[kind.name].update(kind.skips(clone, rel, text))
+                except MissingDependency as missing:
+                    raise KindError(
+                        f"{kind.name}: {_store_relative(root, clone / rel)} {missing} - "
+                        f"pip install '{PACKAGE}[{missing.extra}]'"
+                    ) from missing
                 except (OSError, ValueError):
                     unreadable.append(_store_relative(root, clone / rel))
                     skipped[kind.name]["unreadable"] += 1
@@ -1450,7 +1469,6 @@ def build(
         }
         for kind, targets in unresolved.items()
     }
-    flux_readable = importlib.util.find_spec("yaml") is not None
     kinds_body = {}
     for kind in kinds:
         carrying = [edge for edge in edges.values() if kind.name in edge.kinds]
@@ -1460,9 +1478,6 @@ def build(
             "references": sum(edge.kinds[kind.name] for edge in carrying),
             "unresolved": len(unresolved[kind.name]),
             "skipped": dict(sorted(skipped[kind.name].items())),
-            "notes": {"flux": FLUX_UNREAD}
-            if kind.name == "helm_chart" and not flux_readable
-            else {},
         }
     return Layer(
         dependencies={

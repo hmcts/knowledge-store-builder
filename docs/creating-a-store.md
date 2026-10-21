@@ -451,8 +451,10 @@ in the order is a convention. It prints one line per kind, giving the number of
 edges, references, unresolved targets and skipped declarations. Read the
 unresolved count: these are dependencies the store does not hold. Leave
 `KSB_CHART_REPO_PATTERN` unset unless the estate names chart repositories by a
-rule. The [relationships layer](how-it-works.md#the-relationships-layer) lists
-the files it writes and the resolution order.
+rule. A clone holding a Flux `HelmRelease` needs the `deploy` extra (PyYAML):
+without it the stage exits 1 and names the file. The
+[relationships layer](how-it-works.md#the-relationships-layer) lists the files it
+writes and the resolution order.
 
 Then link every node to its file at the commit the store was built from:
 

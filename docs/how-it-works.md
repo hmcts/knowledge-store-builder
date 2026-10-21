@@ -180,6 +180,13 @@ A file that cannot be opened, or a POM that does not parse, is counted as
 is still read. Two runs over the same clones write identical bytes, and a
 repository no longer cloned loses its `by-repo` file in the same run.
 
+A Flux `HelmRelease` is read with PyYAML, which the `deploy` extra installs
+(`pip install 'hmcts-knowledge-store-builder[deploy]'`). Without it, a run over a
+clone holding a release stops with exit 1 and writes nothing, naming the file, the
+missing library and the extra, because a release the stage cannot read would
+leave its references out of a layer that reads as complete. An estate holding no
+release builds without PyYAML.
+
 ### A store's own kinds
 
 A store whose clones declare a dependency the four kinds do not read, such as an

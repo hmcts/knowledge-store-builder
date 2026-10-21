@@ -7311,6 +7311,26 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "relationships: a HelmRelease is skipped when PyYAML is missing",
+        "relationships.py",
+        '        raise MissingDependency("PyYAML", "deploy") from None\n',
+        "        return []\n",
+        "#460 parity: without PyYAML every Flux `HelmRelease` was reported as not read while the stage exited 0, so a store comparing layers lost every reference in its releases from a layer that read as complete",
+        (
+            "test_build_relationships.MissingPyYamlTest.test_a_release_without_pyyaml_fails_the_stage_and_compare_naming_the_extra",
+        ),
+    ),
+    Mutation(
+        "relationships: every YAML file needs PyYAML",
+        "relationships.py",
+        '    if "HelmRelease" not in text:\n        return []\n    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n',
+        '    try:\n        import yaml\n    except ImportError:\n        raise MissingDependency("PyYAML", "deploy") from None\n    if "HelmRelease" not in text:\n        return []\n',
+        "#460 parity: PyYAML is the `deploy` extra and stays optional; asking for it before a file is known to hold a release refuses every estate with a `values.yaml` on the default install",
+        (
+            "test_build_relationships.MissingPyYamlTest.test_an_estate_with_no_release_builds_without_pyyaml",
+        ),
+    ),
+    Mutation(
         "relationships: a store kind's module path may climb with `..`",
         "relationships.py",
         '    if given.is_absolute() or ".." in given.parts:\n',
