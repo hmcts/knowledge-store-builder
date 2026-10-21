@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from test_build_relationships import GITHUB, TOKEN, _kind, _Store, _write  # noqa: E402
+from test_build_relationships import GITHUB, TOKEN, _Store, _write  # noqa: E402
 from knowledgestore import relationships  # noqa: E402
 
 KIND = "event_subscription"
@@ -226,7 +226,7 @@ class RejectedDeclarationTest(_StoreKinds):
     def test_a_bad_kind_name_is_refused(self):
         """Break caught: a name that cannot be a JSON key or a file stem safely
         (`Has Space`, `1st`) reaching `kinds.json`."""
-        for bad in ("Has Space", "1st", "Upper", "a-b", ""):
+        for bad in ("Has Space", "1st", "Upper", "a-b", "", "abc\n"):
             with self.subTest(bad=bad):
                 self.declare({bad: CONFIG[KIND]})
                 with self.assertRaisesRegex(relationships.UsageError, "kind name"):
@@ -237,6 +237,28 @@ class RejectedDeclarationTest(_StoreKinds):
         scanned, after other stages have run."""
         self.rejected({"references": "nope"}, "references")
         self.rejected({"publishes": "nope"}, "publishes")
+
+    def test_a_declaration_without_its_function_keys_is_refused(self):
+        """Break caught: an absent `references` or `publishes` key read as `None` and
+        failing later as a traceback, or as a kind that quietly reads nothing."""
+        for key in ("references", "publishes"):
+            with self.subTest(key=key):
+                entry = {k: v for k, v in CONFIG[KIND].items() if k != key}
+                self.declare({KIND: entry})
+                with self.assertRaisesRegex(relationships.UsageError, key):
+                    self.load()
+
+    def test_every_declaration_is_checked_before_any_module_is_imported(self):
+        """Break caught: modules imported as the file is read, so a bad second
+        declaration is reported only after the first store module has already run."""
+        marker = self.root / "ran"
+        self.declare(
+            {"aa_ok": CONFIG[KIND], "bb_bad": {**CONFIG[KIND], "globs": []}},
+            script=f"open({str(marker)!r}, 'w').close()\n" + SCRIPT,
+        )
+        with self.assertRaisesRegex(relationships.UsageError, "globs"):
+            self.load()
+        self.assertFalse(marker.exists())
 
     def test_a_missing_or_malformed_field_is_refused(self):
         """Break caught: a missing `globs` read as 'match nothing', so a registered
@@ -276,6 +298,61 @@ class StoreKindFailureTest(_StoreKinds):
         self.assertFalse(self.layer_dir().exists())
 
 
+class BadParserResultTest(_StoreKinds):
+    def failing(self, override: str, *, expect: str) -> None:
+        self.estate(ESTATE)
+        self.declare(script=SCRIPT + override)
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 1, err)
+        self.assertIn(KIND, err)
+        self.assertIn(expect, err)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse(self.layer_dir().exists())
+
+    def test_a_reference_under_another_kinds_name_is_refused(self):
+        """Break caught: a reference whose `kind` is not the registered name resolves
+        against another kind's publishers - nothing - and vanishes with no message."""
+        self.failing(
+            "\n_real = references\n\n"
+            "def references(clone, rel, text):\n"
+            "    return [Reference(**{**r.__dict__, 'kind': 'typo'}) for r in _real(clone, rel, text)]\n",
+            expect="billing/billing.events",
+        )
+
+    def test_a_chart_from_a_kind_other_than_helm_chart_is_refused_without_echoing_it(self):
+        """Break caught: a store kind's `chart` becoming an edge key and being written
+        unmasked - and the refusal itself repeating the value, which can be a secret."""
+        self.estate(ESTATE)
+        self.declare(
+            script=SCRIPT + "\n_real = references\n\n"
+            "def references(clone, rel, text):\n"
+            "    return [Reference(**{**r.__dict__, 'chart': 'ghp_" + "x" * 36 + "'})"
+            " for r in _real(clone, rel, text)]\n"
+        )
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 1)
+        self.assertIn("chart", err)
+        self.assertNotIn("x" * 36, err)
+        self.assertFalse(self.layer_dir().exists())
+
+    def test_a_wrong_return_type_is_refused_not_a_traceback(self):
+        """Break caught: `None`, a dict or a bare Reference from `references`, or a
+        malformed `publishes`, escaping as a traceback or being iterated into nonsense."""
+        for body in (
+            "None",
+            "[{'a': 1}]",
+            "Reference('event_subscription', 't', '', '', rel, 1, '')",
+        ):
+            with self.subTest(references=body):
+                self.failing(
+                    f"\ndef references(clone, rel, text):\n    return {body}\n",
+                    expect="billing/billing.events",
+                )
+        for body in ("None", "5", "[('only-one',)]", "[(1, 'x')]"):
+            with self.subTest(publishes=body):
+                self.failing(f"\ndef publishes(clone):\n    return {body}\n", expect="publishes()")
+
+
 class StoreKindMaskingTest(_StoreKinds):
     def test_a_credential_in_a_store_kinds_reference_reaches_no_file(self):
         """Break caught: store kinds exempt from the rules the built-ins follow, so a
@@ -296,6 +373,26 @@ class StoreKindMaskingTest(_StoreKinds):
         self.assertNotIn(TOKEN, written)
         self.assertNotIn(GITHUB, written)
         self.assertNotIn("user:", written)
+
+    def test_a_chart_on_an_edge_key_is_masked_whatever_wrote_it(self):
+        """Break caught: the chart, which keys an edge and is written, skipping the
+        masking pins and targets get. A store kind cannot reach it (it is refused),
+        so this drives `build` with a kind named `helm_chart`, as a defence in depth."""
+
+        def references(clone, rel, text):
+            return [
+                relationships.Reference(
+                    "helm_chart", "t", GITHUB, "", rel, 1, "x", resolved_repo="topics", org=""
+                )
+            ]
+
+        self.estate(ESTATE)
+        kind = relationships.Kind(
+            "helm_chart", "builtin", ("**/*.events",), references, lambda clone: []
+        )
+        layer = self.build(kinds=(kind,))
+        self.assertNotIn(GITHUB, json.dumps(layer.dependencies))
+        self.assertNotIn(GITHUB, json.dumps(layer.by_repo))
 
 
 class EveryKindReportsWhatItCannotResolveTest(_StoreKinds):
@@ -365,4 +462,3 @@ class EveryKindReportsWhatItCannotResolveTest(_StoreKinds):
                 )
                 self.assertEqual(layer.kinds[kind.name]["edges"], 1)
                 self.assertEqual(layer.kinds[kind.name]["unresolved"], 1)
-        self.assertEqual(_kind("npm_package").name, "npm_package")

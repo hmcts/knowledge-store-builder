@@ -1002,10 +1002,12 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
     if not isinstance(declared, dict):
         raise UsageError(f"{config_path}: must be a JSON object keyed by kind name")
     builtin_names = {kind.name for kind in BUILTIN}
-    kinds = []
+    # Every declaration is checked before any module is imported: importing runs the
+    # store's code, and a bad later declaration must not follow code that already ran.
+    checked = []
     for name in sorted(declared):
         entry = declared[name]
-        if not KIND_NAME.match(name):
+        if not KIND_NAME.fullmatch(name):
             raise _declared(name, "kind name", "must match ^[a-z][a-z0-9_]*$")
         if name in builtin_names:
             raise _declared(name, "kind name", "shadows a built-in kind")
@@ -1018,15 +1020,20 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
             or not all(isinstance(g, str) and g for g in globs)
         ):
             raise _declared(name, "globs", "must be a non-empty list of glob strings")
-        path = _module_path(root, name, entry.get("module"))
+        for field_name in ("references", "publishes"):
+            if not isinstance(entry.get(field_name), str) or not entry[field_name]:
+                raise _declared(name, field_name, "must name a function in the module")
+        checked.append((name, entry, tuple(globs), _module_path(root, name, entry.get("module"))))
+    kinds = []
+    for name, entry, globs, path in checked:
         module = _load_module(name, path, entry["module"])
         kinds.append(
             Kind(
                 name,
                 "store",
-                tuple(globs),
-                _function(name, module, "references", entry.get("references")),
-                _function(name, module, "publishes", entry.get("publishes")),
+                globs,
+                _function(name, module, "references", entry["references"]),
+                _function(name, module, "publishes", entry["publishes"]),
             )
         )
     return tuple(kinds)
@@ -1171,10 +1178,14 @@ def _publishers(clones: list[Path], kind: Kind) -> dict[str, list[str]]:
     found: dict[str, set[str]] = {}
     for clone in clones:
         try:
-            published = kind.publishes(clone)
+            published = list(kind.publishes(clone))
+            for pair in published:
+                target, declared_in = pair
+                if not isinstance(target, str) or not isinstance(declared_in, str):
+                    raise TypeError(f"{pair!r} is not a (target, path) pair of strings")
         except Exception as error:
             raise KindError(
-                f"{kind.name}: publishes() raised on {clone.name}: {error!r}"
+                f"{kind.name}: publishes() failed on {clone.name}: {error!r}"
             ) from error
         for target, _rel in published:
             found.setdefault(target, set()).add(clone.name)
@@ -1218,6 +1229,24 @@ def _edge_body(edge: _Edge, consumer: str, chart: str, examples: int, urls) -> d
     }
 
 
+def _check_references(kind: Kind, clone: Path, rel: str, found: object) -> None:
+    """Stop, naming the kind and the file, on what a parser must not return.
+
+    A reference under another kind's name resolves against that kind's publishers
+    and so resolves nothing, silently; a `chart` is the key of an edge and is only
+    meaningful for `helm_chart`; and a parser that returns something other than a
+    list of `Reference` has broken the contract the layer is built on.
+    """
+    where = f"{kind.name}: the parser returned a bad result for {clone.name}/{rel}"
+    if not isinstance(found, (list, tuple)) or not all(isinstance(r, Reference) for r in found):
+        raise KindError(f"{where}: it must be a list of Reference")
+    for ref in found:
+        if ref.kind != kind.name:
+            raise KindError(f"{where}: a reference is of kind {ref.kind!r}, not {kind.name!r}")
+        if ref.chart and kind.name != "helm_chart":
+            raise KindError(f"{where}: a non-empty `chart` is only for helm_chart")
+
+
 def _scan_layer(clones, kinds, resolver, root):
     edges: dict[tuple[str, str, str], _Edge] = {}
     unresolved: dict[str, dict[str, _Unresolved]] = {kind.name: {} for kind in kinds}
@@ -1238,6 +1267,7 @@ def _scan_layer(clones, kinds, resolver, root):
                     raise KindError(
                         f"{kind.name}: the parser raised on {clone.name}/{rel}: {error!r}"
                     ) from error
+                _check_references(kind, clone, rel, found)
                 for ref in found:
                     outcome, value = resolver.resolve(clone.name, ref)
                     if outcome == "self":
@@ -1251,7 +1281,9 @@ def _scan_layer(clones, kinds, resolver, root):
                         entry.references += 1
                         entry.referenced_by.add(clone.name)
                     else:
-                        edge = edges.setdefault((clone.name, value, ref.chart), _Edge())
+                        edge = edges.setdefault(
+                            (clone.name, value, secret_mask.mask(ref.chart)), _Edge()
+                        )
                         edge.references += 1
                         edge.kinds[kind.name] += 1
                         # A pin is store text and a key of a committed file: an npm

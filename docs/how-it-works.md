@@ -205,6 +205,13 @@ The module defines two functions, named in the file:
 - `publishes(clone)` returns `(target, repo-relative path)` pairs for what the
   clone offers to others, and `[]` for a kind that only references.
 
+Each `Reference` must carry the kind's registered name as its `kind`: a
+reference under another name would resolve against another kind's publishers and
+vanish, so the stage stops instead. `chart` must be empty, because only
+`helm_chart` has one. A parser that returns anything but a list of `Reference`,
+or a `publishes` that returns anything but pairs of strings, stops the stage the
+same way, naming the kind and the file (for `publishes`, the clone).
+
 A kind follows the rules the built-ins do. Resolution, the `self` rule,
 conflicts, unresolved targets and their `referenced_by` are the layer's, not the
 parser's. A credential in a `Reference` is dropped (`user:token@` in a URL) or
@@ -216,13 +223,21 @@ A declaration the stage refuses, with exit 1 and before any store code runs:
 - a kind name that does not match `^[a-z][a-z0-9_]*$`, or that is a built-in's;
 - a `module` that is absolute, contains `..`, or resolves (through a symlink or
   otherwise) outside the store root, or that is not a file;
-- a function the module does not define, or `globs` that is not a non-empty list.
+- `globs` that is not a non-empty list, or a `references` or `publishes` that is
+  not a function name.
+
+Every declaration is checked before any module is imported, so a bad declaration
+never follows store code that has already run. Only then are the modules
+imported, and a named function that a module does not define stops the stage the
+same way.
 
 **Trust boundary.** A store's module is Python the stage runs with the builder's
 own permissions: it can read and write anything the operator can. The stage loads
 it only from inside the store root, and never adds the store directory to
-`sys.path`, but it does not sandbox it. Register code you would run from the same
-checkout by hand.
+`sys.path`, but it does not sandbox it. There is no timeout: a parser that
+hangs hangs the stage, as any operator code would. A module cannot import a
+sibling with `import x`, because the store directory is not on `sys.path`; load it
+through `__file__`. Register code you would run from the same checkout by hand.
 
 ## The history layers
 

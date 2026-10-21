@@ -7281,6 +7281,44 @@ MUTATIONS = (
             "test_relationships_store_kinds.RejectedDeclarationTest.test_a_kind_cannot_shadow_a_built_in",
         ),
     ),
+    Mutation(
+        "relationships: a reference under another kind's name is accepted",
+        "relationships.py",
+        "        if ref.kind != kind.name:\n",
+        "        if False:\n",
+        "#455: a reference whose kind is not the registered name resolves against another kind's publishers - nothing - and vanishes with no message; the stage must stop and name it",
+        (
+            "test_relationships_store_kinds.BadParserResultTest.test_a_reference_under_another_kinds_name_is_refused",
+        ),
+    ),
+    Mutation(
+        "relationships: a chart from a kind other than helm_chart is accepted",
+        "relationships.py",
+        '        if ref.chart and kind.name != "helm_chart":\n',
+        "        if False:\n",
+        "#455: a chart keys an edge and is written; from a store kind it was unmasked store text, and it means nothing outside helm_chart",
+        (
+            "test_relationships_store_kinds.BadParserResultTest.test_a_chart_from_a_kind_other_than_helm_chart_is_refused_without_echoing_it",
+        ),
+    ),
+    Mutation(
+        "relationships: an edge's chart is written unmasked",
+        "relationships.py",
+        "(clone.name, value, secret_mask.mask(ref.chart))",
+        "(clone.name, value, ref.chart)",
+        "#455: the chart is a key of a committed file like a pin or target, and gets the same masking as defence in depth behind the helm-only rule",
+        (
+            "test_relationships_store_kinds.StoreKindMaskingTest.test_a_chart_on_an_edge_key_is_masked_whatever_wrote_it",
+        ),
+    ),
+    Mutation(
+        "relationships: a kind name may end in a newline",
+        "relationships.py",
+        "KIND_NAME.fullmatch(name)",
+        "KIND_NAME.match(name)",
+        "#455: `$` matches before a trailing newline, so `abc\\n` passes a `match` and reaches `kinds.json` as a key no file stem can safely be",
+        ("test_relationships_store_kinds.RejectedDeclarationTest.test_a_bad_kind_name_is_refused",),
+    ),
 )
 
 
