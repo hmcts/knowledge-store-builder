@@ -247,9 +247,12 @@ class Mutation:
 # Both store-id mutations stop every manifest being computed under the fixed test
 # id, so every manifest test observes them; one list keeps the two entries in step.
 _EVERY_MANIFEST_TEST = (
+    "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
+    "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
     "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
     "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
     "test_build_store_manifest.Refusals.test_an_unwritable_knowledge_directory_exits_2",
+    "test_build_store_manifest.StatusReadsTheManifest.test_a_present_unrecognised_layer_is_named_with_what_it_means",
     "test_build_store_manifest.StatusReadsTheManifest.test_a_store_with_no_uncovered_files_says_none",
     "test_build_store_manifest.StatusReadsTheManifest.test_files_no_layer_covers_are_listed",
     "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
@@ -7546,6 +7549,8 @@ MUTATIONS = (
         '        True if layers["relationships"]["present"] else None\n',
         "every present relationships layer would read as recognised whatever its stamp says, or lacks",
         (
+            "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
+            "test_build_store_manifest.StatusReadsTheManifest.test_a_present_unrecognised_layer_is_named_with_what_it_means",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_a_damaged_stamp_file_is_not_recognised_and_not_a_failure",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
@@ -7700,12 +7705,15 @@ MUTATIONS = (
         "the documented command would answer `unknown stage` and no store would get a manifest",
         (
             "test_build_store_manifest.LocalOnlyLayers.test_a_layer_git_ignores_is_printed_as_local_only",
+            "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
+            "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
             "test_build_store_manifest.Refusals.test_a_missing_root_exits_2_and_creates_nothing",
             "test_build_store_manifest.Refusals.test_an_undeterminable_id_exits_1_naming_both_sources",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.Refusals.test_an_unwritable_knowledge_directory_exits_2",
             "test_build_store_manifest.StatusReadsTheManifest.test_a_local_only_layer_is_listed_as_local_only",
+            "test_build_store_manifest.StatusReadsTheManifest.test_a_present_unrecognised_layer_is_named_with_what_it_means",
             "test_build_store_manifest.StatusReadsTheManifest.test_a_store_with_no_uncovered_files_says_none",
             "test_build_store_manifest.StatusReadsTheManifest.test_files_no_layer_covers_are_listed",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
@@ -7867,7 +7875,10 @@ MUTATIONS = (
         "",
         "a store outside any repository has no rules to judge by and is described as it is on disk; refusing it would stop every unversioned build",
         (
+            "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
+            "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
+            "test_build_store_manifest.StatusReadsTheManifest.test_a_present_unrecognised_layer_is_named_with_what_it_means",
             "test_build_store_manifest.StatusReadsTheManifest.test_a_store_with_no_uncovered_files_says_none",
             "test_build_store_manifest.StatusReadsTheManifest.test_files_no_layer_covers_are_listed",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
