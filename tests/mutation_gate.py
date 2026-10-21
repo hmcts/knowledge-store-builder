@@ -294,6 +294,7 @@ _EVERY_MANIFEST_TEST = (
     "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
     "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
     "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
+    "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
 )
 
 
@@ -7196,6 +7197,7 @@ MUTATIONS = (
             "test_store_manifest.WhatACloneReceives.test_an_ignored_file_far_down_a_long_listing_is_still_excluded",
             "test_store_manifest.WhatACloneReceives.test_an_ignored_file_with_a_quote_in_its_name_is_still_ignored",
             "test_store_manifest.WhatACloneReceives.test_unusual_file_names_that_are_ignored_are_excluded",
+            "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
     ),
     Mutation(
@@ -7791,6 +7793,7 @@ MUTATIONS = (
             "test_store_manifest.WhichLayersArePresent.test_an_empty_directory_is_not_a_present_layer",
             "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
             "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
+            "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
     ),
     Mutation(
@@ -8930,6 +8933,7 @@ MUTATIONS = (
             "test_build_relationships.StageTest.test_the_format_stamp_is_written_identically_by_every_run",
             "test_build_relationships.StatusTest.test_status_reports_an_unstamped_or_foreign_layer_as_unrecognised",
             "test_build_relationships.StatusTest.test_status_reports_the_layer_or_that_it_is_not_built",
+            "test_build_relationships.StatusTest.test_status_survives_a_pathologically_nested_kinds_file",
             "test_build_relationships.SvcATest.test_the_flat_edge_list_names_both_ends",
         ),
     ),
