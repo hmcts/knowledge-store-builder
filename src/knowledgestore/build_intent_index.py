@@ -911,7 +911,7 @@ def summarise(
     bodies = report or BodyReport()
     print(
         f"Indexed {total_files:,} files across {len(index)} repos from "
-        f"{commits_seen:,} ticketed commits; {total_tickets:,} distinct tickets."
+        f"{commits_seen:,} ticketed commits; {total_tickets:,} distinct landed tickets."
     )
     proposed_links = sum(
         len(d.get("proposed", {})) for files in index.values() for d in files.values()

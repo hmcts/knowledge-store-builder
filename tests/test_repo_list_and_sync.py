@@ -734,13 +734,15 @@ class IntentSummariseTest(SettingsIsolated):
             config.configure(INTENT_INDEX_PATH=Path(tmp) / "file-tickets.json.gz")
             with _gzip.open(config.INTENT_INDEX_PATH, "wt", encoding="utf-8") as out:
                 _json.dump({}, out)
-            index = {"repo-a": {"a.ts": {"tickets": {"DD-1": 2}}}}
+            # A proposed-only ticket beside the landed one: the count is of
+            # landed tickets, and the line has to say so (CLAUDE.md 2.7).
+            index = {"repo-a": {"a.ts": {"tickets": {"DD-1": 2}, "proposed": {"DD-2": 1}}}}
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
                 intent.summarise(index, 2)
         printed = buffer.getvalue()
         self.assertIn("1 files", printed.replace(",", ""))
-        self.assertIn("1 distinct tickets", printed.replace(",", ""))
+        self.assertIn("1 distinct landed tickets", printed.replace(",", ""))
 
 
 class FailedSyncKeepsProvenanceTest(SettingsIsolated):

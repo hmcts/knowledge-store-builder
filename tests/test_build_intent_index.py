@@ -313,6 +313,34 @@ class TicketPrefixDenyTest(SettingsIsolated):
         )
         self.assertEqual(intent.commit_tickets(commit), ["QX-4"])
 
+    def test_a_merge_naming_a_ticket_and_an_advisory_links_nothing(self):
+        """Catches the deny-list reaching a merge commit: a merge's file list is
+        the whole branch, so it is skipped whatever its subject names."""
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit(
+            "Merge pull request #206 from example-org/QX-5-suppress_cve-2018-10237"
+        )
+        commit["is_merge"] = True
+        self.assertFalse(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(len(files), 0)
+
+    def test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket(self):
+        """The commit beside that merge which does link: its subject names only
+        the advisory, so - as for any subject naming no ticket - the body's
+        ticket is read. Before the deny-list `CVE-2018` stood in the subject and
+        kept the body unread."""
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit(
+            "Temporarily suppressing CVE-2018-10237 for a library",
+            body="Needs more investigation (QX-5)",
+        )
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(dict(files["src/x.ts"]["tickets"]), {"QX-5": 1})
+        config.configure(TICKET_PREFIX_DENY="")
+        files, descriptions = make_files(), make_descriptions()
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(dict(files["src/x.ts"]["tickets"]), {"CVE-2018": 1})
+
     def test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket(self):
         commit = squash_commit(
             "QX-1: raise dependency floors (#42)",

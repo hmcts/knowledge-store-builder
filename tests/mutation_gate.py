@@ -5542,6 +5542,7 @@ MUTATIONS = (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
             "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
             "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
         ),
@@ -5556,6 +5557,7 @@ MUTATIONS = (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
         ),
     ),
     Mutation(
@@ -5655,6 +5657,33 @@ MUTATIONS = (
         "the promoted count over-reported links a default-branch commit had landed anyway",
         (
             "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "the distinct landed ticket count takes in proposed tickets",
+        "build_intent_index.py",
+        '        {t for files in index.values() for d in files.values() for t in d["tickets"]}',
+        "        {t for files in index.values() for d in files.values()"
+        ' for t in [*d["tickets"], *d.get("proposed", {})]}',
+        "the summary's ticket count was read as all tickets while it counted landed ones "
+        "(#466 review)",
+        (
+            "test_repo_list_and_sync.IntentSummariseTest.test_reports_counts",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "a subject naming only an advisory keeps its body unread",
+        "build_intent_index.py",
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))\n'
+        "    if subject_tickets:",
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))\n'
+        '    if subject_tickets or config.TICKET_PATTERN.search(commit["subject"]):',
+        "the ticket a branch commit's body named was lost behind an advisory in its subject "
+        "(#466 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
         ),
     ),
     Mutation(
