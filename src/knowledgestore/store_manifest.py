@@ -85,6 +85,8 @@ LAYERS: tuple[Layer, ...] = (
     Layer("provenance", (_rel(config.PROVENANCE_PATH),)),
     Layer("repository_manifest", (_rel(config.MANIFEST_PATH),)),
     Layer("context", (_rel(config.CONTEXT_PATH),)),
+    # Committed, and the asker docs tell a reader to grep it.
+    Layer("content_files", (_rel(config.CONTENT_FILES_PATH),)),
     Layer("history", (_rel(config.HISTORY_DIR),), "dir"),
     Layer("intent", (_rel(config.INTENT_INDEX_PATH),)),
     Layer("ticket_descriptions", (_rel(config.TICKET_DESCRIPTIONS_PATH),)),
@@ -132,8 +134,7 @@ NOT_A_LAYER: dict[str, str] = {
     "DEEPDIVES_INPUT_DIR": "holds the deep-dive inputs beside dives.json, which is the layer",
     "SUMMARIES_SNAPSHOT_PATH": "membership before a re-cluster, kept so a remap can run",
     "SUMMARIES_FILE_SNAPSHOT_PATH": "file-keyed membership before a re-cluster, for the remap",
-    "CONTENT_FILES_PATH": "a path list for grep, derived from the content set",
-    "CONTENT_SET_PATH": "which corpus files were judged content, a build diagnostic",
+    "CONTENT_SET_PATH": "a committed record of the content-set counts, read by status",
     # reports and diagnostics
     "GRAPH_REPORT_PATH": "a human-readable report on the graph, not a layer a reader opens",
     "REMAP_REPORT_PATH": "a report on the last remap",
@@ -143,7 +144,7 @@ NOT_A_LAYER: dict[str, str] = {
     "TOPICS_DOCS_DIR": "the written topic pages that briefs.json is built from",
     "DEEPDIVES_DOCS_DIR": "the written deep-dive pages that dives.json is built from",
     # intent-stage sidecar
-    "TICKET_TITLES_PATH": "ticket titles imported for the explorer, not read by manifest readers",
+    "TICKET_TITLES_PATH": "committed titles the explorer build reads as input; not an asker-facing layer",
     # the manifest's own sources and output
     "TELEMETRY_PATH": "what the stages measured; the manifest reads it for flags",
     "STORE_MANIFEST_PATH": "the manifest itself",

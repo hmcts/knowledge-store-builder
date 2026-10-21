@@ -7058,6 +7058,7 @@ MUTATIONS = (
             "test_store_manifest.WhichLayersArePresent.test_an_empty_directory_is_not_a_present_layer",
             "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
             "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
+            "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
         ),
     ),
     Mutation(
@@ -7073,6 +7074,7 @@ MUTATIONS = (
             "test_store_manifest.Symlinks.test_a_link_staying_inside_the_store_is_hashed_as_its_target",
             "test_store_manifest.WhatACloneReceives.test_a_clone_computes_the_builders_store_digest",
             "test_store_manifest.WhatACloneReceives.test_a_committed_archive_beside_an_ignored_plain_file_stays_present",
+            "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
         ),
     ),
     Mutation(
@@ -7087,6 +7089,7 @@ MUTATIONS = (
             "test_store_manifest.Digest.test_one_changed_byte_changes_the_digest",
             "test_store_manifest.Symlinks.test_a_link_staying_inside_the_store_is_hashed_as_its_target",
             "test_store_manifest.WhatACloneReceives.test_a_committed_archive_beside_an_ignored_plain_file_stays_present",
+            "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
         ),
     ),
     Mutation(
@@ -7305,6 +7308,7 @@ MUTATIONS = (
             "test_store_manifest.WhichLayersArePresent.test_an_empty_directory_is_not_a_present_layer",
             "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
             "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
+            "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
         ),
     ),
     Mutation(
@@ -7732,6 +7736,7 @@ MUTATIONS = (
             "test_store_manifest.WhichLayersArePresent.test_a_subset_of_layers_reports_exactly_that_subset",
             "test_store_manifest.WhichLayersArePresent.test_an_empty_directory_is_not_a_present_layer",
             "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
+            "test_store_manifest.WhichLayersArePresent.test_the_content_file_list_is_a_present_digested_layer",
         ),
     ),
     Mutation(

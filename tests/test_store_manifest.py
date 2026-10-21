@@ -23,6 +23,7 @@ from knowledgestore import config, store_manifest
 from knowledgestore.git_env import git_env
 
 ALL_LAYERS = (
+    "content_files",
     "context",
     "deep_dives",
     "deployments",
@@ -132,6 +133,7 @@ class WhichLayersArePresent(_Store):
         """Breaks if any one layer's path is wrong: each file is created alone and
         only its own layer may turn present."""
         paths = {
+            "content_files": "knowledge/corpus/content-files.txt",
             "context": "knowledge_context.md",
             "deep_dives": "knowledge/deep-dives/dives.json",
             "explorer": "graphify-out/explorer.html",
@@ -155,6 +157,16 @@ class WhichLayersArePresent(_Store):
                 _touch(self.root, rel)
                 present = [n for n, p in self.present().items() if p]
                 self.assertEqual(present, [name])
+
+    def test_the_content_file_list_is_a_present_digested_layer(self):
+        """Breaks if the committed path list a reader greps is left out of the
+        manifest: it would be a store artefact no reader is told about."""
+        data = b"docs/a.md\ndocs/b.md\n"
+        _touch(self.root, "knowledge/corpus/content-files.txt", data.decode())
+        layer = self.compute()["layers"]["content_files"]
+        self.assertEqual(layer["paths"], ["knowledge/corpus/content-files.txt"])
+        self.assertTrue(layer["present"])
+        self.assertEqual(layer["digest"], _sha(data))
 
     def test_an_empty_directory_is_not_a_present_layer(self):
         """Breaks if a directory layer counts as present because the directory
@@ -849,10 +861,6 @@ class SourcesAsOf(_Store):
         self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T00:00:00+00:00")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def _unaccounted(namespace, root: Path, layers, not_a_layer) -> list[str]:
     """Config names of the paths under `root` that are neither a layer nor excused.
 
@@ -936,3 +944,7 @@ class EveryArtefactIsAccountedFor(unittest.TestCase):
             _unaccounted(synthetic, root, layers, {"EXCUSED_PATH": "an input"}),
             ["INSIDE_PATH", "STRAY_PATH"],
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
