@@ -546,6 +546,21 @@ It exits 0 when no grammar is missing or none of those extensions occur, and
 non-zero otherwise. `--detect` and `--files` move the input as they do for
 `extract-ast`.
 
+**A per-repository `graphify update` route runs `knowledgestore check-grammars
+--clones` first.** The content set on disk comes from the previous extraction, so
+after a resync that adds a repository or a file type it is stale, and the check
+would miss exactly the new `.tf` and `.sql` files. `--clones` scans
+`repositories/<name>` for every repository `config/repositories.txt` declares and
+nothing else. The file list comes from graphify itself:
+`graphify.extract.collect_files`, run inside the probed interpreter with the clone
+as working directory, so each repository's `.graphifyignore`, vendored and
+symlinked paths are treated as that graphify will treat them. The output names the
+method beside the interpreter, either `graphify detection (exact)` or `library
+exclusions + .graphifyignore parse (approximate)`. The second is the fallback for
+an interpreter with no usable graphify: it prunes `.git` and `graphify-out` and
+applies `.graphifyignore` with gitignore semantics, so its counts are
+approximate - treat a refusal or a pass under it accordingly.
+
 ### Check each semantic chunk before merging
 
 ```bash

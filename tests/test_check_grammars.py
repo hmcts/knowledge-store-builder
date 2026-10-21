@@ -44,7 +44,9 @@ def run(argv: "list[str]") -> "tuple[int, str, str]":
     return code, out.getvalue(), err.getvalue()
 
 
-class CheckGrammarsTest(unittest.TestCase):
+class _Fixture:
+    """Shared fixture, deliberately not a TestCase so subclasses do not re-run each other."""
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -55,16 +57,37 @@ class CheckGrammarsTest(unittest.TestCase):
         self.bin.mkdir()
         self.log = self.bin / "probes.log"
 
-    def _interpreter(self, name: str, missing: "tuple[str, ...]" = ()) -> str:
-        """An executable that fails `import <m>` for each m in `missing`, and logs every probe."""
+    def _interpreter(
+        self, name: str, missing: "tuple[str, ...]" = (), delegate: bool = False
+    ) -> str:
+        """An executable that fails `import <m>` for each m in `missing`, and logs every probe.
+
+        With `delegate` every other invocation runs the real interpreter, so graphify's
+        own file detection really runs; without it the executable answers nothing to
+        that script, which is what an interpreter with no usable graphify does.
+        """
         path = self.bin / name
         cases = "".join(f"  *{module}*) exit 1;;\n" for module in missing)
+        ending = f'exec "{sys.executable}" "$@"\n' if delegate else "exit 0\n"
         path.write_text(
-            f'#!/bin/sh\necho "{name} $*" >> "{self.log}"\ncase "$*" in\n{cases}esac\nexit 0\n',
+            f'#!/bin/sh\necho "{name} $*" >> "{self.log}"\ncase "$*" in\n{cases}esac\n{ending}',
             encoding="utf-8",
         )
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return str(path)
+
+    def _declare(self, *names: str) -> None:
+        config_file = config.REPOSITORIES_CONFIG
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(
+            "".join(f"{n}|https://example.invalid/{n}.git|main\n" for n in names),
+            encoding="utf-8",
+        )
+
+    def _clone_file(self, repo: str, relative: str) -> None:
+        path = self.root / "repositories" / repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('resource "a" "b" {}\n', encoding="utf-8")
 
     def _probes(self) -> "list[str]":
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
@@ -84,6 +107,8 @@ class CheckGrammarsTest(unittest.TestCase):
         where.mkdir(parents=True, exist_ok=True)
         (where / ".graphify_python").write_text(interpreter + "\n", encoding="utf-8")
 
+
+class CheckGrammarsTest(_Fixture, unittest.TestCase):
     def test_a_missing_hcl_grammar_refuses_naming_grammar_count_interpreter_and_fix(self):
         """Catches the check passing when the grammar is absent: .tf then extracts to nothing."""
         python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
@@ -199,6 +224,126 @@ class CheckGrammarsTest(unittest.TestCase):
         self.assertIn("HCL grammar (tree_sitter_hcl) is missing for 1 file(s)", err)
         self.assertIn(f"{sys.executable} (extract-ast's own interpreter)", err)
         self.assertFalse((self.root / "graphify-out" / ".graphify_ast.json").exists())
+
+
+class ClonesTest(_Fixture, unittest.TestCase):
+    """`--clones` scans what is on disk, not a content set that may predate the resync.
+
+    The interpreter here answers nothing to graphify's file detection, so the file
+    list is the library's approximate walk.
+    """
+
+    def test_a_tf_the_content_set_does_not_list_is_caught(self):
+        """Catches --clones trusting a stale content set: a resync's new .tf files go unchecked."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._content("repo-a", "old.py")  # the stale content set lists no .tf
+        self._clone_file("repo-a", "new/main.tf")
+        code, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 1, err)
+        self.assertIn("HCL grammar (tree_sitter_hcl) is missing for 1 file(s)", err)
+
+    def test_a_repository_not_declared_is_not_scanned(self):
+        """Catches walking repositories/ instead of the declaration: a stray clone would refuse."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._clone_file("repo-a", "app.py")
+        self._clone_file("stray", "main.tf")
+        code, out, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertIn("nothing to probe", out)
+
+    def test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is(self):
+        """Catches counting files graphify will skip, and missing ones it will read (approximate)."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._clone_file("repo-a", "vendor/skipped.tf")
+        (self.root / "repositories" / "repo-a" / ".graphifyignore").write_text(
+            "vendor/\n", encoding="utf-8"
+        )
+        code, out, _ = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 0, out)
+        self._clone_file("repo-a", "kept.tf")
+        code, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 1)
+        self.assertIn("missing for 1 file(s)", err)
+
+    def test_a_file_pattern_in_graphifyignore_excludes_that_file_only(self):
+        """Catches the fallback honouring directory patterns but not file patterns."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._clone_file("repo-a", "net.generated.tf")
+        (self.root / "repositories" / "repo-a" / ".graphifyignore").write_text(
+            "*.generated.tf\n", encoding="utf-8"
+        )
+        code, out, _ = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 0, out)
+        self._clone_file("repo-a", "net.tf")
+        code, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 1)
+        self.assertIn("missing for 1 file(s)", err)
+
+    def test_a_pipeline_output_directory_and_git_are_not_counted(self):
+        """Catches the fallback counting .tf inside .git or the pipeline's own output."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._clone_file("repo-a", ".git/x.tf")
+        self._clone_file("repo-a", "graphify-out/y.tf")
+        code, out, _ = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 0, out)
+
+    def test_the_approximate_method_is_named(self):
+        """Catches a silent fallback reading as the exact check."""
+        python = self._interpreter("py-fallback", missing=("tree_sitter_hcl",))
+        self._declare("repo-a")
+        self._clone_file("repo-a", "main.tf")
+        _, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertIn("file list: library exclusions + .graphifyignore parse (approximate)", err)
+        self.assertNotIn("(exact)", err)
+
+    def test_a_missing_declaration_refuses(self):
+        """Catches --clones passing when it had no repositories to look at."""
+        code, _, err = run(["check-grammars", "--clones"])
+        self.assertEqual(code, 1)
+        self.assertIn("Cannot read the declared repositories", err)
+
+
+@needs_graphify
+class ClonesWithGraphifyTest(_Fixture, unittest.TestCase):
+    """The exact route: graphify's own file detection, run in the probed interpreter."""
+
+    def test_the_exact_method_is_named(self):
+        """Catches the exact route being reported as the approximate one, or the reverse."""
+        python = self._interpreter("py-delegating", missing=("tree_sitter_hcl",), delegate=True)
+        self._declare("repo-a")
+        self._clone_file("repo-a", "main.tf")
+        _, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertIn("file list: graphify detection (exact)", err)
+        self.assertIn("missing for 1 file(s)", err)
+
+    def test_graphify_decides_what_is_vendored(self):
+        """Catches the library re-deriving exclusions: graphify skips node_modules itself."""
+        python = self._interpreter("py-delegating", missing=("tree_sitter_hcl",), delegate=True)
+        self._declare("repo-a")
+        self._clone_file("repo-a", "node_modules/pkg/x.tf")
+        code, out, _ = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 0, out)
+        self.assertIn("(exact)", out)
+
+    def test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is(self):
+        """Catches graphify's .graphifyignore being bypassed on the exact route."""
+        python = self._interpreter("py-delegating", missing=("tree_sitter_hcl",), delegate=True)
+        self._declare("repo-a")
+        self._clone_file("repo-a", "generated/skipped.tf")
+        (self.root / "repositories" / "repo-a" / ".graphifyignore").write_text(
+            "generated/\n", encoding="utf-8"
+        )
+        code, out, _ = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 0, out)
+        self._clone_file("repo-a", "kept.tf")
+        code, _, err = run(["check-grammars", "--clones", "--interpreter", python])
+        self.assertEqual(code, 1)
+        self.assertIn("missing for 1 file(s)", err)
 
 
 if __name__ == "__main__":
