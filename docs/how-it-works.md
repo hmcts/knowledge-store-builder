@@ -152,7 +152,9 @@ chart rather than one edge that hides which.
 
 1. `KSB_CHART_REPO_PATTERN` with `{name}` replaced, when it is set and names a
    clone. It is empty by default.
-2. The clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella.
+2. The clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella. The
+   `Chart.yaml` can be at the clone's root or in any subdirectory
+   (`<clone>/<chart>/Chart.yaml`), unless it is vendored (below).
 3. An umbrella (`KSB_UMBRELLA_REPOS`) that defines it.
 4. For a Flux `HelmRelease` only, a `sourceRef` that names a clone.
 5. Otherwise, unresolved.
@@ -175,9 +177,19 @@ module block's own literal `source`, with the organisation check above, and the
 the graph, the report and this layer name the same repository for one
 declaration, and the two chart settings apply to both.
 
-A file that cannot be opened, or a POM that does not parse, is counted as
-`unreadable` for its kind and named in the run's output. The rest of the estate
-is still read. Two runs over the same clones write identical bytes, and a
+A file that cannot be opened, a POM that does not parse, or a file naming a
+`HelmRelease` that does not parse as YAML, is counted as `unreadable` for its kind
+and named in the run's output. The rest of the estate is still read. A bare `=` in
+a release's values (`op: =`) is read as the string `"="`, as Kubernetes reads it.
+
+**No reference vanishes.** Every reference the parsers read ends as exactly one
+of these: a reference in an edge, a reference to an unresolved target, or a skip
+counted under its reason. Before writing, the stage checks this per kind: the
+references read, plus the declarations a parser set aside (`local`), must equal
+the references in edges, plus those of unresolved targets, plus every skip but
+`unreadable`, which counts files rather than references. A kind that does not
+balance stops the stage with exit 1, naming the kind and each figure, and nothing
+is written. Two runs over the same clones write identical bytes, and a
 repository no longer cloned loses its `by-repo` file in the same run.
 
 A Flux `HelmRelease` is read with PyYAML, which the `deploy` extra installs

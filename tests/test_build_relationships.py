@@ -479,6 +479,22 @@ class ChartResolutionTest(_HelmStore):
         self.assertEqual(self.provider(layer, "deployer", "ext"), "flux-src")
         self.assertEqual(layer.by_repo["deployer"]["depends_on"][0]["refs_pinned"], {"2.0.0": 1})
 
+    def test_a_release_of_a_chart_defined_in_a_subdirectory_resolves_to_that_clone(self):
+        """Break caught: only a clone's root `Chart.yaml` read as a definition, or a
+        subdirectory taken for a vendored copy, so a release of a chart from a
+        `HelmRepository` - no clone to fall back on - resolves to nothing. A
+        `Chart.yaml` at `<clone>/<chart>/` with no chart above it defines the chart."""
+        if not HAS_YAML:
+            self.skipTest("needs the `deploy` extra (PyYAML)")
+        layer = self.helm(
+            {
+                "deployer": {"apps/x/release.yaml": RELEASE},
+                "charts-repo": {"xchart/Chart.yaml": _chart("xchart")},
+            }
+        )
+        self.assertEqual(self.provider(layer, "deployer", "xchart"), "charts-repo")
+        self.assertEqual(layer.dependencies["unresolved_targets_outside_estate"]["helm_chart"], {})
+
 
 class SelfRuleTest(_HelmStore):
     """`self` means resolution landed on the consumer, and nothing else does."""
@@ -807,6 +823,65 @@ class MissingPyYamlTest(_Store):
             (self.root / "knowledge" / "relationships" / "by-repo" / "app.json").read_text()
         )
         self.assertEqual([e["repository"] for e in body["depends_on"]], ["web-charts"])
+
+
+class UnparsedReleaseTest(_Store):
+    def test_a_release_that_will_not_parse_is_counted_and_named(self):
+        """Break caught: a file holding a `HelmRelease` that PyYAML refuses read as
+        holding no release, so its chart reference vanishes with nothing counted -
+        the drop a store's parity run found. It is unreadable, and named."""
+        if not HAS_YAML:
+            self.skipTest("needs the `deploy` extra (PyYAML)")
+        self.estate({"broken": {"release.yaml": RELEASE + "  values: {unclosed: [\n"}})
+        layer = self.build(kinds=(_kind("helm_chart"),))
+        self.assertEqual(layer.unreadable, ["repositories/broken/release.yaml"])
+        self.assertEqual(layer.skipped["helm_chart"], {"unreadable": 1})
+
+
+# Every declaration in the fixture estate plus EXTRA_CLONES, counted by hand from the
+# files. terraform_module: svc-a/main.tf's seven module sources and svc-c's three.
+# helm_chart: chart-web's two dependencies and svc-b's release. maven_artifact: four
+# in libs-java/pom.xml, one in lib-b, one in svc-b. npm_package: ui-kit's one and
+# svc-b's three.
+DECLARED = {"terraform_module": 10, "helm_chart": 3, "maven_artifact": 6, "npm_package": 4}
+
+
+class ConservationTest(_Store):
+    """Every reference ends as exactly one of an edge, an unresolved target, or a
+    counted skip with a reason."""
+
+    def test_every_declaration_in_the_estate_is_placed_exactly_once(self):
+        """Break caught: a reference read and then neither drawn as an edge, listed
+        as unresolved nor counted as skipped - a dependency missing from a layer
+        that reads as complete. The stage's own conservation check stops the build
+        on that before this test reads anything."""
+        self.estate()
+        layer = self.build()
+        unresolved = layer.dependencies["unresolved_targets_outside_estate"]
+        placed = {
+            kind: counts["references"]
+            + sum(entry["references"] for entry in unresolved[kind].values())
+            + sum(counts["skipped"].values())
+            for kind, counts in layer.kinds.items()
+        }
+        expected = dict(DECLARED)
+        if not HAS_YAML:
+            expected["helm_chart"] -= 1  # svc-b's release is removed without PyYAML
+        self.assertEqual(placed, expected)
+
+    def test_a_kind_that_does_not_balance_is_named_with_each_figure(self):
+        """Break caught: the check comparing the wrong quantities - counting an
+        unreadable file as a placed reference, or a balanced kind reported - so it
+        passes over a dropped reference or fails a sound build."""
+        self.assertEqual(
+            relationships.unaccounted(
+                {"npm_package": 5, "helm_chart": 3},
+                {"npm_package": 2, "helm_chart": 1},
+                {"npm_package": 1, "helm_chart": 1},
+                {"npm_package": {"self": 1, "unreadable": 4}, "helm_chart": {"self": 1}},
+            ),
+            ["npm_package: 5 references read, 4 placed (2 in edges, 1 unresolved, 1 skipped)"],
+        )
 
 
 class StageTest(_Store):

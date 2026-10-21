@@ -23,6 +23,7 @@ would be absent from a layer that reads as complete.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import hashlib
 import importlib.util
 import json
@@ -601,12 +602,33 @@ class MissingDependency(Exception):
         self.extra = extra
 
 
+@functools.cache
+def _flux_loader():
+    """PyYAML's safe loader, reading a bare `=` as the string it is. Only called
+    once `import yaml` has succeeded.
+
+    PyYAML resolves a plain `=` to YAML 1.1's `value` type and the safe loader has
+    no constructor for it, so a release whose values hold a policy rule
+    (`op: =`) fails to load whole and its chart reference with it. Kubernetes reads
+    the same scalar as `"="`.
+    """
+
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_constructor("tag:yaml.org,2002:value", yaml.SafeLoader.construct_yaml_str)
+    return Loader
+
+
 def _helm_releases(rel: str, text: str) -> list[Reference]:
     """Flux `HelmRelease`s in a YAML file, through the one reader of them.
 
     Raises `MissingDependency` without PyYAML, because there is nothing to read them
-    with and the file is not therefore free of references; a file that is not YAML
-    (a Helm template full of `{{ }}`) is not a release."""
+    with and the file is not therefore free of references; and `ValueError` for a
+    file naming `HelmRelease` that will not parse (a Helm template full of `{{ }}`),
+    so the layer counts it as unreadable rather than as holding no release."""
     if "HelmRelease" not in text:
         return []
     try:
@@ -614,9 +636,9 @@ def _helm_releases(rel: str, text: str) -> list[Reference]:
     except ImportError:
         raise MissingDependency("PyYAML", "deploy") from None
     try:
-        documents = list(yaml.safe_load_all(text))
-    except yaml.YAMLError:
-        return []
+        documents = list(yaml.load_all(text, Loader=_flux_loader()))
+    except yaml.YAMLError as error:
+        raise ValueError(f"not YAML: {type(error).__name__}") from error
     lines = text.splitlines()
     found, at = [], 0
     for document in documents:
@@ -1358,10 +1380,62 @@ def _check_references(kind: Kind, clone: Path, rel: str, found: object) -> None:
             raise KindError(f"{where}: a non-empty `chart` is only for helm_chart")
 
 
+UNREADABLE = "unreadable"
+
+
+class ConservationError(KindError):
+    """A reference was read and then placed nowhere: not an edge, not an unresolved
+    target, not a counted skip. The stage stops before writing a layer that would
+    read as complete without it."""
+
+
+def unaccounted(
+    read: Mapping[str, int],
+    edges: Mapping[str, int],
+    unresolved: Mapping[str, int],
+    skipped: Mapping[str, Mapping[str, int]],
+) -> list[str]:
+    """One line per kind whose references read differ from those placed, `[]` when
+    every kind balances (CLAUDE.md 2.5).
+
+    `read` is what the parsers returned plus the declarations they set aside
+    (`Kind.skips`); placed is the references in edges, plus those of unresolved
+    targets, plus every skip but `unreadable`, which counts files, not references.
+    """
+    found = []
+    for kind in sorted(read):
+        in_edges, outside = edges.get(kind, 0), unresolved.get(kind, 0)
+        set_aside = sum(n for reason, n in skipped.get(kind, {}).items() if reason != UNREADABLE)
+        placed = in_edges + outside + set_aside
+        if placed != read[kind]:
+            found.append(
+                f"{kind}: {read[kind]} references read, {placed} placed "
+                f"({in_edges} in edges, {outside} unresolved, {set_aside} skipped)"
+            )
+    return found
+
+
+def _check_conservation(read, edges, unresolved, skipped) -> None:
+    problems = unaccounted(
+        read,
+        Counter(kind for edge in edges.values() for kind in edge.kinds.elements()),
+        {
+            kind: sum(entry.references for entry in targets.values())
+            for kind, targets in unresolved.items()
+        },
+        skipped,
+    )
+    if problems:
+        raise ConservationError(
+            "references read and references placed do not balance - " + "; ".join(problems)
+        )
+
+
 def _scan_layer(clones, kinds, resolver, root):
     edges: dict[tuple[str, str, str], _Edge] = {}
     unresolved: dict[str, dict[str, _Unresolved]] = {kind.name: {} for kind in kinds}
     skipped: dict[str, Counter] = {kind.name: Counter() for kind in kinds}
+    read: Counter = Counter({kind.name: 0 for kind in kinds})
     unreadable: list[str] = []
     for clone in clones:
         for kind in kinds:
@@ -1369,7 +1443,8 @@ def _scan_layer(clones, kinds, resolver, root):
                 try:
                     text = read_text_or_raise(clone / rel)
                     found = kind.references(clone, rel, text)
-                    skipped[kind.name].update(kind.skips(clone, rel, text))
+                    set_aside = kind.skips(clone, rel, text)
+                    skipped[kind.name].update(set_aside)
                 except MissingDependency as missing:
                     raise KindError(
                         f"{kind.name}: {_store_relative(root, clone / rel)} {missing} - "
@@ -1377,7 +1452,7 @@ def _scan_layer(clones, kinds, resolver, root):
                     ) from missing
                 except (OSError, ValueError):
                     unreadable.append(_store_relative(root, clone / rel))
-                    skipped[kind.name]["unreadable"] += 1
+                    skipped[kind.name][UNREADABLE] += 1
                     continue
                 except Exception as error:
                     raise KindError(
@@ -1385,6 +1460,7 @@ def _scan_layer(clones, kinds, resolver, root):
                         f"on {clone.name}/{rel}"
                     ) from error
                 _check_references(kind, clone, rel, found)
+                read[kind.name] += len(found) + sum(set_aside.values())
                 for ref in found:
                     outcome, value = resolver.resolve(clone.name, ref)
                     if outcome == "self":
@@ -1407,6 +1483,7 @@ def _scan_layer(clones, kinds, resolver, root):
                         # spec can be a URL carrying `access_token=`.
                         edge.refs[secret_mask.mask(ref.ref)] += 1
                         edge.examples.append((ref.rel, ref.line, ref.text))
+    _check_conservation(read, edges, unresolved, skipped)
     return edges, unresolved, skipped, sorted(unreadable)
 
 

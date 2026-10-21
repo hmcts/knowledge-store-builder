@@ -524,6 +524,32 @@ class HelmReleaseTest(SettingsIsolated):
             (ref,) = relationships.scan(Path(root), _kind("helm_chart"))
         self.assertEqual((ref.target, ref.ref, ref.source, ref.line), ("odd", "1.4", "", 8))
 
+    def test_a_release_whose_values_hold_a_bare_equals_sign_is_read(self):
+        """Break caught: PyYAML's safe loader refusing `op: =` - it resolves a bare
+        `=` to YAML 1.1's `value` type and has no constructor for it - so the file
+        reads as not YAML and the release's chart reference above the values is
+        lost. A policy rule in a release's values is where `=` is written."""
+        text = (
+            "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n  name: a\n"
+            "spec:\n  chart:\n    spec:\n      chart: xchart\n      version: 1.2.3\n"
+            "      sourceRef:\n        kind: HelmRepository\n        name: some-helm-repo\n"
+            "  values:\n    criteria:\n      - key: namespace\n        op: =\n"
+            "        value: '*'\n"
+        )
+        with _clone({"r.yaml": text}) as root:
+            refs = relationships.scan(Path(root), _kind("helm_chart"))
+        self.assertEqual(
+            [(r.target, r.ref, r.source, r.line) for r in refs],
+            [("xchart", "1.2.3", "some-helm-repo", 8)],
+        )
+
+    def test_a_release_that_will_not_parse_is_unreadable_not_empty(self):
+        """Break caught: a file holding a `HelmRelease` that does not parse read as
+        holding none, so the layer cannot count what it lost."""
+        text = "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec: {unclosed: [\n"
+        with _clone({"r.yaml": text}) as root, self.assertRaises(ValueError):
+            relationships.scan(Path(root), _kind("helm_chart"))
+
     def test_the_kind_reports_the_release_as_a_chart_reference(self):
         """Break caught: the release read but not turned into a reference, or its
         sourceRef dropped - the resolver falls back on it for a chart no clone
