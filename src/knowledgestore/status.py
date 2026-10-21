@@ -1202,6 +1202,10 @@ def _report_relationships() -> None:
     if not path.is_file():
         print("Relationships: not built - `knowledgestore relationships` writes it")
         return
+    problem = _relationships_format_problem()
+    if problem:
+        print(f"Relationships: unrecognised format ({_relative(path)}: {problem})")
+        return
     try:
         kinds = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError) as error:
@@ -1209,10 +1213,6 @@ def _report_relationships() -> None:
         return
     if not isinstance(kinds, dict):
         print(f"Relationships: {_relative(path)} is not a JSON object")
-        return
-    problem = _relationships_format_problem()
-    if problem:
-        print(f"Relationships: unrecognised format ({_relative(path)}: {problem})")
         return
     parts = []
     for name, entry in sorted(kinds.items()):

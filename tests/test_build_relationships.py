@@ -1127,6 +1127,23 @@ class StageTest(_Store):
                 self.assertIn("format", err)
                 self.assertNotIn("Traceback", out + err)
 
+    def test_compare_names_the_missing_stamp_for_a_legacy_shaped_file(self):
+        """Break caught: the shape check running before the stamp check, so a store
+        script's output (its own `edges`, an unresolved-targets table of another
+        shape) is refused for whichever field is malformed rather than for being
+        another layer's format."""
+        self.estate()
+        legacy = {
+            "edges": [],
+            "unresolved_targets_outside_estate": {"npm_package": {"react": 3}},
+        }
+        path = self.root / "legacy.json"
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        code, out, err = self.run_stage("--compare", str(path))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("carries no `format` stamp", err)
+        self.assertNotIn("object of objects", err)
+
     def test_the_format_stamp_is_written_identically_by_every_run(self):
         """Break caught: the stamp missing from the written file, carrying a key a
         reader does not look for, or varying between runs (CLAUDE.md 1.3)."""
@@ -1193,6 +1210,9 @@ class StatusTest(_Store):
         (CLAUDE.md 6.7)."""
         path = self.root / "knowledge" / "relationships" / "kinds.json"
         path.parent.mkdir(parents=True)
+        (path.parent / "repository-dependencies.json").write_text(
+            json.dumps({"format": relationships.format_stamp()}), encoding="utf-8"
+        )
         path.write_text("[" * 200000 + "]" * 200000, encoding="utf-8")
         self.assertIn(
             "Relationships: knowledge/relationships/kinds.json is unreadable", self._status()

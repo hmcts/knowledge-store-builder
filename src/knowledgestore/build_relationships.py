@@ -80,11 +80,14 @@ def report(layer: relationships.Layer) -> list[str]:
 def shape_error(body: object) -> str:
     """Why `body` is not a `repository-dependencies.json` that can be compared, or "".
 
-    Shape first, then the format stamp, so a foreign layer is told it is foreign
-    only once it is at least this layer's shape.
+    The format stamp first, then the shape: a file with no stamp is not this stage's
+    format, and which of its fields happens to be malformed says nothing useful.
     """
     if not isinstance(body, dict):
         return "it is not a JSON object"
+    problem = relationships.format_problem(body)
+    if problem:
+        return problem
     edges = body.get("edges", [])
     if not isinstance(edges, list):
         return "`edges` is not a list"
@@ -98,7 +101,7 @@ def shape_error(body: object) -> str:
     for kind, targets in unresolved.items():
         if not isinstance(targets, dict) or not all(isinstance(t, dict) for t in targets.values()):
             return f"`unresolved_targets_outside_estate.{kind}` is not an object of objects"
-    return relationships.format_problem(body)
+    return ""
 
 
 def _edge_shape_error(number: int, edge: object) -> str:

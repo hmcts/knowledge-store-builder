@@ -7852,6 +7852,7 @@ MUTATIONS = (
             "test_build_relationships.StageTest.test_an_unwritable_output_exits_2",
             "test_build_relationships.StageTest.test_compare_exits_0_on_an_equal_file_and_1_on_a_difference",
             "test_build_relationships.StageTest.test_compare_refuses_a_file_of_the_wrong_shape_cleanly",
+            "test_build_relationships.StageTest.test_compare_names_the_missing_stamp_for_a_legacy_shaped_file",
             "test_build_relationships.StageTest.test_compare_refuses_an_unstamped_or_foreign_major_file",
             "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
             "test_build_relationships.StageTest.test_compare_writes_nothing",
@@ -8097,10 +8098,11 @@ MUTATIONS = (
     Mutation(
         "relationships: --compare reads a file with no format stamp",
         "build_relationships.py",
-        "    return relationships.format_problem(body)\n",
-        '    return ""\n',
+        "    problem = relationships.format_problem(body)\n    if problem:\n        return problem\n",
+        "",
         "#455: a store's script output shares this layer's top-level keys and differs below them, so a comparison that checks only shape reports its differences as drift in a layer it is not",
         (
+            "test_build_relationships.StageTest.test_compare_names_the_missing_stamp_for_a_legacy_shaped_file",
             "test_build_relationships.StageTest.test_compare_refuses_an_unstamped_or_foreign_major_file",
         ),
     ),
