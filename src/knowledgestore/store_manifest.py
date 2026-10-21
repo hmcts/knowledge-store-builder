@@ -121,6 +121,7 @@ LAYERS: tuple[Layer, ...] = (
 # `tests/test_store_manifest.py`: a path the library writes that is neither a layer
 # nor here fails the suite, so adding an artefact forces the decision whether a
 # reader should be told about it. Keyed by the config name.
+_IN_RELATIONSHIPS = "inside the relationships layer, digested with its directory"
 NOT_A_LAYER: dict[str, str] = {
     # inputs a person maintains
     "BOUNDARY_PATH": "a hand-maintained input: the estate's declared boundary",
@@ -160,9 +161,9 @@ NOT_A_LAYER: dict[str, str] = {
     # intent-stage sidecar
     "TICKET_TITLES_PATH": "committed titles the explorer build reads as input; not an asker-facing layer",
     # the relationships layer: one directory layer, so its files are digested with it
-    "RELATIONSHIPS_BY_REPO_DIR": "inside the relationships layer, digested with its directory",
-    "REPOSITORY_DEPENDENCIES_PATH": "inside the relationships layer, digested with its directory",
-    "RELATIONSHIP_KINDS_PATH": "inside the relationships layer, digested with its directory",
+    "RELATIONSHIPS_BY_REPO_DIR": _IN_RELATIONSHIPS,
+    "REPOSITORY_DEPENDENCIES_PATH": _IN_RELATIONSHIPS,
+    "RELATIONSHIP_KINDS_PATH": _IN_RELATIONSHIPS,
     "RELATIONSHIPS_EXTRA_DIR": "the store's own inputs to `extra`, inside the relationships layer",
     "RELATIONSHIP_KINDS_CONFIG_PATH": "a hand-maintained input: the store's own relationship kinds",
     # the manifest's own sources and output
