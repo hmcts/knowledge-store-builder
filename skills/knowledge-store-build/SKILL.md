@@ -856,6 +856,7 @@ what discovers the tickets:
 
 ```bash
 knowledgestore fetch-tickets     # -> knowledge/intent/ticket-tracker.json.gz
+knowledgestore manifest          # the ticket layer changed: re-run before committing
 ```
 
 With no credentials it names the missing settings, writes nothing and exits 0 —
@@ -1209,6 +1210,7 @@ knowledgestore summaries snapshot   # BEFORE re-clustering; writes two files, co
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: re-keys prose whose community is unchanged
 knowledgestore summaries snapshot   # re-key the baseline to the new clustering
+knowledgestore manifest             # the summaries layer changed: re-run before committing
 ```
 
 **`adrift` first, and never straight after a snapshot.** Community ids are

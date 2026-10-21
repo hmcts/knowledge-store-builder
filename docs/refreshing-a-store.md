@@ -58,6 +58,7 @@ is the stage that discovers which tickets exist:
 
 ```bash
 knowledgestore fetch-tickets
+knowledgestore manifest
 ```
 
 It asks the tracker about tickets it has never had an answer for, and about up
