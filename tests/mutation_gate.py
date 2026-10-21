@@ -5328,6 +5328,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
@@ -5625,6 +5626,27 @@ MUTATIONS = (
         "a feature file named after an advisory was linked to `CVE-<year>` (#464 review)",
         (
             "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "the run stops recording how many links squash merges promoted",
+        "build_intent_index.py",
+        '            "intent.links_promoted": links.promoted,',
+        '            "intent.links_promoted": 0,',
+        "a rebuild moved links from `proposed` and nothing in the run could say how many "
+        "(#453 reimplementation review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "a link landed by its own commit is counted as promoted",
+        "build_intent_index.py",
+        '            links.promoted += sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])',
+        '            links.promoted += sum(1 for t, n in data["promoted"].items())',
+        "the promoted count over-reported links a default-branch commit had landed anyway",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
         ),
     ),
     Mutation(

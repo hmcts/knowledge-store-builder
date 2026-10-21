@@ -37,6 +37,7 @@ def make_files():
         lambda: {
             "tickets": defaultdict(int),
             "proposed": defaultdict(int),
+            "promoted": defaultdict(int),
             "first": None,
             "last": None,
         }
@@ -2064,6 +2065,36 @@ class SquashPromotionTest(SettingsIsolated):
         self.assertNotIn("proposed", index["src/a.ts"])
         self.assertNotIn("QX-3", records)
         self.assertNotIn("proposed", records["QX-2"])
+
+    def test_the_run_counts_the_links_squash_merges_promoted(self):
+        """Catches the promotion's size unrecorded, so the figure a rebuild moves
+        cannot be re-derived from the run. Hand-derived: TK-1 on a.ts and b.ts are
+        promoted; TK-2 on a.ts was landed by its own commit already, and TK-1 on
+        c.ts is outside the squash."""
+        commits = [
+            draft_commit("TK-1 change", ["src/a.ts", "src/b.ts", "src/c.ts"]),
+            draft_commit("TK-1 change again", ["src/a.ts"]),
+            draft_commit("TK-2 change", ["src/a.ts"]),
+            make_commit("TK-2 landed change", path="src/a.ts", reach="default"),
+            squash_commit("Feature (#7)", ("TK-1 change", "TK-2 change"), ["src/a.ts", "src/b.ts"]),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "history" / "repo-a"
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            config.configure(
+                HISTORY_DIR=root / "history",
+                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+                TELEMETRY_PATH=root / "telemetry.json",
+            )
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertEqual(intent.main(), 0)
+            recorded = telemetry.read()
+        self.assertIn("Links promoted from `proposed` by squash merges: 2.", printed.getvalue())
+        self.assertEqual(recorded["intent.links_promoted"], 2)
 
     def test_two_runs_under_different_hash_seeds_write_identical_bytes(self):
         """Catches promotion output ordered by set iteration, which differs

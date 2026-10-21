@@ -165,6 +165,15 @@ class RedactionReport:
     emptied: int = 0
 
 
+@dataclass
+class LinkReport:
+    """How many links the run moved, so the figure can be re-derived from it."""
+
+    # (file, ticket) links landed only because a squash merge vouched for them:
+    # without the promotion each would have been published under `proposed`.
+    promoted: int = 0
+
+
 def clean_description(subject: str) -> str:
     """Strip leading ticket references, leaving the human description."""
     cleaned = subject.strip()
@@ -707,6 +716,8 @@ def _fold_files(
             entry["tickets" if landed_link else "proposed"][ticket] += 1
             if landed_link and not is_landed:
                 descriptions[ticket]["landed"] = True
+                if not changed.get("landed"):
+                    entry["promoted"][ticket] += 1
         _widen_range(entry, date)
 
 
@@ -736,6 +747,7 @@ def index_repository(
     descriptions: dict[str, dict],
     report: BodyReport | None = None,
     redactions: RedactionReport | None = None,
+    links: LinkReport | None = None,
 ) -> tuple[dict[str, dict], int]:
     """Build the file -> ticket map for one repository's dataset.
 
@@ -755,6 +767,8 @@ def index_repository(
         lambda: {
             "tickets": defaultdict(int),
             "proposed": defaultdict(int),
+            # Of `tickets`, the count each link owes to a squash's promotion.
+            "promoted": defaultdict(int),
             "first": None,
             "last": None,
         }
@@ -769,6 +783,10 @@ def index_repository(
                 commits_seen += 1
     finalised = {}
     for path, data in files.items():
+        if links is not None:
+            # Promoted only where every landed commit of the link was promoted:
+            # a link something else landed would have been landed without it.
+            links.promoted += sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])
         entry = {"tickets": dict(sorted(data["tickets"].items(), key=lambda kv: -kv[1]))}
         proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}
         if proposed:
@@ -981,9 +999,10 @@ def main() -> int:
     commits_seen = 0
     report = BodyReport()
     redactions = RedactionReport()
+    links = LinkReport()
     for ndjson in ndjson_files:
         index[ndjson.parent.name], repo_commits = index_repository(
-            ndjson, descriptions, report, redactions
+            ndjson, descriptions, report, redactions, links
         )
         commits_seen += repo_commits
 
@@ -1010,6 +1029,7 @@ def main() -> int:
         "with branch-only text, under `ps` and `pb`."
     )
     report_redactions(redactions)
+    print(f"Links promoted from `proposed` by squash merges: {links.promoted:,}.")
 
     without_reach = sum(1 for ndjson in ndjson_files if lacks_reach(ndjson))
     print(
@@ -1029,6 +1049,7 @@ def main() -> int:
             ),
             "intent.repositories_without_reach": without_reach,
             "intent.tickets_with_branch_text": branch_texted,
+            "intent.links_promoted": links.promoted,
         }
     )
     telemetry.record(summarise(index, commits_seen, report))
