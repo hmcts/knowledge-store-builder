@@ -118,6 +118,31 @@ class WritingTheManifest(_Run):
         self.assertIn("id example-store", lines[-1])
 
 
+class RecognisedLayers(_Run):
+    STAMP = "knowledge/relationships/repository-dependencies.json"
+
+    def test_an_unstamped_present_layer_is_not_printed_as_built(self):
+        """Breaks if a present layer this library cannot read prints the same tick
+        as a good one: a maintainer would not see it without opening the JSON."""
+        _touch(self.root, "knowledge/relationships/by-repo/example-repo.json")
+        code, out, _ = self.run_stage()
+        self.assertEqual(code, 0)
+        self.assertIn(
+            "! relationships (present, not recognised: no format stamp this library reads)\n",
+            out,
+        )
+        self.assertNotIn("✓ relationships", out)
+
+    def test_a_stamped_layer_still_prints_the_plain_tick(self):
+        """Breaks if the new mark spreads to a layer whose stamp is known."""
+        _touch(self.root, "knowledge/relationships/by-repo/example-repo.json")
+        stamp = {"format": {"layer": "relationships", "major": 1, "minor": 0}}
+        _touch(self.root, self.STAMP, json.dumps(stamp))
+        _, out, _ = self.run_stage()
+        self.assertIn("✓ relationships\n", out)
+        self.assertNotIn("not recognised", out)
+
+
 class LocalOnlyLayers(_Run):
     def test_a_layer_git_ignores_is_printed_as_local_only(self):
         """Breaks if the stage prints an ignored layer as plainly absent: the
@@ -266,6 +291,26 @@ class StatusReadsTheManifest(_Run):
         out = self.status_output()
         self.assertIn("history (local only)", out)
         self.assertNotIn("graph (local only)", out)
+
+    def test_a_present_unrecognised_layer_is_named_with_what_it_means(self):
+        """Breaks if `status` stays silent about a layer that consumers will read
+        as absent: the maintainer is never told a rebuild is due."""
+        _touch(self.root, "knowledge/relationships/by-repo/example-repo.json")
+        self.run_stage()
+        lines = self.status_output().splitlines()
+        self.assertIn(
+            "  not recognised: relationships - present, but it reads as absent to "
+            "consumers until rebuilt with this library",
+            lines,
+        )
+
+    def test_a_store_with_no_unrecognised_layer_prints_no_such_line(self):
+        """Breaks if the line prints for a recognised or absent layer."""
+        _touch(self.root, "knowledge/relationships/by-repo/example-repo.json")
+        stamp = {"format": {"layer": "relationships", "major": 1, "minor": 0}}
+        _touch(self.root, "knowledge/relationships/repository-dependencies.json", json.dumps(stamp))
+        self.run_stage()
+        self.assertNotIn("not recognised", self.status_output())
 
     def test_without_a_manifest_it_says_how_to_write_one_and_does_not_fail(self):
         """Breaks if a store with no manifest makes `status` fail or go silent

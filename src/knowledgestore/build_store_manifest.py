@@ -28,6 +28,27 @@ def _mark(present) -> str:
     return "✓" if present else "✗"
 
 
+# The mark for a layer whose files exist but carry nothing this library can read.
+UNRECOGNISED = "!"
+
+
+def _layer_mark(layer: dict) -> str:
+    """`_mark`, except a present layer this library does not recognise is not a tick.
+
+    `False` only: `None` is a layer nothing measured, which is not unrecognised.
+    """
+    if layer["present"] and layer.get("recognised") is False:
+        return UNRECOGNISED
+    return _mark(layer["present"])
+
+
+def _unrecognised(layer: dict) -> str:
+    """Said beside a layer whose files exist but whose format stamp is not read."""
+    if _layer_mark(layer) != UNRECOGNISED:
+        return ""
+    return " (present, not recognised: no format stamp this library reads)"
+
+
 def _local(layer: dict) -> str:
     """Said beside a layer git ignores: it exists here, and no clone receives it."""
     return " (local only: git ignores it)" if layer.get("local_only") else ""
@@ -61,7 +82,7 @@ def write_atomically(path: Path, text: str) -> None:
 
 def report(manifest: dict) -> None:
     for name, layer in manifest["layers"].items():
-        print(f"  {_mark(layer['present'])} {name}{_local(layer)}")
+        print(f"  {_layer_mark(layer)} {name}{_unrecognised(layer)}{_local(layer)}")
     for name, layer in manifest["extra_layers"].items():
         print(f"  {_mark(layer['present'])} {name} (extra){_local(layer)}")
     format_ = manifest["format"]

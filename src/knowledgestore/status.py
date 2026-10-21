@@ -1243,11 +1243,22 @@ def _report_manifest() -> None:
             for name, layer in layers.items()
             if layer["present"] is False
         )
+        # `present` and `recognised` is False: the files exist, the stamp is not read.
+        unrecognised = sorted(
+            name
+            for name, layer in layers.items()
+            if layer["present"] is True and layer.get("recognised") is False
+        )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         print(f"Store manifest: unreadable ({path}) - rewrite it with `knowledgestore manifest`")
         return
     print(summary)
     print(f"  absent: {', '.join(absent) if absent else 'none'}")
+    for name in unrecognised:
+        print(
+            f"  not recognised: {name} - present, but it reads as absent to consumers "
+            "until rebuilt with this library"
+        )
     uncovered = _uncovered(manifest)
     print(f"  uncovered: {', '.join(uncovered) if uncovered else 'none'}")
 

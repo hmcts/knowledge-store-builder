@@ -7583,6 +7583,36 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "store manifest: the console prints a present unrecognised layer as built",
+        "build_store_manifest.py",
+        '    if layer["present"] and layer.get("recognised") is False:\n',
+        "    if False:\n",
+        "a layer whose files exist but whose stamp this library does not read would print the same tick as a good one, visible only by opening the JSON",
+        (
+            "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
+        ),
+    ),
+    Mutation(
+        "store manifest: the console gives no reason beside an unrecognised layer",
+        "build_store_manifest.py",
+        '    if _layer_mark(layer) != UNRECOGNISED:\n        return ""\n',
+        '    if True:\n        return ""\n',
+        "the mark would stand alone, and a maintainer would not know what it flags",
+        (
+            "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
+        ),
+    ),
+    Mutation(
+        "store manifest: status stays silent about a present unrecognised layer",
+        "status.py",
+        '            if layer["present"] is True and layer.get("recognised") is False\n',
+        "            if False\n",
+        "a layer consumers will read as absent would go unmentioned, so nobody learns a rebuild is due",
+        (
+            "test_build_store_manifest.StatusReadsTheManifest.test_a_present_unrecognised_layer_is_named_with_what_it_means",
+        ),
+    ),
+    Mutation(
         "store manifest: a mistyped root is created as a store",
         "build_store_manifest.py",
         "    if not root.is_dir():\n",

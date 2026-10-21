@@ -540,7 +540,10 @@ last by `knowledgestore manifest` and committed with the store.
   carries a top-level `format` stamp naming the layer `relationships` at a major
   this library reads (1), and false for a missing, damaged or foreign stamp; the
   layer is still `present` and digested either way, so the reader decides. It is
-  `null` when the layer is absent.
+  `null` when the layer is absent. The console summary marks a present layer that is
+  not recognised `!` with the reason beside it, and `knowledgestore status` names it
+  on a `not recognised:` line, because consumers read it as absent until it is
+  rebuilt with this library.
 - **Present means a clone receives it.** Measured when the manifest is
   computed, from files git would commit: a path a `.gitignore` rule ignores does
   not count, and a directory counts when it holds at least one such file. A layer
