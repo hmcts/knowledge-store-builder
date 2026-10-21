@@ -95,11 +95,14 @@ def _documents(text: str) -> list[object] | None:
     `safe_load_all`, not `safe_load`: a cluster's Kustomizations are conventionally
     one file of `---`-separated documents, and reading only the first would take
     the environment binding of every document after it with no sign that anything
-    was missed.
+    was missed. Through `deploy_flux.yaml_loader`, the relationships layer's loader,
+    so a release whose values hold a bare `=` is read here as it is there.
     """
     yaml = _yaml()
     try:
-        return list(yaml.safe_load_all(deploy_values.strip_template(text)))
+        return list(
+            yaml.load_all(deploy_values.strip_template(text), Loader=deploy_flux.yaml_loader())
+        )
     except yaml.YAMLError:
         return None
 

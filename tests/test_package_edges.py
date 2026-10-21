@@ -15,6 +15,7 @@ from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import config  # noqa: E402
 from knowledgestore import build_deployments as deployments  # noqa: E402
 from knowledgestore import build_package_edges as packages  # noqa: E402
+from knowledgestore import relationships  # noqa: E402
 
 try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
     import yaml  # noqa: F401
@@ -348,6 +349,22 @@ SCENARIOS: dict[str, tuple[bool, dict[str, str], dict[str, object]]] = {
 }
 
 
+# A release whose values hold a policy rule with a bare `=`, which PyYAML's safe
+# loader refuses, and the clone defining its chart. No golden entry: the graph
+# could not parse this release before, so it had no edge to compare against.
+_BARE_EQUALS_RELEASE = _release("web", "web", "HelmRepository", "example-helm") + (
+    "  values:\n    criteria:\n      - key: namespace\n        op: =\n        value: '*'\n"
+)
+SCENARIOS["bare-equals"] = (
+    False,
+    {
+        **_flux({"web": _BARE_EQUALS_RELEASE}),
+        "charts-repo/web/Chart.yaml": "apiVersion: v2\nname: web\nversion: 1.0.0\n",
+    },
+    {"DEPLOY_REPOS": {"example-deploy"}},
+)
+
+
 # A scenario's `config/repositories.txt`, for one whose clones come from more than
 # one organisation. No golden entry: the stages before the move had no such check.
 REPOSITORY_LISTS = {
@@ -404,9 +421,10 @@ SCENARIOS["chart-estate"] = (
 )
 
 
-def _scenario_graph(name: str) -> dict:
+@contextlib.contextmanager
+def _scenario_store(name: str):
     """Run `packages`, then `deployments` when a deployment clone is named, over the
-    scenario, and return the graph they wrote."""
+    scenario, and yield the store root they wrote into."""
     copy_estate, files, settings = SCENARIOS[name]
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
@@ -442,6 +460,12 @@ def _scenario_graph(name: str) -> dict:
                 raise AssertionError(f"{name}: packages failed")
             if settings.get("DEPLOY_REPOS") and deployments.main() != 0:
                 raise AssertionError(f"{name}: deployments failed")
+        yield root
+
+
+def _scenario_graph(name: str) -> dict:
+    """The graph `_scenario_store` wrote for the scenario."""
+    with _scenario_store(name):
         return json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
 
 
@@ -658,6 +682,48 @@ class ChartEstateTest(SettingsIsolated):
         self.assertEqual(
             [edge for edge in found["edges"] if edge[0] == "uses_chart" and ":jobs" in edge[1]],
             [],
+        )
+
+
+class BareEqualsReleaseTest(SettingsIsolated):
+    @needs_yaml
+    def test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both(self):
+        """Break caught: the graph reading Flux YAML with PyYAML's plain safe loader
+        while the layer reads it with the one that takes a bare `=` as `"="`. The
+        release then fails to parse in `deployments` alone, so the layer names the
+        chart's repository and the graph has no `uses_chart` edge for it."""
+        with _scenario_store("bare-equals") as root:
+            graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+            repos = root / "repositories"
+            layer = relationships.build(
+                root,
+                sorted(repos.iterdir()),
+                tuple(k for k in relationships.BUILTIN if k.name == "helm_chart"),
+                "",
+                "",
+                set(),
+                3,
+                None,
+                root / "extra",
+            )
+        rel = "apps/base/services/web/helmrelease.yaml"
+        self.assertEqual(
+            sorted(
+                [edge["source"], edge["target"], edge["source_file"]]
+                for edge in graph["links"]
+                if edge["relation"] == "uses_chart"
+            ),
+            [
+                ["example-deploy::deploy:_base:web", "charts-repo::chart", rel],
+                ["example-deploy::deploy:prod:web", "charts-repo::chart", rel],
+            ],
+        )
+        self.assertEqual(
+            [
+                (edge["repository"], edge["chart"])
+                for edge in layer.by_repo["example-deploy"]["depends_on"]
+            ],
+            [("charts-repo", "web")],
         )
 
 

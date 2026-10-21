@@ -23,7 +23,6 @@ would be absent from a layer that reads as complete.
 from __future__ import annotations
 
 import fnmatch
-import functools
 import hashlib
 import importlib.util
 import json
@@ -610,26 +609,6 @@ class MissingDependency(Exception):
         self.extra = extra
 
 
-@functools.cache
-def _flux_loader():
-    """PyYAML's safe loader, reading a bare `=` as the string it is. Only called
-    once `import yaml` has succeeded.
-
-    PyYAML resolves a plain `=` to YAML 1.1's `value` type and the safe loader has
-    no constructor for it, so a release whose values hold a policy rule
-    (`op: =`) fails to load whole and its chart reference with it. Kubernetes reads
-    the same scalar as `"="`.
-    """
-
-    import yaml
-
-    class Loader(yaml.SafeLoader):
-        pass
-
-    Loader.add_constructor("tag:yaml.org,2002:value", yaml.SafeLoader.construct_yaml_str)
-    return Loader
-
-
 def _helm_releases(rel: str, text: str) -> list[Reference]:
     """Flux `HelmRelease`s in a YAML file, through the one reader of them.
 
@@ -644,7 +623,7 @@ def _helm_releases(rel: str, text: str) -> list[Reference]:
     except ImportError:
         raise MissingDependency("PyYAML", "deploy") from None
     try:
-        documents = list(yaml.load_all(text, Loader=_flux_loader()))
+        documents = list(yaml.load_all(text, Loader=deploy_flux.yaml_loader()))
     except yaml.YAMLError as error:
         raise ValueError(f"not YAML: {type(error).__name__}") from error
     lines = text.splitlines()

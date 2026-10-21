@@ -7337,10 +7337,11 @@ MUTATIONS = (
     Mutation(
         "relationships: a bare `=` in a release's values fails the file",
         "relationships.py",
-        "        documents = list(yaml.load_all(text, Loader=_flux_loader()))\n",
+        "        documents = list(yaml.load_all(text, Loader=deploy_flux.yaml_loader()))\n",
         "        documents = list(yaml.safe_load_all(text))\n",
         "#460 parity: PyYAML's safe loader has no constructor for the `value` type a bare `=` resolves to, so a release carrying a policy rule (`op: =`) in its values failed to load and its chart reference vanished; a store's own script found the edge the stage did not",
         (
+            "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_relationships_parsers.HelmReleaseTest.test_a_release_whose_values_hold_a_bare_equals_sign_is_read",
         ),
     ),
@@ -7563,6 +7564,27 @@ MUTATIONS = (
         (
             "test_package_edges.ChartEstateTest.test_a_chart_is_in_the_estate_only_when_the_graph_holds_its_repository",
             "test_package_edges.ChartEstateTest.test_a_helm_release_with_no_source_ref_gets_no_chart_edge",
+        ),
+    ),
+    Mutation(
+        "deployments: a bare `=` in a release's values fails the file",
+        "build_deployments.py",
+        "            yaml.load_all(deploy_values.strip_template(text), Loader=deploy_flux.yaml_loader())\n",
+        "            yaml.safe_load_all(deploy_values.strip_template(text))\n",
+        '#455: the graph read Flux YAML with PyYAML\'s plain safe loader while the layer read it with one taking a bare `=` as `"="`, so a release whose values held a policy rule (`op: =`) failed to parse in `deployments` alone and lost its `uses_chart` edge while the layer kept it',
+        (
+            "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
+        ),
+    ),
+    Mutation(
+        "relationships and deployments: the shared Flux loader refuses a bare `=`",
+        "deploy_flux.py",
+        '    Loader.add_constructor("tag:yaml.org,2002:value", yaml.SafeLoader.construct_yaml_str)\n',
+        "",
+        "#455: one loader serves the graph and the layer; without its constructor for YAML 1.1's `value` type both fail a release whose values hold `op: =`, and its chart edge goes from each",
+        (
+            "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
+            "test_relationships_parsers.HelmReleaseTest.test_a_release_whose_values_hold_a_bare_equals_sign_is_read",
         ),
     ),
     Mutation(

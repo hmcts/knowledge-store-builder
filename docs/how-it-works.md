@@ -192,7 +192,8 @@ declaration, and the two chart settings apply to both.
 A file that cannot be opened, a POM that does not parse, or a file naming a
 `HelmRelease` that does not parse as YAML, is counted as `unreadable` for its kind
 and named in the run's output. The rest of the estate is still read. A bare `=` in
-a release's values (`op: =`) is read as the string `"="`, as Kubernetes reads it.
+a release's values (`op: =`) is read as the string `"="`, as Kubernetes reads it,
+by this layer and by the `deployments` stage alike.
 
 **No reference vanishes.** Every reference the parsers read ends as exactly one
 of these: a reference in an edge, a reference to an unresolved target, or a skip
