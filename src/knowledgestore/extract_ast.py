@@ -551,6 +551,18 @@ def main(argv: "list[str] | None" = None) -> int:
         return 1
 
     groups = by_repository(files, config.REPOSITORIES_DIR)
+    # The extractor is imported in this process, so this interpreter is the one that
+    # must hold the grammars - passed explicitly, not left to the stage's fallback.
+    # Imported here because `check_grammars` reuses this module's input handling.
+    from . import check_grammars
+
+    _report, missing = check_grammars.check(
+        groups, lambda _name: (sys.executable, "extract-ast's own interpreter")
+    )
+    if missing:
+        for line in missing:
+            print(f"Refusing to extract: {line}", file=sys.stderr)
+        return 1
     # Read before anything is written: the sidecar is the only record of the last
     # run, and writing the layer first would leave a half-updated pair if the
     # write failed between them.

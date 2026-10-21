@@ -22,21 +22,43 @@ class GraphifyPin(unittest.TestCase):
         CI would stay green on a version the package no longer supports.
         """
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        declared = re.search(r"^ast\s*=\s*\[(.*?)\]", text, re.MULTILINE | re.DOTALL)
+        declared = re.search(r"^ast\s*=\s*\[(.*?)\]\s*$", text, re.MULTILINE | re.DOTALL)
         self.assertIsNotNone(declared, "pyproject.toml declares no `ast` extra")
-        floor = re.search(r"graphifyy>=(\d+(?:\.\d+)*)", declared.group(1))
+        floor = re.search(r"graphifyy(?:\[[^\]]*\])?>=(\d+(?:\.\d+)*)", declared.group(1))
         self.assertIsNotNone(floor, "the `ast` extra must state a graphifyy floor")
 
         pins: dict[str, str] = {}
         for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
             for match in re.finditer(
-                r"graphifyy==(\d+(?:\.\d+)*)", workflow.read_text(encoding="utf-8")
+                r"graphifyy(?:\[[^\]]*\])?==(\d+(?:\.\d+)*)", workflow.read_text(encoding="utf-8")
             ):
                 pins[workflow.name] = pins.get(workflow.name, "") + match.group(1) + " "
         self.assertTrue(pins, "CI must pin the graphifyy version it installs")
         versions = {v for joined in pins.values() for v in joined.split()}
         self.assertEqual(len(versions), 1, f"CI pins disagree: {pins}")
         self.assertGreaterEqual(_version(versions.pop()), _version(floor.group(1)))
+
+    def test_every_ci_install_carries_the_grammar_extras(self):
+        """Catches CI installing bare graphifyy: the grammar tests then skip or fail for the wrong reason.
+
+        graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` as nothing without its
+        `terraform` and `sql` extras, and the tests that prove it needs them
+        installed to run at all.
+        """
+        installs = 0
+        for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            for match in re.finditer(r"'(graphifyy[^']*==[^']*)'", workflow.read_text("utf-8")):
+                installs += 1
+                spec = match.group(1)
+                self.assertRegex(spec, r"\[(?=[^\]]*terraform)(?=[^\]]*sql)[^\]]*\]", workflow.name)
+        self.assertGreater(installs, 0, "CI must install graphifyy")
+
+    def test_the_ast_extra_carries_the_grammar_extras(self):
+        """Catches the extra losing `terraform` or `sql`: stores then extract those files to nothing."""
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r"^ast\s*=\s*\[(.*?)\]\s*$", text, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(declared)
+        self.assertRegex(declared.group(1), r"graphifyy\[(?=[^\]]*terraform)(?=[^\]]*sql)")
 
 
 if __name__ == "__main__":
