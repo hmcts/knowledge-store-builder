@@ -5310,6 +5310,7 @@ MUTATIONS = (
         '    return commit.get("reach", "branch") != "branch"',
         "a store that had not re-exported would have seen every link move to proposed",
         (
+            "test_build_intent_index.ApplyCommitTest.test_a_hand_written_bullet_list_does_not_dilute_a_ticketed_subject",
             "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_links_the_tickets_its_bullets_name",
             "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_whose_subject_names_nothing_still_links_its_bullets",
             "test_build_intent_index.ApplyCommitTest.test_body_contributes_at_most_three_tickets",
