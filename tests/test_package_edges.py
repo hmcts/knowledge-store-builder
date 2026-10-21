@@ -331,6 +331,30 @@ SCENARIOS: dict[str, tuple[bool, dict[str, str], dict[str, object]]] = {
 }
 
 
+# A scenario's `config/repositories.txt`, for one whose clones come from more than
+# one organisation. No golden entry: the stages before the move had no such check.
+REPOSITORY_LISTS = {
+    "two-organisations": (
+        "shared-mod|git@github.com:Other-Org/shared-mod.git|main\n"
+        "svc-x|git@github.com:example-org/svc-x.git|main\n"
+        "tf-storage|https://git.example.com/infra/tf-storage.git|main\n"
+    ),
+}
+SCENARIOS["two-organisations"] = (
+    False,
+    {
+        "svc-x/a-theirs.tf": _module("theirs", "github.com/other-org/shared-mod"),
+        "svc-x/b-wrong.tf": _module("wrong", "github.com/example-org/shared-mod"),
+        "svc-x/c-net.tf": _module("net", "github.com/example-org/tf-network"),
+        "svc-x/d-store.tf": _module("store", "github.com/example-org/tf-storage"),
+        "shared-mod/main.tf": _EMPTY_MODULE,
+        "tf-network/main.tf": _EMPTY_MODULE,
+        "tf-storage/main.tf": _EMPTY_MODULE,
+    },
+    {"GITHUB_ORG": "example-org"},
+)
+
+
 def _scenario_graph(name: str) -> dict:
     """Run `packages`, then `deployments` when a deployment clone is named, over the
     scenario, and return the graph they wrote."""
@@ -338,6 +362,11 @@ def _scenario_graph(name: str) -> dict:
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         repos = root / "repositories"
+        if name in REPOSITORY_LISTS:
+            (root / "config").mkdir()
+            (root / "config" / "repositories.txt").write_text(
+                REPOSITORY_LISTS[name], encoding="utf-8"
+            )
         if copy_estate:
             shutil.copytree(ESTATE, repos)
         for rel, text in files.items():
@@ -476,6 +505,43 @@ class TheDeclaredGraphChangesTest(SettingsIsolated):
         self.assertNotIn("xxxxx-not-a-real-token", json.dumps(_scenario_graph("credentialed")))
 
 
+class EachCloneItsOwnOrganisationTest(SettingsIsolated):
+    def test_a_source_is_compared_against_the_organisation_of_the_clone_it_names(self):
+        """Break caught: every source compared against `KSB_GITHUB_ORG` alone, in a
+        store holding clones from two organisations. Then `other-org/shared-mod`,
+        which the store holds, becomes a module outside the estate, and
+        `example-org/shared-mod`, which it does not, lands on the clone. A clone the
+        list does not name, or names off GitHub, falls back to `KSB_GITHUB_ORG`."""
+        self.assertEqual(
+            scenario_edges("two-organisations"),
+            {
+                "edges": [
+                    [
+                        "USES_MODULE",
+                        "svc-x::a-theirs.tf",
+                        f"{provider}::module",
+                        rel,
+                    ]
+                    for provider, rel in sorted(
+                        [
+                            ("example-org/shared-mod", "b-wrong.tf"),
+                            ("shared-mod", "a-theirs.tf"),
+                            ("tf-network", "c-net.tf"),
+                            ("tf-storage", "d-store.tf"),
+                        ],
+                        key=lambda pair: f"{pair[0]}::module",
+                    )
+                ],
+                "nodes": [
+                    ["example-org/shared-mod::module", "", False],
+                    ["shared-mod::module", "shared-mod", True],
+                    ["tf-network::module", "tf-network", True],
+                    ["tf-storage::module", "tf-storage", True],
+                ],
+            },
+        )
+
+
 SRC = Path(__file__).resolve().parent.parent / "src" / "knowledgestore"
 
 
@@ -484,7 +550,13 @@ class OneParserTest(unittest.TestCase):
     reader growing back beside `relationships`. Two readers drift - that is how the
     graph and the layer came to disagree about module scope, organisations and
     credentials - and a reader nobody routes through the registry is invisible to
-    every test of it."""
+    every test of it.
+
+    Narrow by design, and so a tripwire rather than a proof: it catches only a
+    regex holding a literal `source\\s*=`, and a dependency section read by its
+    literal name. A reader spelled any other way - a `source =` with a literal
+    space, a section name built in a variable, a Maven or Helm reader - passes it.
+    """
 
     # A regex matching a Terraform `source =` attribute, and a manifest's dependency
     # section read by name (`data.get("dependencies")`, `data["devDependencies"]`).

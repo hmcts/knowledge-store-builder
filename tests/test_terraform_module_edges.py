@@ -49,8 +49,8 @@ class TerraformReferenceTest(SettingsIsolated):
     def test_the_scp_style_form_is_recognised(self):
         """The majority form on a real estate."""
         self.assertEqual(
-            terraform_references('source = "git@github.com:hmcts/cnp-module-key-vault"'),
-            {"cnp-module-key-vault"},
+            terraform_references('source = "git@github.com:example-org/tf-module-key-vault"'),
+            {"tf-module-key-vault"},
         )
 
     def test_a_ref_parameter_does_not_become_part_of_the_name(self):

@@ -295,6 +295,25 @@ class CredentialTest(SettingsIsolated):
         )
         self.assertNotIn(self.TOKEN, repr(refs))
 
+    def test_an_ssh_source_with_any_login_or_a_credential_names_its_repository(self):
+        """Break caught: only `ssh://git@github.com` read as GitHub. Stripping
+        `user:token@` leaves `ssh://github.com`, and another login name leaves
+        `ssh://deploy@github.com`; either then names no repository and is reported
+        as an address the estate does not hold."""
+        for url in (
+            f"git::ssh://user:{self.TOKEN}@github.com/example-org/tf-network.git?ref=v1",
+            "ssh://deploy@github.com/example-org/tf-network.git?ref=v1",
+            "ssh://github.com/example-org/tf-network.git?ref=v1",
+        ):
+            with self.subTest(url=url):
+                text = f'module "m" {{\n  source = "{url}"\n}}\n'
+                refs = _kind("terraform_module").references(Path(), "main.tf", text)
+                self.assertEqual(
+                    [(ref.org, ref.target, ref.resolved_repo, ref.ref) for ref in refs],
+                    [("example-org", "tf-network", "tf-network", "v1")],
+                )
+                self.assertNotIn(self.TOKEN, repr(refs))
+
 
 class UserinfoTest(SettingsIsolated):
     def test_an_ssh_login_name_is_kept_and_a_credential_is_not(self):

@@ -5454,6 +5454,7 @@ MUTATIONS = (
         "naming a repository that does not exist there: a wrong link where the rule is to "
         "write none",
         (
+            "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
@@ -5461,6 +5462,7 @@ MUTATIONS = (
             "test_explorer_source_links.SourceLinksOnThePage.test_a_sync_after_source_urls_is_warned_about",
             "test_explorer_source_links.SourceLinksOnThePage.test_each_row_joined_to_its_base_is_the_graph_url_for_its_node",
             "test_explorer_source_links.SourceLinksOnThePage.test_the_page_carries_a_base_for_each_repository_its_rows_can_link",
+            "test_package_edges.EachCloneItsOwnOrganisationTest.test_a_source_is_compared_against_the_organisation_of_the_clone_it_names",
             "test_source_urls.BuildingTheUrl.test_no_url_is_written_where_one_cannot_be_right",
             "test_source_urls.BuildingTheUrl.test_the_base_is_the_prefix_every_link_for_the_repository_starts_with",
             "test_source_urls.ParsingALink.test_a_link_names_the_configured_repository_whatever_its_local_name",
@@ -6968,6 +6970,7 @@ MUTATIONS = (
             "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
             "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
             "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
+            "test_relationships_parsers.CredentialTest.test_an_ssh_source_with_any_login_or_a_credential_names_its_repository",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
             "test_relationships_parsers.TerraformSourcesTest.test_a_ref_after_another_query_argument_is_still_the_ref",
             "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
@@ -7034,6 +7037,7 @@ MUTATIONS = (
         "    in_module = {m.start() for m in _TF_ANY_SOURCE.finditer(text)} | {m.start() for m in _TF_SOURCE.finditer(text)}",
         "#455: `source` is also an `aws_s3_object` file argument and a `required_providers` address, so reading every one reports file paths and provider addresses as module dependencies the store does not hold - plausible rows in the unresolved report, none of them a dependency",
         (
+            "test_ingestion_gaps.TerraformEvidence.test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing",
             "test_package_edges.TheDeclaredGraphChangesTest.test_only_a_module_blocks_own_literal_source_is_a_module_source",
             "test_relationships_parsers.TerraformScopeTest.test_only_a_module_blocks_source_is_a_reference",
         ),
@@ -7057,9 +7061,11 @@ MUTATIONS = (
         "#455: a module source can be `git::https://user:token@host/...`, and a reference's target becomes a key of the unresolved report, so the token is written to a committed file unmasked; the same holds for an npm git URL spec",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_ingestion_gaps.TerraformEvidence.test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_credential_in_the_url_does_not_hide_the_repository",
             "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
             "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
+            "test_relationships_parsers.CredentialTest.test_an_ssh_source_with_any_login_or_a_credential_names_its_repository",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
             "test_relationships_store_kinds.StoreKindMaskingTest.test_a_credential_in_a_store_kinds_reference_reaches_no_file",
         ),
@@ -7082,13 +7088,8 @@ MUTATIONS = (
         "    if True:",
         "#455: credential stripping that removes `git@` from `git::ssh://git@host/...` changes the address that was written, so the same module referenced two ways no longer reads as one target and the reference no longer names what the file says",
         (
-            "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
-            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_every_terraform_source_form",
-            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_the_relationships_fixture_estate",
-            "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
             "test_relationships_parsers.TerraformSourcesTest.test_every_documented_form_gives_org_repo_ref_and_line",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
-            "test_terraform_module_edges.TerraformReferenceTest.test_ssh_form_is_recognised",
         ),
     ),
     Mutation(
@@ -7122,6 +7123,7 @@ MUTATIONS = (
         (
             "test_build_relationships.ChartResolutionTest.test_an_undefined_chart_is_unresolved",
             "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
+            "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
             "test_build_relationships.SvcATest.test_referenced_by_is_complete_and_sorted",
             "test_relationships_store_kinds.EveryKindReportsWhatItCannotResolveTest.test_a_resolvable_and_an_unresolvable_reference_per_kind",
@@ -7162,12 +7164,27 @@ MUTATIONS = (
     Mutation(
         "relationships: a Terraform source in another organisation is the estate's",
         "relationships.py",
-        "    return ref.resolved_repo in estate and (not org or ref.org.lower() == org.lower())\n",
-        "    return ref.resolved_repo in estate\n",
+        "    return not org or ref.org.lower() == org\n",
+        "    return True\n",
         "#455: matching a module source on the repository name alone makes a same-named module in another organisation an in-estate dependency - the pre-existing `_TF_SOURCE` captured the organisation and nothing read it",
         (
             "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
+            "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
+            "test_ingestion_gaps.TerraformEvidence.test_each_clone_is_compared_against_its_own_organisation",
+            "test_package_edges.EachCloneItsOwnOrganisationTest.test_a_source_is_compared_against_the_organisation_of_the_clone_it_names",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_source_in_another_organisation_is_not_the_estates_repository",
+        ),
+    ),
+    Mutation(
+        "relationships: every source is compared against KSB_GITHUB_ORG, not its clone's organisation",
+        "relationships.py",
+        "        orgs[name] = (origin[0] if origin else fallback_org).lower()\n",
+        "        orgs[name] = fallback_org.lower()\n",
+        "#455 review: a store can hold clones from more than one organisation, each with its own clone URL; one organisation for all of them calls a source naming a held clone somebody else's, and lands a source naming a repository no clone is on the clone of that name",
+        (
+            "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
+            "test_ingestion_gaps.TerraformEvidence.test_each_clone_is_compared_against_its_own_organisation",
+            "test_package_edges.EachCloneItsOwnOrganisationTest.test_a_source_is_compared_against_the_organisation_of_the_clone_it_names",
         ),
     ),
     Mutation(
@@ -7217,17 +7234,20 @@ MUTATIONS = (
         "        github = _TF_SOURCE.match(match.group(0))\n",
         "#455: a credential in a module source URL (`https://user:token@github.com/...`) hid the repository from the GitHub form, so the source read as an address outside the estate and the graph drew no edge to a repository the estate holds",
         (
+            "test_ingestion_gaps.TerraformEvidence.test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_credential_in_the_url_does_not_hide_the_repository",
             "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
         ),
     ),
     Mutation(
-        "packages: a same-named repository in another organisation takes the estate's module node",
-        "build_package_edges.py",
-        "                elif provider in estate:\n",
-        "                elif False:\n",
+        "relationships: a same-named repository in another organisation takes the estate's module node",
+        "relationships.py",
+        "    if ref.resolved_repo in orgs and not names_estate_repo(ref, orgs):\n",
+        "    if False:\n",
         "#455: a source in another organisation naming a repository the estate also holds is somebody else's; keyed by name alone it joins the estate's module node, so the estate's module gains a consumer it does not have - and a consumer naming itself in another organisation is dropped as self",
         (
+            "test_ingestion_gaps.TerraformEvidence.test_each_clone_is_compared_against_its_own_organisation",
+            "test_package_edges.EachCloneItsOwnOrganisationTest.test_a_source_is_compared_against_the_organisation_of_the_clone_it_names",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_source_in_another_organisation_is_not_the_estates_repository",
         ),
     ),
@@ -7249,6 +7269,36 @@ MUTATIONS = (
         "#455: two parsers of one declaration drift - that is how the graph and the relationships layer came to disagree about module scope, organisations and credentials - so the graph reads Terraform sources only through `relationships`",
         (
             "test_package_edges.OneParserTest.test_no_module_outside_relationships_parses_these_declarations",
+        ),
+    ),
+    Mutation(
+        "relationships: an ssh source is GitHub only with the `git` login",
+        "relationships.py",
+        '        (?:https://|git@|ssh://(?:[^@/"]+@)?)?github\\.com[/:]\n',
+        "        (?:https://|git@|ssh://git@)?github\\.com[/:]\n",
+        "#455 review: stripping `user:token@` from `ssh://user:token@github.com/...` leaves `ssh://github.com`, and a deploy key's login is not always `git`; read only as `ssh://git@` either names no repository and is reported as an address the estate does not hold",
+        (
+            "test_relationships_parsers.CredentialTest.test_an_ssh_source_with_any_login_or_a_credential_names_its_repository",
+        ),
+    ),
+    Mutation(
+        "relationships: a store parser's exception text is echoed in the refusal",
+        "relationships.py",
+        '                        f"{kind.name}: the parser raised {type(error).__name__} "\n',
+        '                        f"{kind.name}: the parser raised {error!r} "\n',
+        "#455 review: a store's parser raises with whatever text it holds, which can be a credential it read, and the refusal is printed where a build log keeps it",
+        (
+            "test_relationships_store_kinds.BadParserResultTest.test_a_refusal_names_the_kind_the_file_and_the_type_and_echoes_no_store_text",
+        ),
+    ),
+    Mutation(
+        "relationships: a store publisher's exception text is echoed in the refusal",
+        "relationships.py",
+        '            raise KindError(f"{where} raised {type(error).__name__}") from error\n',
+        '            raise KindError(f"{where} raised {error!r}") from error\n',
+        "#455 review: as for a parser - `publishes()` raises with store text, and the refusal is printed where a build log keeps it",
+        (
+            "test_relationships_store_kinds.BadParserResultTest.test_a_refusal_names_the_kind_the_file_and_the_type_and_echoes_no_store_text",
         ),
     ),
     Mutation(
@@ -7289,6 +7339,7 @@ MUTATIONS = (
         "#455: a reference whose kind is not the registered name resolves against another kind's publishers - nothing - and vanishes with no message; the stage must stop and name it",
         (
             "test_relationships_store_kinds.BadParserResultTest.test_a_reference_under_another_kinds_name_is_refused",
+            "test_relationships_store_kinds.BadParserResultTest.test_a_refusal_names_the_kind_the_file_and_the_type_and_echoes_no_store_text",
         ),
     ),
     Mutation(

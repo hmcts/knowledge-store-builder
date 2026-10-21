@@ -29,13 +29,13 @@ import re
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Set
+from collections.abc import Callable, Iterable, Mapping, Set
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.parsers import expat
 
-from . import deploy_flux, io, secret_mask
+from . import config, deploy_flux, io, secret_mask, source_urls
 
 if TYPE_CHECKING:
     from .source_urls import SourceUrls
@@ -186,18 +186,19 @@ def _line_of(text: str, offset: int) -> tuple[int, str]:
 
 # An infrastructure estate's shared dependencies are declared in module sources
 # rather than a language manifest. Unlike an npm package, the reference names the
-# providing repository outright, so no manifest lookup is needed. All five forms
-# are in use and none dominates by design: on one estate the scp-style `git@` form
-# outnumbered `git::https://` five to one, so handling only the documented form
-# would have missed most of the reuse.
+# providing repository outright, so no manifest lookup is needed. Every form is in
+# use and none dominates by design: on a real estate the scp-style `git@` form
+# outnumbered the documented `git::https://` one several times over, so handling only
+# the documented form would have missed most of the reuse.
 _TF_SOURCE = re.compile(
     r"""source\s*=\s*"
         (?:git::)?
         # The scheme is optional in Terraform: its GitHub detector accepts a bare
         # `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made
-        # 5 shared modules invisible on a 361-repository estate (#125). The opening
-        # quote anchors this, so `notgithub.com/...` cannot match.
-        (?:https://|git@|ssh://git@)?github\.com[/:]
+        # shared modules invisible on a real estate (#125). The opening quote anchors
+        # this, so `notgithub.com/...` cannot match. An ssh URL may carry any login
+        # name, and none once a `user:token@` credential has been stripped.
+        (?:https://|git@|ssh://(?:[^@/"]+@)?)?github\.com[/:]
         (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
         (?:\.git)?(?P<tail>[?/][^"]*)?"
     """,
@@ -1079,12 +1080,56 @@ def builtin(name: str) -> Kind:
     return next(kind for kind in BUILTIN if kind.name == name)
 
 
-def names_estate_repo(ref: Reference, estate: Set[str], org: str) -> bool:
+def estate_orgs(
+    names: Iterable[str], clone_urls: Mapping[str, str], fallback_org: str
+) -> dict[str, str]:
+    """Clone name -> the GitHub organisation a source must name to mean that clone,
+    lower-cased, `""` accepting any.
+
+    Each clone's own organisation, read from its clone URL, so a store holding
+    clones from several organisations resolves a source against the clone it names.
+    A clone whose URL is not on github.com, or that `clone_urls` does not name,
+    takes `fallback_org` (`KSB_GITHUB_ORG`).
+    """
+    orgs = {}
+    for name in names:
+        origin = source_urls.github_origin(strip_userinfo(clone_urls.get(name, "")))
+        orgs[name] = (origin[0] if origin else fallback_org).lower()
+    return orgs
+
+
+def store_estate_orgs(names: Iterable[str]) -> dict[str, str]:
+    """`estate_orgs` for these clones, from the store's `config/repositories.txt` and
+    `KSB_GITHUB_ORG`. A malformed list raises `ValueError`, naming the line."""
+    return estate_orgs(names, source_urls.configured_clone_urls(), config.GITHUB_ORG)
+
+
+def names_estate_repo(ref: Reference, orgs: Mapping[str, str]) -> bool:
     """Whether a reference that names its repository outright names one the estate
-    holds: a clone of that name, and in the estate's organisation when one is set.
-    The organisation compares ignoring case, as GitHub does. A same-named repository
-    in another organisation is somebody else's."""
-    return ref.resolved_repo in estate and (not org or ref.org.lower() == org.lower())
+    holds: a clone of that name, in the organisation `orgs` (`estate_orgs`) gives
+    for it. The organisation compares ignoring case, as GitHub does. A same-named
+    repository in another organisation is somebody else's."""
+    repo = ref.resolved_repo
+    if repo is None or repo not in orgs:
+        return False
+    org = orgs[repo]
+    return not org or ref.org.lower() == org
+
+
+def module_provider(ref: Reference, orgs: Mapping[str, str]) -> str | None:
+    """The provider a graph or report names for a reference that names its
+    repository outright, or None when it names none.
+
+    The repository's name when the estate holds it (`names_estate_repo`), and when
+    no clone of that name exists; `<org>/<repo>` when a clone of that name exists
+    but the source is in another organisation - somebody else's repository, which
+    must neither take the estate's name nor read as its consumer naming itself.
+    """
+    if ref.resolved_repo is None:
+        return None
+    if ref.resolved_repo in orgs and not names_estate_repo(ref, orgs):
+        return f"{ref.org}/{ref.resolved_repo}"
+    return ref.resolved_repo
 
 
 def resolve_chart(
@@ -1128,14 +1173,13 @@ class _Resolver:
 
     def __init__(
         self,
-        estate: frozenset[str],
-        org: str,
+        orgs: Mapping[str, str],
         pattern: str,
         umbrellas: Set[str],
         publishers: dict[str, dict[str, list[str]]],
     ) -> None:
-        self.estate = estate
-        self.org = org.lower()
+        self.estate = frozenset(orgs)
+        self.orgs = orgs
         self.pattern = pattern
         self.publishers = publishers
         self.chosen: dict[str, dict[str, str]] = {}
@@ -1155,7 +1199,7 @@ class _Resolver:
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
         """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
         if ref.resolved_repo is not None:
-            if not names_estate_repo(ref, self.estate, self.org):
+            if not names_estate_repo(ref, self.orgs):
                 return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
             provider = ref.resolved_repo
         elif ref.kind == "helm_chart":
@@ -1174,19 +1218,34 @@ class _Resolver:
         return "edge", provider
 
 
+def _shape(value: object) -> str:
+    """The type of a returned value - of each member, for a tuple or list - and
+    nothing of its content."""
+    if isinstance(value, (tuple, list)):
+        return "(" + ", ".join(type(member).__name__ for member in value) + ")"
+    return type(value).__name__
+
+
 def _publishers(clones: list[Path], kind: Kind) -> dict[str, list[str]]:
+    # A refusal names the kind, the clone and a type, never a value or an exception's
+    # text: either is store text, which can carry a credential, and stderr is kept in
+    # build logs.
     found: dict[str, set[str]] = {}
     for clone in clones:
+        where = f"{kind.name}: publishes() on {clone.name}"
         try:
             published = list(kind.publishes(clone))
-            for pair in published:
-                target, declared_in = pair
-                if not isinstance(target, str) or not isinstance(declared_in, str):
-                    raise TypeError(f"{pair!r} is not a (target, path) pair of strings")
         except Exception as error:
-            raise KindError(
-                f"{kind.name}: publishes() failed on {clone.name}: {error!r}"
-            ) from error
+            raise KindError(f"{where} raised {type(error).__name__}") from error
+        for pair in published:
+            if not (
+                isinstance(pair, (tuple, list))
+                and len(pair) == 2
+                and all(isinstance(member, str) for member in pair)
+            ):
+                raise KindError(
+                    f"{where} returned a {_shape(pair)}, not a (target, path) pair of strings"
+                )
         for target, _rel in published:
             found.setdefault(target, set()).add(clone.name)
     return {target: sorted(repos) for target, repos in found.items()}
@@ -1242,7 +1301,7 @@ def _check_references(kind: Kind, clone: Path, rel: str, found: object) -> None:
         raise KindError(f"{where}: it must be a list of Reference")
     for ref in found:
         if ref.kind != kind.name:
-            raise KindError(f"{where}: a reference is of kind {ref.kind!r}, not {kind.name!r}")
+            raise KindError(f"{where}: a reference is not of kind {kind.name}")
         if ref.chart and kind.name != "helm_chart":
             raise KindError(f"{where}: a non-empty `chart` is only for helm_chart")
 
@@ -1265,7 +1324,8 @@ def _scan_layer(clones, kinds, resolver, root):
                     continue
                 except Exception as error:
                     raise KindError(
-                        f"{kind.name}: the parser raised on {clone.name}/{rel}: {error!r}"
+                        f"{kind.name}: the parser raised {type(error).__name__} "
+                        f"on {clone.name}/{rel}"
                     ) from error
                 _check_references(kind, clone, rel, found)
                 for ref in found:
@@ -1306,7 +1366,8 @@ def build(
 ) -> Layer:
     """The layer for these clones, in memory. Nothing is written.
 
-    `org` is the estate's GitHub organisation (`""` accepts any); `chart_pattern`
+    `org` is the estate's GitHub organisation (`""` accepts any), for a clone whose
+    own is not known from `urls` (`estate_orgs`); `chart_pattern`
     names a chart's repository (`chart-{name}`, `""` to skip that step);
     `umbrellas` are repositories that bundle other repositories' charts; `examples`
     caps the example lines per edge and nothing else; `urls` links each example and
@@ -1318,7 +1379,8 @@ def build(
     clones = sorted(clones, key=lambda clone: clone.name)
     names = [clone.name for clone in clones]
     publishers = {kind.name: _publishers(clones, kind) for kind in kinds}
-    resolver = _Resolver(frozenset(names), org, chart_pattern, umbrellas, publishers)
+    clone_urls = {name: urls.clone_url(name) for name in names} if urls is not None else {}
+    resolver = _Resolver(estate_orgs(names, clone_urls, org), chart_pattern, umbrellas, publishers)
     edges, unresolved, skipped, unreadable = _scan_layer(clones, kinds, resolver, root)
 
     flat, depends_on, depended_on_by = [], {}, {}

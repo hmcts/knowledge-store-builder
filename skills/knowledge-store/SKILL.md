@@ -132,8 +132,9 @@ Before traversing, check whether the question is already answered:
 - `knowledge/relationships/by-repo/<repo>.json` — for a dependency question
   about one repository ("what uses X", "what does X depend on", "which pin a
   branch"). Read the file whole: `depends_on` and `depended_on_by` are complete
-  for the four declared kinds, each edge carries its pins and cited example
-  lines. A dependency the store does not hold is listed in
+  for every kind in `knowledge/relationships/kinds.json`, a store's own kinds
+  included. Each edge carries its pins and cited example lines. A dependency
+  the store does not hold is listed in
   `knowledge/relationships/repository-dependencies.json` under
   `unresolved_targets_outside_estate`; say so rather than report no dependency.
 

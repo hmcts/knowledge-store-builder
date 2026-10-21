@@ -17,8 +17,8 @@ not hold is a finding, never an absence. Three outputs, under
 - `by-repo/<repo>.json`, one per clone: what it depends on and what depends on
   it, plus `extra` copied from `extra/<repo>.json` when the store writes one.
 
-The stage reads clones, `config/repositories.txt` and `knowledge/provenance.json`
-(for links), and never the graph. Two runs over the same clones write the same
+The stage reads clones, `config/repositories.txt` (for links, and each clone's
+organisation) and `knowledge/provenance.json` (for links), and never the graph. Two runs over the same clones write the same
 bytes, and a repository no longer cloned loses its `by-repo` file in the same run.
 
 `--compare PATH` builds the layer, writes nothing, and prints every

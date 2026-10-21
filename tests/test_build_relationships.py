@@ -559,6 +559,49 @@ class OrgCheckTest(_Store):
                     ["tf-network", "tf-storage"],
                 )
 
+    def test_each_clone_is_compared_against_its_own_organisation(self):
+        """Break caught: every source compared against `KSB_GITHUB_ORG` alone, in a
+        store holding clones from two organisations. Then a source naming the clone
+        `other-org/shared-mod` is called somebody else's, and one naming
+        `example-org/shared-mod`, which no clone is, lands on it. A clone the list
+        does not name, or names off GitHub, falls back to `KSB_GITHUB_ORG`."""
+        self.estate(
+            {
+                "shared-mod": {"main.tf": 'variable "z" {}\n'},
+                "svc-d": {
+                    "main.tf": (
+                        'module "theirs" {\n  source = "github.com/other-org/shared-mod"\n}\n'
+                        'module "wrong" {\n  source = "github.com/example-org/shared-mod"\n}\n'
+                        'module "net" {\n  source = "github.com/example-org/tf-network"\n}\n'
+                        'module "store" {\n  source = "github.com/example-org/tf-storage"\n}\n'
+                    )
+                },
+            }
+        )
+        config.REPOSITORIES_CONFIG.parent.mkdir(parents=True)
+        config.REPOSITORIES_CONFIG.write_text(
+            "shared-mod|git@github.com:Other-Org/shared-mod.git|main\n"
+            "svc-d|git@github.com:example-org/svc-d.git|main\n"
+            "tf-storage|https://git.example.com/infra/tf-storage.git|main\n",
+            encoding="utf-8",
+        )
+        config.configure(GITHUB_ORG="example-org")
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 0, err)
+        base = self.root / "knowledge" / "relationships"
+        svc_d = json.loads((base / "by-repo" / "svc-d.json").read_text())
+        self.assertEqual(
+            [e["repository"] for e in svc_d["depends_on"]],
+            ["shared-mod", "tf-network", "tf-storage"],
+        )
+        unresolved = json.loads((base / "repository-dependencies.json").read_text())[
+            "unresolved_targets_outside_estate"
+        ]["terraform_module"]
+        self.assertNotIn("other-org/shared-mod", unresolved)
+        self.assertEqual(
+            unresolved["example-org/shared-mod"], {"references": 1, "referenced_by": ["svc-d"]}
+        )
+
 
 class MaskingTest(_Store):
     def test_an_example_line_is_masked_and_a_target_key_too(self):

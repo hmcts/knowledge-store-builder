@@ -161,19 +161,22 @@ A `Chart.yaml` under another chart's `charts/` directory is a vendored copy of a
 dependency, and is neither published nor read. When two clones publish one chart,
 coordinate or package, the first by name wins and both are listed under
 `conflicts`. A Terraform GitHub source belongs to the estate only when its
-repository is a clone and its organisation matches `KSB_GITHUB_ORG`, ignoring case.
-An unset organisation matches any. A source outside the estate is reported as
-`<org>/<repo>`.
+repository is a clone and its organisation is that clone's own, ignoring case. A
+clone's organisation is read from its clone URL in `config/repositories.txt`, so a
+store holding clones from several organisations matches each against its own. A
+clone whose URL is not on GitHub, or that the list does not name, takes
+`KSB_GITHUB_ORG`, and an unset organisation matches any. A source outside the
+estate is reported as `<org>/<repo>`.
 
 The graph reads the same declarations through the same parsers. The `packages`
-stage's `USES_MODULE` edges take Terraform sources from a module block's own
-literal `source`, with the organisation check above, so the graph and this layer
-name the same repository for one module source.
+stage's `USES_MODULE` edges and the `gaps` report take Terraform sources from a
+module block's own literal `source`, with the organisation check above, so the
+graph, the report and this layer name the same repository for one module source.
 
 A file that cannot be opened, or a POM that does not parse, is counted as
-`unreadable` for its kind and named in the run's output. The rest of the estate is still read. Two runs over the same clones write
-identical bytes, and a repository no longer cloned loses its `by-repo` file in the
-same run.
+`unreadable` for its kind and named in the run's output. The rest of the estate
+is still read. Two runs over the same clones write identical bytes, and a
+repository no longer cloned loses its `by-repo` file in the same run.
 
 ### A store's own kinds
 

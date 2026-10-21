@@ -352,6 +352,43 @@ class BadParserResultTest(_StoreKinds):
             with self.subTest(publishes=body):
                 self.failing(f"\ndef publishes(clone):\n    return {body}\n", expect="publishes()")
 
+    def test_a_refusal_names_the_kind_the_file_and_the_type_and_echoes_no_store_text(self):
+        """Break caught: a refusal repeating what the store's parser returned or the
+        text of what it raised - a pair, a kind name, an exception message - any of
+        which can carry a credential the store read, printed where a build log keeps
+        it."""
+        cases = (
+            (
+                f"\ndef references(clone, rel, text):\n    raise RuntimeError({TOKEN!r})\n",
+                ("billing/billing.events", "RuntimeError"),
+            ),
+            (
+                "\n_real = references\n\n"
+                "def references(clone, rel, text):\n"
+                f"    return [Reference(**{{**r.__dict__, 'kind': {TOKEN!r}}})"
+                " for r in _real(clone, rel, text)]\n",
+                ("billing/billing.events",),
+            ),
+            (
+                f"\ndef publishes(clone):\n    raise RuntimeError({TOKEN!r})\n",
+                ("publishes()", "RuntimeError"),
+            ),
+            (
+                f"\ndef publishes(clone):\n    return [({TOKEN!r}, 5)]\n",
+                ("publishes()", "str", "int"),
+            ),
+        )
+        for override, expected in cases:
+            with self.subTest(override=override):
+                self.estate(ESTATE)
+                self.declare(script=SCRIPT + override)
+                code, _, err = self.run_stage()
+                self.assertEqual(code, 1, err)
+                self.assertIn(KIND, err)
+                for text in expected:
+                    self.assertIn(text, err)
+                self.assertNotIn(TOKEN, err)
+
 
 class StoreKindMaskingTest(_StoreKinds):
     def test_a_credential_in_a_store_kinds_reference_reaches_no_file(self):

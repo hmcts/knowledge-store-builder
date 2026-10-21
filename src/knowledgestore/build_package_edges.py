@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 
 from . import config, graph_files, io, relationships
 
@@ -132,35 +133,33 @@ def _module_node(repo_name: str, in_estate: bool) -> dict:
     }
 
 
-def _module_references(clones: list, org: str = "") -> dict[tuple[str, str], list[str]]:
+def _module_references(
+    clones: list, orgs: Mapping[str, str] | None = None
+) -> dict[tuple[str, str], list[str]]:
     """(consumer repo, provider) -> the files declaring it, sorted.
 
     Only sources naming a GitHub repository: a registry address names no repository
-    to link to, so a node for one would be a guess. The provider is the repository
-    name when the estate holds that repository (`relationships.names_estate_repo`),
-    and `<org>/<repo>` when a clone of that name exists but the source is in another
-    organisation - somebody else's repository, which must neither take the
-    estate's node nor read as the consumer referencing itself.
+    to link to, so a node for one would be a guess. The provider is
+    `relationships.module_provider`'s, against `orgs` (`relationships.estate_orgs`;
+    by default every clone in any organisation).
     """
-    estate = {clone.name for clone in clones}
+    if orgs is None:
+        orgs = relationships.estate_orgs((clone.name for clone in clones), {}, "")
     kind = relationships.builtin("terraform_module")
     found: dict[tuple[str, str], set[str]] = {}
     for clone in clones:
-        for rel in relationships.files_of(clone, kind):
-            for ref in kind.references(clone, rel, relationships.read_text(clone / rel)):
-                provider = ref.resolved_repo
-                if provider is None:
-                    continue
-                if relationships.names_estate_repo(ref, estate, org):
-                    if provider == clone.name:
-                        continue  # a repository referencing itself is not reuse
-                elif provider in estate:
-                    provider = f"{ref.org}/{provider}"
-                found.setdefault((clone.name, provider), set()).add(rel)
+        for ref in relationships.scan(clone, kind):
+            provider = relationships.module_provider(ref, orgs)
+            # A repository referencing itself is not reuse.
+            if provider is None or provider == clone.name:
+                continue
+            found.setdefault((clone.name, provider), set()).add(ref.rel)
     return {pair: sorted(files) for pair, files in found.items()}
 
 
-def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
+def _add_module_layer(
+    graph: dict, clones: list, orgs: Mapping[str, str]
+) -> tuple[int, int, int, int]:
     """Module nodes and consumer edges from Terraform sources.
 
     Returns (modules, consumer pairs, edges). The evidence cap is per
@@ -179,7 +178,7 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
             anchors[node_repo] = node_id
     estate = {clone.name for clone in clones}
     existing = {n["id"] for n in graph["nodes"]}
-    references = _module_references(clones, config.GITHUB_ORG)
+    references = _module_references(clones, orgs)
 
     edges = 0
     capped = 0
@@ -302,12 +301,19 @@ def main() -> int:
         return 1
 
     clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
+    try:
+        orgs = relationships.store_estate_orgs(clone.name for clone in clones)
+    except ValueError as error:
+        print(f"Cannot read the store's repository list: {error}", file=sys.stderr)
+        return 1
     providers = _discover_providers(clones)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
-    module_count, module_pairs, module_edges, module_external = _add_module_layer(graph, clones)
+    module_count, module_pairs, module_edges, module_external = _add_module_layer(
+        graph, clones, orgs
+    )
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
