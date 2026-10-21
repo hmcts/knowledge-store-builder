@@ -283,6 +283,7 @@ TICKET_BROWSE_URL = _browse_url(os.environ.get("KSB_TICKET_BROWSE_URL", ""))
 _NORMALISERS = {
     "TICKET_BROWSE_URL": _browse_url,
     "PROPOSED_LINKS": lambda given: str(given).strip().lower() or "write",
+    "INDEX_WARN_MB": int,
 }
 
 # --- asking the tracker what a ticket is (the `fetch-tickets` stage) ------
@@ -606,6 +607,15 @@ FRAMEWORK_MARKERS = _env_set(
 # --- community summaries -------------------------------------------------
 MIN_COMMUNITY_SIZE = _env_int("KSB_MIN_COMMUNITY_SIZE", 25)
 
+# --- query index (the `index` stage) ---------------------------------------
+# The archive size, in MB, above which the stage warns that GitHub will refuse the
+# commit. GitHub rejects a push carrying a file over 100 MB, and the archive is the
+# file a store commits, so a store that learns its size at `git push` has an
+# artefact it cannot ship. Under the limit on purpose: the point is room to decide
+# between committing the archive and gitignoring it, not a second copy of the alarm.
+INDEX_WARN_MB = _env_int("KSB_INDEX_WARN_MB", 90)
+INDEX_PATH = ROOT / "knowledge" / "index" / "store.sqlite"
+
 # --- semantic index ------------------------------------------------------
 EMBEDDING_MODEL = os.environ.get("KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
@@ -681,6 +691,7 @@ def _recompute_paths() -> None:
         DEEPDIVES_DOCS_DIR=root / "docs" / "deep-dives",
         DEEPDIVES_PATH=root / "knowledge" / "deep-dives" / "dives.json",
         GRAPH_PATH=root / "graphify-out" / "graph.json",
+        INDEX_PATH=root / "knowledge" / "index" / "store.sqlite",
         LABELS_PATH=root / "graphify-out" / ".graphify_labels.json",
         GRAPH_REPORT_PATH=root / "graphify-out" / "GRAPH_REPORT.md",
         EXPLORER_PATH=root / "graphify-out" / "explorer.html",

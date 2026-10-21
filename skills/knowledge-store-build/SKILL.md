@@ -811,7 +811,16 @@ and immediately afterwards, and build the page:
 ```bash
 knowledgestore record-clustering   # -> graphify-out/clustering-inputs.json
 knowledgestore explorer            # the self-contained search page
+knowledgestore index               # the query index readers open instead of the graph
 ```
+
+`index` is a copy of the graph and the ticket layer, so run it after both have
+settled and again after any change to either. `status` says when an index built from
+`graph.json.gz` is stale, and does not check one built from the plain graph. Commit
+`knowledge/index/store.sqlite.gz` and gitignore `knowledge/index/store.sqlite`.
+When the archive passes `KSB_INDEX_WARN_MB` (default 90) the stage warns and still
+exits 0: GitHub rejects a file over 100 MB, so the store decides whether to commit
+it. The build needs temporary disk under `TMPDIR` for staging and sort spill.
 
 Stages are independent and idempotent — re-run one without repeating the rest.
 

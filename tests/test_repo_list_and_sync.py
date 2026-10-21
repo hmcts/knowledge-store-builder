@@ -562,6 +562,9 @@ class CliTest(SettingsIsolated):
                 "topics",
                 "deepdive",
                 "explorer",
+                # last of the builders: it is a copy of the graph and the ticket
+                # layer, so it runs once both have settled (#457)
+                "index",
                 "status",
                 # a diagnostic, not a build step: it reads the per-repository
                 # graphs before they are merged, which is the only point at

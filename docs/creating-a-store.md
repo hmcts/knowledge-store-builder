@@ -634,6 +634,7 @@ any later graph mutation, then build the page:
 knowledgestore record-clustering
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
+knowledgestore index
 knowledgestore status
 ```
 
@@ -649,6 +650,37 @@ recorded one.
 provenance, layer coverage, dangling citations, the recorded partitioner and
 whether the page predates a layer it embeds. It always exits zero because drift and missing optional layers
 are conditions to assess, not build failures; read the report.
+
+### Build the query index
+
+`knowledgestore index` writes `knowledge/index/store.sqlite`, a copy of the graph
+and the ticket layer that a reader opens read-only and queries, instead of
+parsing `graph.json.gz` into memory. It writes `knowledge/index/store.sqlite.gz`
+beside it, and prints what it read against what it wrote, then both sizes. Run it
+last, after the graph, `intent` and `source-urls` have settled, because it is a
+copy of them. The schema and the queries it supports are in
+[Query index](how-it-works.md#query-index).
+
+Ignore the plain file and commit the archive, as the graph is handled:
+
+```gitignore
+knowledge/index/store.sqlite
+```
+
+The archive is what a store commits, because it is far smaller than the plain
+file and GitHub refuses a file over 100 MB. The stage prints both sizes, so
+measure your own. When the archive passes `KSB_INDEX_WARN_MB` (default 90), the
+stage warns and still exits 0, because whether to commit it is the store's
+decision. A store whose archive cannot stay under 100 MB should also ignore
+`knowledge/index/store.sqlite.gz` and publish the index some other way.
+
+A build needs temporary disk: staging tables live in a file under `TMPDIR`, not in
+memory (`temp_store=FILE`), and the sort spills there too. Allow for that, plus
+the finished `.building` file and its archive beside the output.
+
+A missing graph, a truncated or corrupt graph or ticket layer, or a SQLite
+without FTS5 exits 1 and writes nothing, leaving any existing index as it was. A
+target that cannot be written exits 2.
 
 ### Check that answers cite real code
 
@@ -737,6 +769,7 @@ At minimum, ignore these working files:
 repositories/
 knowledge/git-history/
 graphify-out/graph.json
+knowledge/index/store.sqlite
 ```
 
 Ignoring `repositories/` is why the graph must be built from inside each clone
@@ -747,7 +780,8 @@ See *Build the graph* above.
 Commit `config/`, `knowledge_context.md`, generated content under `knowledge/`
 apart from `knowledge/git-history/`, authored material under `docs/`, and the
 committed artefacts under `graphify-out/`, including `graph.json.gz` and
-`explorer.html`. Do not commit repository clones or the uncompressed graph.
+`explorer.html`, and `knowledge/index/store.sqlite.gz`. Do not commit repository
+clones, the uncompressed graph or the uncompressed index.
 
 The browser page can be large, but committing it is what lets people without a
 Claude licence or network access use the store. Report which stages ran, what

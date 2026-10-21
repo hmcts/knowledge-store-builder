@@ -1,0 +1,852 @@
+"""The query index is a faithful, deterministic rewrite of the graph and ticket layer.
+
+A reader opens `store.sqlite` instead of parsing the graph, so the index is only
+worth having if it answers what the graph would, rebuilds to the same bytes, and
+is never left half written. The fixture is small enough to check by eye: six node
+records over two repositories (one a repeated id, one a structural node with no
+label, one written with the old `gherkin_feature` kind) and five links, one of
+them to a node that does not exist.
+
+Expected values are written out by hand, never taken from the code under test.
+Each test names the defect it catches.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import gzip
+import hashlib
+import json
+import re
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import settings_isolation  # noqa: F401  (puts the working tree on sys.path first)
+from knowledgestore import graph_stream, io, store_index
+
+
+def node(id, label=None, repo="svc-a", kind=None, file="", **extra):
+    record = {"id": id, "repo": repo, "source_file": file, **extra}
+    if label is not None:
+        record["label"] = label
+    if kind is not None:
+        record["metadata"] = {"kind": kind}
+    return record
+
+
+NODES = [
+    node(
+        "a1",
+        "Payment gateway feature",
+        kind="gherkin_feature",
+        file="features/pay.feature",
+        community=0,
+        url="https://example.test/svc-a/features/pay.feature",
+    ),
+    node("a2", "Payment retry scenario", kind="scenario", file="features/pay.feature", community=0),
+    node("a3", "Gateway client", kind="class", file="src/Client.java", community=1),
+    node("b1", "Order service", repo="svc-b", kind="class", file="src/Order.java", community=2),
+    # A structural node: neither a label nor a source file (CLAUDE.md 6.4).
+    {"id": "s1", "repo": "svc-b"},
+    # The same id again, disagreeing on the label: which copy survives must not
+    # depend on which the graph listed first.
+    node("a1", "Payment gateway feature copy", kind="gherkin_feature", file="features/pay.feature"),
+]
+
+LINKS = [
+    {"source": "a1", "target": "a2", "relation": "contains"},
+    {"source": "a2", "target": "a3", "relation": "calls"},
+    {"source": "a3", "target": "b1", "relation": "calls"},
+    {"source": "b1", "target": "s1", "relation": "contains"},
+    {"source": "a1", "target": "ghost", "relation": "calls"},
+]
+
+# The layout `file-tickets.json.gz` carries: repo -> repo-relative path -> entry.
+TICKETS = {
+    "svc-a": {
+        "features/pay.feature": {
+            "tickets": {"PROJ-1": 2},
+            "proposed": {"PROJ-1": 1, "PROJ-2": 1},
+            "first": "2024-01-01",
+            "last": "2024-06-01",
+        },
+        "docs/readme.md": {"tickets": {"PROJ-3": 1}, "first": "2024-02-01", "last": "2024-02-01"},
+    }
+}
+
+
+def write_graph(path: Path, nodes, links) -> None:
+    text = json.dumps({"directed": True, "nodes": nodes, "links": links})
+    if path.suffix == ".gz":
+        with gzip.open(path, "wt", encoding="utf-8") as handle:
+            handle.write(text)
+    else:
+        path.write_text(text, encoding="utf-8")
+
+
+def write_tickets(path: Path, layer) -> None:
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        json.dump(layer, handle)
+
+
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class IndexCase(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        (self.root / "knowledge").mkdir()
+        self.graph = self.root / "knowledge" / "graph.json.gz"
+        self.tickets = self.root / "knowledge" / "file-tickets.json.gz"
+        self.out = self.root / "knowledge" / "index" / "store.sqlite"
+        write_graph(self.graph, NODES, LINKS)
+        write_tickets(self.tickets, TICKETS)
+
+    def build(self, out=None, graph=None):
+        return store_index.build(self.root, graph or self.graph, self.tickets, out or self.out)
+
+    def query(self, sql, *args, path=None):
+        connection = sqlite3.connect(Path(path or self.out).as_uri() + "?mode=ro", uri=True)
+        try:
+            return connection.execute(sql, args).fetchall()
+        finally:
+            connection.close()
+
+
+class WhatTheIndexHolds(IndexCase):
+    def test_the_report_and_row_counts_are_the_fixtures(self):
+        """Breaks if a node, edge or ticket is dropped or doubled, or if the report
+        stops reconciling: 6 nodes read = 5 rows + 1 duplicate, 5 links read = 4
+        edges + 1 dangling + 0 duplicate (CLAUDE.md 2.5)."""
+        report = self.build()
+        self.assertEqual(
+            dataclasses.replace(report, plain_bytes=0, archive_bytes=0),
+            store_index.IndexReport(
+                nodes_read=6,
+                nodes=5,
+                duplicate_nodes=1,
+                links_read=5,
+                edges=4,
+                dangling_edges=1,
+                duplicate_edges=0,
+                ticket_files=2,
+                plain_bytes=0,
+                archive_bytes=0,
+                graph="knowledge/graph.json.gz",
+            ),
+        )
+        self.assertEqual(report.plain_bytes, self.out.stat().st_size)
+        self.assertEqual(report.archive_bytes, self.out.with_name("store.sqlite.gz").stat().st_size)
+        counts = {
+            table: self.query(f"SELECT count(*) FROM {table}")[0][0]
+            for table in ("repos", "files", "relations", "nodes", "edges", "tickets")
+        }
+        # files: three with a node, one for the structural node's empty path, one
+        # that only the ticket layer names.
+        self.assertEqual(
+            counts,
+            {"repos": 2, "files": 5, "relations": 2, "nodes": 5, "edges": 4, "tickets": 3},
+        )
+
+    def test_the_meta_rows_name_the_sources_and_the_schema(self):
+        """Breaks if the index stops saying which graph and ticket layer it came
+        from, or which schema a reader should expect."""
+        self.build()
+        meta = dict(self.query("SELECT key, value FROM meta"))
+        self.assertEqual(
+            meta,
+            {
+                "index_schema": "1.0",
+                "graph": "knowledge/graph.json.gz",
+                "graph_sha256": digest(self.graph)[:16],
+                "file_tickets_sha256": digest(self.tickets)[:16],
+            },
+        )
+
+    def test_a_repeated_node_id_keeps_the_copy_that_sorts_first(self):
+        """Breaks if the survivor of a duplicate id is chosen by input order rather
+        than content: the same graph, listed the other way, would index differently."""
+        self.build()
+        self.assertEqual(
+            self.query("SELECT label FROM nodes WHERE id = 'a1'"),
+            [("Payment gateway feature",)],
+        )
+
+    def test_a_label_search_finds_the_hand_listed_nodes(self):
+        """Breaks if the full-text index is empty, mis-keyed to the wrong node, or
+        stale against the nodes table."""
+        self.build()
+        sql = (
+            "SELECT n.id FROM labels JOIN nodes n ON n.k = labels.rowid"
+            " WHERE labels MATCH ? ORDER BY n.id"
+        )
+        self.assertEqual(self.query(sql, "gateway"), [("a1",), ("a3",)])
+        self.assertEqual(self.query(sql, "payment"), [("a1",), ("a2",)])
+        self.assertEqual(self.query(sql, "order"), [("b1",)])
+        self.assertEqual(self.query(sql, "copy"), [])
+
+    def test_the_neighbours_of_a_node_match_in_both_directions(self):
+        """Breaks if an edge is stored with source and target swapped, or the
+        reverse index does not answer `who points at this node`."""
+        self.build()
+        outgoing = self.query(
+            "SELECT r.name, t.id FROM edges e JOIN nodes s ON s.k = e.source"
+            " JOIN nodes t ON t.k = e.target JOIN relations r ON r.k = e.relation"
+            " WHERE s.id = 'a2' ORDER BY r.name, t.id"
+        )
+        incoming = self.query(
+            "SELECT r.name, s.id FROM edges e JOIN nodes s ON s.k = e.source"
+            " JOIN nodes t ON t.k = e.target JOIN relations r ON r.k = e.relation"
+            " WHERE t.id = 'a2' ORDER BY r.name, s.id"
+        )
+        self.assertEqual(outgoing, [("calls", "a3")])
+        self.assertEqual(incoming, [("contains", "a1")])
+
+    def test_a_dangling_edge_is_counted_and_not_stored(self):
+        """Breaks if an edge to a node that is not in the graph reaches the edge
+        table, where a reader would follow it to nothing."""
+        self.build()
+        self.assertEqual(
+            self.query(
+                "SELECT count(*) FROM edges e JOIN relations r ON r.k = e.relation"
+                " JOIN nodes s ON s.k = e.source WHERE s.id = 'a1' AND r.name = 'calls'"
+            ),
+            [(0,)],
+        )
+
+    def test_a_repeated_link_is_counted_and_stored_once(self):
+        """Breaks if a duplicate link is dropped without being reported, so that
+        links read no longer equal edges + dangling + duplicates."""
+        write_graph(self.graph, NODES, LINKS + [LINKS[0], LINKS[0]])
+        report = self.build()
+        self.assertEqual(
+            (report.links_read, report.edges, report.dangling_edges, report.duplicate_edges),
+            (7, 4, 1, 2),
+        )
+
+    def test_the_unlabeled_node_is_a_node_and_is_not_searchable(self):
+        """Breaks if a structural node is lost, or is entered into the full-text
+        index with a NULL label (CLAUDE.md 6.4). `labels_docsize` is FTS5's own
+        record of which rows it indexed."""
+        self.build()
+        self.assertEqual(self.query("SELECT label FROM nodes WHERE id = 's1'"), [(None,)])
+        indexed = {k for (k,) in self.query("SELECT id FROM labels_docsize")}
+        unlabeled = self.query("SELECT k FROM nodes WHERE id = 's1'")[0][0]
+        self.assertNotIn(unlabeled, indexed)
+        self.assertEqual(len(indexed), 4)
+
+    def test_an_old_kind_is_stored_in_its_current_form(self):
+        """Breaks if the raw `metadata.kind` is stored: a reader filtering on
+        `feature` would miss every node a pre-rename store wrote (CLAUDE.md 6.5)."""
+        self.build()
+        self.assertEqual(
+            self.query("SELECT id, kind FROM nodes ORDER BY id"),
+            [("a1", "feature"), ("a2", "scenario"), ("a3", "class"), ("b1", "class"), ("s1", "")],
+        )
+
+    def test_a_missing_field_is_null_and_a_present_one_is_kept(self):
+        """Breaks if url or community is invented where the graph has none, or lost
+        where it has one."""
+        self.build()
+        self.assertEqual(
+            self.query("SELECT id, url, community FROM nodes WHERE id IN ('a1', 'a3') ORDER BY id"),
+            [("a1", "https://example.test/svc-a/features/pay.feature", 0), ("a3", None, 1)],
+        )
+
+    def test_tickets_join_to_the_node_through_repo_and_path(self):
+        """Breaks if the ticket join key is not (repo, path), or if a ticket in both
+        the landed and proposed sections is kept as proposed."""
+        self.build()
+        rows = self.query(
+            "SELECT t.ticket, t.count, t.landed FROM nodes n"
+            " JOIN files f ON f.k = n.file JOIN repos r ON r.k = f.repo"
+            " JOIN tickets t ON t.file = f.k"
+            " WHERE n.id = 'a1' AND r.name = 'svc-a' ORDER BY t.ticket"
+        )
+        self.assertEqual(rows, [("PROJ-1", 2, 1), ("PROJ-2", 1, 0)])
+        by_ticket = self.query(
+            "SELECT f.path FROM tickets t JOIN files f ON f.k = t.file"
+            " WHERE t.ticket = 'PROJ-3' AND t.landed = 1"
+        )
+        self.assertEqual(by_ticket, [("docs/readme.md",)])
+
+    def test_a_node_with_no_repository_is_not_a_repository(self):
+        """Breaks if the empty name is listed in `repos`: a store of two repositories
+        would report three. The node still reads as having no repository, through a
+        NULL `files.repo`."""
+        write_graph(
+            self.graph,
+            NODES + [{"id": "n0", "label": "Orphan", "source_file": "loose.txt"}],
+            LINKS,
+        )
+        self.build()
+        self.assertEqual(
+            self.query("SELECT name FROM repos ORDER BY name"), [("svc-a",), ("svc-b",)]
+        )
+        self.assertEqual(
+            self.query(
+                "SELECT f.path, coalesce(r.name, '') FROM nodes n JOIN files f ON f.k = n.file"
+                " LEFT JOIN repos r ON r.k = f.repo WHERE n.id = 'n0'"
+            ),
+            [("loose.txt", "")],
+        )
+
+    def test_a_missing_ticket_layer_gives_an_empty_table_and_a_null_digest(self):
+        """Breaks if a store without the ticket layer cannot be indexed, or if the
+        digest of an absent layer is written as something other than NULL."""
+        self.tickets.unlink()
+        report = self.build()
+        self.assertEqual(self.query("SELECT count(*) FROM tickets"), [(0,)])
+        self.assertEqual(
+            self.query("SELECT value FROM meta WHERE key = 'file_tickets_sha256'"), [(None,)]
+        )
+        self.assertEqual(report.ticket_files, 0)
+        self.assertEqual(report.nodes, 5)
+
+    def test_ticket_files_counts_only_the_files_that_carry_a_ticket(self):
+        """Breaks if an entry with no tickets is counted: the report says how many files
+        carry tickets, and an entry holding only dates or an empty section carries none."""
+        layer = {
+            "svc-a": {
+                **TICKETS["svc-a"],
+                "empty.md": {"first": "2024-01-01", "last": "2024-01-01"},
+                "hollow.md": {"tickets": {}, "proposed": {}},
+            }
+        }
+        write_tickets(self.tickets, layer)
+        report = self.build()
+        self.assertEqual(report.ticket_files, 2)
+        self.assertEqual(self.query("SELECT count(DISTINCT file) FROM tickets"), [(2,)])
+
+
+def logical_dump(path: Path) -> dict:
+    """Every table except `meta`, row keys included, and FTS5's own shadow tables.
+
+    `meta` records a digest of each input file, which differs whenever the input's
+    bytes do, so a graph listed in another order cannot give an identical file. What
+    must not change is every row, the key it was given, and the full-text segments.
+    """
+    connection = sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True)
+    try:
+        tables = [
+            name
+            for (name,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'meta'"
+                " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        dump = {}
+        for name in tables:
+            try:
+                sql = f'SELECT rowid, * FROM "{name}" ORDER BY rowid'
+                dump[name] = connection.execute(sql).fetchall()
+            except sqlite3.OperationalError:
+                # WITHOUT ROWID: a scan already returns primary-key order.
+                dump[name] = connection.execute(f'SELECT * FROM "{name}"').fetchall()
+        return dump
+    finally:
+        connection.close()
+
+
+def bulk_nodes(count: int) -> list:
+    return [
+        node(f"n{i:05d}", f"word{i} alpha{i % 97} beta{i} gamma{i * 7}", file=f"f{i % 50}.py")
+        for i in range(count)
+    ]
+
+
+class ABuildIsReproducible(IndexCase):
+    def files(self, out: Path) -> tuple[bytes, bytes]:
+        return out.read_bytes(), out.with_name(out.name + ".gz").read_bytes()
+
+    def test_a_rebuild_over_the_same_inputs_is_byte_identical(self):
+        """Breaks if the plain file or the archive carries anything that changes
+        between runs: a timestamp, a filename, an unordered fill, an unmerged
+        full-text index. The second build lands on a different path and then over
+        the first, so both a fresh write and a replacement are compared."""
+        self.build()
+        first = self.files(self.out)
+        elsewhere = self.root / "knowledge" / "other" / "store.sqlite"
+        self.build(out=elsewhere)
+        self.assertEqual(self.files(elsewhere), first)
+        self.build()
+        self.assertEqual(self.files(self.out), first)
+
+    def test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file(self):
+        """Breaks if any table is filled in input order rather than sorted order, so
+        that a node's key, an edge's endpoints, the full-text segments or the free
+        pages depend on how the graph happened to list its nodes and links.
+
+        `meta` digests the input file's bytes, which differ for a reordered file, so
+        the digest function (the IO boundary) is held to a constant and the two builds
+        are compared byte for byte. The row-and-key diff runs first because it says
+        which table moved. A third build with one label changed shows the comparison
+        can fail: a build that ignored its input would also be identical."""
+
+        def constant(paths, root):
+            return {str(p.relative_to(root)): "f" * 16 for p in paths}
+
+        def build_in(name, nodes, links, layer):
+            top = self.root / name
+            (top / "knowledge").mkdir(parents=True)
+            graph = top / "knowledge" / "graph.json.gz"
+            tickets = top / "knowledge" / "file-tickets.json.gz"
+            write_graph(graph, nodes, links)
+            write_tickets(tickets, layer)
+            out = top / "knowledge" / "index" / "store.sqlite"
+            with mock.patch.object(store_index.io, "layer_digests", constant):
+                store_index.build(top, graph, tickets, out)
+            return out
+
+        reversed_layer = {
+            "svc-a": {
+                path: {key: entry[key] for key in reversed(list(entry))}
+                for path, entry in reversed(list(TICKETS["svc-a"].items()))
+            }
+        }
+        forward = build_in("forward", NODES, LINKS, TICKETS)
+        backward = build_in("backward", NODES[::-1], LINKS[::-1], reversed_layer)
+
+        original = logical_dump(forward)
+        self.assertEqual(logical_dump(backward), original)
+        # The comparison reads real rows: a dump of nothing would also be equal.
+        self.assertEqual(len(original["nodes"]), 5)
+        self.assertEqual(len(original["edges"]), 4)
+        node_ids = [row[2] for row in original["nodes"]]
+        self.assertEqual(node_ids, ["a1", "a2", "a3", "b1", "s1"])
+        self.assertEqual(self.files(backward), self.files(forward))
+
+        changed = [dict(n) for n in NODES]
+        changed[3]["label"] = "Order service v2"
+        different = build_in("different", changed, LINKS, TICKETS)
+        self.assertNotEqual(different.read_bytes(), forward.read_bytes())
+        self.assertNotEqual(self.files(different)[1], self.files(forward)[1])
+
+    def test_the_archive_is_the_plain_file_without_a_timestamp_or_name(self):
+        """Breaks if the archive carries an mtime or filename, which would change its
+        bytes on every run, or if it is not a faithful copy of the plain file."""
+        self.build()
+        plain, packed = self.files(self.out)
+        self.assertEqual(packed[4:8], b"\x00\x00\x00\x00")  # MTIME
+        self.assertEqual(packed[3], 0)  # FLG: no FNAME
+        self.assertEqual(gzip.decompress(packed), plain)
+
+
+class ABulkBuildIsFinished(IndexCase):
+    """20,000 labels is where an unfinished build shows. Smaller sets fit one
+    full-text flush and one tidy file whether or not the final steps ran."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Held on the class: an unreferenced TemporaryDirectory deletes itself.
+        cls.scratch = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.scratch.cleanup)
+        root = Path(cls.scratch.name)
+        graph = root / "graph.json"
+        write_graph(graph, bulk_nodes(20000), [])
+        cls.bulk = root / "store.sqlite"
+        store_index.build(root, graph, root / "absent.json.gz", cls.bulk)
+
+    def test_the_full_text_index_is_merged_to_one_segment(self):
+        """Breaks if `optimize` is not run: a bulk insert leaves five segments here,
+        each a reader must consult for every search."""
+        self.assertEqual(
+            self.query("SELECT count(DISTINCT segid) FROM labels_idx", path=self.bulk), [(1,)]
+        )
+
+    def test_the_file_has_no_free_pages(self):
+        """Breaks if `VACUUM` is not run last: merging the full-text segments frees
+        pages, and unvacuumed they stay in the file holding stale bytes that follow
+        input order."""
+        self.assertEqual(self.query("PRAGMA freelist_count", path=self.bulk), [(0,)])
+
+
+class NothingIsWrittenHalfDone(IndexCase):
+    def pair(self):
+        archive = self.out.with_name("store.sqlite.gz")
+        return digest(self.out), digest(archive)
+
+    def test_a_truncated_graph_raises_and_creates_no_index(self):
+        """Breaks if a graph cut short part way through yields a partial index that a
+        reader would trust."""
+        text = json.dumps({"nodes": NODES, "links": LINKS})
+        truncated = self.root / "knowledge" / "graph.json"
+        truncated.write_text(text[: text.rindex("]")], encoding="utf-8")
+        with self.assertRaises(graph_stream.TruncatedJson):
+            self.build(graph=truncated)
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.out.with_name("store.sqlite.gz").exists())
+        self.assertEqual(list(self.out.parent.iterdir()), [])
+
+    def test_a_failed_rebuild_leaves_the_previous_index_unchanged(self):
+        """Breaks if a rebuild that fails overwrites or deletes the index already
+        there, by hash, for both files."""
+        self.build()
+        before = self.pair()
+        text = json.dumps({"nodes": NODES, "links": LINKS})
+        truncated = self.root / "knowledge" / "graph.json"
+        truncated.write_text(text[: text.rindex("]")], encoding="utf-8")
+        with self.assertRaises(graph_stream.TruncatedJson):
+            self.build(graph=truncated)
+        self.assertEqual(self.pair(), before)
+        self.assertEqual(
+            sorted(p.name for p in self.out.parent.iterdir()),
+            ["store.sqlite", "store.sqlite.gz"],
+        )
+
+
+class WhatItRefuses(IndexCase):
+    def test_a_missing_graph_raises_and_leaves_an_existing_index_alone(self):
+        """Breaks if an absent graph, which the stream reads as empty, replaces a good
+        index with a valid empty one."""
+        self.build()
+        before = (digest(self.out), digest(self.out.with_name("store.sqlite.gz")))
+        self.graph.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.build()
+        current = (digest(self.out), digest(self.out.with_name("store.sqlite.gz")))
+        self.assertEqual(current, before)
+
+    def test_a_missing_graph_creates_nothing(self):
+        """Breaks if the refusal comes after the output directory or file is made."""
+        self.graph.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.build()
+        self.assertFalse(self.out.parent.exists())
+
+    def test_a_sqlite_without_fts5_is_refused_before_anything_is_written(self):
+        """Breaks if the build goes on without full-text search and writes an index
+        whose label table cannot be created, or leaves half of one behind. The
+        capability probe is the boundary stubbed."""
+        with mock.patch.object(store_index, "fts5_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "FTS5"):
+                self.build()
+        self.assertFalse(self.out.parent.exists())
+
+
+class EdgesUnderEitherKey(IndexCase):
+    def test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them(self):
+        """Breaks if only `links` is read: an `edges`-keyed graph would index with zero
+        edges and a clean report."""
+        text = json.dumps({"directed": True, "nodes": NODES, "edges": LINKS})
+        with gzip.open(self.graph, "wt", encoding="utf-8") as handle:
+            handle.write(text)
+        report = self.build()
+        reconciled = (report.links_read, report.edges, report.dangling_edges)
+        self.assertEqual(reconciled, (5, 4, 1))
+
+
+class TheReportMustReconcile(IndexCase):
+    def test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate(self):
+        """Breaks if `duplicate_edges` is whatever is left over: an edge lost for any
+        other reason would then be reported as a duplicate and the sum would hold by
+        construction. A trigger on the real edge table skips one row, as a constraint
+        or a bug might."""
+        lossy = store_index.DDL + (
+            "CREATE TRIGGER lose BEFORE INSERT ON edges WHEN NEW.source = 1"
+            " BEGIN SELECT RAISE(IGNORE); END;"
+        )
+        with mock.patch.object(store_index, "DDL", lossy):
+            with self.assertRaisesRegex(RuntimeError, "an edge was lost"):
+                self.build()
+        self.assertFalse(self.out.exists())
+
+
+class DigestsAreStreamed(unittest.TestCase):
+    def test_the_digest_is_the_sha256_of_the_bytes_whatever_way_it_is_read(self):
+        """Breaks if streaming the digest changes it: a manifest, a page and an index
+        compare it against digests written by the whole-file read. The literal is the
+        published SHA-256 of b'abc'."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            small = root / "small.bin"
+            small.write_bytes(b"abc")
+            large = root / "large.bin"
+            large.write_bytes(bytes(range(256)) * 20000)  # several read chunks
+            digests = io.layer_digests([small, large, root / "absent"], root)
+            self.assertEqual(digests["small.bin"], "ba7816bf8f01cfea")
+            self.assertEqual(
+                digests["large.bin"], hashlib.sha256(large.read_bytes()).hexdigest()[:16]
+            )
+            self.assertIsNone(digests["absent"])
+
+
+class FullTextSearchIsAvailable(unittest.TestCase):
+    def test_this_environment_can_build_the_index(self):
+        """Breaks if the probe reports FTS5 missing where it works, which would refuse
+        every build here."""
+        self.assertTrue(store_index.fts5_available())
+
+
+DOCUMENT = Path(__file__).resolve().parents[1] / "docs" / "how-it-works.md"
+
+# `<!-- index-query: NAME -->` on the line before a fenced `sql` block names a query a
+# reader is told to run; `<!-- index-helper: NAME -->` does the same for a `python`
+# block. The test runs each block as written.
+_BLOCK = re.compile(r"<!-- index-(query|helper): (\w+) -->\n```(?:sql|python)\n(.*?)```", re.DOTALL)
+
+
+def tagged_blocks(text: str, kind: str) -> dict[str, str]:
+    """The fenced blocks of one kind in `text`, by tag. A tag used twice raises: two
+    blocks for one name would leave one of them untested. So does a tag comment that
+    does not yield a block (a blank line after it, a hyphenated name, another fence
+    language): every tag comment on the page must be one this function ran, or it is a
+    query the test never saw."""
+    found: dict[str, str] = {}
+    extracted = 0
+    for tagged, name, body in _BLOCK.findall(text):
+        if tagged != kind:
+            continue
+        extracted += 1
+        if name in found:
+            raise ValueError(f"index-{kind} {name} appears twice")
+        found[name] = body
+    comments = len(re.findall(rf"<!--\s*index-{kind}\b", text))
+    if comments != extracted:
+        raise ValueError(
+            f"{comments} index-{kind} tag comment(s) on the page but {extracted} block(s) "
+            "read: a tag is malformed and its block is not being tested"
+        )
+    return found
+
+
+def mismatches(documented: dict[str, str], expected: dict, connection) -> list[str]:
+    """Every way the documented queries disagree with the hand-listed expectations:
+    a tag with no expectation, an expectation with no tag, and any case whose rows
+    differ. Empty means they agree."""
+    problems = [
+        f"{name}: documented, no expected rows"
+        for name in sorted(documented.keys() - expected.keys())
+    ]
+    problems += [
+        f"{name}: expected rows, not documented"
+        for name in sorted(expected.keys() - documented.keys())
+    ]
+    for name in sorted(documented.keys() & expected.keys()):
+        for params, rows in expected[name]:
+            got = connection.execute(documented[name], params).fetchall()
+            if got != rows:
+                problems.append(f"{name}{params}: got {got}, expected {rows}")
+    return problems
+
+
+# One node with no repository, found through its label, with a ticket entry under the
+# empty repository name so the ticket queries meet a NULL `files.repo` too.
+ORPHAN = {"id": "n0", "label": "Orphan gateway note", "source_file": "loose.txt"}
+QUERY_LINKS = LINKS + [{"source": "n0", "target": "a2", "relation": "calls"}]
+QUERY_TICKETS = {
+    "svc-a": {
+        **TICKETS["svc-a"],
+        "docs/readme.md": {
+            "tickets": {"PROJ-3": 1},
+            "proposed": {"PROJ-1": 1},
+            "first": "2024-02-01",
+            "last": "2024-02-01",
+        },
+    },
+    "": {"loose.txt": {"tickets": {"PROJ-1": 1, "PROJ-9": 3}, "first": "x", "last": "y"}},
+}
+
+A1_ROW = (
+    "a1",
+    "Payment gateway feature",
+    "svc-a",
+    "feature",
+    "features/pay.feature",
+    "https://example.test/svc-a/features/pay.feature",
+    0,
+)
+A3_ROW = ("a3", "Gateway client", "svc-a", "class", "src/Client.java", None, 1)
+N0_ROW = ("n0", "Orphan gateway note", "", "", "loose.txt", None, None)
+
+# Written out by hand. `find`: a3's label has two words, a1's and n0's three, so a3 is
+# the better match and a1 and n0 tie on rank and fall back to id.
+EXPECTED = {
+    "find": [
+        (('"gateway"*', None, None, 20), [A3_ROW, A1_ROW, N0_ROW]),
+        (('"gateway"*', None, None, 2), [A3_ROW, A1_ROW]),
+        (('"gateway"*', "svc-a", None, 20), [A3_ROW, A1_ROW]),
+        (('"gateway"*', "", None, 20), [N0_ROW]),
+        (('"gateway"*', None, "class", 20), [A3_ROW]),
+        (('"nothing"*', None, None, 20), []),
+    ],
+    "node": [
+        (("a3",), [A3_ROW]),
+        (("n0",), [N0_ROW]),
+        (("ghost",), []),
+    ],
+    "neighbours": [
+        (
+            ("a2", None),
+            [("out", "calls", "a3"), ("in", "calls", "n0"), ("in", "contains", "a1")],
+        ),
+        (("a2", "contains"), [("in", "contains", "a1")]),
+        (("a3", None), [("in", "calls", "a2"), ("out", "calls", "b1")]),
+        (("ghost", None), []),
+    ],
+    "tickets_for_file": [
+        (
+            ("svc-a", "features/pay.feature"),
+            [
+                ("PROJ-1", 2, 1, "svc-a", "features/pay.feature"),
+                ("PROJ-2", 1, 0, "svc-a", "features/pay.feature"),
+            ],
+        ),
+        (
+            ("", "loose.txt"),
+            [("PROJ-1", 1, 1, "", "loose.txt"), ("PROJ-9", 3, 1, "", "loose.txt")],
+        ),
+        (("nope", "loose.txt"), []),
+        # No path: every file of the repository, landed first, then ticket, then path.
+        (
+            ("svc-a", None),
+            [
+                ("PROJ-1", 2, 1, "svc-a", "features/pay.feature"),
+                ("PROJ-3", 1, 1, "svc-a", "docs/readme.md"),
+                ("PROJ-1", 1, 0, "svc-a", "docs/readme.md"),
+                ("PROJ-2", 1, 0, "svc-a", "features/pay.feature"),
+            ],
+        ),
+        (
+            ("", None),
+            [("PROJ-1", 1, 1, "", "loose.txt"), ("PROJ-9", 3, 1, "", "loose.txt")],
+        ),
+        (("nope", None), []),
+    ],
+    "files_for_ticket": [
+        (
+            ("PROJ-1",),
+            [
+                ("", "loose.txt", 1, 1),
+                ("svc-a", "features/pay.feature", 2, 1),
+                ("svc-a", "docs/readme.md", 1, 0),
+            ],
+        ),
+        (("PROJ-0",), []),
+    ],
+}
+
+
+class TheDocumentedQueriesAreTheContract(IndexCase):
+    """`docs/how-it-works.md` tells a reader which SQL to run. A reader such as the MCP
+    server runs that SQL, so it is held against a real built index."""
+
+    def setUp(self):
+        super().setUp()
+        write_graph(self.graph, NODES + [ORPHAN], QUERY_LINKS)
+        write_tickets(self.tickets, QUERY_TICKETS)
+        self.build()
+        self.connection = sqlite3.connect(self.out.as_uri() + "?mode=ro", uri=True)
+        self.addCleanup(self.connection.close)
+        self.text = DOCUMENT.read_text(encoding="utf-8")
+
+    def test_each_documented_query_returns_the_hand_listed_rows(self):
+        """Breaks if a documented query is wrong for the schema: a direction swapped,
+        a join that drops a node with no repository, a lost tiebreak, a landed
+        ticket listed after a proposed one."""
+        documented = tagged_blocks(self.text, "query")
+        self.assertEqual(mismatches(documented, EXPECTED, self.connection), [])
+
+    def test_a_documented_query_without_an_expectation_fails(self):
+        """Breaks if a query can be added to the page and go untested: the check that
+        reads the page must name a tag no expectation covers."""
+        documented = {"one": "SELECT 1", "added": "SELECT 1"}
+        expected = {"one": [((), [(1,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["added: documented, no expected rows"],
+        )
+
+    def test_an_expectation_without_a_documented_query_fails(self):
+        """Breaks if a query can be deleted from the page and its expectation linger
+        green: the check must name an expectation with no tag behind it."""
+        documented = {"one": "SELECT 1"}
+        expected = {"one": [((), [(1,)])], "gone": [((), [(1,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["gone: expected rows, not documented"],
+        )
+
+    def test_a_wrong_expectation_is_reported_as_a_mismatch(self):
+        """CLAUDE.md 2.9: the comparison must be able to fail in this run. Breaks if
+        `mismatches` reports nothing whatever the rows are, which would make the
+        contract test above pass over any SQL. The queries here are the instrument's
+        own, so a change to the page cannot make this pass or fail."""
+        documented = {"one": "SELECT 1"}
+        expected = {"one": [((), [(2,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["one(): got [(1,)], expected [(2,)]"],
+        )
+
+    def test_a_tag_used_twice_is_refused(self):
+        """Breaks if the second of two blocks for one name silently replaces the first,
+        leaving one documented query unrun."""
+        block = "<!-- index-query: node -->\n```sql\nSELECT 1\n```\n"
+        with self.assertRaises(ValueError):
+            tagged_blocks(block + block, "query")
+
+    def test_the_documented_helper_makes_free_text_a_safe_match_argument(self):
+        """Breaks if the documented recipe lets FTS5 syntax through as an operator
+        (`gateway OR order` must need all three words, so match nothing), raises on a
+        lone quote, stops marking words as prefixes, or tokenises differently from the
+        index: `pay_gate` and `feature-gateway` are two words each there."""
+        scope: dict = {}
+        exec(tagged_blocks(self.text, "helper")["match_argument"], scope)
+        match_argument = scope["match_argument"]
+        find = tagged_blocks(self.text, "query")["find"]
+
+        def ids(text):
+            rows = self.connection.execute(find, (match_argument(text), None, None, -1))
+            return [row[0] for row in rows]
+
+        self.assertEqual(match_argument("Gate pay Gate"), '"gate"* "pay"*')
+        self.assertEqual(ids("Gate pay"), ["a1"])
+        self.assertEqual(ids("pay_gate"), ["a1"])
+        self.assertEqual(ids("feature-gateway"), ["a1"])
+        self.assertEqual(ids("gateway OR order"), [])
+        self.assertEqual(ids('gateway "'), ["a3", "a1", "n0"])
+        self.assertEqual(ids("gateway NEAR"), [])
+        self.assertEqual(ids('"gateway'), ["a3", "a1", "n0"])
+        self.assertEqual(match_argument("  "), "")
+
+    def test_a_helper_the_page_names_and_this_test_does_not_know_fails(self):
+        """Breaks if a helper can be added to the page and go unrun."""
+        self.assertEqual(set(tagged_blocks(self.text, "helper")), {"match_argument"})
+
+    def test_a_malformed_tag_fails_the_gate_loudly(self):
+        """Breaks if a tag that does not match the block pattern is skipped: its query
+        would be on the page, untested, and nothing would say so."""
+        good = "<!-- index-query: node -->\n```sql\nSELECT 1\n```\n"
+        self.assertEqual(tagged_blocks(good, "query"), {"node": "SELECT 1\n"})
+        for bad in (
+            "<!-- index-query: node -->\n\n```sql\nSELECT 1\n```\n",  # blank line
+            "<!-- index-query: files-for-ticket -->\n```sql\nSELECT 1\n```\n",  # hyphen
+            "<!-- index-query: node -->\n```sqlite\nSELECT 1\n```\n",  # other fence
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                tagged_blocks(bad, "query")
+        with self.assertRaises(ValueError):
+            tagged_blocks("<!-- index-helper: h -->\n\n```python\nx = 1\n```\n", "helper")
+
+    def test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories(self):
+        """Breaks if the repository filter goes back to `coalesce(r.name, '') = ?`, which
+        scans every file, or if an unknown repository is read as `no repository`."""
+        sql = tagged_blocks(self.text, "query")["tickets_for_file"]
+        for params in (("svc-a", None), ("svc-a", "docs/readme.md"), ("", None)):
+            plan = [row[3] for row in self.connection.execute("EXPLAIN QUERY PLAN " + sql, params)]
+            with self.subTest(params=params):
+                self.assertTrue(any(d.startswith("SEARCH f ") for d in plan), plan)
+                self.assertFalse(any(d.startswith("SCAN") for d in plan), plan)
+        self.assertNotEqual(self.connection.execute(sql, ("", None)).fetchall(), [])
+        self.assertEqual(self.connection.execute(sql, ("unknown", None)).fetchall(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

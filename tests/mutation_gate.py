@@ -800,6 +800,18 @@ MUTATIONS = (
         "readers already accepted the `.gz` and only the guard refused, and the "
         "way out was a multi-gigabyte gunzip for a report documented as cheap",
         (
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_ticket_layer_that_is_not_gzip_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_ticket_layer_that_is_not_json_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_an_edge_the_build_loses_exits_1_with_its_message",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_plain_graph_is_never_hashed",
+            "test_build_store_index.TheSizeWarning.test_a_threshold_given_as_a_string_through_configure_is_a_number",
+            "test_build_store_index.TheSizeWarning.test_no_warning_at_the_default_for_a_small_archive",
+            "test_build_store_index.TheSizeWarning.test_the_warning_appears_over_the_threshold_and_the_exit_stays_0",
+            "test_build_store_index.TheStageRefusesCleanly.test_an_unwritable_target_exits_2",
+            "test_build_store_index.TheStageRefusesCleanly.test_missing_fts5_exits_1_naming_the_sqlite_version",
+            "test_build_store_index.TheStageRefusesCleanly.test_no_graph_exits_1_naming_both_paths_and_leaves_an_existing_index",
+            "test_build_store_index.TheStageWritesTheIndex.test_a_second_run_over_unchanged_inputs_is_byte_identical",
+            "test_build_store_index.TheStageWritesTheIndex.test_it_writes_both_files_and_reports_the_reconciliation_and_sizes",
             "test_check_citations.TheStage.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
             "test_graph_to_read.GraphToReadTest.test_the_committed_archive_is_read_when_the_plain_graph_is_absent",
             "test_graph_to_read.StatusReportsFromTheCommittedArchive.test_an_estate_sharing_no_pair_still_prints_nothing",
@@ -828,6 +840,17 @@ MUTATIONS = (
             "test_answers.Comparing.test_a_malformed_record_file_is_refused_cleanly",
             "test_answers.Comparing.test_a_repeated_question_is_compared_as_its_median",
             "test_answers.Comparing.test_an_unpaired_question_is_listed_on_its_own_side",
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_graph_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_ticket_layer_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_fresh_index_reports_its_archive_size_and_that_it_is_current",
+            "test_build_store_index.StatusReportsTheIndex.test_a_graph_named_outside_the_store_is_not_checked",
+            "test_build_store_index.StatusReportsTheIndex.test_a_plain_file_that_is_not_a_database_is_reported_unreadable",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_archive_ignores_a_plain_graph_that_appears_later",
+            "test_build_store_index.StatusReportsTheIndex.test_an_unreadable_graph_is_not_checked_and_does_not_raise",
+            "test_build_store_index.StatusReportsTheIndex.test_only_the_archive_present_is_reported_without_a_freshness_claim",
+            "test_build_store_index.StatusReportsTheIndex.test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes",
+            "test_build_store_index.TheStageWritesTheIndex.test_the_archive_graph_is_read_when_the_plain_one_is_absent",
+            "test_build_store_index.TheStageWritesTheIndex.test_the_archive_is_read_when_both_graphs_exist",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_flag_reports_the_ranking",
             "test_duplicate_repositories.StatusDuplicatesTest.test_the_graph_is_only_read_when_the_flag_is_given",
             "test_estate_phrase_label_segments.PhraseLabelEstateTest.test_a_phrase_between_name_separators_still_corroborates",
@@ -6970,6 +6993,434 @@ MUTATIONS = (
         (
             "test_git_env.AHookBindingDoesNotRedirectAStage.test_git_version_runs_against_the_clone",
             "test_git_env.EveryGitCallPassesTheStrippedEnvironment.test_no_git_call_in_the_library_inherits_the_callers_binding",
+        ),
+    ),
+    Mutation(
+        "store index: the nodes are written in the order they were staged",
+        "store_index.py",
+        '        " SELECT d.id, d.label, d.kind, f.k, d.url, d.community FROM ("\n'
+        '        "  SELECT *, ROW_NUMBER() OVER ("\n'
+        '        "   PARTITION BY id ORDER BY repo, file, kind, label, url, community) AS rn"\n'
+        '        "  FROM stg_nodes) d"\n'
+        '        " LEFT JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo IS r.k AND f.path = d.file"\n'
+        '        " WHERE d.rn = 1 ORDER BY d.id"\n',
+        '        " SELECT d.id, d.label, d.kind, f.k, d.url, d.community FROM stg_nodes d"\n'
+        '        " LEFT JOIN repos r ON r.name = d.repo"\n'
+        '        " JOIN files f ON f.repo IS r.k AND f.path = d.file"\n'
+        '        " WHERE d.rowid = (SELECT min(rowid) FROM stg_nodes WHERE id = d.id)"\n',
+        "a node's integer key, every edge keyed on it, and the copy of a repeated id that "
+        "survives would follow the order the graph listed its nodes in, so two builds of one "
+        "store differ and a committed archive churns on every refresh",
+        (
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file",
+        ),
+    ),
+    Mutation(
+        "store index: the full-text index is not optimised",
+        "store_index.py",
+        "    execute(\"INSERT INTO labels(labels) VALUES('optimize')\")\n",
+        "    pass\n",
+        "a bulk build leaves several full-text segments that every search must consult, and their layout follows insertion history rather than content",
+        (
+            "test_store_index.ABulkBuildIsFinished.test_the_full_text_index_is_merged_to_one_segment",
+        ),
+    ),
+    Mutation(
+        "store index: the file is not vacuumed last",
+        "store_index.py",
+        '        connection.execute("VACUUM")\n',
+        "        pass\n",
+        "pages freed by merging the full-text segments stay in the file holding stale bytes, so the index is larger than it needs to be and its bytes follow input order",
+        ("test_store_index.ABulkBuildIsFinished.test_the_file_has_no_free_pages",),
+    ),
+    Mutation(
+        "store index: a dangling edge is written",
+        "store_index.py",
+        '        "         (SELECT k FROM nodes WHERE id = l.target) AS t"\n'
+        '        "  FROM (SELECT DISTINCT source, relation, target FROM stg_links) l)"\n'
+        '        " WHERE s IS NOT NULL AND t IS NOT NULL ORDER BY s, r, t"\n',
+        '        "         ifnull((SELECT k FROM nodes WHERE id = l.target), -1) AS t"\n'
+        '        "  FROM (SELECT DISTINCT source, relation, target FROM stg_links) l)"\n'
+        '        " WHERE s IS NOT NULL ORDER BY s, r, t"\n',
+        "an edge to a node the graph does not contain would reach the edge table, where a reader following it arrives at nothing, and the report would no longer reconcile",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_graph_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_ticket_layer_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_fresh_index_reports_its_archive_size_and_that_it_is_current",
+            "test_build_store_index.StatusReportsTheIndex.test_a_graph_named_outside_the_store_is_not_checked",
+            "test_build_store_index.StatusReportsTheIndex.test_a_plain_file_that_is_not_a_database_is_reported_unreadable",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_archive_ignores_a_plain_graph_that_appears_later",
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_plain_graph_is_never_hashed",
+            "test_build_store_index.StatusReportsTheIndex.test_an_unreadable_graph_is_not_checked_and_does_not_raise",
+            "test_build_store_index.StatusReportsTheIndex.test_only_the_archive_present_is_reported_without_a_freshness_claim",
+            "test_build_store_index.StatusReportsTheIndex.test_the_file_the_index_names_is_the_one_compared",
+            "test_build_store_index.StatusReportsTheIndex.test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes",
+            "test_build_store_index.TheSizeWarning.test_a_threshold_given_as_a_string_through_configure_is_a_number",
+            "test_build_store_index.TheSizeWarning.test_no_warning_at_the_default_for_a_small_archive",
+            "test_build_store_index.TheSizeWarning.test_the_warning_appears_over_the_threshold_and_the_exit_stays_0",
+            "test_build_store_index.TheStageRefusesCleanly.test_no_graph_exits_1_naming_both_paths_and_leaves_an_existing_index",
+            "test_build_store_index.TheStageWritesTheIndex.test_a_builder_with_both_graphs_and_a_peer_with_only_the_archive_write_the_same_bytes",
+            "test_build_store_index.TheStageWritesTheIndex.test_a_second_run_over_unchanged_inputs_is_byte_identical",
+            "test_build_store_index.TheStageWritesTheIndex.test_it_writes_both_files_and_reports_the_reconciliation_and_sizes",
+            "test_build_store_index.TheStageWritesTheIndex.test_the_archive_graph_is_read_when_the_plain_one_is_absent",
+            "test_build_store_index.TheStageWritesTheIndex.test_the_archive_is_read_when_both_graphs_exist",
+            "test_store_index.ABuildIsReproducible.test_a_rebuild_over_the_same_inputs_is_byte_identical",
+            "test_store_index.ABuildIsReproducible.test_the_archive_is_the_plain_file_without_a_timestamp_or_name",
+            "test_store_index.ABuildIsReproducible.test_the_order_the_graph_lists_things_in_reaches_no_byte_of_either_file",
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
+            "test_store_index.NothingIsWrittenHalfDone.test_a_failed_rebuild_leaves_the_previous_index_unchanged",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_a_documented_query_without_an_expectation_fails",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_a_helper_the_page_names_and_this_test_does_not_know_fails",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_a_malformed_tag_fails_the_gate_loudly",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_a_tag_used_twice_is_refused",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_a_wrong_expectation_is_reported_as_a_mismatch",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_an_expectation_without_a_documented_query_fails",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_documented_helper_makes_free_text_a_safe_match_argument",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories",
+            "test_store_index.WhatItRefuses.test_a_missing_graph_raises_and_leaves_an_existing_index_alone",
+            "test_store_index.WhatTheIndexHolds.test_a_dangling_edge_is_counted_and_not_stored",
+            "test_store_index.WhatTheIndexHolds.test_a_label_search_finds_the_hand_listed_nodes",
+            "test_store_index.WhatTheIndexHolds.test_a_missing_field_is_null_and_a_present_one_is_kept",
+            "test_store_index.WhatTheIndexHolds.test_a_missing_ticket_layer_gives_an_empty_table_and_a_null_digest",
+            "test_store_index.WhatTheIndexHolds.test_a_node_with_no_repository_is_not_a_repository",
+            "test_store_index.WhatTheIndexHolds.test_a_repeated_link_is_counted_and_stored_once",
+            "test_store_index.WhatTheIndexHolds.test_a_repeated_node_id_keeps_the_copy_that_sorts_first",
+            "test_store_index.WhatTheIndexHolds.test_an_old_kind_is_stored_in_its_current_form",
+            "test_store_index.WhatTheIndexHolds.test_the_meta_rows_name_the_sources_and_the_schema",
+            "test_store_index.WhatTheIndexHolds.test_the_neighbours_of_a_node_match_in_both_directions",
+            "test_store_index.WhatTheIndexHolds.test_the_report_and_row_counts_are_the_fixtures",
+            "test_store_index.WhatTheIndexHolds.test_the_unlabeled_node_is_a_node_and_is_not_searchable",
+            "test_store_index.WhatTheIndexHolds.test_ticket_files_counts_only_the_files_that_carry_a_ticket",
+            "test_store_index.WhatTheIndexHolds.test_tickets_join_to_the_node_through_repo_and_path",
+        ),
+    ),
+    Mutation(
+        "store index: an unlabeled node is entered into the full-text index",
+        "store_index.py",
+        '" WHERE label IS NOT NULL ORDER BY k"',
+        '" ORDER BY k"',
+        "a structural node with no label would get an empty row in the full-text index, which is a row a search can never return and a reader of the index cannot explain",
+        (
+            "test_store_index.WhatTheIndexHolds.test_the_unlabeled_node_is_a_node_and_is_not_searchable",
+        ),
+    ),
+    Mutation(
+        "store index: the raw metadata kind is stored",
+        "store_index.py",
+        "            kinds.node_kind(node),\n",
+        '            (node.get("metadata") or {}).get("kind", ""),\n',
+        "a store built before the kind rename would index `gherkin_feature` where a reader filters on `feature`, so a lookup by kind misses every node an older build wrote",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.WhatTheIndexHolds.test_an_old_kind_is_stored_in_its_current_form",
+        ),
+    ),
+    Mutation(
+        "store index: the index is written in place",
+        "store_index.py",
+        '    building = out.with_name(out.name + ".building")\n'
+        '    packing = archive.with_name(archive.name + ".building")\n'
+        "    try:\n"
+        "        building.unlink(missing_ok=True)\n"
+        "        counts = _build_database(building, graph, layer, meta)\n"
+        "        _write_archive(building, packing)\n"
+        "        # Both finished before either is renamed, so a failure above leaves the\n"
+        "        # previous pair exactly as it was.\n"
+        "        os.replace(building, out)\n"
+        "        os.replace(packing, archive)\n"
+        "    finally:\n"
+        "        building.unlink(missing_ok=True)\n"
+        "        packing.unlink(missing_ok=True)\n",
+        "    out.unlink(missing_ok=True)\n"
+        "    counts = _build_database(out, graph, layer, meta)\n"
+        "    _write_archive(out, archive)\n",
+        "a graph that is cut short part way through, or a build that dies, would leave a partial "
+        "index at the real path, or delete the previous one, where a reader would trust it",
+        (
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_graph_archive_that_is_not_gzip_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_plain_graph_that_is_not_json_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_an_edge_the_build_loses_exits_1_with_its_message",
+            "test_build_store_index.TheStageRefusesCleanly.test_a_truncated_archive_exits_1_and_leaves_nothing_behind",
+            "test_store_index.NothingIsWrittenHalfDone.test_a_failed_rebuild_leaves_the_previous_index_unchanged",
+            "test_store_index.NothingIsWrittenHalfDone.test_a_truncated_graph_raises_and_creates_no_index",
+            "test_store_index.TheReportMustReconcile.test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate",
+        ),
+    ),
+    Mutation(
+        "store index: duplicate edges are the residual of the other counts",
+        "store_index.py",
+        "    duplicate_edges = live_links - distinct_links\n",
+        "    duplicate_edges = links_read - dangling - edges\n",
+        "an edge the insert loses for any other reason is reported as a duplicate, and the links reconciliation holds by construction instead of failing",
+        (
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_an_edge_the_build_loses_exits_1_with_its_message",
+            "test_store_index.TheReportMustReconcile.test_an_edge_the_insert_loses_fails_the_build_rather_than_counting_as_a_duplicate",
+        ),
+    ),
+    Mutation(
+        "store index: a missing graph is indexed as empty",
+        "store_index.py",
+        "    if not graph.is_file():\n",
+        "    if False:\n",
+        "the stream reads an absent graph as empty, so a good index would be replaced by a valid empty one with a NULL graph digest",
+        (
+            "test_store_index.WhatItRefuses.test_a_missing_graph_creates_nothing",
+            "test_store_index.WhatItRefuses.test_a_missing_graph_raises_and_leaves_an_existing_index_alone",
+        ),
+    ),
+    Mutation(
+        "store index: an index is built without full-text search",
+        "store_index.py",
+        "    if not fts5_available():\n",
+        "    if False:\n",
+        "a SQLite without FTS5 would fail part way through the schema, after the build had started, instead of refusing first with a message that names the cause",
+        (
+            "test_store_index.WhatItRefuses.test_a_sqlite_without_fts5_is_refused_before_anything_is_written",
+        ),
+    ),
+    Mutation(
+        "store index: edges are read only from the links key",
+        "store_index.py",
+        "for link in graph_files.iter_edges(graph):",
+        'for link in graph_stream.iter_array(graph, "links"):',
+        "a graph that keys its edges as `edges` would index with zero edges and a clean report",
+        (
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
+        ),
+    ),
+    Mutation(
+        "index stage: the plain graph is preferred over the archive",
+        "build_store_index.py",
+        "    graph = graph_files.graph_to_read(packed)\n",
+        "    graph = graph_files.graph_to_read(config.GRAPH_PATH)\n",
+        "a builder holding the gitignored graph.json records a file `status` cannot compare, and writes different bytes from a peer holding only the archive",
+        (
+            "test_build_store_index.TheStageWritesTheIndex.test_a_builder_with_both_graphs_and_a_peer_with_only_the_archive_write_the_same_bytes",
+            "test_build_store_index.TheStageWritesTheIndex.test_the_archive_is_read_when_both_graphs_exist",
+            "test_build_store_index.StatusReportsTheIndex.test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes",
+        ),
+    ),
+    Mutation(
+        "store index: ticket files are counted as ticket rows",
+        "store_index.py",
+        '            connection, "SELECT count(*) FROM (SELECT DISTINCT repo, path FROM stg_tickets)"\n',
+        '            connection, "SELECT count(*) FROM stg_tickets"\n',
+        "the report says that many files carry tickets while counting rows, or entries that carry none",
+        (
+            "test_store_index.WhatTheIndexHolds.test_ticket_files_counts_only_the_files_that_carry_a_ticket",
+        ),
+    ),
+    Mutation(
+        "index stage: an archive exactly at the limit is warned about",
+        "build_store_index.py",
+        "    return archive_bytes > warn_mb * 1_000_000\n",
+        "    return archive_bytes >= warn_mb * 1_000_000\n",
+        "a store whose archive is exactly at its configured limit is told it is over it",
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_exclusive_of_an_archive_exactly_at_it",
+        ),
+    ),
+    Mutation(
+        "status: the index is always current",
+        "status.py",
+        '    state["current"] = graph_digest == recorded and tickets_digest == meta.get(\n'
+        '        "file_tickets_sha256"\n'
+        "    )\n",
+        '    state["current"] = True\n',
+        "an index describing a graph that has since changed is reported current, so a reader opens answers about nodes that are gone",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_graph_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_ticket_layer_makes_it_stale",
+            "test_build_store_index.StatusReportsTheIndex.test_the_file_the_index_names_is_the_one_compared",
+            "test_build_store_index.StatusReportsTheIndex.test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes",
+        ),
+    ),
+    Mutation(
+        "status: the index is compared against a fixed graph file",
+        "status.py",
+        "    graph = (root / named).resolve()\n",
+        '    graph = (root / "graphify-out" / "graph.json.gz").resolve()\n',
+        "an index built from a gzip other than the default one is judged against the wrong file, so a fresh index reads stale or a stale one reads current",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_graph_named_outside_the_store_is_not_checked",
+            "test_build_store_index.StatusReportsTheIndex.test_the_file_the_index_names_is_the_one_compared",
+        ),
+    ),
+    Mutation(
+        "status: an index built from the plain graph is hashed",
+        "status.py",
+        '    if not named.endswith(".gz"):\n',
+        "    if False:\n",
+        "`status` reads a graph that can be gigabytes, which it must not (CLAUDE.md 6.6), and a plain-built index reads stale or current on a file nobody meant it to read",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_an_index_built_from_the_plain_graph_is_never_hashed",
+        ),
+    ),
+    Mutation(
+        "status: an unreadable graph raises",
+        "status.py",
+        '    except OSError:\n        state["note"] = "could not read the graph or ticket layer it was built from"\n',
+        '    except KeyError:\n        state["note"] = "could not read the graph or ticket layer it was built from"\n',
+        "a permission error while hashing makes `status` raise, and it never fails (CLAUDE.md 6.7)",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_an_unreadable_graph_is_not_checked_and_does_not_raise",
+        ),
+    ),
+    Mutation(
+        "status: the ticket layer is not compared",
+        "status.py",
+        '    state["current"] = graph_digest == recorded and tickets_digest == meta.get(\n        "file_tickets_sha256"\n    )\n',
+        '    state["current"] = graph_digest == recorded\n',
+        "a store that re-ran `intent` reads current over a tickets table built from the old layer",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_changed_ticket_layer_makes_it_stale",
+        ),
+    ),
+    Mutation(
+        "status: a graph outside the store is hashed",
+        "status.py",
+        "    if not graph.is_relative_to(root) or not graph.is_file():\n",
+        "    if not graph.is_file():\n",
+        "`meta.graph` can point `status` at any file on the machine",
+        (
+            "test_build_store_index.StatusReportsTheIndex.test_a_graph_named_outside_the_store_is_not_checked",
+        ),
+    ),
+    Mutation(
+        "index stage: corrupt inputs exit as an output error",
+        "build_store_index.py",
+        "    except _INPUT_ERRORS + (RuntimeError,) as error:\n",
+        "    except RuntimeError as error:\n",
+        "a corrupt graph or ticket layer exits 2, which tells a caller to look at the target path",
+        (
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_graph_archive_that_is_not_gzip_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_plain_graph_that_is_not_json_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_ticket_layer_that_is_not_gzip_exits_1",
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_a_ticket_layer_that_is_not_json_exits_1",
+            "test_build_store_index.TheStageRefusesCleanly.test_a_truncated_archive_exits_1_and_leaves_nothing_behind",
+        ),
+    ),
+    Mutation(
+        "index stage: a reconciliation failure escapes",
+        "build_store_index.py",
+        "    except _INPUT_ERRORS + (RuntimeError,) as error:\n",
+        "    except _INPUT_ERRORS as error:\n",
+        "the build refusing to write an index whose counts do not add up surfaces as a traceback",
+        (
+            "test_build_store_index.InputErrorsAreNotOutputErrors.test_an_edge_the_build_loses_exits_1_with_its_message",
+        ),
+    ),
+    Mutation(
+        "index stage: an unreadable input exits 2",
+        "build_store_index.py",
+        "        if isinstance(error, OSError) and error.filename in (str(graph), str(tickets)):\n",
+        "        if False:\n",
+        "a permission error on the graph is reported as an unwritable target",
+        ("test_build_store_index.InputErrorsAreNotOutputErrors.test_an_unreadable_graph_exits_1",),
+    ),
+    Mutation(
+        "index stage: the size warning goes to stdout",
+        "build_store_index.py",
+        '            "and publish the index some other way.",\n            file=sys.stderr,\n',
+        '            "and publish the index some other way.",\n',
+        "a script parsing the report on stdout reads the warning as part of it",
+        (
+            "test_build_store_index.TheSizeWarning.test_a_threshold_given_as_a_string_through_configure_is_a_number",
+            "test_build_store_index.TheSizeWarning.test_the_warning_appears_over_the_threshold_and_the_exit_stays_0",
+        ),
+    ),
+    Mutation(
+        "config: the index size threshold is not normalised",
+        "config.py",
+        '    "INDEX_WARN_MB": int,\n',
+        "",
+        "a threshold passed to `configure` as a string is compared with a number after a full build",
+        (
+            "test_build_store_index.TheSizeWarning.test_a_threshold_given_as_a_string_through_configure_is_a_number",
+        ),
+    ),
+    Mutation(
+        "config: the index size threshold ignores the environment",
+        "config.py",
+        '_env_int("KSB_INDEX_WARN_MB", 90)',
+        "90",
+        "an operator's `KSB_INDEX_WARN_MB` is read and dropped, so the warning fires at the wrong size",
+        ("test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",),
+    ),
+    Mutation(
+        "store index: a node with no repository is listed as a repository",
+        "store_index.py",
+        "        \" WHERE repo <> '' ORDER BY repo\"",
+        '        " ORDER BY repo"',
+        "a store of N repositories reports N+1, the extra one named with the empty string",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories",
+            "test_store_index.WhatTheIndexHolds.test_a_node_with_no_repository_is_not_a_repository",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented neighbours query reads the outgoing edges backwards",
+        "docs/how-it-works.md",
+        "JOIN edges e ON e.source = s.k",
+        "JOIN edges e ON e.target = s.k",
+        "a reader following the page gets the nodes that point at a node labelled as the ones it points at, and every row still looks like an edge",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented find query drops a node with no repository",
+        "docs/how-it-works.md",
+        "LEFT JOIN repos r ON r.k = f.repo\nWHERE labels MATCH",
+        "JOIN repos r ON r.k = f.repo\nWHERE labels MATCH",
+        "an inner join on repos loses every node whose files.repo is NULL, with no error and no count of what went missing",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_documented_helper_makes_free_text_a_safe_match_argument",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented files_for_ticket query no longer lists landed files first",
+        "docs/how-it-works.md",
+        "ORDER BY t.landed DESC, coalesce(r.name, ''), f.path",
+        "ORDER BY coalesce(r.name, ''), f.path",
+        "a proposed ticket reads as evidence ahead of one that landed",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented match helper stops marking each word as a prefix",
+        "docs/how-it-works.md",
+        "+ '\"*' for t in",
+        "+ '\"' for t in",
+        "a search for `gate` stops finding `gateway`, for whoever copies the helper: whole-word matching where the server matches prefixes",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_documented_helper_makes_free_text_a_safe_match_argument",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented ticket query filters on the repository name again",
+        "docs/how-it-works.md",
+        "WHERE f.repo IS CASE WHEN ?1 = '' THEN NULL\n                     ELSE coalesce((SELECT k FROM repos WHERE name = ?1), -1) END",
+        "WHERE coalesce(r.name, '') = ?1",
+        "the name filter reads right and returns the right rows, and scans every file to do it, which on a store of hundreds of thousands of files is the query a reader waits on",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented ticket query reads an unknown repository as no repository",
+        "docs/how-it-works.md",
+        "-1) END",
+        "NULL) END",
+        "a misspelt repository name answers with the tickets of files that belong to no repository, which looks like a result",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories",
         ),
     ),
     Mutation(
