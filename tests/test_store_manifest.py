@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -850,3 +851,88 @@ class SourcesAsOf(_Store):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _unaccounted(namespace, root: Path, layers, not_a_layer) -> list[str]:
+    """Config names of the paths under `root` that are neither a layer nor excused.
+
+    The matching rule: a config path is a layer's when its store-relative form
+    equals one of that layer's candidate paths. A `dir` layer is therefore matched
+    by its directory, and a file inside a directory layer is not matched by it -
+    such a file is a separate artefact and needs its own decision. A name is
+    taken whatever it ends in: any `Path` attribute counts, so `EXTERNAL_CONFIG`
+    is held as well as every `*_PATH` and `*_DIR`.
+    """
+    claimed = {rel for layer in layers for rel in layer.paths}
+    unaccounted = []
+    for name, value in sorted(vars(namespace).items()):
+        if not isinstance(value, Path) or value == root or root not in value.parents:
+            continue
+        if value.relative_to(root).as_posix() not in claimed and name not in not_a_layer:
+            unaccounted.append(name)
+    return unaccounted
+
+
+class EveryArtefactIsAccountedFor(unittest.TestCase):
+    # When #457 (`INDEX_PATH`) and #455 (the relationships directory, the
+    # relationship-kinds path and its config path) merge, their config names fail
+    # `test_every_config_path_is_a_layer_or_named_as_not_one` until each is
+    # accounted for. `LAYERS` already holds `index` and `relationships` by literal
+    # path, so the merger maps `INDEX_PATH` and the relationships directory to those
+    # layers by making config and the layer agree on one path, and lists the
+    # relationship kinds files here in `NOT_A_LAYER` or as a layer.
+
+    def test_every_config_path_is_a_layer_or_named_as_not_one(self):
+        """Breaks if a stage gains an artefact path in config that is neither a
+        manifest layer nor named in `NOT_A_LAYER`: a reader would never be told
+        the store holds it, and nobody would have decided that it should not."""
+        missing = _unaccounted(
+            config, config.ROOT, store_manifest.LAYERS, store_manifest.NOT_A_LAYER
+        )
+        self.assertEqual(missing, [], f"not a layer and not in NOT_A_LAYER: {missing}")
+
+    def test_the_excusal_list_holds_no_stale_or_contradictory_entry(self):
+        """Breaks if `NOT_A_LAYER` names a config path that no longer exists, or
+        one that is also a layer, or gives no reason: a list that only grows
+        stops saying what the library writes."""
+        for name, reason in store_manifest.NOT_A_LAYER.items():
+            with self.subTest(name=name):
+                value = getattr(config, name, None)
+                self.assertIsInstance(value, Path, f"{name} is not a config path")
+                self.assertTrue(reason.strip(), f"{name} has no reason")
+                self.assertEqual(
+                    _unaccounted(
+                        types.SimpleNamespace(**{name: value}),
+                        config.ROOT,
+                        store_manifest.LAYERS,
+                        {},
+                    ),
+                    [name],
+                    f"{name} is both a layer's path and in NOT_A_LAYER",
+                )
+
+    def test_the_check_tells_a_layer_from_an_excused_path_from_a_stray_one(self):
+        """The comparison above is covered by the mutation entry 'store manifest:
+        a layer dropped from LAYERS' (tests/mutation_gate.py), and this proves the
+        comparison discriminates in the same run: on a synthetic config it must
+        name the stray path and only it. A comparison that returned nothing for
+        every input would pass the real check vacuously."""
+        root = Path("/example/store")
+        layers = (
+            store_manifest.Layer("a_file", ("knowledge/a.json.gz", "knowledge/a.json")),
+            store_manifest.Layer("a_dir", ("knowledge/dir",), "dir"),
+        )
+        synthetic = types.SimpleNamespace(
+            ROOT=root,
+            A_PATH=root / "knowledge" / "a.json",  # the layer's second candidate
+            A_DIR=root / "knowledge" / "dir",  # a directory layer
+            INSIDE_PATH=root / "knowledge" / "dir" / "x.json",  # inside one: still needs a decision
+            EXCUSED_PATH=root / "knowledge" / "e.json",
+            STRAY_PATH=root / "knowledge" / "stray.json",
+            OUTSIDE_PATH=Path("/elsewhere/z.json"),  # not under the root: out of scope
+            NOT_A_PATH="knowledge/stray2.json",  # not a Path at all
+        )
+        self.assertEqual(
+            _unaccounted(synthetic, root, layers, {"EXCUSED_PATH": "an input"}),
+            ["INSIDE_PATH", "STRAY_PATH"],
+        )

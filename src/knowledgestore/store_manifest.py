@@ -101,6 +101,55 @@ LAYERS: tuple[Layer, ...] = (
 )
 
 
+# Every path `config` names that is not a layer, and why. Held against `config` by
+# `tests/test_store_manifest.py`: a path the library writes that is neither a layer
+# nor here fails the suite, so adding an artefact forces the decision whether a
+# reader should be told about it. Keyed by the config name.
+NOT_A_LAYER: dict[str, str] = {
+    # inputs a person maintains
+    "BOUNDARY_PATH": "a hand-maintained input: the estate's declared boundary",
+    "CONTENT_CUTS_PATH": "a hand-maintained input: candidate cuts for size-cuts to measure",
+    "CONTENT_SET_ALLOWED_PATH": "a hand-maintained input: files ruled safe despite their format",
+    "EXTERNAL_CONFIG": "a hand-maintained input: fetch-only repositories",
+    "FILTERS_PATH": "a hand-maintained input: repository filters",
+    "QUESTIONS_PATH": "a hand-maintained input: the questions a store is asked",
+    "REPOSITORIES_CONFIG": "a hand-maintained input: the repositories to build from",
+    "STORE_EXTRA_LAYERS_PATH": "an input the manifest reads to list a store's own layers",
+    "TOPICS_CONFIG_PATH": "a hand-maintained input: the topics to write about",
+    "REQUIREMENTS_PATH": "a dependency pin, not store content",
+    "LOCK_PATH": "a dependency pin, not store content",
+    # working directories, regenerable and not committed
+    "REPOSITORIES_DIR": "working clones, regenerable and not committed",
+    "EXTERNAL_DIR": "working clones of fetch-only repositories, not committed",
+    # intermediates a stage hands to the next
+    "CHUNK_PLAN_PATH": "a build input: the map from chunk number to file list",
+    "DETECT_PATH": "an intermediate of the graph extraction pass",
+    "UNCACHED_PATH": "an intermediate of the graph extraction pass",
+    "CLUSTERING_RECORD_PATH": "a record of the last clustering's inputs, read back by the next",
+    "EXPLORER_INPUTS_PATH": "a record of the explorer's inputs, read back by the next build",
+    "SUMMARIES_INPUT_PATH": "the input of the summaries stage, not its answers",
+    "TOPICS_INPUT_PATH": "the input of the topics stage, not its answers",
+    "DEEPDIVES_INPUT_DIR": "holds the deep-dive inputs beside dives.json, which is the layer",
+    "SUMMARIES_SNAPSHOT_PATH": "membership before a re-cluster, kept so a remap can run",
+    "SUMMARIES_FILE_SNAPSHOT_PATH": "file-keyed membership before a re-cluster, for the remap",
+    "CONTENT_FILES_PATH": "a path list for grep, derived from the content set",
+    "CONTENT_SET_PATH": "which corpus files were judged content, a build diagnostic",
+    # reports and diagnostics
+    "GRAPH_REPORT_PATH": "a human-readable report on the graph, not a layer a reader opens",
+    "REMAP_REPORT_PATH": "a report on the last remap",
+    "SUMMARIES_WITHDRAWN_PATH": "prose a remap would not re-key, awaiting revision",
+    "TRACKER_UNDECIDED_PATH": "ticket prefixes nobody has ruled on, a report",
+    # documents the topic and deep-dive layers are built from
+    "TOPICS_DOCS_DIR": "the written topic pages that briefs.json is built from",
+    "DEEPDIVES_DOCS_DIR": "the written deep-dive pages that dives.json is built from",
+    # intent-stage sidecar
+    "TICKET_TITLES_PATH": "ticket titles imported for the explorer, not read by manifest readers",
+    # the manifest's own sources and output
+    "TELEMETRY_PATH": "what the stages measured; the manifest reads it for flags",
+    "STORE_MANIFEST_PATH": "the manifest itself",
+}
+
+
 def run_git(arguments: list[str]) -> str:
     """Run git and return stdout. The IO boundary; tests may replace it.
 

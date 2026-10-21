@@ -7198,6 +7198,8 @@ MUTATIONS = (
         '    Layer("topics", (_rel(config.TOPICS_INPUT_PATH),)),',
         "an input and an output of the same stage sit side by side in config; a layer pointed at the input reports written answers present before any were written",
         (
+            "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
+            "test_store_manifest.EveryArtefactIsAccountedFor.test_the_excusal_list_holds_no_stale_or_contradictory_entry",
             "test_store_manifest.WhichLayersArePresent.test_a_subset_of_layers_reports_exactly_that_subset",
             "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
         ),
@@ -7225,6 +7227,19 @@ MUTATIONS = (
         "the plain index is over GitHub's 100 MB limit on a large estate, so stores commit only the `.gz`; a manifest reading only the plain file reports the index absent from every clone",
         (
             "test_store_manifest.CompressedAndPlainVariants.test_only_the_compressed_index_counts_and_is_listed_first",
+        ),
+    ),
+    Mutation(
+        "store manifest: a layer dropped from LAYERS",
+        "store_manifest.py",
+        '    Layer("explorer", (_rel(config.EXPLORER_PATH),)),\n',
+        "",
+        "an artefact the library writes would vanish from the manifest with every other test still reading a table that no longer has it; the test holding config against LAYERS and NOT_A_LAYER is what names the path",
+        (
+            "test_store_manifest.AnEmptyStore.test_every_layer_is_absent_with_no_digest",
+            "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
+            "test_store_manifest.WhichLayersArePresent.test_a_subset_of_layers_reports_exactly_that_subset",
+            "test_store_manifest.WhichLayersArePresent.test_every_layer_reads_its_own_path",
         ),
     ),
     Mutation(
