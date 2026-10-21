@@ -2481,6 +2481,7 @@ MUTATIONS = (
         "is the same either way",
         (
             "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
@@ -2518,6 +2519,7 @@ MUTATIONS = (
         "this gate exists for",
         (
             "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
@@ -5415,6 +5417,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
         ),
     ),
@@ -5434,7 +5437,9 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
         ),
     ),
     Mutation(
@@ -5493,6 +5498,7 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
         ),
     ),
     Mutation(
@@ -5516,7 +5522,9 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
         ),
     ),
     Mutation(
@@ -5671,6 +5679,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
@@ -5682,6 +5691,7 @@ MUTATIONS = (
         (
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
