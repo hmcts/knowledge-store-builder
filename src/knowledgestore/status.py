@@ -1107,6 +1107,9 @@ def _report_manifest() -> None:
     it is merge-resolved by hand and may come from a later format.
     """
     path = config.STORE_MANIFEST_PATH
+    if path.is_dir():
+        print(f"Store manifest: unreadable ({path}) - it is a directory, not a file")
+        return
     if not path.is_file():
         print("Store manifest: none - run `knowledgestore manifest` after the last stage")
         return

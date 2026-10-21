@@ -6964,6 +6964,36 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "store manifest: an extra layer's path is recorded as declared",
+        "store_manifest.py",
+        '            "path": _listed(rel, kind),\n',
+        '            "path": entry["path"],\n',
+        "`./answers` and `answers/../answers` would stay three spellings of one layer, and a directory would carry no trailing slash",
+        (
+            "test_store_manifest.ExtraLayers.test_equivalent_spellings_of_a_path_are_recorded_one_way",
+        ),
+    ),
+    Mutation(
+        "store manifest: an OSError while hashing escapes the stage",
+        "build_store_manifest.py",
+        "    except OSError as failure:\n        # A layer file that cannot be read",
+        "    except ZeroDivisionError as failure:\n        # A layer file that cannot be read",
+        "an unreadable layer file would end the stage in a traceback rather than the documented exit 2",
+        (
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
+        ),
+    ),
+    Mutation(
+        "store manifest: status reports a directory at the manifest path as none",
+        "status.py",
+        '    if path.is_dir():\n        print(f"Store manifest: unreadable',
+        '    if False:\n        print(f"Store manifest: unreadable',
+        "the advice to run `manifest` would be followed by a write that fails",
+        (
+            "test_build_store_manifest.StatusReadsTheManifest.test_a_manifest_path_that_is_a_directory_is_unreadable_not_none",
+        ),
+    ),
+    Mutation(
         "store manifest: an absolute extra-layer path inside the store is accepted",
         "store_manifest.py",
         "        if Path(rel).is_absolute() or not _within(root, rel):\n",
@@ -7014,6 +7044,7 @@ MUTATIONS = (
         "the override exists for the clone git cannot name; if the clone checks still run, a nested store has no way to be named and a fork's origin wins over the configured id",
         (
             "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.Refusals.test_an_unwritable_knowledge_directory_exits_2",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
             "test_build_store_manifest.WritingTheManifest.test_a_failed_rename_leaves_no_temporary_file",
@@ -7068,6 +7099,7 @@ MUTATIONS = (
         '    if kind != "dir":\n        return _text_digest([str(path.stat().st_mtime)])\n',
         "a clone and an identical rebuild move every mtime, so the committed manifest would change on every build",
         (
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.WritingTheManifest.test_a_rerun_writes_a_byte_identical_file",
             "test_store_manifest.Determinism.test_a_file_layer_digest_is_the_sha256_of_its_bytes",
             "test_store_manifest.Digest.test_moving_every_modification_time_leaves_the_digest_unchanged",
@@ -7084,6 +7116,7 @@ MUTATIONS = (
         '    if kind != "dir":\n        return _text_digest([str(path.stat().st_size)])\n',
         "an edit that keeps a file's length - a changed id, a corrected digit - would leave the digest where it was",
         (
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_store_manifest.Determinism.test_a_file_layer_digest_is_the_sha256_of_its_bytes",
             "test_store_manifest.Digest.test_an_extra_layer_changing_changes_the_digest",
             "test_store_manifest.Digest.test_one_changed_byte_changes_the_digest",
@@ -7264,6 +7297,7 @@ MUTATIONS = (
         "a clone whose remote is a fork or a mirror would be named after it, and a client holding several stores could not tell them apart",
         (
             "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.Refusals.test_an_unwritable_knowledge_directory_exits_2",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
             "test_build_store_manifest.WritingTheManifest.test_a_failed_rename_leaves_no_temporary_file",
@@ -7560,6 +7594,7 @@ MUTATIONS = (
             "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
             "test_build_store_manifest.Refusals.test_a_missing_root_exits_2_and_creates_nothing",
             "test_build_store_manifest.Refusals.test_an_undeterminable_id_exits_1_naming_both_sources",
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.Refusals.test_an_unwritable_knowledge_directory_exits_2",
             "test_build_store_manifest.StatusReadsTheManifest.test_a_local_only_layer_is_listed_as_local_only",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
@@ -7709,6 +7744,7 @@ MUTATIONS = (
         "",
         "a store outside any repository has no rules to judge by and is described as it is on disk; refusing it would stop every unversioned build",
         (
+            "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.StatusReadsTheManifest.test_it_prints_the_format_digest_sources_date_and_absent_layers",
             "test_build_store_manifest.WritingTheManifest.test_a_failed_write_leaves_the_previous_manifest_intact",
             "test_build_store_manifest.WritingTheManifest.test_a_rerun_writes_a_byte_identical_file",
@@ -7728,6 +7764,7 @@ MUTATIONS = (
             "test_store_manifest.Digest.test_the_store_digest_is_derived_from_the_layer_lines",
             "test_store_manifest.ExtraLayers.test_an_empty_declared_directory_is_not_present",
             "test_store_manifest.ExtraLayers.test_declared_layers_are_listed_with_their_presence",
+            "test_store_manifest.ExtraLayers.test_equivalent_spellings_of_a_path_are_recorded_one_way",
             "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
             "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
             "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",

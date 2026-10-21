@@ -375,11 +375,10 @@ last by `knowledgestore manifest` and committed with the store.
   not count, and a directory counts when it holds at least one such file. A layer
   that exists only on the builder's machine - `git-history/`, or a plain
   `graph.json` with no committed `.gz` - is `"present": false` with
-  `"local_only": true`, no digest, and contributes nothing to the store digest, so
+  `"local_only": true`, no digest, and counts as absent in the store digest, so
   a builder and every clone compute the same one. A clone compares the manifest's
   `digest`, not the file's bytes or its own `local_only` flags: those describe the
-  builder's tree. An empty directory has built
-  nothing.
+  builder's tree. An empty directory has built nothing.
 - **A store's own layers** are declared in `config/store-extra-layers.json`, each
   with a path below the store root, a description and optionally
   `"kind": "answers"` for written answers a reader can serve alongside the
@@ -393,7 +392,8 @@ last by `knowledgestore manifest` and committed with the store.
   sources are; a store with no manifest yet has neither.
 - **The format version** is `format.major` and `format.minor`. The major number
   changes when a reader written for the old version would misread the store, the
-  minor when a layer or field is added. A reader written for one major number should not read another.
+  minor when a layer or field is added. A reader written for one major number
+  should not read another.
 
 The store's id is `KSB_STORE_ID`, else the repository name of the clone's
 `origin` remote, never the directory name: readers identify a store by it.

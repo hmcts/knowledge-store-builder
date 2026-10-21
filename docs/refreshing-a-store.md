@@ -283,15 +283,17 @@ had members and now has none needs no judgement about the estate.
 of these itself, so a fresh figure beside a recorded one would claim a
 comparison it never made.
 
-Two more measurements are recorded for the store manifest rather than for
-comparison: `source_urls.linked`, the number of graph nodes `source-urls` gave a
+Two more measurements are recorded, compared like the others, and read by the
+store manifest: `source_urls.linked`, the number of graph nodes `source-urls` gave a
 `url`, and `deployments.pairs`, the number of service/environment pairs
 `deployments` added (recorded as 0 when no deployment repository is named). The
 manifest's flags for source links, deployments and ticket reach are read from the
 record, so each is the **last recorded measurement**. A re-extract changes the
 graph without changing the record, so a flag can lag until `source-urls`,
 `deployments` or `intent` run again; a flag nothing has recorded is `null`,
-unknown, never `false`. Re-run those stages, then `manifest`.
+unknown, never `false`. Re-run those stages, then `manifest`. Because
+`deployments.pairs` is compared too, unsetting `KSB_DEPLOY_REPOS` after a
+configured run prints the "fell to zero" warning; that is expected, not a break.
 
 Commit the refreshed artefacts described in
 [Publish the store](creating-a-store.md#publish-the-store). Report which stages

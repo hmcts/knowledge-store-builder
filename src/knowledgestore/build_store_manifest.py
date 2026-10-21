@@ -83,6 +83,10 @@ def main() -> int:
     except store_manifest.UsageError as refusal:
         print(f"Store manifest not written: {refusal}", file=sys.stderr)
         return 1
+    except OSError as failure:
+        # A layer file that cannot be read, or vanished mid-run: nothing is written.
+        print(f"Cannot read the store to hash it: {failure}", file=sys.stderr)
+        return 2
     try:
         write_atomically(path, render(manifest))
     except OSError as failure:

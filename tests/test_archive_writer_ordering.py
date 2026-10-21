@@ -77,9 +77,9 @@ WRITE_SINKS = frozenset(
 )
 
 # Modules that name the archive without writing it. `status` compares its commit
-# date with the graph report's; `store_manifest` tests that it exists and reads
-# its modification time. Listed so a module touching the archive through a sink
-# this file does not know about still has to be classified by hand rather than
+# date with the graph report's; `store_manifest` tests that it exists and hashes
+# it. Listed so a module touching the archive through a sink this file does not
+# know about still has to be classified by hand rather than
 # passing as neither a reader nor a writer.
 ARCHIVE_READERS = frozenset({"status", "store_manifest"})
 

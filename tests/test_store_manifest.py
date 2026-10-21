@@ -458,6 +458,30 @@ class ExtraLayers(_Store):
         self.declare({"back": {"path": "knowledge/../docs/x.md", "description": "x"}})
         self.assertFalse(store_manifest.extra_layers(self.root)["back"]["present"])
 
+    def test_equivalent_spellings_of_a_path_are_recorded_one_way(self):
+        """Breaks if a path is written as declared: `./answers` and
+        `answers/../answers` would name one layer in three spellings, and a
+        directory would lack the trailing slash library layers carry."""
+        _touch(self.root, "answers/a.md", "# A")
+        self.declare(
+            {
+                "dotted": {"path": "./answers", "description": "x"},
+                "climbed": {"path": "answers/../answers", "description": "x"},
+                "plain": {"path": "answers/", "description": "x"},
+                "file": {"path": "./knowledge/./r.json", "description": "x"},
+            }
+        )
+        found = store_manifest.extra_layers(self.root)
+        self.assertEqual(
+            {name: found[name]["path"] for name in found},
+            {
+                "dotted": "answers/",
+                "climbed": "answers/",
+                "plain": "answers/",
+                "file": "knowledge/r.json",
+            },
+        )
+
     def test_a_malformed_declaration_is_refused(self):
         """Breaks if a declaration without a path, with an unknown kind, or that is
         not JSON is skipped silently - the store would lose a layer unnoticed."""

@@ -851,9 +851,9 @@ def main() -> int:
     )
 
     _report(tally, graph)
-    # The store manifest's `deployments` layer reads this. Recorded only when a
-    # deployment repository is named: an estate that names none returns above with
-    # no key, which the manifest reports as unknown rather than absent.
+    # The store manifest's `deployments` layer reads this. An estate that names no
+    # deployment repository records 0 on the early return above, so the manifest
+    # reports it as absent rather than unknown.
     telemetry.record({"deployments.pairs": tally.pairs})
     return 0
 

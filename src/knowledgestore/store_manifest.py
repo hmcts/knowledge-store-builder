@@ -35,6 +35,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import os
+import posixpath
 import re
 import subprocess
 from dataclasses import dataclass
@@ -429,12 +430,15 @@ def extra_layers(root: Path, run=run_git) -> dict:
                 f"extra layer {name!r} must name a path below the store root, relative "
                 f"to it: {rel!r} does not."
             )
+        # Written the way library layers are: normalised, with a directory marked by
+        # a trailing slash, so `./answers` and `answers/../answers` name one layer.
+        rel = posixpath.normpath(rel)
         target = root / rel
         # The library's own rule: a file, or a directory holding something.
         kind = "dir" if target.is_dir() else "file"
         exists, present, entries = _probe(root, rel, kind, run)
         described = {
-            "path": rel,
+            "path": _listed(rel, kind),
             "description": description,
             "present": present,
             "digest": _digest(target, kind, root, entries) if present else None,

@@ -799,7 +799,8 @@ knowledgestore manifest            # run last: knowledge/store-manifest.json
 ```
 
 `manifest` records what the store holds, measured from the files the other stages
-wrote, so run it after every stage that writes a layer or it describes an older
+wrote, so it runs last, and again after any later stage that writes a layer
+(summaries, topics, deep dives, the semantic index) or it describes an older
 store. It refuses and writes nothing when it cannot name the store: set
 `KSB_STORE_ID`, or give the clone an `origin` remote. Its `digest` is how a reader
 tells a store that changed from one that did not.
@@ -1188,6 +1189,7 @@ a random 20–30 against their digests claim by claim. See
 
 ```bash
 knowledgestore summaries verify --sample 200   # grounding, after merging
+knowledgestore manifest                        # the summaries are a layer: re-run it
 ```
 
 Compares the identifiers each summary cites against those its digest contains,
@@ -1428,6 +1430,7 @@ Write `docs/topics/<slug>.md` from each dossier, then:
 ```bash
 knowledgestore topics merge     # validates and renders to briefs.json
 knowledgestore explorer         # embed into the page
+knowledgestore manifest         # the briefs are a layer: re-run it
 ```
 
 Brief structure that works:
@@ -1491,6 +1494,7 @@ Then:
 ```bash
 knowledgestore deepdive merge
 knowledgestore explorer
+knowledgestore manifest     # the deep dives are a layer: re-run it
 ```
 
 ## Checking a store's health
@@ -1541,6 +1545,7 @@ like `--central`.
 ```bash
 pip install 'hmcts-knowledge-store-builder[semantic]'
 knowledgestore semantic     # -> knowledge/semantic/ (committed)
+knowledgestore manifest     # the index is a layer: re-run it
 ```
 
 A model embeds the graph's own vocabulary once, locally; only the

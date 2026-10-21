@@ -175,6 +175,23 @@ class Refusals(_Run):
         self.assertEqual(code, 2)
         self.assertIn("store-manifest.json", err)
 
+    @unittest.skipIf(os.geteuid() == 0, "root reads anything")
+    def test_an_unreadable_layer_file_exits_2_with_a_message(self):
+        """Breaks if an OSError while hashing escapes as a traceback."""
+        _touch(self.root, "knowledge/registry.json", "{}")
+        _touch(
+            self.root,
+            "config/store-extra-layers.json",
+            json.dumps({"reg": {"path": "knowledge/registry.json", "description": "x"}}),
+        )
+        locked = self.root / "knowledge" / "registry.json"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o644)
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 2)
+        self.assertIn("registry.json", err)
+        self.assertFalse(self.path.exists())
+
 
 class StatusReadsTheManifest(_Run):
     def status_output(self) -> str:
@@ -239,6 +256,14 @@ class StatusReadsTheManifest(_Run):
         _touch(self.root, "knowledge/store-manifest.json", '["not", "a", "manifest"]')
         line = self.manifest_line()
         self.assertIn("unreadable", line)
+
+    def test_a_manifest_path_that_is_a_directory_is_unreadable_not_none(self):
+        """Breaks if a directory at the manifest path reads as "none": the advice to
+        run `manifest` would then fail to write."""
+        (self.root / "knowledge" / "store-manifest.json").mkdir(parents=True)
+        line = self.manifest_line()
+        self.assertIn("unreadable", line)
+        self.assertNotIn("none", line)
 
 
 if __name__ == "__main__":
