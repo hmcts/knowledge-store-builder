@@ -15,9 +15,11 @@ acts on.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -112,10 +114,10 @@ def commit(repo: Path, message: str, *names: str) -> None:
     git(repo, *AUTHOR, "commit", "-q", "-m", message)
 
 
-def make_store(root: Path, *names: str) -> Path:
+def make_store(root: Path, *names: str, branch: str = "main") -> Path:
     origin = root / "origin"
     origin.mkdir()
-    git(origin, "init", "-q", "-b", "main")
+    git(origin, "init", "-q", "-b", branch)
     git(origin, "config", "uploadpack.allowFilter", "true")
     commit(origin, "one", *names)
     return origin
@@ -129,19 +131,22 @@ def sparse_clone(origin: Path, target: Path) -> Path:
     return target
 
 
-def run_block(name: str, store: Path) -> str:
-    """Run a named block as written under `sh`, and return its first stdout line."""
+def run_block(name: str, store: Path, env: dict[str, str] | None = None) -> str:
+    """Run a named block as written under `sh`, and return its first stdout line.
+    The timeout makes a block that hangs on a prompt fail its test, not stall the suite."""
     block = named_block(name).replace("<store-directory>", str(store))
-    result = subprocess.run(["sh", "-c", block], capture_output=True, text=True)
+    result = subprocess.run(
+        ["sh", "-c", block], capture_output=True, text=True, env=env, timeout=30
+    )
     lines = result.stdout.splitlines()
     return lines[0] if lines else ""
 
 
-def squash(origin: Path) -> None:
-    """Rewrite the store's history to one commit, as a squash of main does."""
+def squash(origin: Path, branch: str = "main") -> None:
+    """Rewrite the store's history to one commit, as a squash of its branch does."""
     git(origin, "checkout", "-q", "--orphan", "squashed")
     git(origin, *AUTHOR, "commit", "-q", "-m", "squashed")
-    git(origin, "branch", "-q", "-M", "squashed", "main")
+    git(origin, "branch", "-q", "-M", "squashed", branch)
 
 
 class FreshnessBlockTest(unittest.TestCase):
@@ -244,8 +249,75 @@ class ResetCheckBlockTest(unittest.TestCase):
         squash(self.origin)
         self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: DIVERGED")
         self.assertEqual(run_block("reset-check", self.clone), "RESET-CHECK: safe")
-        git(self.clone, "reset", "-q", "--hard", "origin/main")
+        run_block("reset", self.clone)
         self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: current")
+
+
+class DefaultBranchTest(unittest.TestCase):
+    """A store whose default branch is not `main`. Every block hard-coded `main`
+    once, so such a store reported UNKNOWN every session and was never called stale."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.origin = make_store(self.root, *WANTED, UNWANTED, branch="master")
+        self.clone = sparse_clone(self.origin, self.root / "clone")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def forget_origin_head(self):
+        git(self.clone, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+
+    def test_a_master_store_is_checked_and_updated_on_master(self):
+        """Breaks if the freshness or update block names `main` instead of the
+        branch the clone records in origin/HEAD."""
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: current")
+        commit(self.origin, "two", "graphify-out/graph.json.gz")
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: BEHIND 1")
+        run_block("update", self.clone)
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: current")
+
+    def test_a_clone_without_origin_head_asks_the_remote(self):
+        """Breaks if a clone that lacks origin/HEAD falls straight back to `main`
+        instead of asking the remote which branch is its default."""
+        self.forget_origin_head()
+        commit(self.origin, "two", "graphify-out/graph.json.gz")
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: BEHIND 1")
+        run_block("update", self.clone)
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: current")
+
+    def test_the_reset_check_and_reset_follow_a_rewritten_master(self):
+        """Breaks if the reset check reads `main`'s fetch log, which never existed,
+        or the reset targets a branch the store does not have."""
+        commit(self.clone, "mine", "knowledge/note.md")
+        squash(self.origin, "master")
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: DIVERGED")
+        self.assertEqual(
+            run_block("reset-check", self.clone),
+            "RESET-CHECK: refuse local commits not on any remote branch",
+        )
+        git(self.clone, "reset", "-q", "--hard", "HEAD~1")
+        self.assertEqual(run_block("reset-check", self.clone), "RESET-CHECK: safe")
+        run_block("reset", self.clone)
+        self.assertEqual(run_block("freshness", self.clone), "FRESHNESS: current")
+
+    def test_an_unreachable_remote_without_origin_head_is_unknown_not_a_hang(self):
+        """Breaks if asking the remote for its default branch is not guarded the
+        way the fetch is: an ssh that waits for a key or passphrase then hangs the
+        session at branch resolution instead of reporting UNKNOWN. The stand-in ssh
+        hangs, and only an unguarded call reaches it."""
+        self.forget_origin_head()
+        git(self.clone, "remote", "set-url", "origin", "ssh://git@127.0.0.1:1/store.git")
+        hang = self.root / "hanging-ssh"
+        hang.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+        hang.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if k != "GIT_SSH_COMMAND"}
+        env["GIT_SSH"] = str(hang)
+        started = time.monotonic()
+        line = run_block("freshness", self.clone, env=env)
+        self.assertLess(time.monotonic() - started, 25)
+        self.assertTrue(line.startswith("FRESHNESS: UNKNOWN "), line)
 
 
 class RepairBlockTest(unittest.TestCase):

@@ -125,25 +125,35 @@ found and before the first answer:
 ```bash
 # skill-block: freshness
 STORE=<store-directory>
+# The store's default branch: origin/HEAD, else ask the remote, else main. The ask is
+# guarded like the fetch, so a missing key or passphrase cannot hang it.
+BRANCH=$(git -C "$STORE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+BRANCH=${BRANCH#origin/}
+[ -n "$BRANCH" ] || BRANCH=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    git -C "$STORE" ls-remote --symref origin HEAD 2>/dev/null |
+    awk '$1 == "ref:" { sub("^refs/heads/", "", $2); print $2 }')
+BRANCH=${BRANCH:-main}
 # No --depth here: on a maintainer's full clone it would make the repository shallow.
 # BatchMode and no terminal prompt, so a missing key or passphrase fails instead of hanging.
 if ! err=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
-    git -C "$STORE" fetch --quiet origin main 2>&1); then
+    git -C "$STORE" fetch --quiet origin "$BRANCH" 2>&1); then
   echo "FRESHNESS: UNKNOWN $(printf '%s\n' "$err" | head -n 1)"
-elif git -C "$STORE" merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+elif git -C "$STORE" merge-base --is-ancestor "origin/$BRANCH" HEAD 2>/dev/null; then
   echo "FRESHNESS: current"
-elif git -C "$STORE" merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-  echo "FRESHNESS: BEHIND $(git -C "$STORE" rev-list --count HEAD..origin/main)"
+elif git -C "$STORE" merge-base --is-ancestor HEAD "origin/$BRANCH" 2>/dev/null; then
+  echo "FRESHNESS: BEHIND $(git -C "$STORE" rev-list --count "HEAD..origin/$BRANCH")"
 else
   echo "FRESHNESS: DIVERGED"
 fi
 ```
 
-It prints one line. Act on it:
+The default branch is not always `main`, so the blocks here read it from
+`origin/HEAD`, which a clone records; a clone that lacks it asks the remote, and
+only then assumes `main`. It prints one line. Act on it:
 
 | Line | What to do |
 |---|---|
-| `FRESHNESS: current` | Nothing, and say nothing. A clone ahead of `origin/main`, such as a maintainer's, reports this too. |
+| `FRESHNESS: current` | Nothing, and say nothing. A clone ahead of its remote, such as a maintainer's, reports this too. |
 | `FRESHNESS: BEHIND <n>` | Say the store is `n` commits behind and offer the update below. Answering without updating is fine, but say the answer comes from a stale store. |
 | `FRESHNESS: DIVERGED` | The store's history was rewritten, for example squashed. Run the reset check below, and offer the reset only when it prints `safe`. |
 | `FRESHNESS: UNKNOWN <reason>` | Say freshness could not be checked, give the reason, and answer from disk. |
@@ -154,23 +164,39 @@ anything:
 ```bash
 # skill-block: update
 STORE=<store-directory>
-git -C "$STORE" merge --ff-only --quiet origin/main
+# The store's default branch: origin/HEAD, else ask the remote, else main. The ask is
+# guarded like the fetch, so a missing key or passphrase cannot hang it.
+BRANCH=$(git -C "$STORE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+BRANCH=${BRANCH#origin/}
+[ -n "$BRANCH" ] || BRANCH=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    git -C "$STORE" ls-remote --symref origin HEAD 2>/dev/null |
+    awk '$1 == "ref:" { sub("^refs/heads/", "", $2); print $2 }')
+BRANCH=${BRANCH:-main}
+git -C "$STORE" merge --ff-only --quiet "origin/$BRANCH"
 ```
 
 Then run the prepare block below, which decompresses the newer graph.
 
-**Check before offering a reset.** `git reset --hard origin/main` discards
+**Check before offering a reset.** A hard reset to the remote discards
 uncommitted changes and local commits, so never offer it on `DIVERGED` alone.
 This check reads the clone and changes nothing:
 
 ```bash
 # skill-block: reset-check
 STORE=<store-directory>
+# The store's default branch: origin/HEAD, else ask the remote, else main. The ask is
+# guarded like the fetch, so a missing key or passphrase cannot hang it.
+BRANCH=$(git -C "$STORE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+BRANCH=${BRANCH#origin/}
+[ -n "$BRANCH" ] || BRANCH=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    git -C "$STORE" ls-remote --symref origin HEAD 2>/dev/null |
+    awk '$1 == "ref:" { sub("^refs/heads/", "", $2); print $2 }')
+BRANCH=${BRANCH:-main}
 # Work of theirs is an uncommitted change, or a commit that no remote branch has ever had.
-# Commits origin/main used to point at count as the remote's, not theirs: after a rewrite
+# Commits the remote branch used to point at count as the remote's, not theirs: after a rewrite
 # they are on no remote branch, yet they are exactly what the reset is meant to replace.
 # The fetch that saw the rewrite logged the old value, in the first column of the log.
-log=$(git -C "$STORE" rev-parse --path-format=absolute --git-path logs/refs/remotes/origin/main)
+log=$(git -C "$STORE" rev-parse --path-format=absolute --git-path "logs/refs/remotes/origin/$BRANCH")
 seen=$(cut -d' ' -f1,2 "$log" 2>/dev/null | tr ' ' '\n' | grep -v '^0*$')
 if ! dirty=$(git -C "$STORE" status --porcelain) \
    || ! mine=$(git -C "$STORE" rev-list --ignore-missing HEAD --not --remotes $seen); then
@@ -184,11 +210,25 @@ else
 fi
 ```
 
-- `RESET-CHECK: safe` — offer the reset, and run it only when the asker says
-  yes: `git -C "$STORE" reset --hard origin/main`. Then run the prepare block.
+- `RESET-CHECK: safe` — offer the reset below, and run it only when the asker
+  says yes. Then run the prepare block.
 - `RESET-CHECK: refuse <reason>` — do not offer the reset. Give the asker the
   reason, leave the clone as it is, and answer from disk, saying the store has
   diverged from its remote.
+
+```bash
+# skill-block: reset
+STORE=<store-directory>
+# The store's default branch: origin/HEAD, else ask the remote, else main. The ask is
+# guarded like the fetch, so a missing key or passphrase cannot hang it.
+BRANCH=$(git -C "$STORE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+BRANCH=${BRANCH#origin/}
+[ -n "$BRANCH" ] || BRANCH=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    git -C "$STORE" ls-remote --symref origin HEAD 2>/dev/null |
+    awk '$1 == "ref:" { sub("^refs/heads/", "", $2); print $2 }')
+BRANCH=${BRANCH:-main}
+git -C "$STORE" reset --hard --quiet "origin/$BRANCH"
+```
 
 ### Decompress the graph and install the CLI
 

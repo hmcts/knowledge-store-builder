@@ -8995,6 +8995,10 @@ MUTATIONS = (
         (
             "test_docs_integrity.RealRepositoryTest.test_no_command_block_runs_a_retired_instruction",
             "test_docs_integrity.RealRepositoryTest.test_the_gate_passes_as_a_whole",
+            "test_skill_clone_block.DefaultBranchTest.test_a_clone_without_origin_head_asks_the_remote",
+            "test_skill_clone_block.DefaultBranchTest.test_a_master_store_is_checked_and_updated_on_master",
+            "test_skill_clone_block.DefaultBranchTest.test_an_unreachable_remote_without_origin_head_is_unknown_not_a_hang",
+            "test_skill_clone_block.DefaultBranchTest.test_the_reset_check_and_reset_follow_a_rewritten_master",
             "test_skill_clone_block.FreshnessBlockTest.test_a_clone_ahead_of_its_remote_is_current",
             "test_skill_clone_block.FreshnessBlockTest.test_a_clone_behind_its_remote_says_by_how_many_commits",
             "test_skill_clone_block.FreshnessBlockTest.test_a_rewritten_remote_is_diverged",
