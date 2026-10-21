@@ -44,14 +44,14 @@ from pathlib import Path
 from . import __version__, config, io, provenance, telemetry
 from .git_env import git_env
 
-FORMAT: tuple[int, int] = (1, 0)
+FORMAT: tuple[int, int] = (1, 1)
 # The hash of the manifest's shape - every key path with its type, never a value -
 # as recorded under FORMAT. Change both together, never one: `tests/
 # test_manifest_format_guard.py` computes the shape and fails when it differs from
 # this, and says which bump it needs (minor for an added layer or field, major for a
 # removal, rename or type change). The shape is then added to
 # `tests/manifest_format_shapes.json` under the new FORMAT, and this is set to its hash.
-FORMAT_SHAPE = "1193e041f65df92f4d93a8de1c831a6054a6795493fcd6bd0491af614a6648ab"
+FORMAT_SHAPE = "09d8090fcae280045ab736919e80252c70fe3c78e40127f9541d235b8e89b952"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.
@@ -547,6 +547,36 @@ def store_digest(layers: dict, extra: dict) -> str:
     )
 
 
+# The stamp the relationships layer writes, and the one major this library reads. Spelled
+# here rather than imported because the stage that writes it is not part of this
+# library's manifest yet; when it is, take both from its own format constant.
+RELATIONSHIPS_STAMP = "knowledge/relationships/repository-dependencies.json"
+RELATIONSHIPS_MAJOR = 1
+
+
+def _relationships_recognised(root: Path) -> bool:
+    """Whether the layer's stamp names this layer at a major this library knows.
+
+    A missing, damaged or foreign stamp is False, never a refusal: the files are
+    still the store's, and the reader decides what to do with a layer it cannot
+    read. A boolean major is not a major (`True == 1`).
+    """
+    try:
+        stamp = io.read_json(root / RELATIONSHIPS_STAMP)
+    except (OSError, ValueError):
+        return False
+    declared = stamp.get("format") if isinstance(stamp, dict) else None
+    if not isinstance(declared, dict):
+        return False
+    major = declared.get("major")
+    return (
+        declared.get("layer") == "relationships"
+        and isinstance(major, int)
+        and not isinstance(major, bool)
+        and major == RELATIONSHIPS_MAJOR
+    )
+
+
 def compute(root: Path, run=run_git) -> dict:
     """The full manifest for the store at `root`."""
     store_id, github_org = store_identity(root, run)
@@ -556,6 +586,10 @@ def compute(root: Path, run=run_git) -> dict:
     layers["graph"]["source_urls"] = _flag(measurements, "source_urls.linked", lambda n: n > 0)
     layers["intent"]["reach"] = _flag(
         measurements, "intent.repositories_without_reach", lambda n: n == 0
+    )
+    # `None` with no layer: nothing was measured, so there is nothing to refuse.
+    layers["relationships"]["recognised"] = (
+        _relationships_recognised(root) if layers["relationships"]["present"] else None
     )
     # Deployments are nodes inside the graph, so no file says whether the stage
     # added any; only the count it recorded can.

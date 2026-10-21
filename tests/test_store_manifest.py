@@ -111,7 +111,7 @@ class AnEmptyStore(_Store):
 
         config.configure(GITHUB_ORG="example-org")
         manifest = compute(self)
-        self.assertEqual(manifest["format"], {"major": 1, "minor": 0})
+        self.assertEqual(manifest["format"], {"major": 1, "minor": 1})
         self.assertEqual(manifest["store"], {"id": "example-store", "github_org": "example-org"})
         self.assertEqual(manifest["library_version"], __version__)
 
@@ -514,6 +514,68 @@ class ExtraLayers(_Store):
                 _touch(self.root, "config/store-extra-layers.json", declared)
                 with self.assertRaises(store_manifest.UsageError):
                     store_manifest.extra_layers(self.root)
+
+
+class RelationshipsLayerIsRecognised(_Store):
+    """The relationships layer carries a format stamp a reader must know before it
+    trusts the files; the manifest says whether this library knows the stamp."""
+
+    STAMP = "knowledge/relationships/repository-dependencies.json"
+
+    def relationships(self, stamp) -> dict:
+        _touch(self.root, "knowledge/relationships/by-repo/example.json")
+        if stamp is not None:
+            _touch(self.root, self.STAMP, json.dumps(stamp))
+        return compute(self)["layers"]["relationships"]
+
+    def test_a_known_stamp_is_recognised(self):
+        """Breaks if a layer carrying the stamp this library writes is reported as
+        one it does not know: readers would refuse a good layer."""
+        layer = self.relationships({"format": {"layer": "relationships", "major": 1, "minor": 0}})
+        self.assertEqual((layer["present"], layer["recognised"]), (True, True))
+
+    def test_an_unknown_major_is_present_digested_and_not_recognised(self):
+        """Breaks if a major this library does not know is called recognised, or
+        stops being present and digested: the files are there, the reader decides."""
+        layer = self.relationships({"format": {"layer": "relationships", "major": 2}})
+        self.assertEqual((layer["present"], layer["recognised"]), (True, False))
+        self.assertIsInstance(layer["digest"], str)
+
+    def test_no_stamp_or_another_layers_stamp_is_not_recognised(self):
+        """Breaks if a missing stamp, a stamp for another layer, a boolean major or
+        a damaged file reads as recognised."""
+        for stamp in (
+            None,
+            {"format": {"layer": "index", "major": 1}},
+            {"format": {"layer": "relationships", "major": True}},
+            {"format": "relationships"},
+            ["format"],
+        ):
+            with self.subTest(stamp=stamp):
+                self.assertFalse(self.relationships(stamp)["recognised"])
+
+    def test_a_damaged_stamp_file_is_not_recognised_and_not_a_failure(self):
+        """Breaks if a merge-conflicted stamp file stops the manifest being written."""
+        _touch(self.root, "knowledge/relationships/by-repo/example.json")
+        _touch(self.root, self.STAMP, "<<<<<<< not json")
+        self.assertIs(compute(self)["layers"]["relationships"]["recognised"], False)
+
+    def test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised(self):
+        """Breaks if a store holding a `by-repo/` directory written before the stamp
+        existed is reported absent or recognised: the files are the store's and a
+        reader must be told it cannot vouch for their shape. A consuming store
+        re-runs exactly this case."""
+        _touch(self.root, "knowledge/relationships/by-repo/payments.json", '{"depends_on": []}')
+        _touch(self.root, "knowledge/relationships/by-repo/orders.json", '{"depends_on": []}')
+        layer = compute(self)["layers"]["relationships"]
+        self.assertIs(layer["present"], True)
+        self.assertIs(layer["recognised"], False)
+        self.assertIsInstance(layer["digest"], str)
+
+    def test_an_absent_layer_has_nothing_to_recognise(self):
+        """Breaks if a store without the layer reports it unrecognised: false says a
+        layer was measured and refused, and there is none."""
+        self.assertIsNone(compute(self)["layers"]["relationships"]["recognised"])
 
 
 class Determinism(_Store):

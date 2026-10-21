@@ -184,6 +184,11 @@ def representative_manifest(root: Path) -> dict:
             }
         ),
     )
+    _touch(
+        root,
+        "knowledge/relationships/repository-dependencies.json",
+        json.dumps({"format": {"layer": "relationships", "major": 1}}),
+    )
     _touch(root, "docs/journeys/apply.md", "# Apply")
     _touch(root, "scratch/note.md", "n")
     _touch(root, ".gitignore", "scratch/\n")
@@ -226,6 +231,7 @@ class TheManifestShapeIsGuarded(SettingsIsolated):
             "format.major: int",
             "layers.graph.digest: str",
             "layers.graph.source_urls: bool",
+            "layers.relationships.recognised: bool",
             "layers.deployments.present: bool",
             "extra_layers.*.local_only: bool",
             "extra_layers.*.kind: str",
