@@ -221,20 +221,6 @@ def _ref_of(tail: str | None) -> str:
     return ""
 
 
-def terraform_sources(text: str) -> list[tuple[str, str, str, int, str]]:
-    """`(org, repo, ref, line, linetext)` for each GitHub-hosted module source.
-
-    Only GitHub sources: a registry or local path names no repository, so naming
-    one would be a guess. `ref` is `""` when the source is unpinned.
-    """
-    found = []
-    for match in _TF_SOURCE.finditer(text):
-        line, linetext = _line_of(text, match.start())
-        ref = _ref_of(match.group("tail"))
-        found.append((match.group("org"), match.group("repo"), ref, line, linetext))
-    return found
-
-
 def _module_source_offsets(text: str) -> set[int]:
     """Offsets of the `source = "..."` attributes that sit directly inside a
     `module "<name>" { ... }` block.
@@ -326,39 +312,45 @@ def _word_before(text: str, i: int) -> bool:
 
 
 def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
+    """Every module source in the file: a GitHub one names its repository outright,
+    any other is an address the estate may not hold.
+
+    Read only from a module block's own `source` (`_module_source_offsets`), and
+    never when built by interpolation, which no reader can resolve. A credential in
+    the URL is dropped before the GitHub form is matched, so `https://user:token@`
+    hides neither the repository nor anything else - the graph reads this function
+    too, so the two cannot disagree about which repository a source names.
+    """
     found = []
-    github_at = {match.start() for match in _TF_SOURCE.finditer(text)}
     in_module = _module_source_offsets(text)
-    # The organisation is carried, not checked: the layer decides whether it is the
-    # estate's, because only the layer knows the estate.
-    for match in _TF_SOURCE.finditer(text):
-        if match.start() not in in_module:
-            continue
-        line, linetext = _line_of(text, match.start())
-        found.append(
-            Reference(
-                kind="terraform_module",
-                target=match.group("repo"),
-                chart="",
-                ref=_ref_of(match.group("tail")),
-                rel=rel,
-                line=line,
-                text=linetext,
-                resolved_repo=match.group("repo"),
-                org=match.group("org"),
-            )
-        )
     for match in _TF_ANY_SOURCE.finditer(text):
         address = match.group("address")
         if (
-            match.start() in github_at
-            or match.start() not in in_module
+            match.start() not in in_module
             or not address
             or "${" in address
             or address.startswith(_LOCAL_SOURCE)
         ):
             continue
         line, linetext = _line_of(text, match.start())
+        github = _TF_SOURCE.match(strip_userinfo(match.group(0)))
+        # The organisation is carried, not checked: the layer decides whether it is
+        # the estate's, because only the layer knows the estate.
+        if github:
+            found.append(
+                Reference(
+                    kind="terraform_module",
+                    target=github.group("repo"),
+                    chart="",
+                    ref=_ref_of(github.group("tail")),
+                    rel=rel,
+                    line=line,
+                    text=linetext,
+                    resolved_repo=github.group("repo"),
+                    org=github.group("org"),
+                )
+            )
+            continue
         # A pin is not part of what is referenced, so two pins of one module are one
         # target. Any other query parameter selects something and stays.
         base, _, query = address.partition("?")
@@ -374,7 +366,7 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
                 text=linetext,
             )
         )
-    return sorted(found, key=lambda ref: ref.line)
+    return found
 
 
 def _terraform_skips(_clone: Path, _rel: str, text: str) -> dict[str, int]:
@@ -830,22 +822,37 @@ def _maven_publishes(clone: Path) -> list[tuple[str, str]]:
 
 # --- npm ----------------------------------------------------------------------
 
+NPM_MANIFEST = "package.json"
 NPM_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
+# Where a clone publishes packages from: the root, and the workspace directories.
+NPM_WORKSPACES = ("projects", "packages", "libs")
 
 
-def _npm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
+def package_json(text: str) -> dict:
+    """A `package.json` as a mapping, `{}` when it is not a JSON object."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return []
-    if not isinstance(data, dict):
-        return []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def npm_dependencies(manifest: dict, sections: tuple[str, ...] = NPM_SECTIONS) -> dict[str, dict]:
+    """`{section: {package: version spec}}` for each of `sections` the manifest
+    declares as an object, in the order asked for. The one reader of a manifest's
+    dependencies: the graph's `imports_package` edges and the ingestion-gaps report
+    ask for fewer sections than the layer, and filter here rather than re-read."""
+    return {
+        section: manifest[section]
+        for section in sections
+        if isinstance(manifest.get(section), dict)
+    }
+
+
+def _npm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
     lines = text.splitlines()
     found = []
-    for section in NPM_SECTIONS:
-        block = data.get(section)
-        if not isinstance(block, dict):
-            continue
+    for section, block in npm_dependencies(package_json(text)).items():
         _, _, at = _locate(lines, re.compile(rf'"{section}"\s*:'), 0)
         for name, spec in block.items():
             key = re.escape(json.dumps(name, ensure_ascii=False))
@@ -864,12 +871,23 @@ def _npm_references(_clone: Path, rel: str, text: str) -> list[Reference]:
     return found
 
 
-def _npm_publishes(clone: Path) -> list[tuple[str, str]]:
-    # The same locations the `packages` stage reads: the root and the workspace
-    # directories. Imported here because that module imports this one.
-    from .build_package_edges import _named_packages
-
-    return _named_packages(clone)
+def npm_publishes(clone: Path) -> list[tuple[str, str]]:
+    """(package name, repo-relative `package.json` path) for each package the clone
+    names, root first and then each workspace directory's packages in path order."""
+    found = []
+    candidates = [clone / NPM_MANIFEST]
+    for sub in NPM_WORKSPACES:
+        candidates.extend(sorted((clone / sub).glob(f"*/{NPM_MANIFEST}")))
+    for manifest in candidates:
+        if not manifest.is_file():
+            continue
+        try:
+            name = package_json(manifest.read_text(encoding="utf-8")).get("name")
+        except UnicodeDecodeError:
+            continue
+        if name:
+            found.append((str(name), str(manifest.relative_to(clone))))
+    return found
 
 
 _CHART_FILES = Kind("", "", ("**/Chart.yaml",), lambda *_: [], lambda _: [])
@@ -892,7 +910,7 @@ BUILTIN: tuple[Kind, ...] = (
         _helm_publishes,
     ),
     Kind("maven_artifact", "builtin", ("**/pom.xml",), _maven_references, _maven_publishes),
-    Kind("npm_package", "builtin", ("**/package.json",), _npm_references, _npm_publishes),
+    Kind("npm_package", "builtin", ("**/package.json",), _npm_references, npm_publishes),
 )
 
 
@@ -929,6 +947,19 @@ class Layer:
     conflicts: dict
     skipped: dict
     unreadable: list[str]
+
+
+def builtin(name: str) -> Kind:
+    """The built-in kind called `name`."""
+    return next(kind for kind in BUILTIN if kind.name == name)
+
+
+def names_estate_repo(ref: Reference, estate: Set[str], org: str) -> bool:
+    """Whether a reference that names its repository outright names one the estate
+    holds: a clone of that name, and in the estate's organisation when one is set.
+    The organisation compares ignoring case, as GitHub does. A same-named repository
+    in another organisation is somebody else's."""
+    return ref.resolved_repo in estate and (not org or ref.org.lower() == org.lower())
 
 
 def resolve_chart(
@@ -999,10 +1030,7 @@ class _Resolver:
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
         """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
         if ref.resolved_repo is not None:
-            ours = ref.resolved_repo in self.estate and (
-                not self.org or ref.org.lower() == self.org
-            )
-            if not ours:
+            if not names_estate_repo(ref, self.estate, self.org):
                 return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
             provider = ref.resolved_repo
         elif ref.kind == "helm_chart":

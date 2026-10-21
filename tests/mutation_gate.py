@@ -6956,8 +6956,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a Terraform source loses its ref",
         "relationships.py",
-        '                ref=_ref_of(match.group("tail")),',
-        '                ref="",',
+        '                    ref=_ref_of(github.group("tail")),',
+        '                    ref="",',
         "#455: the layer reports which pin each consumer holds, so a parser that reads the repository and drops `?ref=` yields every edge as floating - plausible edges, all of them saying nothing about version drift. The pre-existing `_TF_SOURCE` captured the organisation and nothing read it; the same shape of silent omission",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
@@ -6994,7 +6994,7 @@ MUTATIONS = (
         "relationships.py",
         'IGNORED_DIRS = frozenset({".git", ".terraform", "node_modules", "target"})',
         'IGNORED_DIRS = frozenset({".git", "node_modules", "target"})',
-        "#455: `.terraform` holds copies of the upstream modules, whose sources would read as this repository's dependencies; a cache committed once would quietly invent reuse. The graph stage guards the same directory (`_own_terraform_files`) and the registry must not lose the guard in the move",
+        "#455: `.terraform` holds copies of the upstream modules, whose sources would read as this repository's dependencies; a cache committed once would quietly invent reuse. The graph stage reads its Terraform files through this same walk, so losing the guard here loses it in the graph too",
         (
             "test_build_relationships.StageTest.test_the_stage_prints_one_line_per_kind_and_records_telemetry",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
@@ -7138,8 +7138,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a Terraform source in another organisation is the estate's",
         "relationships.py",
-        "                not self.org or ref.org.lower() == self.org\n",
-        "                True\n",
+        "    return ref.resolved_repo in estate and (not org or ref.org.lower() == org.lower())\n",
+        "    return ref.resolved_repo in estate\n",
         "#455: matching a module source on the repository name alone makes a same-named module in another organisation an in-estate dependency - the pre-existing `_TF_SOURCE` captured the organisation and nothing read it",
         (
             "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
@@ -7183,6 +7183,46 @@ MUTATIONS = (
         "#455 review: a file the stage cannot open was read as empty, so its references vanished from the layer with nothing counted or named; only a POM that failed to parse was reported",
         (
             "test_build_relationships.UnreadableTest.test_a_file_that_cannot_be_opened_is_counted_and_named_per_kind",
+        ),
+    ),
+    Mutation(
+        "relationships: a credentialed GitHub module source names no repository",
+        "relationships.py",
+        "        github = _TF_SOURCE.match(strip_userinfo(match.group(0)))\n",
+        "        github = _TF_SOURCE.match(match.group(0))\n",
+        "#455: a credential in a module source URL (`https://user:token@github.com/...`) hid the repository from the GitHub form, so the source read as an address outside the estate and the graph drew no edge to a repository the estate holds",
+        (
+            "test_package_edges.TheDeclaredGraphChangesTest.test_a_credential_in_the_url_does_not_hide_the_repository",
+        ),
+    ),
+    Mutation(
+        "packages: a same-named repository in another organisation takes the estate's module node",
+        "build_package_edges.py",
+        "                elif provider in estate:\n",
+        "                elif False:\n",
+        "#455: a source in another organisation naming a repository the estate also holds is somebody else's; keyed by name alone it joins the estate's module node, so the estate's module gains a consumer it does not have - and a consumer naming itself in another organisation is dropped as self",
+        (
+            "test_package_edges.TheDeclaredGraphChangesTest.test_a_source_in_another_organisation_is_not_the_estates_repository",
+        ),
+    ),
+    Mutation(
+        "packages: the graph's npm consumers read peer dependencies",
+        "build_package_edges.py",
+        'CONSUMER_SECTIONS = ("dependencies", "devDependencies")\n',
+        "CONSUMER_SECTIONS = relationships.NPM_SECTIONS\n",
+        "#455: the layer reads `peerDependencies` and the graph's `imports_package` consumer set never has; reading the manifest through the layer's parser must not widen what the graph already published",
+        (
+            "test_package_edges.TheGraphMatchesItsOutputBeforeTheMoveTest.test_the_relationships_fixture_estate",
+        ),
+    ),
+    Mutation(
+        "packages: a second Terraform-source parser grows back beside the registry",
+        "build_package_edges.py",
+        'TERRAFORM_SUFFIX = ".tf"\n',
+        'TERRAFORM_SUFFIX = ".tf"\n_TF_SOURCE = r\'source\\s*=\\s*"(?:git::)?github\\.com[/:]\'\n',
+        "#455: two parsers of one declaration drift - that is how the graph and the relationships layer came to disagree about module scope, organisations and credentials - so the graph reads Terraform sources only through `relationships`",
+        (
+            "test_package_edges.OneParserTest.test_no_module_outside_relationships_parses_these_declarations",
         ),
     ),
 )

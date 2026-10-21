@@ -28,32 +28,17 @@ import sys
 from . import config, graph_files, io, relationships
 
 FORMAT = "packages"
-MANIFEST = "package.json"
+MANIFEST = relationships.NPM_MANIFEST
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 
-# Terraform module reuse: the source patterns live in `relationships`, which owns
-# every declaration parser. This stage reads them through `terraform_references`.
+# Every declaration parser lives in `relationships`, which also writes the
+# dependency layer: the graph reads Terraform sources, npm publishers and npm
+# dependencies through it, so the two cannot disagree about who depends on whom.
 TERRAFORM_SUFFIX = ".tf"
+# The graph's consumer set has always been these two; the layer also reads peers.
+CONSUMER_SECTIONS = ("dependencies", "devDependencies")
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
-
-
-def _named_packages(repo_dir) -> list[tuple[str, str]]:
-    """(package name, repo-relative package.json path) declared by one clone."""
-    found = []
-    candidates = [repo_dir / MANIFEST]
-    for sub in ("projects", "packages", "libs"):
-        candidates.extend(sorted((repo_dir / sub).glob(f"*/{MANIFEST}")))
-    for manifest in candidates:
-        if not manifest.is_file():
-            continue
-        try:
-            name = json.loads(manifest.read_text(encoding="utf-8")).get("name")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        if name:
-            found.append((str(name), str(manifest.relative_to(repo_dir))))
-    return found
 
 
 def _declared_dependencies(repo_dir) -> set[str]:
@@ -61,10 +46,11 @@ def _declared_dependencies(repo_dir) -> set[str]:
     if not manifest.is_file():
         return set()
     try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = relationships.package_json(manifest.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
         return set()
-    return set(data.get("dependencies", {})) | set(data.get("devDependencies", {}))
+    sections = relationships.npm_dependencies(data, CONSUMER_SECTIONS)
+    return {name for block in sections.values() for name in block}
 
 
 def _importing_files(repo_dir, package: str) -> list[str]:
@@ -117,15 +103,6 @@ def _strip_layer(graph: dict) -> None:
     ]
 
 
-def terraform_references(text: str) -> set[str]:
-    """Repository names a Terraform file declares as module sources.
-
-    Deliberately only GitHub-hosted sources. A registry or local path reference
-    names no repository, so reporting one would be a guess.
-    """
-    return {repo for _org, repo, _ref, _line, _text in relationships.terraform_sources(text)}
-
-
 def _module_node(repo_name: str, in_estate: bool) -> dict:
     """A referenced module, identified by the repository that provides it.
 
@@ -155,37 +132,31 @@ def _module_node(repo_name: str, in_estate: bool) -> dict:
     }
 
 
-def _own_terraform_files(clone):
-    """This repository's own .tf files.
+def _module_references(clones: list, org: str = "") -> dict[tuple[str, str], list[str]]:
+    """(consumer repo, provider) -> the files declaring it, sorted.
 
-    .terraform is Terraform's download cache: it holds copies of the upstream
-    modules, whose sources would otherwise read as this repository's dependencies.
-    Measured at zero files on the estate this was built against, so a guard rather
-    than a fix - but a cache committed once would quietly invent reuse.
+    Only sources naming a GitHub repository: a registry address names no repository
+    to link to, so a node for one would be a guess. The provider is the repository
+    name when the estate holds that repository (`relationships.names_estate_repo`),
+    and `<org>/<repo>` when a clone of that name exists but the source is in another
+    organisation - somebody else's repository, which must neither take the
+    estate's node nor read as the consumer referencing itself.
     """
-    for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
-        if ".terraform" not in path.parts:
-            yield path
-
-
-def _read_text(path) -> str:
-    """File contents, or "" if it cannot be read. One unreadable file is not worth
-    abandoning an estate scan for."""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
-    """(consumer repo, provider repo) -> the files declaring it, sorted."""
+    estate = {clone.name for clone in clones}
+    kind = relationships.builtin("terraform_module")
     found: dict[tuple[str, str], set[str]] = {}
     for clone in clones:
-        for path in _own_terraform_files(clone):
-            for provider in terraform_references(_read_text(path)):
-                if provider == clone.name:
-                    continue  # a repository referencing itself is not reuse
-                found.setdefault((clone.name, provider), set()).add(str(path.relative_to(clone)))
+        for rel in relationships.files_of(clone, kind):
+            for ref in kind.references(clone, rel, relationships.read_text(clone / rel)):
+                provider = ref.resolved_repo
+                if provider is None:
+                    continue
+                if relationships.names_estate_repo(ref, estate, org):
+                    if provider == clone.name:
+                        continue  # a repository referencing itself is not reuse
+                elif provider in estate:
+                    provider = f"{ref.org}/{provider}"
+                found.setdefault((clone.name, provider), set()).add(rel)
     return {pair: sorted(files) for pair, files in found.items()}
 
 
@@ -208,7 +179,7 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
             anchors[node_repo] = node_id
     estate = {clone.name for clone in clones}
     existing = {n["id"] for n in graph["nodes"]}
-    references = _module_references(clones)
+    references = _module_references(clones, config.GITHUB_ORG)
 
     edges = 0
     capped = 0
@@ -265,7 +236,7 @@ def _discover_providers(clones: list) -> dict[str, tuple[str, str]]:
     """package name -> (provider repo, manifest path); first repo wins a conflict."""
     providers: dict[str, tuple[str, str]] = {}
     for repo_dir in clones:
-        for name, manifest_rel in _named_packages(repo_dir):
+        for name, manifest_rel in relationships.npm_publishes(repo_dir):
             if name not in providers or repo_dir.name < providers[name][0]:
                 providers[name] = (repo_dir.name, manifest_rel)
     return providers

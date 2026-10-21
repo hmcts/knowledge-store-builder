@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
-from knowledgestore import build_package_edges as packages  # noqa: E402
 from knowledgestore import deploy_flux, relationships  # noqa: E402
 
 try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
@@ -65,7 +64,11 @@ class TerraformSourcesTest(SettingsIsolated):
         the repo name, or a `?ref=` that is read as part of the repository or lost.
         The five forms are the ones `_TF_SOURCE` documents; the line numbers are
         those of `tests/fixtures/relationships/svc-a/main.tf`."""
-        got = relationships.terraform_sources(_text("svc-a", "main.tf"))
+        got = [
+            (ref.org, ref.target, ref.ref, ref.line, ref.text)
+            for ref in relationships.scan(ESTATE / "svc-a", _kind("terraform_module"))
+            if ref.resolved_repo
+        ]
         self.assertEqual(
             got,
             [
@@ -107,19 +110,12 @@ class TerraformSourcesTest(SettingsIsolated):
             ],
         )
 
-    def test_the_wrapper_still_returns_repository_names(self):
-        """Break caught: `terraform_references` drifting from `terraform_sources`
-        while the graph stage still calls it."""
-        self.assertEqual(
-            packages.terraform_references(_text("svc-a", "main.tf")),
-            {"tf-network", "tf-storage", "tf-queue", "tf-dns", "tf-cache"},
-        )
-
     def test_a_ref_after_another_query_argument_is_still_the_ref(self):
         """Break caught: the ref read only when `?ref=` is first, which loses the
         pin on `?depth=1&ref=v2`."""
-        got = relationships.terraform_sources('source = "github.com/o/m?depth=1&ref=v2"\n')
-        self.assertEqual([entry[2] for entry in got], ["v2"])
+        text = 'module "m" {\n  source = "github.com/o/m?depth=1&ref=v2"\n}\n'
+        got = _kind("terraform_module").references(Path(), "main.tf", text)
+        self.assertEqual([ref.ref for ref in got], ["v2"])
 
 
 class TerraformKindTest(SettingsIsolated):
@@ -285,6 +281,19 @@ class CredentialTest(SettingsIsolated):
                 self.assertNotIn(self.TOKEN, repr(ref))
         self.assertEqual(refs[0].target, "git::https://git.example.test/team/mod.git")
         self.assertEqual(refs[0].ref, "v1")
+
+    def test_a_credentialed_github_source_names_its_repository(self):
+        """Break caught: the GitHub form matched before the credential is stripped,
+        so `https://user:token@github.com/org/repo` names no repository and is
+        reported as an address the estate does not hold."""
+        url = f"git::https://user:{self.TOKEN}@github.com/example-org/tf-network.git?ref=v1"
+        text = f'module "m" {{\n  source = "{url}"\n}}\n'
+        refs = _kind("terraform_module").references(Path(), "main.tf", text)
+        self.assertEqual(
+            [(ref.org, ref.target, ref.resolved_repo, ref.ref, ref.line) for ref in refs],
+            [("example-org", "tf-network", "tf-network", "v1", 2)],
+        )
+        self.assertNotIn(self.TOKEN, repr(refs))
 
 
 class UserinfoTest(SettingsIsolated):

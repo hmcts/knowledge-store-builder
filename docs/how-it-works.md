@@ -165,6 +165,11 @@ repository is a clone and its organisation matches `KSB_GITHUB_ORG`, ignoring ca
 An unset organisation matches any. A source outside the estate is reported as
 `<org>/<repo>`.
 
+The graph reads the same declarations through the same parsers. The `packages`
+stage's `USES_MODULE` edges take Terraform sources from a module block's own
+literal `source`, with the organisation check above, so the graph and this layer
+name the same repository for one module source.
+
 A file that cannot be opened, or a POM that does not parse, is counted as
 `unreadable` for its kind and named in the run's output. The rest of the estate is still read. Two runs over the same clones write
 identical bytes, and a repository no longer cloned loses its `by-repo` file in the

@@ -58,7 +58,6 @@ a repository the store does hold is no gap at all.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections import Counter
@@ -66,7 +65,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import boundary, build_package_edges, config
+from . import boundary, build_package_edges, config, relationships
 
 # How many leading dot-segments make a namespace. Two is too wide: a group id
 # whose first two segments are a country or sector prefix and a shared parent
@@ -339,21 +338,14 @@ def _read_pom(evidence: Evidence, repo: str, rel: str, text: str) -> None:
 
 
 def _read_package_json(evidence: Evidence, repo: str, rel: str, text: str) -> None:
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return
-    if not isinstance(data, dict):
-        return
+    data = relationships.package_json(text)
     name = data.get("name")
     if isinstance(name, str) and name:
         evidence.built.add(npm_coordinate(name))
         evidence.built_from[PACKAGE_JSON] += 1
+    sections = relationships.npm_dependencies(data, ("dependencies", "devDependencies"))
     for key, scope in (("dependencies", "main"), ("devDependencies", "test")):
-        declared = data.get(key)
-        if not isinstance(declared, dict):
-            continue
-        for dependency in sorted(declared):
+        for dependency in sorted(sections.get(key, {})):
             coordinate = npm_coordinate(dependency)
             if coordinate.group:
                 _record(evidence, coordinate, scope, repo, rel)
@@ -361,16 +353,18 @@ def _read_package_json(evidence: Evidence, repo: str, rel: str, text: str) -> No
                 evidence.unscoped.add(dependency)
 
 
-def _read_terraform(evidence: Evidence, repo: str, text: str) -> None:
-    """Module sources, through the parser that already reads them (#122).
+def _read_terraform(evidence: Evidence, clone: Path, rel: str, text: str) -> None:
+    """Module sources, through the parser the graph and the relationships layer
+    read them with (#122, #455).
 
     Reused rather than rewritten: an estate can be built almost entirely from
     shared modules, both source forms are in use, and a divergent copy of that
     regex would report different reuse from the one already in the graph.
     """
-    for provider in build_package_edges.terraform_references(text):
-        if provider != repo:
-            evidence.modules.setdefault(provider, set()).add(repo)
+    repo = clone.name
+    for ref in relationships.builtin("terraform_module").references(clone, rel, text):
+        if ref.resolved_repo and ref.resolved_repo != repo:
+            evidence.modules.setdefault(ref.resolved_repo, set()).add(repo)
 
 
 def read_clone(evidence: Evidence, clone: Path) -> None:
@@ -394,7 +388,7 @@ def read_clone(evidence: Evidence, clone: Path) -> None:
             _read_package_json(evidence, repo, rel, _read(path))
         elif path.suffix == build_package_edges.TERRAFORM_SUFFIX:
             evidence.scanned[".tf"] += 1
-            _read_terraform(evidence, repo, _read(path))
+            _read_terraform(evidence, clone, rel, _read(path))
 
 
 def read_estate(clones: list[Path]) -> Evidence:
