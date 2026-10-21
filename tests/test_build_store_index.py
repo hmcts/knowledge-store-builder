@@ -91,7 +91,8 @@ class TheStageWritesTheIndex(StageCase):
         run_stage()
         first = (self.sqlite.read_bytes(), self.gz.read_bytes())
         run_stage()
-        self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), first)
+        current = (self.sqlite.read_bytes(), self.gz.read_bytes())
+        self.assertEqual(current, first)
 
     def test_the_archive_is_read_when_both_graphs_exist(self):
         """Breaks if the stage prefers the gitignored plain graph: the index would record
@@ -117,7 +118,8 @@ class TheStageWritesTheIndex(StageCase):
         builder = (self.sqlite.read_bytes(), self.gz.read_bytes())
         self.plain.unlink()
         run_stage()
-        self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), builder)
+        current = (self.sqlite.read_bytes(), self.gz.read_bytes())
+        self.assertEqual(current, builder)
 
     def test_the_archive_graph_is_read_when_the_plain_one_is_absent(self):
         """Breaks if the stage demands the gitignored plain graph: a fresh checkout holds
@@ -140,7 +142,8 @@ class TheStageRefusesCleanly(StageCase):
         self.assertEqual(code, 1)
         self.assertIn(str(self.plain), out + err)
         self.assertIn(str(self.archive), out + err)
-        self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), before)
+        current = (self.sqlite.read_bytes(), self.gz.read_bytes())
+        self.assertEqual(current, before)
 
     def test_no_graph_writes_nothing(self):
         """Breaks if the refusal still creates the index directory or a partial file."""

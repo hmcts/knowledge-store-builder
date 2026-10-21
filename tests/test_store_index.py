@@ -418,7 +418,8 @@ class ABuildIsReproducible(IndexCase):
         # The comparison reads real rows: a dump of nothing would also be equal.
         self.assertEqual(len(original["nodes"]), 5)
         self.assertEqual(len(original["edges"]), 4)
-        self.assertEqual([row[2] for row in original["nodes"]], ["a1", "a2", "a3", "b1", "s1"])
+        node_ids = [row[2] for row in original["nodes"]]
+        self.assertEqual(node_ids, ["a1", "a2", "a3", "b1", "s1"])
         self.assertEqual(self.files(backward), self.files(forward))
 
         changed = [dict(n) for n in NODES]
@@ -509,7 +510,8 @@ class WhatItRefuses(IndexCase):
         self.graph.unlink()
         with self.assertRaises(FileNotFoundError):
             self.build()
-        self.assertEqual((digest(self.out), digest(self.out.with_name("store.sqlite.gz"))), before)
+        current = (digest(self.out), digest(self.out.with_name("store.sqlite.gz")))
+        self.assertEqual(current, before)
 
     def test_a_missing_graph_creates_nothing(self):
         """Breaks if the refusal comes after the output directory or file is made."""
@@ -536,7 +538,8 @@ class EdgesUnderEitherKey(IndexCase):
         with gzip.open(self.graph, "wt", encoding="utf-8") as handle:
             handle.write(text)
         report = self.build()
-        self.assertEqual((report.links_read, report.edges, report.dangling_edges), (5, 4, 1))
+        reconciled = (report.links_read, report.edges, report.dangling_edges)
+        self.assertEqual(reconciled, (5, 4, 1))
 
 
 class TheReportMustReconcile(IndexCase):
