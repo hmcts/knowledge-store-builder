@@ -1,4 +1,51 @@
 {
+ "chart-resolution": {
+  "edges": [
+   [
+    "uses_chart",
+    "example-deploy::deploy:_base:api",
+    "example-helm::chart",
+    "apps/base/services/api/helmrelease.yaml"
+   ],
+   [
+    "uses_chart",
+    "example-deploy::deploy:_base:jobs",
+    "example-helm::chart",
+    "apps/base/services/jobs/helmrelease.yaml"
+   ],
+   [
+    "uses_chart",
+    "example-deploy::deploy:_base:web",
+    "example-helm::chart",
+    "apps/base/services/web/helmrelease.yaml"
+   ],
+   [
+    "uses_chart",
+    "example-deploy::deploy:prod:api",
+    "example-helm::chart",
+    "apps/base/services/api/helmrelease.yaml"
+   ],
+   [
+    "uses_chart",
+    "example-deploy::deploy:prod:jobs",
+    "example-helm::chart",
+    "apps/base/services/jobs/helmrelease.yaml"
+   ],
+   [
+    "uses_chart",
+    "example-deploy::deploy:prod:web",
+    "example-helm::chart",
+    "apps/base/services/web/helmrelease.yaml"
+   ]
+  ],
+  "nodes": [
+   [
+    "example-helm::chart",
+    "",
+    false
+   ]
+  ]
+ },
  "credentialed": {
   "edges": [],
   "nodes": []

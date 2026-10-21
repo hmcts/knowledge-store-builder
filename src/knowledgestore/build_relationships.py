@@ -177,14 +177,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    try:
-        config.CHART_REPO_PATTERN.format(name="chart")
-    except (KeyError, IndexError, ValueError) as error:
-        print(
-            f"KSB_CHART_REPO_PATTERN={config.CHART_REPO_PATTERN!r} is not a pattern with "
-            f"only {{name}} in it: {error!r}",
-            file=sys.stderr,
-        )
+    problem = relationships.chart_pattern_problem(config.CHART_REPO_PATTERN)
+    if problem:
+        print(problem, file=sys.stderr)
         return 1
     try:
         urls = SourceUrls.from_store()

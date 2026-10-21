@@ -170,8 +170,10 @@ estate is reported as `<org>/<repo>`.
 
 The graph reads the same declarations through the same parsers. The `packages`
 stage's `USES_MODULE` edges and the `gaps` report take Terraform sources from a
-module block's own literal `source`, with the organisation check above, so the
-graph, the report and this layer name the same repository for one module source.
+module block's own literal `source`, with the organisation check above, and the
+`deployments` stage's `uses_chart` edges resolve a chart in the order above. So
+the graph, the report and this layer name the same repository for one
+declaration, and the two chart settings apply to both.
 
 A file that cannot be opened, or a POM that does not parse, is counted as
 `unreadable` for its kind and named in the run's output. The rest of the estate

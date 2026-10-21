@@ -137,7 +137,7 @@ class PackageEdgesTest(SettingsIsolated):
 
 # --- one parser, two consumers -------------------------------------------------
 #
-# The graph's module and package edges come from the same parsers as the
+# The graph's module, chart and package edges come from the same parsers as the
 # relationships layer (#455). The golden file below was written by the graph stages
 # *before* they moved onto those parsers, over the relationships fixture estate and
 # the shapes the other stage tests use. An equivalence scenario must still produce
@@ -328,6 +328,23 @@ SCENARIOS: dict[str, tuple[bool, dict[str, str], dict[str, object]]] = {
         },
         {},
     ),
+    # Declared: a chart resolves to the clone that defines it, or to the clone the
+    # store's naming pattern names, before falling back to the `sourceRef`.
+    "chart-resolution": (
+        False,
+        {
+            **_flux(
+                {
+                    "web": _release("web", "web", "HelmRepository", "example-helm"),
+                    "api": _release("api", "api", "HelmRepository", "example-helm"),
+                    "jobs": _release("jobs", "jobs", "HelmRepository", "example-helm"),
+                }
+            ),
+            "web-chart-repo/charts/web/Chart.yaml": "apiVersion: v2\nname: web\nversion: 1.0.0\n",
+            "chart-api/README.md": "The api chart.\n",
+        },
+        {"DEPLOY_REPOS": {"example-deploy"}, "CHART_REPO_PATTERN": "chart-{name}"},
+    ),
 }
 
 
@@ -355,6 +372,38 @@ SCENARIOS["two-organisations"] = (
 )
 
 
+# A scenario's clones the graph does not hold: on disk, with no node in the graph.
+UNGRAPHED = {"chart-estate": {"charts-unheld"}}
+
+_NO_SOURCE_REF = (
+    "apiVersion: helm.toolkit.fluxcd.io/v2\n"
+    "kind: HelmRelease\n"
+    "metadata:\n"
+    "  name: jobs\n"
+    "spec:\n"
+    "  chart:\n"
+    "    spec:\n"
+    "      chart: jobs\n"
+    "      version: 1.0.0\n"
+)
+SCENARIOS["chart-estate"] = (
+    False,
+    {
+        **_flux(
+            {
+                "web": _release("web", "web", "HelmRepository", "example-helm"),
+                "api": _release("api", "api", "HelmRepository", "example-helm"),
+                "jobs": _NO_SOURCE_REF,
+            }
+        ),
+        "charts-held/web/Chart.yaml": "apiVersion: v2\nname: web\nversion: 1.0.0\n",
+        "charts-held/jobs/Chart.yaml": "apiVersion: v2\nname: jobs\nversion: 1.0.0\n",
+        "charts-unheld/api/Chart.yaml": "apiVersion: v2\nname: api\nversion: 1.0.0\n",
+    },
+    {"DEPLOY_REPOS": {"example-deploy"}},
+)
+
+
 def _scenario_graph(name: str) -> dict:
     """Run `packages`, then `deployments` when a deployment clone is named, over the
     scenario, and return the graph they wrote."""
@@ -376,6 +425,8 @@ def _scenario_graph(name: str) -> dict:
         nodes = []
         for clone in sorted(repos.iterdir()):
             (clone / ".git").mkdir(exist_ok=True)
+            if clone.name in UNGRAPHED.get(name, ()):
+                continue
             for path in sorted(clone.rglob("*")):
                 if path.is_file() and ".git" not in path.relative_to(clone).parts:
                     rel = path.relative_to(clone).as_posix()
@@ -504,6 +555,40 @@ class TheDeclaredGraphChangesTest(SettingsIsolated):
         )
         self.assertNotIn("xxxxx-not-a-real-token", json.dumps(_scenario_graph("credentialed")))
 
+    @needs_yaml
+    def test_a_chart_resolves_to_the_repository_that_provides_it(self):
+        """Break caught: the graph resolving a chart by its `sourceRef` alone while
+        the layer resolves it by the naming pattern and the defining clone, so the
+        two name different repositories for one release."""
+        expected = {
+            "edges added": [
+                ["uses_chart", f"example-deploy::deploy:{env}:{chart}", f"{repo}::chart", rel]
+                for chart, repo in (("api", "chart-api"), ("web", "web-chart-repo"))
+                for env in ("_base", "prod")
+                for rel in [f"apps/base/services/{chart}/helmrelease.yaml"]
+            ],
+            "edges removed": [
+                [
+                    "uses_chart",
+                    f"example-deploy::deploy:{env}:{chart}",
+                    "example-helm::chart",
+                    rel,
+                ]
+                for chart in ("api", "web")
+                for env in ("_base", "prod")
+                for rel in [f"apps/base/services/{chart}/helmrelease.yaml"]
+            ],
+            "nodes added": [
+                ["chart-api::chart", "chart-api", True],
+                ["web-chart-repo::chart", "web-chart-repo", True],
+            ],
+            "nodes removed": [],
+        }
+        self.assertEqual(
+            self._changed("chart-resolution"),
+            {change: sorted(entries) for change, entries in expected.items()},
+        )
+
 
 class EachCloneItsOwnOrganisationTest(SettingsIsolated):
     def test_a_source_is_compared_against_the_organisation_of_the_clone_it_names(self):
@@ -540,6 +625,67 @@ class EachCloneItsOwnOrganisationTest(SettingsIsolated):
                 ],
             },
         )
+
+
+class ChartEstateTest(SettingsIsolated):
+    @needs_yaml
+    def test_a_chart_is_in_the_estate_only_when_the_graph_holds_its_repository(self):
+        """Break caught: a chart resolved to a clone on disk that the graph does not
+        hold, written with `repo` set and `provider_in_estate: True` - a store
+        claiming a repository it never extracted. Such a chart falls back to its
+        `sourceRef`, outside the estate, as before the routing."""
+        found = scenario_edges("chart-estate")
+        charts = sorted([edge[1], edge[2]] for edge in found["edges"] if edge[0] == "uses_chart")
+        self.assertEqual(
+            charts,
+            sorted(
+                [f"example-deploy::deploy:{env}:{chart}", f"{provider}::chart"]
+                for chart, provider in (("api", "example-helm"), ("web", "charts-held"))
+                for env in ("_base", "prod")
+            ),
+        )
+        self.assertEqual(
+            [node for node in found["nodes"] if node[0].endswith("::chart")],
+            [["charts-held::chart", "charts-held", True], ["example-helm::chart", "", False]],
+        )
+
+    @needs_yaml
+    def test_a_helm_release_with_no_source_ref_gets_no_chart_edge(self):
+        """Break caught: a `HelmRelease` naming no `sourceRef` given a `uses_chart`
+        edge to the clone defining its chart. It had none before the routing, and
+        the routing changes where an edge points, not which releases have one."""
+        found = scenario_edges("chart-estate")
+        self.assertEqual(
+            [edge for edge in found["edges"] if edge[0] == "uses_chart" and ":jobs" in edge[1]],
+            [],
+        )
+
+
+class ChartPatternRefusalTest(SettingsIsolated):
+    def test_a_malformed_chart_pattern_is_refused_with_exit_1_and_writes_nothing(self):
+        """Break caught: `deployments` formatting `KSB_CHART_REPO_PATTERN` unchecked,
+        so `chart-{chart}` ends the stage in a `KeyError` traceback while
+        `relationships` refuses the same setting with a message."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "repositories" / "example-deploy" / ".git").mkdir(parents=True)
+            (root / "graphify-out").mkdir()
+            graph = root / "graphify-out" / "graph.json"
+            graph.write_text(
+                json.dumps({"directed": False, "graph": {}, "nodes": [], "links": []}),
+                encoding="utf-8",
+            )
+            before = graph.read_bytes()
+            config.configure(
+                root=root, DEPLOY_REPOS={"example-deploy"}, CHART_REPO_PATTERN="chart-{chart}"
+            )
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                code = deployments.main()
+            self.assertEqual(code, 1)
+            self.assertIn("KSB_CHART_REPO_PATTERN", err.getvalue())
+            self.assertNotIn("Traceback", err.getvalue())
+            self.assertEqual(graph.read_bytes(), before)
 
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "knowledgestore"

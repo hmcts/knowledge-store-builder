@@ -1132,6 +1132,20 @@ def module_provider(ref: Reference, orgs: Mapping[str, str]) -> str | None:
     return ref.resolved_repo
 
 
+def chart_pattern_problem(pattern: str) -> str:
+    """Why `pattern` (`KSB_CHART_REPO_PATTERN`) cannot name a chart's repository, or
+    `""` when it can. Every stage resolving charts refuses on this before reading
+    anything, rather than ending in a `KeyError` at the first chart."""
+    try:
+        pattern.format(name="chart")
+    except (KeyError, IndexError, ValueError) as error:
+        return (
+            f"KSB_CHART_REPO_PATTERN={pattern!r} is not a pattern with only {{name}} in it: "
+            f"{error!r}"
+        )
+    return ""
+
+
 def resolve_chart(
     chart: str, source: str, estate: Set[str], pattern: str, defined: dict[str, str]
 ) -> str | None:
@@ -1167,6 +1181,28 @@ class _Unresolved:
     referenced_by: set = field(default_factory=set)
 
 
+def _choose(
+    kind: str, published: dict[str, list[str]], umbrellas: Set[str]
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """For one kind: target -> the clone chosen to provide it, and the conflicts
+    (masked target -> every candidate, the chosen one first).
+
+    A clone that is not an umbrella over one that is, then the first by name.
+    """
+    chosen: dict[str, str] = {}
+    conflicts: dict[str, list[str]] = {}
+    for target, repos in sorted(published.items()):
+        # Only the chart resolver knows umbrellas: an umbrella bundles other
+        # repositories' charts, and is the owner of none of them.
+        own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos
+        candidates = own or repos
+        chosen[target] = candidates[0]
+        if len(candidates) > 1:
+            # A key of a committed file, so masked like every other one.
+            conflicts[secret_mask.mask(target)] = candidates
+    return chosen, conflicts
+
+
 class _Resolver:
     """Decides, for one reference, whether it is an edge, a self-reference or a
     target outside the estate."""
@@ -1185,16 +1221,9 @@ class _Resolver:
         self.chosen: dict[str, dict[str, str]] = {}
         self.conflicts: dict[str, dict[str, list[str]]] = {}
         for kind, published in publishers.items():
-            chosen = self.chosen.setdefault(kind, {})
-            for target, repos in sorted(published.items()):
-                # Only the chart resolver knows umbrellas: an umbrella bundles other
-                # repositories' charts, and is the owner of none of them.
-                own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos
-                candidates = own or repos
-                chosen[target] = candidates[0]
-                if len(candidates) > 1:
-                    # A key of a committed file, so masked like every other one.
-                    self.conflicts.setdefault(kind, {})[secret_mask.mask(target)] = candidates
+            self.chosen[kind], conflicts = _choose(kind, published, umbrellas)
+            if conflicts:
+                self.conflicts[kind] = conflicts
 
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
         """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
@@ -1216,6 +1245,14 @@ class _Resolver:
         if provider == consumer:
             return "self", ""
         return "edge", provider
+
+
+def chart_definitions(clones: list[Path], umbrellas: Set[str]) -> dict[str, str]:
+    """chart name -> the clone defining it, chosen as the layer chooses
+    (`_choose`). What `resolve_chart` takes as `defined`, for a caller resolving
+    charts outside the layer - the graph's `uses_chart` edges."""
+    chosen, _ = _choose("helm_chart", _publishers(clones, builtin("helm_chart")), umbrellas)
+    return chosen
 
 
 def _shape(value: object) -> str:
