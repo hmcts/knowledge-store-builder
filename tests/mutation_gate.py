@@ -4302,6 +4302,7 @@ MUTATIONS = (
         "the parameter inside the URL",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
             "test_headless_workers.ExtractTests.test_nothing_a_worker_can_read_holds_a_planted_secret",
             "test_secret_mask.UrlQuerySecrets.test_a_secret_parameter_is_masked_and_the_rest_of_the_url_kept",
             "test_secret_mask.UrlQuerySecrets.test_a_signature_is_counted_once_by_its_own_rule",
@@ -6960,6 +6961,7 @@ MUTATIONS = (
         "#455: the layer reports which pin each consumer holds, so a parser that reads the repository and drops `?ref=` yields every edge as floating - plausible edges, all of them saying nothing about version drift. The pre-existing `_TF_SOURCE` captured the organisation and nothing read it; the same shape of silent omission",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
             "test_build_relationships.SvcATest.test_svc_a_depends_on_and_depended_on_by_exactly",
             "test_relationships_parsers.TerraformKindTest.test_a_repository_source_resolves_outright_and_a_registry_one_does_not",
         ),
@@ -7073,7 +7075,10 @@ MUTATIONS = (
         "    if pattern:\n",
         "    if False:\n",
         "#455 comment 1: an estate that names chart repositories by a rule (`chart-{name}`) says so in configuration; skipping the step resolves each chart to whichever clone happens to define a chart of that name, a plausible and wrong provider",
-        ("test_build_relationships.ChartResolutionTest.test_the_pattern_step_wins_when_set",),
+        (
+            "test_build_relationships.ChartResolutionTest.test_the_pattern_step_wins_when_set",
+            "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_the_pattern_names_is_an_edge_to_that_clone",
+        ),
     ),
     Mutation(
         "relationships: an umbrella is preferred over the chart's own repository",
@@ -7083,6 +7088,7 @@ MUTATIONS = (
         "#455 comment 1: an umbrella bundles other repositories' charts, so preferring it resolves every chart it bundles to the umbrella and `dependents` of the chart's owner reads as empty",
         (
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
+            "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
         ),
     ),
     Mutation(
@@ -7126,6 +7132,7 @@ MUTATIONS = (
         "#455: a module source can carry `access_token=` in its query, and the example line is written to a committed file; the reference strips `user:token@` but not a query secret",
         (
             "test_build_relationships.MaskingTest.test_an_example_line_is_masked_and_a_target_key_too",
+            "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
         ),
     ),
     Mutation(
@@ -7146,6 +7153,36 @@ MUTATIONS = (
         "#455: a chart's `charts/` directory holds copies of its dependencies, so reading one publishes the dependency from every consumer that vendors it (a conflict with its owner) and adds the copy's own dependencies to the consumer's",
         (
             "test_build_relationships.ChartResolutionTest.test_a_vendored_subchart_publishes_nothing_and_declares_nothing",
+        ),
+    ),
+    Mutation(
+        "relationships: a reference is self because its repository publishes the target",
+        "relationships.py",
+        '            provider = ref.resolved_repo\n        elif ref.kind == "helm_chart":\n',
+        '            provider = ref.resolved_repo\n        elif consumer in self.publishers.get(ref.kind, {}).get(ref.target, ()):\n            return "self", ""\n        elif ref.kind == "helm_chart":\n',
+        "#455 review: skipping a reference as `self` whenever its repository also publishes the target, before resolution runs, dropped every edge from an umbrella to the charts it bundles - on one estate most of the helm self-skips were the shared charts repository, each a real dependency of the chart's owner",
+        (
+            "test_build_relationships.SelfRuleTest.test_a_coordinate_two_clones_publish_follows_the_conflict_resolution",
+            "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
+            "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_the_pattern_names_is_an_edge_to_that_clone",
+        ),
+    ),
+    Mutation(
+        "relationships: a pin is written unmasked",
+        "relationships.py",
+        "                        edge.refs[secret_mask.mask(ref.ref)] += 1\n",
+        "                        edge.refs[ref.ref] += 1\n",
+        "#455 review: a pin is store text and a key of a committed file - an npm spec can be a URL carrying `access_token=`, a Terraform `?ref=` can hold a token - and example lines were masked while the pin beside them was not",
+        ("test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",),
+    ),
+    Mutation(
+        "relationships: an unopenable file reads as empty",
+        "relationships.py",
+        "                    text = read_text_or_raise(clone / rel)\n",
+        "                    text = read_text(clone / rel)\n",
+        "#455 review: a file the stage cannot open was read as empty, so its references vanished from the layer with nothing counted or named; only a POM that failed to parse was reported",
+        (
+            "test_build_relationships.UnreadableTest.test_a_file_that_cannot_be_opened_is_counted_and_named_per_kind",
         ),
     ),
 )

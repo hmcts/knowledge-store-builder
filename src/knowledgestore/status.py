@@ -1110,7 +1110,7 @@ def _report_relationships() -> None:
         return
     try:
         kinds = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         print(f"Relationships: {_relative(path)} is unreadable ({error})")
         return
     if not isinstance(kinds, dict):

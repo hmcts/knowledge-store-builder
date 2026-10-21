@@ -108,9 +108,13 @@ by `knowledgestore relationships`). Four kinds are read:
 | `npm_package` | `package.json` `dependencies`, `devDependencies` and `peerDependencies` | the package name |
 
 Each reference resolves to a repository in the estate, to the repository that
-declared it, or to nothing the store holds. A reference to its own repository (a
-sibling Maven module, a chart beside its umbrella) is counted under `skipped` and
-is not an edge. A local module path is counted the same way. A target the store does
+declared it, or to nothing the store holds. A reference whose resolution lands on
+its own repository (a sibling Maven module, a module source naming its own
+repository) is counted under `skipped` as `self` and is not an edge. Publishing the
+target is not enough: an umbrella that also defines a chart another clone owns
+depends on that clone, and a coordinate two clones publish resolves by the conflict
+rule below, whichever of them declared it. A local module path is counted under
+`skipped` as `local`. A target the store does
 not hold is never dropped: `unresolved_targets_outside_estate` lists it per kind,
 with how often it is referenced and every repository that references it.
 
@@ -139,7 +143,8 @@ with how often it is referenced and every repository that references it.
 `refs_pinned` counts each pin as written, and `""` means none (floating).
 `references` is the full count. `examples` holds at most
 `KSB_RELATIONSHIP_EXAMPLES` (default 3), sorted by path and line, and each `line`
-is passed through the secret mask before it is written. `chart` is `""` for every
+is passed through the secret mask before it is written, as is every pin, unresolved
+target and conflict key. `chart` is `""` for every
 kind but `helm_chart`, so one repository of shared charts yields an edge per
 chart rather than one edge that hides which.
 
@@ -160,8 +165,8 @@ repository is a clone and its organisation matches `KSB_GITHUB_ORG`, ignoring ca
 An unset organisation matches any. A source outside the estate is reported as
 `<org>/<repo>`.
 
-A POM that does not parse is counted as `unreadable` and named in the run's
-output. The rest of the estate is still read. Two runs over the same clones write
+A file that cannot be opened, or a POM that does not parse, is counted as
+`unreadable` for its kind and named in the run's output. The rest of the estate is still read. Two runs over the same clones write
 identical bytes, and a repository no longer cloned loses its `by-repo` file in the
 same run.
 

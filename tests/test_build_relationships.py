@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io as _io
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -32,6 +33,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "relationships"
 SHA_A = "a" * 40
 SHA_C = "c" * 40
 TOKEN = "xxxxx-not-a-real-token"
+# Token-shaped, built so the source never holds the literal (as test_secret_mask does).
+GITHUB = "gh" + "p_" + "x" * 36
 
 # Clones the shared fixture estate does not carry: two module repositories svc-a
 # uses, and a consumer of svc-a that also names itself.
@@ -104,7 +107,15 @@ class _Store(SettingsIsolated):
             {"svc-a": SHA_A, "svc-c": SHA_C},
         )
         return relationships.build(
-            self.root, self.clones(), kinds, org, pattern, set(umbrellas), examples, urls
+            self.root,
+            self.clones(),
+            kinds,
+            org,
+            pattern,
+            set(umbrellas),
+            examples,
+            urls,
+            self.root / "knowledge" / "relationships" / "extra",
         )
 
     def run_stage(self, *argv: str) -> tuple[int, str, str]:
@@ -329,9 +340,7 @@ def _chart(name: str, *deps: str) -> str:
     return text
 
 
-class ChartResolutionTest(_Store):
-    """The five steps, in order, each shown deciding."""
-
+class _HelmStore(_Store):
     def helm(self, clones: dict[str, dict[str, str]], **kwargs):
         self.repos.mkdir()
         for name, files in clones.items():
@@ -343,6 +352,10 @@ class ChartResolutionTest(_Store):
             e["repository"] for e in layer.by_repo[consumer]["depends_on"] if e["chart"] == chart
         ]
         return found[0] if found else None
+
+
+class ChartResolutionTest(_HelmStore):
+    """The five steps, in order, each shown deciding."""
 
     ESTATE = {
         "app": {"Chart.yaml": _chart("app", "web")},
@@ -461,6 +474,67 @@ class ChartResolutionTest(_Store):
         self.assertEqual(layer.by_repo["deployer"]["depends_on"][0]["refs_pinned"], {"2.0.0": 1})
 
 
+class SelfRuleTest(_HelmStore):
+    """`self` means resolution landed on the consumer, and nothing else does."""
+
+    def test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone(self):
+        """Break caught: a reference skipped as `self` because its repository also
+        publishes the target, before resolution runs - so an umbrella bundling a
+        chart reads as depending on nothing, and the chart's owner loses a
+        dependent."""
+        layer = self.helm(
+            {
+                "bundle": {
+                    "Chart.yaml": _chart("bundle", "api"),
+                    "src/api/Chart.yaml": _chart("api"),
+                },
+                "owner": {"Chart.yaml": _chart("api")},
+            },
+            umbrellas={"bundle"},
+        )
+        self.assertEqual(self.provider(layer, "bundle", "api"), "owner")
+        self.assertEqual(layer.skipped["helm_chart"], {})
+
+    def test_an_umbrella_using_a_chart_the_pattern_names_is_an_edge_to_that_clone(self):
+        """Break caught: the same pre-emptive skip overriding step 1, so the
+        configured chart repository loses the umbrella as a dependent."""
+        layer = self.helm(
+            {
+                "bundle": {
+                    "Chart.yaml": _chart("bundle", "web"),
+                    "src/web/Chart.yaml": _chart("web"),
+                },
+                "chart-web": {"README.md": "x\n"},
+            },
+            pattern="chart-{name}",
+            umbrellas={"bundle"},
+        )
+        self.assertEqual(self.provider(layer, "bundle", "web"), "chart-web")
+
+    def test_a_coordinate_two_clones_publish_follows_the_conflict_resolution(self):
+        """Break caught: a multi-module repository's dependency on a coordinate it
+        and another clone both publish skipped as `self` when the conflict
+        resolved to the other clone."""
+        self.repos.mkdir()
+        _write(
+            self.repos / "multi",
+            {
+                "pom.xml": _pom("multi-parent", ""),
+                "core/pom.xml": _pom("shared", ""),
+                "app/pom.xml": _pom("multi-app", "shared"),
+            },
+        )
+        _write(self.repos / "a-shared", {"pom.xml": _pom("shared", "")})
+        layer = self.build(kinds=(_kind("maven_artifact"),))
+        self.assertEqual(
+            [e["repository"] for e in layer.by_repo["multi"]["depends_on"]], ["a-shared"]
+        )
+        self.assertEqual(
+            layer.conflicts, {"maven_artifact": {"com.example:shared": ["a-shared", "multi"]}}
+        )
+        self.assertEqual(layer.skipped["maven_artifact"], {})
+
+
 class OrgCheckTest(_Store):
     def test_a_module_in_another_organisation_is_not_the_estates(self):
         """Break caught: a module source matched on the repository name alone, so a
@@ -522,6 +596,66 @@ class MaskingTest(_Store):
         self.assertNotIn(TOKEN, json.dumps(layer.by_repo))
 
 
+class PinMaskingTest(_Store):
+    def test_pin_and_conflict_keys_are_masked(self):
+        """Break caught: `refs_pinned` and `conflicts` keys written as the file has
+        them. A pin is store text - an npm spec can be a URL with `access_token=`,
+        a Terraform `?ref=` can hold a token - and both are keys of committed files."""
+        self.estate(
+            {
+                "svc-p": {
+                    "package.json": json.dumps(
+                        {
+                            "name": "svc-p",
+                            "dependencies": {
+                                "@example/ui": "https://registry.example.test/ui.tgz"
+                                f"?access_token={TOKEN}"
+                            },
+                        }
+                    ),
+                    "main.tf": (
+                        f'module "m" {{\n  source = "github.com/example-org/tf-network?ref={GITHUB}"\n}}\n'
+                    ),
+                },
+                "pub-a": {
+                    "package.json": json.dumps(
+                        {"name": f"https://p.example.test/x?access_token={TOKEN}"}
+                    )
+                },
+                "pub-b": {
+                    "package.json": json.dumps(
+                        {"name": f"https://p.example.test/x?access_token={TOKEN}"}
+                    )
+                },
+            }
+        )
+        layer = self.build(kinds=(_kind("terraform_module"), _kind("npm_package")))
+        pins = {e["repository"]: e["refs_pinned"] for e in layer.by_repo["svc-p"]["depends_on"]}
+        self.assertEqual(
+            pins,
+            {
+                "tf-network": {"[masked]": 1},
+                "ui-kit": {"https://registry.example.test/ui.tgz?access_token=[masked]": 1},
+            },
+        )
+        self.assertEqual(
+            layer.conflicts,
+            {"npm_package": {"https://p.example.test/x?access_token=[masked]": ["pub-a", "pub-b"]}},
+        )
+        for written in (layer.dependencies, layer.by_repo, layer.conflicts):
+            self.assertNotIn(TOKEN, json.dumps(written))
+            self.assertNotIn(GITHUB, json.dumps(written))
+
+    def test_an_ordinary_pin_is_unchanged(self):
+        """Break caught: masking that rewrites a version (`v4.2.0`, `^2.1.0`), so
+        every pin reads as a secret and the drift question has no answer."""
+        self.estate()
+        layer = self.build()
+        pins = {e["repository"]: e["refs_pinned"] for e in layer.by_repo["svc-b"]["depends_on"]}
+        self.assertEqual(pins["ui-kit"], {"^2.1.0": 1})
+        self.assertEqual(pins["libs-java"], {"1.2.0": 1})
+
+
 class UnreadableTest(_Store):
     def test_a_pom_that_will_not_parse_is_counted_and_named(self):
         """Break caught: one malformed POM ending the stage for the whole estate, or
@@ -533,6 +667,43 @@ class UnreadableTest(_Store):
         self.assertEqual(
             [e["repository"] for e in layer.by_repo["svc-b"]["depends_on"]], ["libs-java"]
         )
+
+    def test_a_file_that_cannot_be_opened_is_counted_and_named_per_kind(self):
+        """Break caught: an unreadable `.tf`, `Chart.yaml` or `HelmRelease` read as
+        empty, so its references vanish with nothing said - the read error swallowed
+        by the helper that the parsers' own tests use."""
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root reads a mode-000 file")
+        release = (
+            "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n  name: x\n"
+            "spec:\n  chart:\n    spec:\n      chart: ext\n"
+        )
+        self.estate(
+            {
+                "locked": {
+                    "main.tf": 'module "m" {\n  source = "github.com/example-org/tf-network"\n}\n',
+                    "Chart.yaml": _chart("locked", "redis"),
+                    "release.yaml": release,
+                }
+            }
+        )
+        locked = [
+            self.repos / "locked" / name for name in ("main.tf", "Chart.yaml", "release.yaml")
+        ]
+        for path in locked:
+            path.chmod(0)
+            self.addCleanup(path.chmod, 0o644)
+        layer = self.build(kinds=(_kind("terraform_module"), _kind("helm_chart")))
+        self.assertEqual(
+            layer.unreadable,
+            [
+                "repositories/locked/Chart.yaml",
+                "repositories/locked/main.tf",
+                "repositories/locked/release.yaml",
+            ],
+        )
+        self.assertEqual(layer.skipped["terraform_module"].get("unreadable"), 1)
+        self.assertEqual(layer.skipped["helm_chart"].get("unreadable"), 2)
 
 
 class StageTest(_Store):
@@ -648,6 +819,41 @@ class StageTest(_Store):
         self.assertIn("terraform_module", out)
         self.assertIn("react", out)
 
+    def test_compare_refuses_a_file_of_the_wrong_shape_cleanly(self):
+        """Break caught: a malformed comparison file ending in a traceback rather
+        than an exit 1 that says what is wrong with it."""
+        self.estate()
+        for body in (
+            {"edges": [{"consumer": "a", "provider": "b", "kinds": ["helm_chart"]}]},
+            {"edges": {"not": "a list"}},
+            {"edges": [], "unresolved_targets_outside_estate": ["x"]},
+            {"edges": [], "unresolved_targets_outside_estate": {"npm_package": {"x": 3}}},
+            [],
+        ):
+            with self.subTest(body=body):
+                path = self.root / "bad.json"
+                path.write_text(json.dumps(body), encoding="utf-8")
+                code, out, err = self.run_stage("--compare", str(path))
+                self.assertEqual(code, 1)
+                self.assertNotIn("Traceback", out + err)
+                self.assertIn("bad.json", err)
+
+    def test_written_files_get_the_umask_not_owner_only(self):
+        """Break caught: files written through `mkstemp` keep its 0600, so a store
+        committed from one account is unreadable to another and to CI."""
+        self.estate()
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        self.run_stage()
+        base = self.root / "knowledge" / "relationships"
+        for path in (
+            base / "kinds.json",
+            base / "repository-dependencies.json",
+            base / "by-repo" / "svc-a.json",
+        ):
+            with self.subTest(path=path.name):
+                self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
     def test_compare_writes_nothing(self):
         """Break caught: a parity check that also rebuilds the store's layer."""
         self.estate()
@@ -678,3 +884,14 @@ class StatusTest(_Store):
         text = self._status()
         self.assertIn("Relationships:", text)
         self.assertIn("terraform_module 3 edges", text)
+
+    def test_status_survives_a_pathologically_nested_kinds_file(self):
+        """Break caught: `json.loads` raising `RecursionError` on a deeply nested
+        file, which is neither `OSError` nor `ValueError`, so `status` fails
+        (CLAUDE.md 6.7)."""
+        path = self.root / "knowledge" / "relationships" / "kinds.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("[" * 200000 + "]" * 200000, encoding="utf-8")
+        self.assertIn(
+            "Relationships: knowledge/relationships/kinds.json is unreadable", self._status()
+        )

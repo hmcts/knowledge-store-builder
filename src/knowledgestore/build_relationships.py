@@ -74,6 +74,28 @@ def report(layer: relationships.Layer) -> list[str]:
     return lines
 
 
+def shape_error(body: object) -> str:
+    """Why `body` is not a `repository-dependencies.json` that can be compared, or ""."""
+    if not isinstance(body, dict):
+        return "it is not a JSON object"
+    edges = body.get("edges", [])
+    if not isinstance(edges, list):
+        return "`edges` is not a list"
+    for number, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            return f"edge {number} is not an object"
+        for name in ("kinds", "refs_pinned"):
+            if not isinstance(edge.get(name, {}), dict):
+                return f"edge {number}'s `{name}` is not an object"
+    unresolved = body.get("unresolved_targets_outside_estate", {})
+    if not isinstance(unresolved, dict):
+        return "`unresolved_targets_outside_estate` is not an object"
+    for kind, targets in unresolved.items():
+        if not isinstance(targets, dict) or not all(isinstance(t, dict) for t in targets.values()):
+            return f"`unresolved_targets_outside_estate.{kind}` is not an object of objects"
+    return ""
+
+
 def _edge_index(body: dict) -> dict[tuple[str, str, str], tuple[dict, dict]]:
     index = {}
     for edge in body.get("edges") or []:
@@ -122,8 +144,9 @@ def _compare(layer: relationships.Layer, path: Path) -> int:
     except (OSError, ValueError) as error:
         print(f"Cannot read {path} to compare against: {error}", file=sys.stderr)
         return 1
-    if not isinstance(there, dict):
-        print(f"Cannot compare against {path}: it is not a JSON object", file=sys.stderr)
+    problem = shape_error(there)
+    if problem:
+        print(f"Cannot compare against {path}: {problem}", file=sys.stderr)
         return 1
     found = differences(layer.dependencies, there)
     if not found:
@@ -179,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             set(config.UMBRELLA_REPOS),
             config.RELATIONSHIP_EXAMPLES,
             urls,
+            config.RELATIONSHIPS_EXTRA_DIR,
         )
     except (relationships.KindError, ValueError) as error:
         print(f"Nothing written: {error}", file=sys.stderr)

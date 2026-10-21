@@ -27,13 +27,13 @@ import os
 import re
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Set
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.parsers import expat
 
-from . import config, deploy_flux, io, secret_mask
+from . import deploy_flux, io, secret_mask
 
 if TYPE_CHECKING:
     from .source_urls import SourceUrls
@@ -148,11 +148,17 @@ def _matches(rel: str, glob: str) -> bool:
 
 def read_text(path: Path) -> str:
     """File contents, or "" when unreadable: one bad file is not worth abandoning a
-    scan for."""
+    scan for. The layer reads with `read_text_or_raise` instead, so that it can say
+    which files it could not read rather than reading them as empty."""
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        return read_text_or_raise(path)
     except OSError:
         return ""
+
+
+def read_text_or_raise(path: Path) -> str:
+    """File contents, decoding errors replaced; an `OSError` propagates."""
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def scan(clone: Path, kind: Kind) -> list[Reference]:
@@ -926,7 +932,7 @@ class Layer:
 
 
 def resolve_chart(
-    chart: str, source: str, estate: Iterable[str], pattern: str, defined: dict[str, str]
+    chart: str, source: str, estate: Set[str], pattern: str, defined: dict[str, str]
 ) -> str | None:
     """The repository providing `chart`, or None when the estate holds none.
 
@@ -935,7 +941,6 @@ def resolve_chart(
     umbrella's, first by name); and, for a Flux `HelmRelease`, a `sourceRef` that
     names a clone - the graph's `uses_chart` rule, kept so the two agree.
     """
-    estate = set(estate)
     if pattern:
         candidate = pattern.format(name=chart)
         if candidate in estate:
@@ -965,7 +970,14 @@ class _Resolver:
     """Decides, for one reference, whether it is an edge, a self-reference or a
     target outside the estate."""
 
-    def __init__(self, estate, org, pattern, umbrellas, publishers):
+    def __init__(
+        self,
+        estate: frozenset[str],
+        org: str,
+        pattern: str,
+        umbrellas: Set[str],
+        publishers: dict[str, dict[str, list[str]]],
+    ) -> None:
         self.estate = estate
         self.org = org.lower()
         self.pattern = pattern
@@ -981,7 +993,8 @@ class _Resolver:
                 candidates = own or repos
                 chosen[target] = candidates[0]
                 if len(candidates) > 1:
-                    self.conflicts.setdefault(kind, {})[target] = candidates
+                    # A key of a committed file, so masked like every other one.
+                    self.conflicts.setdefault(kind, {})[secret_mask.mask(target)] = candidates
 
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
         """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
@@ -992,10 +1005,6 @@ class _Resolver:
             if not ours:
                 return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
             provider = ref.resolved_repo
-        elif consumer in self.publishers.get(ref.kind, {}).get(ref.target, ()):
-            # A repository using what it publishes itself: a sibling module of a
-            # multi-module build, a chart beside its own umbrella.
-            return "self", ""
         elif ref.kind == "helm_chart":
             provider = resolve_chart(
                 ref.target, ref.source, self.estate, self.pattern, self.chosen.get(ref.kind, {})
@@ -1004,6 +1013,9 @@ class _Resolver:
             provider = self.chosen.get(ref.kind, {}).get(ref.target)
         if provider is None:
             return "unresolved", ref.target
+        # `self` is where resolution landed, never what the consumer happens to
+        # publish: an umbrella that also defines a chart another clone owns depends
+        # on that clone, and a conflict another clone won is a dependency on it.
         if provider == consumer:
             return "self", ""
         return "edge", provider
@@ -1030,8 +1042,8 @@ def _store_relative(root: Path, path: Path) -> str:
         return path.as_posix()
 
 
-def _read_extra(repo: str) -> dict:
-    path = config.RELATIONSHIPS_EXTRA_DIR / f"{repo}.json"
+def _read_extra(extra_dir: Path, repo: str) -> dict:
+    path = extra_dir / f"{repo}.json"
     if not path.is_file():
         return {}
     try:
@@ -1068,11 +1080,11 @@ def _scan_layer(clones, kinds, resolver, root):
     for clone in clones:
         for kind in kinds:
             for rel in files_of(clone, kind):
-                text = read_text(clone / rel)
                 try:
+                    text = read_text_or_raise(clone / rel)
                     found = kind.references(clone, rel, text)
                     skipped[kind.name].update(kind.skips(clone, rel, text))
-                except ValueError:
+                except (OSError, ValueError):
                     unreadable.append(_store_relative(root, clone / rel))
                     skipped[kind.name]["unreadable"] += 1
                     continue
@@ -1096,7 +1108,9 @@ def _scan_layer(clones, kinds, resolver, root):
                         edge = edges.setdefault((clone.name, value, ref.chart), _Edge())
                         edge.references += 1
                         edge.kinds[kind.name] += 1
-                        edge.refs[ref.ref] += 1
+                        # A pin is store text and a key of a committed file: an npm
+                        # spec can be a URL carrying `access_token=`.
+                        edge.refs[secret_mask.mask(ref.ref)] += 1
                         edge.examples.append((ref.rel, ref.line, ref.text))
     return edges, unresolved, skipped, sorted(unreadable)
 
@@ -1110,6 +1124,7 @@ def build(
     umbrellas: set[str],
     examples: int,
     urls: SourceUrls | None,
+    extra_dir: Path,
 ) -> Layer:
     """The layer for these clones, in memory. Nothing is written.
 
@@ -1117,7 +1132,8 @@ def build(
     names a chart's repository (`chart-{name}`, `""` to skip that step);
     `umbrellas` are repositories that bundle other repositories' charts; `examples`
     caps the example lines per edge and nothing else; `urls` links each example and
-    names each repository's commit, or None for a store with no provenance.
+    names each repository's commit, or None for a store with no provenance;
+    `extra_dir` holds the store's `<repo>.json` inputs for `extra`.
     Raises `KindError` when a parser fails, and `ValueError` for an unreadable
     `extra` input.
     """
@@ -1146,7 +1162,7 @@ def build(
             "base_url": urls.base(name) if urls is not None else None,
             "depends_on": by_other_end(depends_on.get(name, [])),
             "depended_on_by": by_other_end(depended_on_by.get(name, [])),
-            "extra": _read_extra(name),
+            "extra": _read_extra(extra_dir, name),
         }
 
     unresolved_body = {
@@ -1207,6 +1223,8 @@ def write(layer: Layer, cfg) -> None:
         files[by_repo_dir / f"{repo}.json"] = body
     for path in files:
         io.checked_write_target(path)
+    umask = os.umask(0)
+    os.umask(umask)
     staged: list[tuple[str, Path]] = []
     try:
         for path, body in sorted(files.items()):
@@ -1217,6 +1235,8 @@ def write(layer: Layer, cfg) -> None:
             staged.append((temporary, path))
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 out.write(dumps(body))
+            # `mkstemp` creates 0600; the layer is committed and read by others.
+            os.chmod(temporary, 0o666 & ~umask)
     except BaseException:
         for temporary, _ in staged:
             Path(temporary).unlink(missing_ok=True)
