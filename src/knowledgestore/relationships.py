@@ -1162,8 +1162,32 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
 # kind but `helm_chart`: one repository of generic charts would otherwise read as a
 # dependency of nearly everything, with no way to ask which chart.
 
-FORMAT = {"major": 1, "minor": 0}
+# The layer's format version, stamped into `repository-dependencies.json`. Major
+# for incompatible changes, minor for additions.
+FORMAT = (1, 0)
+LAYER = "relationships"
 PACKAGE = "hmcts-knowledge-store-builder"
+
+
+def format_stamp() -> dict:
+    """The `format` object `repository-dependencies.json` carries at its top level."""
+    return {"layer": LAYER, "major": FORMAT[0], "minor": FORMAT[1]}
+
+
+def format_problem(body: object) -> str:
+    """Why `body` is not a layer this release reads, or "" when its stamp is ours.
+
+    A file with no stamp, another layer's stamp or another major is refused: a
+    store's own script writes a differently shaped `knowledge/relationships/`, and
+    a reader must not take that for this stage's output.
+    """
+    stamp = body.get("format") if isinstance(body, dict) else None
+    if not isinstance(stamp, dict) or stamp.get("layer") != LAYER:
+        return f'it carries no `format` stamp for the "{LAYER}" layer'
+    major = stamp.get("major")
+    if isinstance(major, bool) or major != FORMAT[0]:
+        return f"it is format major {major!r}; this release reads major {FORMAT[0]}"
+    return ""
 
 
 class KindError(Exception):
@@ -1663,7 +1687,7 @@ def build(
         }
     return Layer(
         dependencies={
-            "format": dict(FORMAT),
+            "format": format_stamp(),
             "edges": flat,
             "unresolved_targets_outside_estate": unresolved_body,
             "conflicts": resolver.conflicts,

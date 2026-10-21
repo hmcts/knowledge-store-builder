@@ -25,7 +25,7 @@ bytes, and a repository no longer cloned loses its `by-repo` file in the same ru
 (consumer, provider, chart, kind) whose references or pins differ from PATH's,
 and every unresolved target that differs. It exits 1 on any difference. PATH must
 be a `repository-dependencies.json` in this stage's own layer format: nothing
-else is read. A file of another shape exits 1 with "Cannot compare against
+else is read. A file of another shape, or with no format stamp or another major, exits 1 with "Cannot compare against
 PATH: ..." and compares nothing. Parity with another tool is reached by
 converting that tool's output to this format first, which is the store's job.
 
@@ -78,7 +78,11 @@ def report(layer: relationships.Layer) -> list[str]:
 
 
 def shape_error(body: object) -> str:
-    """Why `body` is not a `repository-dependencies.json` that can be compared, or ""."""
+    """Why `body` is not a `repository-dependencies.json` that can be compared, or "".
+
+    Shape first, then the format stamp, so a foreign layer is told it is foreign
+    only once it is at least this layer's shape.
+    """
     if not isinstance(body, dict):
         return "it is not a JSON object"
     edges = body.get("edges", [])
@@ -94,7 +98,7 @@ def shape_error(body: object) -> str:
     for kind, targets in unresolved.items():
         if not isinstance(targets, dict) or not all(isinstance(t, dict) for t in targets.values()):
             return f"`unresolved_targets_outside_estate.{kind}` is not an object of objects"
-    return ""
+    return relationships.format_problem(body)
 
 
 def _edge_shape_error(number: int, edge: object) -> str:

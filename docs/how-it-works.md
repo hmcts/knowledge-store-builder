@@ -125,7 +125,12 @@ with how often it is referenced and every repository that references it.
   none is recorded), and `extra`, copied from `extra/<repo>.json` when the store
   writes one. The stage never interprets `extra`.
 - `repository-dependencies.json`: every edge with both ends, the unresolved
-  targets, and `conflicts`.
+  targets, and `conflicts`. Its top level opens with
+  `"format": {"layer": "relationships", "major": 1, "minor": 0}`, the stamp that
+  says whose layer this is: major changes for an incompatible change, minor for an
+  addition. A reader refuses a file with no stamp or another major, so a store's
+  own differently shaped `knowledge/relationships/` is never read as this layer.
+  `kinds.json` carries no stamp; readers find it here.
 - `kinds.json`: per kind, its origin, what its pins are (`pins`), and its counts
   of edges, references and unresolved targets, plus what was skipped and why. It
   is small enough to read without opening the others.
@@ -210,8 +215,8 @@ the layer, writes nothing, and prints every (consumer, provider, chart, kind)
 whose references or pins differ from PATH's, and every unresolved target that
 differs, exiting 1 on any difference. PATH must be a
 `repository-dependencies.json` in this stage's own layer format, such as one an
-earlier run wrote; `--compare` reads nothing else. A file of any other shape
-exits 1 with `Cannot compare against PATH: …` and compares nothing. To check
+earlier run wrote; `--compare` reads nothing else. A file of any other shape, or
+with no format stamp or another major, exits 1 with `Cannot compare against PATH: …` and compares nothing. To check
 parity with a script a store already runs, the store converts that script's
 output to this format first, then compares.
 

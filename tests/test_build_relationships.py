@@ -240,7 +240,9 @@ class SvcATest(_Store):
             terraform,
             [("svc-a", "tf-network", 1), ("svc-a", "tf-storage", 1), ("svc-c", "svc-a", 2)],
         )
-        self.assertEqual(layer.dependencies["format"], {"major": 1, "minor": 0})
+        self.assertEqual(
+            layer.dependencies["format"], {"layer": "relationships", "major": 1, "minor": 0}
+        )
 
     def test_references_are_never_capped_by_the_example_limit(self):
         """Break caught: `references` counted from the truncated example list, so a
@@ -1100,6 +1102,44 @@ class StageTest(_Store):
                 self.assertNotIn("Traceback", out + err)
                 self.assertIn("bad.json", err)
 
+    def test_compare_refuses_an_unstamped_or_foreign_major_file(self):
+        """Break caught: `--compare` accepting a file with no format stamp or another
+        major, so a store's own script output (same top-level keys, different shape)
+        is compared as though it were this layer and the differences read as drift."""
+        self.estate()
+        self.run_stage()
+        written = self.root / "knowledge" / "relationships" / "repository-dependencies.json"
+        stamped = json.loads(written.read_text())
+        unstamped = {k: v for k, v in stamped.items() if k != "format"}
+        other_layer = {**stamped, "format": {**stamped["format"], "layer": "deployments"}}
+        other_major = {**stamped, "format": {**stamped["format"], "major": 2}}
+        for label, body in (
+            ("unstamped", unstamped),
+            ("another layer", other_layer),
+            ("another major", other_major),
+        ):
+            with self.subTest(label):
+                path = self.root / "foreign.json"
+                path.write_text(json.dumps(body), encoding="utf-8")
+                code, out, err = self.run_stage("--compare", str(path))
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("Cannot compare against", err)
+                self.assertIn("format", err)
+                self.assertNotIn("Traceback", out + err)
+
+    def test_the_format_stamp_is_written_identically_by_every_run(self):
+        """Break caught: the stamp missing from the written file, carrying a key a
+        reader does not look for, or varying between runs (CLAUDE.md 1.3)."""
+        self.estate()
+        self.run_stage()
+        written = self.root / "knowledge" / "relationships" / "repository-dependencies.json"
+        first = written.read_bytes()
+        self.assertEqual(
+            json.loads(first)["format"], {"layer": "relationships", "major": 1, "minor": 0}
+        )
+        self.run_stage()
+        self.assertEqual(written.read_bytes(), first)
+
     def test_written_files_get_the_umask_not_owner_only(self):
         """Break caught: files written through `mkstemp` keep its 0600, so a store
         committed from one account is unreadable to another and to CI."""
@@ -1157,3 +1197,23 @@ class StatusTest(_Store):
         self.assertIn(
             "Relationships: knowledge/relationships/kinds.json is unreadable", self._status()
         )
+
+    def test_status_reports_an_unstamped_or_foreign_layer_as_unrecognised(self):
+        """Break caught: `status` summarising a store's own script output as this
+        layer's edges, because it read `kinds.json` and never asked whose it is."""
+        self.estate()
+        self.run_stage()
+        written = self.root / "knowledge" / "relationships" / "repository-dependencies.json"
+        stamped = json.loads(written.read_text())
+        self.assertIn("terraform_module 3 edges", self._status())
+        for label, body in (
+            ("unstamped", {k: v for k, v in stamped.items() if k != "format"}),
+            ("another major", {**stamped, "format": {**stamped["format"], "major": 2}}),
+        ):
+            with self.subTest(label):
+                written.write_text(json.dumps(body), encoding="utf-8")
+                text = self._status()
+                self.assertIn("Relationships: unrecognised format", text)
+                self.assertNotIn("terraform_module 3 edges", text)
+        written.unlink()
+        self.assertIn("Relationships: unrecognised format", self._status())
