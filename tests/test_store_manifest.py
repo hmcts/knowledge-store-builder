@@ -81,9 +81,11 @@ class _Store(SettingsIsolated):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
 
-    def compute(self) -> dict:
-        config.configure(STORE_ID="example-store")
-        return store_manifest.compute(self.root)
+
+def compute(case: _Store) -> dict:
+    """The manifest of the case's store, under a fixed store id."""
+    config.configure(STORE_ID="example-store")
+    return store_manifest.compute(case.root)
 
 
 class AnEmptyStore(_Store):
@@ -91,11 +93,11 @@ class AnEmptyStore(_Store):
         """Breaks if a layer is reported present without its file, or an absent
         layer carries a digest: a fresh `discover` has built nothing, and the
         manifest must say so."""
-        manifest = self.compute()
+        manifest = compute(self)
         self.assertEqual(sorted(manifest["layers"]), list(ALL_LAYERS))
         expected: dict[str, bool | None] = {name: False for name in ALL_LAYERS}
         expected["deployments"] = None  # nothing measured, so unknown rather than absent
-        self.assertEqual(_present(self.compute()), expected)
+        self.assertEqual(_present(compute(self)), expected)
         digests = {name: layer["digest"] for name, layer in manifest["layers"].items()}
         self.assertEqual(digests, {name: None for name in ALL_LAYERS})
         self.assertIsNone(manifest["sources_as_of"])
@@ -108,7 +110,7 @@ class AnEmptyStore(_Store):
         from knowledgestore import __version__
 
         config.configure(GITHUB_ORG="example-org")
-        manifest = self.compute()
+        manifest = compute(self)
         self.assertEqual(manifest["format"], {"major": 1, "minor": 0})
         self.assertEqual(manifest["store"], {"id": "example-store", "github_org": "example-org"})
         self.assertEqual(manifest["library_version"], __version__)
@@ -128,7 +130,7 @@ class WhichLayersArePresent(_Store):
         # Deployments live inside the graph; with no telemetry nothing says whether
         # the stage put any there, so the answer is unknown, not absent.
         expected["deployments"] = None
-        self.assertEqual(_present(self.compute()), expected)
+        self.assertEqual(_present(compute(self)), expected)
 
     def test_every_layer_reads_its_own_path(self):
         """Breaks if any one layer's path is wrong: each file is created alone and
@@ -156,7 +158,7 @@ class WhichLayersArePresent(_Store):
             with self.subTest(layer=name), tempfile.TemporaryDirectory() as raw:
                 self.root = Path(raw)
                 _touch(self.root, rel)
-                present = [n for n, p in _present(self.compute()).items() if p]
+                present = [n for n, p in _present(compute(self)).items() if p]
                 self.assertEqual(present, [name])
 
     def test_the_content_file_list_is_a_present_digested_layer(self):
@@ -164,7 +166,7 @@ class WhichLayersArePresent(_Store):
         manifest: it would be a store artefact no reader is told about."""
         data = b"docs/a.md\ndocs/b.md\n"
         _touch(self.root, "knowledge/corpus/content-files.txt", data.decode())
-        layer = self.compute()["layers"]["content_files"]
+        layer = compute(self)["layers"]["content_files"]
         self.assertEqual(layer["paths"], ["knowledge/corpus/content-files.txt"])
         self.assertTrue(layer["present"])
         self.assertEqual(layer["digest"], _sha(data))
@@ -173,11 +175,11 @@ class WhichLayersArePresent(_Store):
         """Breaks if a directory layer counts as present because the directory
         exists: `mkdir` alone has not built history."""
         (self.root / "knowledge" / "git-history").mkdir(parents=True)
-        self.assertFalse(_present(self.compute())["history"])
+        self.assertFalse(_present(compute(self))["history"])
 
     def test_directory_layers_are_listed_with_a_trailing_slash(self):
         """Breaks if a directory layer's path is indistinguishable from a file's."""
-        layers = self.compute()["layers"]
+        layers = compute(self)["layers"]
         self.assertEqual(layers["history"]["paths"], ["knowledge/git-history/"])
         self.assertEqual(layers["relationships"]["paths"], ["knowledge/relationships/by-repo/"])
 
@@ -187,7 +189,7 @@ class CompressedAndPlainVariants(_Store):
         """Breaks if only the `.gz` counts as the graph, or the listed path is one
         that is not there."""
         _touch(self.root, "graphify-out/graph.json")
-        graph = self.compute()["layers"]["graph"]
+        graph = compute(self)["layers"]["graph"]
         self.assertTrue(graph["present"])
         self.assertEqual(graph["paths"], ["graphify-out/graph.json", "graphify-out/graph.json.gz"])
 
@@ -195,13 +197,13 @@ class CompressedAndPlainVariants(_Store):
         """Breaks if only the plain file counts: every store commits the `.gz` and
         gitignores the plain file, so a clone holds the `.gz` alone."""
         _touch(self.root, "graphify-out/graph.json.gz", "")
-        graph = self.compute()["layers"]["graph"]
+        graph = compute(self)["layers"]["graph"]
         self.assertTrue(graph["present"])
         self.assertEqual(graph["paths"], ["graphify-out/graph.json.gz", "graphify-out/graph.json"])
 
     def test_with_neither_the_first_candidate_is_listed_and_the_layer_is_absent(self):
         """Breaks if an absent layer lists no path, or claims to be present."""
-        graph = self.compute()["layers"]["graph"]
+        graph = compute(self)["layers"]["graph"]
         self.assertFalse(graph["present"])
         self.assertEqual(graph["paths"], ["graphify-out/graph.json.gz", "graphify-out/graph.json"])
 
@@ -209,7 +211,7 @@ class CompressedAndPlainVariants(_Store):
         """Breaks if only the plain index counts: on a large estate the plain file
         is over GitHub's 100 MB limit, so a store commits the `.gz` alone."""
         _touch(self.root, "knowledge/index/store.sqlite.gz", "")
-        index = self.compute()["layers"]["index"]
+        index = compute(self)["layers"]["index"]
         self.assertTrue(index["present"])
         self.assertEqual(
             index["paths"], ["knowledge/index/store.sqlite.gz", "knowledge/index/store.sqlite"]
@@ -303,7 +305,7 @@ class StoreIdentity(SettingsIsolated):
 
 class TelemetryFlags(_Store):
     def flags(self) -> tuple:
-        layers = self.compute()["layers"]
+        layers = compute(self)["layers"]
         return (
             layers["graph"]["source_urls"],
             layers["intent"]["reach"],
@@ -376,7 +378,7 @@ class ExtraLayers(_Store):
         _touch(self.root, "docs/journeys/apply.md", "# Apply")
         journeys_digest = _sha(b"apply.md\0" + _sha(b"# Apply").encode())
         self.assertEqual(
-            self.compute()["extra_layers"],
+            compute(self)["extra_layers"],
             {
                 "journeys": {
                     "path": "docs/journeys/",
@@ -507,8 +509,8 @@ class Determinism(_Store):
         _touch(self.root, "graphify-out/graph.json.gz", "")
         _touch(self.root, "knowledge/summaries/communities.json")
         _telemetry(self.root, {"intent.repositories_without_reach": 0})
-        first = json.dumps(self.compute(), indent=1, sort_keys=True)
-        second = json.dumps(self.compute(), indent=1, sort_keys=True)
+        first = json.dumps(compute(self), indent=1, sort_keys=True)
+        second = json.dumps(compute(self), indent=1, sort_keys=True)
         self.assertEqual(first, second)
 
     def test_a_file_layer_digest_is_the_sha256_of_its_bytes(self):
@@ -517,7 +519,7 @@ class Determinism(_Store):
         _touch(self.root, "knowledge/provenance.json", '{"repositories": {}}')
         _touch(self.root, "knowledge/git-history/a.ndjson", "one")
         _touch(self.root, "knowledge/git-history/b.ndjson", "two")
-        layers = self.compute()["layers"]
+        layers = compute(self)["layers"]
         self.assertEqual(layers["provenance"]["digest"], _sha(b'{"repositories": {}}'))
         lines = sorted([f"a.ndjson\0{_sha(b'one')}", f"b.ndjson\0{_sha(b'two')}"])
         self.assertEqual(layers["history"]["digest"], _sha("\n".join(lines).encode()))
@@ -534,7 +536,7 @@ class Digest(_Store):
         _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
 
     def digest(self) -> str:
-        return self.compute()["digest"]
+        return compute(self)["digest"]
 
     def test_moving_every_modification_time_leaves_the_digest_unchanged(self):
         """Breaks if the digest reads a modification time: a fresh clone and an
@@ -586,7 +588,7 @@ class Digest(_Store):
     def test_the_store_digest_is_derived_from_the_layer_lines(self):
         """Breaks if the store digest's construction drifts from what a second
         reader can recompute from the manifest alone."""
-        manifest = self.compute()
+        manifest = compute(self)
         lines = sorted(
             f"{name}\0{layer['digest'] or '-'}" for name, layer in manifest["layers"].items()
         )
@@ -611,7 +613,7 @@ class Symlinks(_Store):
         (self.root / "knowledge").mkdir()
         (self.root / "knowledge" / "provenance.json").symlink_to(self.outside / "secret.txt")
         with self.assertRaises(store_manifest.UsageError) as caught:
-            self.compute()
+            compute(self)
         self.assertIn("knowledge/provenance.json", str(caught.exception))
 
     def test_a_directory_entry_linking_outside_the_store_is_refused(self):
@@ -622,7 +624,7 @@ class Symlinks(_Store):
             self.outside / "secret.txt"
         )
         with self.assertRaises(store_manifest.UsageError) as caught:
-            self.compute()
+            compute(self)
         self.assertIn("stray.ndjson", str(caught.exception))
 
     def test_a_directory_link_leaving_the_store_is_refused(self):
@@ -633,7 +635,7 @@ class Symlinks(_Store):
             self.outside, target_is_directory=True
         )
         with self.assertRaises(store_manifest.UsageError):
-            self.compute()
+            compute(self)
 
     def test_a_link_staying_inside_the_store_is_hashed_as_its_target(self):
         """Breaks if a link within the store is refused, or digested as its own
@@ -644,7 +646,7 @@ class Symlinks(_Store):
         (self.root / "knowledge" / "git-history" / "b.ndjson").symlink_to(
             self.root / "knowledge/real.json"
         )
-        layers = self.compute()["layers"]
+        layers = compute(self)["layers"]
         self.assertEqual(layers["provenance"]["digest"], _sha(b"shared"))
         direct = _sha(
             "\n".join([f"a.ndjson\0{_sha(b'history')}", f"b.ndjson\0{_sha(b'shared')}"]).encode()
@@ -663,7 +665,7 @@ class WhatACloneReceives(_Store):
         _touch(self.root, ".gitignore", "knowledge/git-history/\ngraphify-out/graph.json\n")
 
     def layers(self) -> dict:
-        return self.compute()["layers"]
+        return compute(self)["layers"]
 
     def test_an_ignored_directory_layer_is_local_only(self):
         """Breaks if a gitignored directory layer is offered to askers: `history`
@@ -706,7 +708,7 @@ class WhatACloneReceives(_Store):
             "config/store-extra-layers.json",
             json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
         )
-        journeys = self.compute()["extra_layers"]["journeys"]
+        journeys = compute(self)["extra_layers"]["journeys"]
         self.assertTrue(journeys["present"])
         self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
 
@@ -721,7 +723,7 @@ class WhatACloneReceives(_Store):
             "config/store-extra-layers.json",
             json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
         )
-        journeys = self.compute()["extra_layers"]["journeys"]
+        journeys = compute(self)["extra_layers"]["journeys"]
         self.assertEqual(journeys["digest"], _sha(b"apply.md\0" + _sha(b"# Apply").encode()))
 
     def journeys(self) -> dict:
@@ -730,7 +732,7 @@ class WhatACloneReceives(_Store):
             "config/store-extra-layers.json",
             json.dumps({"journeys": {"path": "docs/journeys/", "description": "x"}}),
         )
-        return self.compute()["extra_layers"]["journeys"]
+        return compute(self)["extra_layers"]["journeys"]
 
     def test_unusual_file_names_that_are_ignored_are_excluded(self):
         """Breaks if an ignored file is counted because its name defeats the
@@ -808,7 +810,7 @@ class WhatACloneReceives(_Store):
             "config/store-extra-layers.json",
             json.dumps({"registry": {"path": "knowledge/registry.json", "description": "x"}}),
         )
-        registry = self.compute()["extra_layers"]["registry"]
+        registry = compute(self)["extra_layers"]["registry"]
         self.assertFalse(registry["present"])
         self.assertTrue(registry["local_only"])
         self.assertIsNone(registry["digest"])
@@ -817,9 +819,9 @@ class WhatACloneReceives(_Store):
         """Breaks if a layer clones lack still moves the store digest: it must
         contribute `-`, exactly as if the files were never built."""
         _touch(self.root, "knowledge/summaries/communities.json", "{}")
-        without = self.compute()["digest"]
+        without = compute(self)["digest"]
         _touch(self.root, "knowledge/git-history/example-repo.ndjson", "history")
-        self.assertEqual(self.compute()["digest"], without)
+        self.assertEqual(compute(self)["digest"], without)
 
     def test_a_clone_computes_the_builders_store_digest(self):
         """Breaks if builder and clone disagree on the store digest: the one value
@@ -831,7 +833,7 @@ class WhatACloneReceives(_Store):
         git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(self.root)]
         subprocess.run([*git, "add", "."], check=True, env=git_env())
         subprocess.run([*git, "commit", "-q", "-m", "store"], check=True, env=git_env())
-        builder = self.compute()
+        builder = compute(self)
         clones = tempfile.TemporaryDirectory()
         self.addCleanup(clones.cleanup)
         clone = Path(clones.name) / "clone"
@@ -861,7 +863,7 @@ class SourcesAsOf(_Store):
                 "c": {"sha": "3", "committed": "2025-06-01T00:00:00+00:00"},
             }
         )
-        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T23:00:00+00:00")
+        self.assertEqual(compute(self)["sources_as_of"], "2026-01-01T23:00:00+00:00")
 
     def test_fetch_only_repositories_are_not_sources(self):
         """Breaks if `external` counts: a fetch-only repository is not in the
@@ -870,11 +872,11 @@ class SourcesAsOf(_Store):
             {"a": {"sha": "1", "committed": "2026-01-01T00:00:00+00:00"}},
             external={"x": {"sha": "9", "committed": "2027-01-01T00:00:00+00:00"}},
         )
-        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T00:00:00+00:00")
+        self.assertEqual(compute(self)["sources_as_of"], "2026-01-01T00:00:00+00:00")
 
     def test_without_provenance_it_is_null(self):
         """Breaks if a store that recorded no source invents a date."""
-        self.assertIsNone(self.compute()["sources_as_of"])
+        self.assertIsNone(compute(self)["sources_as_of"])
 
     def test_an_unparseable_date_is_skipped(self):
         """Breaks if one blank or damaged `committed` stops the manifest."""
@@ -884,7 +886,7 @@ class SourcesAsOf(_Store):
                 "b": {"sha": "2", "committed": "2026-01-01T00:00:00+00:00"},
             }
         )
-        self.assertEqual(self.compute()["sources_as_of"], "2026-01-01T00:00:00+00:00")
+        self.assertEqual(compute(self)["sources_as_of"], "2026-01-01T00:00:00+00:00")
 
 
 def _unaccounted(namespace, root: Path, layers, not_a_layer) -> list[str]:
