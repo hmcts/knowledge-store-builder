@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import unittest
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated
@@ -24,6 +25,29 @@ from unittest import mock
 
 from knowledgestore import build_store_index, config, status, store_index
 from test_store_index import LINKS, NODES, TICKETS, node, write_graph, write_tickets
+
+
+def run_stage(runner=build_store_index.main):
+    out, err = stdio.StringIO(), stdio.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = runner()
+    return code, out.getvalue(), err.getvalue()
+
+
+def status_text(case: unittest.TestCase) -> str:
+    case.addCleanup(setattr, status, "run_git", status.run_git)
+    status.run_git = lambda arguments: ""
+    out = stdio.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(stdio.StringIO()):
+        code = status.main([])
+    case.assertEqual(code, 0, "status never fails (CLAUDE.md 6.7)")
+    return out.getvalue()
+
+
+def index_line(case: unittest.TestCase, text: str) -> str:
+    lines = [line for line in text.splitlines() if line.startswith("Query index")]
+    case.assertEqual(len(lines), 1, text)
+    return lines[0]
 
 
 class StageCase(SettingsIsolated):
@@ -41,31 +65,12 @@ class StageCase(SettingsIsolated):
         self.sqlite = self.root / "knowledge" / "index" / "store.sqlite"
         self.gz = self.sqlite.with_name("store.sqlite.gz")
 
-    def run_stage(self, runner=build_store_index.main):
-        out, err = stdio.StringIO(), stdio.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = runner()
-        return code, out.getvalue(), err.getvalue()
-
-    def status_text(self) -> str:
-        self.addCleanup(setattr, status, "run_git", status.run_git)
-        status.run_git = lambda arguments: ""
-        out = stdio.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(stdio.StringIO()):
-            self.assertEqual(status.main([]), 0, "status never fails (CLAUDE.md 6.7)")
-        return out.getvalue()
-
-    def index_line(self, text: str) -> str:
-        lines = [line for line in text.splitlines() if line.startswith("Query index")]
-        self.assertEqual(len(lines), 1, text)
-        return lines[0]
-
 
 class TheStageWritesTheIndex(StageCase):
     def test_it_writes_both_files_and_reports_the_reconciliation_and_sizes(self):
         """Breaks if the stage stops writing the plain file or its archive, exits non-zero
         on a good graph, or stops saying what it read against what it wrote."""
-        code, out, _ = self.run_stage()
+        code, out, _ = run_stage()
         self.assertEqual(code, 0)
         self.assertTrue(self.sqlite.is_file())
         self.assertTrue(self.gz.is_file())
@@ -83,16 +88,16 @@ class TheStageWritesTheIndex(StageCase):
     def test_a_second_run_over_unchanged_inputs_is_byte_identical(self):
         """Breaks if anything time- or order-dependent reaches either file: the stage's
         outputs are committed, so a rebuild that differs is a diff nobody made."""
-        self.run_stage()
+        run_stage()
         first = (self.sqlite.read_bytes(), self.gz.read_bytes())
-        self.run_stage()
+        run_stage()
         self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), first)
 
     def test_the_archive_is_read_when_both_graphs_exist(self):
         """Breaks if the stage prefers the gitignored plain graph: the index would record
         a file `status` never compares, and a builder and a peer would differ."""
         write_graph(self.archive, NODES + [node("z9", "Archive only", file="x.py")], LINKS)
-        code, _, _ = self.run_stage()
+        code, _, _ = run_stage()
         self.assertEqual(code, 0)
         connection = sqlite3.connect(self.sqlite.as_uri() + "?mode=ro", uri=True)
         try:
@@ -108,10 +113,10 @@ class TheStageWritesTheIndex(StageCase):
         """Breaks if the bytes depend on whether the plain graph happens to be on disk:
         an unchanged store would then commit a diff on every other machine."""
         write_graph(self.archive, NODES, LINKS)
-        self.run_stage()
+        run_stage()
         builder = (self.sqlite.read_bytes(), self.gz.read_bytes())
         self.plain.unlink()
-        self.run_stage()
+        run_stage()
         self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), builder)
 
     def test_the_archive_graph_is_read_when_the_plain_one_is_absent(self):
@@ -119,7 +124,7 @@ class TheStageWritesTheIndex(StageCase):
         only `graph.json.gz`, and the stage must run there."""
         self.plain.unlink()
         write_graph(self.archive, NODES, LINKS)
-        code, _, _ = self.run_stage()
+        code, _, _ = run_stage()
         self.assertEqual(code, 0)
         self.assertTrue(self.gz.is_file())
 
@@ -128,10 +133,10 @@ class TheStageRefusesCleanly(StageCase):
     def test_no_graph_exits_1_naming_both_paths_and_leaves_an_existing_index(self):
         """Breaks if a missing graph writes an empty index over a good one, or the
         message names only one of the two files the operator might supply."""
-        self.run_stage()
+        run_stage()
         before = (self.sqlite.read_bytes(), self.gz.read_bytes())
         self.plain.unlink()
-        code, out, err = self.run_stage()
+        code, out, err = run_stage()
         self.assertEqual(code, 1)
         self.assertIn(str(self.plain), out + err)
         self.assertIn(str(self.archive), out + err)
@@ -140,7 +145,7 @@ class TheStageRefusesCleanly(StageCase):
     def test_no_graph_writes_nothing(self):
         """Breaks if the refusal still creates the index directory or a partial file."""
         self.plain.unlink()
-        self.run_stage()
+        run_stage()
         self.assertFalse((self.root / "knowledge" / "index").exists())
 
     def test_a_truncated_archive_exits_1_and_leaves_nothing_behind(self):
@@ -148,7 +153,7 @@ class TheStageRefusesCleanly(StageCase):
         self.plain.unlink()
         write_graph(self.archive, NODES, LINKS)
         self.archive.write_bytes(self.archive.read_bytes()[:-20])
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 1)
         self.assertTrue(err.strip(), "a refusal that says nothing is a puzzle")
         self.assertEqual(sorted(p.name for p in self.sqlite.parent.glob("*")), [])
@@ -158,7 +163,7 @@ class TheStageRefusesCleanly(StageCase):
         or raised, so a caller cannot tell the two apart."""
         blocker = self.root / "knowledge" / "index"
         blocker.write_text("a file where the directory should be", encoding="utf-8")
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 2)
         self.assertIn(str(self.sqlite), err)
 
@@ -172,7 +177,7 @@ class TheStageRefusesCleanly(StageCase):
             build_store_index.store_index.fts5_available,
         )
         build_store_index.store_index.fts5_available = lambda: False
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 1)
         self.assertIn(sqlite3.sqlite_version, err)
         self.assertFalse(self.sqlite.exists())
@@ -185,7 +190,7 @@ class InputErrorsAreNotOutputErrors(StageCase):
         return sorted(p.name for p in self.sqlite.parent.glob("*"))
 
     def assert_refused_as_input(self, expected: str):
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 1, err)
         self.assertIn(expected, err)
         self.assertEqual(self.written(), [])
@@ -200,7 +205,7 @@ class InputErrorsAreNotOutputErrors(StageCase):
         """Breaks if a JSON error, a ValueError, falls into the branch for a target that
         climbs upward and exits 2."""
         self.plain.write_text('{"nodes": [{"id": "a1"}, not json', encoding="utf-8")
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 1, err)
         self.assertEqual(self.written(), [])
 
@@ -230,7 +235,7 @@ class InputErrorsAreNotOutputErrors(StageCase):
             " BEGIN SELECT RAISE(IGNORE); END;"
         )
         with mock.patch.object(store_index, "DDL", lossy):
-            code, _, err = self.run_stage()
+            code, _, err = run_stage()
         self.assertEqual(code, 1)
         self.assertIn("an edge was lost", err)
         self.assertFalse(self.sqlite.exists())
@@ -241,7 +246,7 @@ class TheSizeWarning(StageCase):
         """Breaks if an archive over the limit is committed without a word, or if the
         warning is promoted to a failure (the store decides whether to commit)."""
         config.configure(INDEX_WARN_MB=0)
-        code, out, err = self.run_stage()
+        code, out, err = run_stage()
         self.assertEqual(code, 0)
         self.assertIn("100 MB", err)
         self.assertIn("knowledge/index/store.sqlite", err)
@@ -249,7 +254,7 @@ class TheSizeWarning(StageCase):
 
     def test_no_warning_at_the_default_for_a_small_archive(self):
         """Breaks if the warning fires for every store, which teaches readers to ignore it."""
-        code, out, err = self.run_stage()
+        code, out, err = run_stage()
         self.assertEqual(code, 0)
         self.assertNotIn("100 MB", out + err)
 
@@ -264,7 +269,7 @@ class TheSizeWarning(StageCase):
         then raises a TypeError after a full build, instead of warning."""
         config.configure(INDEX_WARN_MB="0")
         self.assertEqual(config.INDEX_WARN_MB, 0)
-        code, _, err = self.run_stage()
+        code, _, err = run_stage()
         self.assertEqual(code, 0)
         self.assertIn("100 MB", err)
 
@@ -296,7 +301,7 @@ class StatusReportsTheIndex(StageCase):
         """The case `status` can judge: the index recorded the committed `.gz`."""
         self.plain.unlink()
         write_graph(self.archive, NODES, LINKS)
-        code, _, _ = self.run_stage()
+        code, _, _ = run_stage()
         self.assertEqual(code, 0)
 
     def unreadable(self, path: Path) -> None:
@@ -305,14 +310,14 @@ class StatusReportsTheIndex(StageCase):
 
     def test_no_index_says_how_to_build_one(self):
         """Breaks if status is silent about the index, so a store never learns it lacks one."""
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("none", line)
         self.assertIn("knowledgestore index", line)
 
     def test_a_fresh_index_reports_its_archive_size_and_that_it_is_current(self):
         """Breaks if a current index is reported stale, or the archive size is dropped."""
         self.build_from_archive()
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("current with the graph", line)
         self.assertNotIn("stale", line)
         self.assertIn(f"{self.gz.stat().st_size:,} bytes", line)
@@ -322,7 +327,7 @@ class StatusReportsTheIndex(StageCase):
         would open an index describing a graph that is gone."""
         self.build_from_archive()
         write_graph(self.archive, NODES + [node("z9", "One more", file="x.py")], LINKS)
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("stale", line)
         self.assertIn("knowledgestore index", line)
 
@@ -332,7 +337,7 @@ class StatusReportsTheIndex(StageCase):
         tickets the index does not hold."""
         self.build_from_archive()
         write_tickets(config.INTENT_INDEX_PATH, {**TICKETS, "svc-b": {}})
-        self.assertIn("stale", self.index_line(self.status_text()))
+        self.assertIn("stale", index_line(self, status_text(self)))
 
     def test_the_file_the_index_names_is_the_one_compared(self):
         """Breaks if status compares a fixed graph path instead of `meta.graph`: an
@@ -341,34 +346,34 @@ class StatusReportsTheIndex(StageCase):
         other = self.root / "knowledge" / "graph.json.gz"
         write_graph(other, NODES, LINKS)
         store_index.build(self.root, other, config.INTENT_INDEX_PATH, self.sqlite)
-        self.assertIn("current with the graph", self.index_line(self.status_text()))
+        self.assertIn("current with the graph", index_line(self, status_text(self)))
         write_graph(other, NODES + [node("z9", "Elsewhere", file="x.py")], LINKS)
-        self.assertIn("stale", self.index_line(self.status_text()))
+        self.assertIn("stale", index_line(self, status_text(self)))
 
     def test_an_index_built_from_the_archive_ignores_a_plain_graph_that_appears_later(self):
         """Breaks if status follows whichever graph exists now instead of the one the
         index recorded in `meta.graph`."""
         self.build_from_archive()
         write_graph(self.plain, NODES + [node("z9", "Newer", file="x.py")], LINKS)
-        self.assertIn("current with the graph", self.index_line(self.status_text()))
+        self.assertIn("current with the graph", index_line(self, status_text(self)))
 
     def test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes(self):
         """Breaks if the documented sequence (gzip, then index, with graph.json still on
         disk) leaves status unable to judge: it must compare against the archive."""
         write_graph(self.archive, NODES, LINKS)
-        self.assertEqual(self.run_stage()[0], 0)
+        self.assertEqual(run_stage()[0], 0)
         self.assertTrue(self.plain.is_file())
-        self.assertIn("current with the graph", self.index_line(self.status_text()))
+        self.assertIn("current with the graph", index_line(self, status_text(self)))
         write_graph(self.archive, NODES + [node("z9", "One more", file="x.py")], LINKS)
-        self.assertIn("stale", self.index_line(self.status_text()))
+        self.assertIn("stale", index_line(self, status_text(self)))
 
     def test_an_index_built_from_the_plain_graph_is_never_hashed(self):
         """Breaks if status reads the plain graph (CLAUDE.md 6.6): it can be gigabytes.
         The file is made unreadable, so a read would fail rather than answer, and the
         line must still say why freshness was not checked."""
-        self.run_stage()  # no archive exists, so meta.graph is graph.json
+        run_stage()  # no archive exists, so meta.graph is graph.json
         self.unreadable(self.plain)
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("freshness not checked: built from the plain graph", line)
         self.assertNotIn("stale", line)
 
@@ -377,7 +382,7 @@ class StatusReportsTheIndex(StageCase):
         current."""
         self.build_from_archive()
         self.sqlite.write_bytes(b"not a database")
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("could not read its meta", line)
         self.assertNotIn("current with", line)
 
@@ -385,7 +390,7 @@ class StatusReportsTheIndex(StageCase):
         """Breaks (CLAUDE.md 6.7) if a permission error while hashing escapes status."""
         self.build_from_archive()
         self.unreadable(self.archive)
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("freshness not checked", line)
         self.assertNotIn("current with", line)
 
@@ -403,7 +408,7 @@ class StatusReportsTheIndex(StageCase):
             connection.commit()
         finally:
             connection.close()
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertIn("absent or outside the store", line)
         self.assertNotIn("current with", line)
 
@@ -412,7 +417,7 @@ class StatusReportsTheIndex(StageCase):
         the plain file only, so with it absent the comparison is not made."""
         self.build_from_archive()
         self.sqlite.unlink()
-        line = self.index_line(self.status_text())
+        line = index_line(self, status_text(self))
         self.assertNotIn("current with the graph", line)
         self.assertNotIn("stale", line)
         self.assertIn(f"{self.gz.stat().st_size:,} bytes", line)

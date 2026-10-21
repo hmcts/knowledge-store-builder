@@ -501,9 +501,6 @@ class NothingIsWrittenHalfDone(IndexCase):
 
 
 class WhatItRefuses(IndexCase):
-    def pair_exists(self):
-        return [self.out.exists(), self.out.with_name("store.sqlite.gz").exists()]
-
     def test_a_missing_graph_raises_and_leaves_an_existing_index_alone(self):
         """Breaks if an absent graph, which the stream reads as empty, replaces a good
         index with a valid empty one."""

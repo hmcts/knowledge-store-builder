@@ -140,24 +140,29 @@ def _link_rows(graph: Path):
         yield (link["source"], link.get("relation") or "", link["target"])
 
 
+def _dict_items(value):
+    """The (key, value) pairs of a mapping, and nothing at all for any other shape."""
+    return value.items() if isinstance(value, dict) else ()
+
+
+def _entry_tickets(entry: dict):
+    """One (ticket, count, landed) per ticket the entry names. A ticket in both
+    sections is the landed one: the first section wins."""
+    seen: set[str] = set()
+    for section, landed in _TICKET_SECTIONS:
+        for ticket, count in _dict_items(entry.get(section)):
+            if ticket not in seen:
+                seen.add(ticket)
+                yield ticket, count, landed
+
+
 def _ticket_rows(layer: dict):
     """One row per (repo, path, ticket), yielded in the layer's own order. The order
     does not matter: the final insert sorts, so the bytes follow the content."""
     for repo, paths in layer.items():
-        if not isinstance(paths, dict):
-            continue
-        for path, entry in paths.items():
-            if not isinstance(entry, dict):
-                continue
-            seen: set[str] = set()
-            for section, landed in _TICKET_SECTIONS:
-                counts = entry.get(section)
-                if not isinstance(counts, dict):
-                    continue
-                for ticket, count in counts.items():
-                    if ticket in seen:
-                        continue
-                    seen.add(ticket)
+        for path, entry in _dict_items(paths):
+            if isinstance(entry, dict):
+                for ticket, count, landed in _entry_tickets(entry):
                     yield (repo, path, ticket, count, landed)
 
 
