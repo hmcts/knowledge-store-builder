@@ -368,7 +368,7 @@ the schema).
 
 Every long node id is stored once. Edges, files and tickets hold integer keys, and
 repositories, files and relation names are interned. Repeating the id strings was
-measured at five times the size on the largest local store graph.
+several times the size on a large store.
 
 | Table | Holds |
 |---|---|
@@ -449,9 +449,9 @@ def match_argument(text):
 ```
 
 An empty result from `match_argument` has nothing to search for, so do not run
-`find` with it. The MCP server also refuses text over 1024 bytes or over 32 words,
-because every word is a prefix scan of the label index: bound the text before it
-reaches the helper.
+`find` with it. A server should also bound the text, for example at 1024 bytes
+and 32 words, because every word is a prefix scan of the label index: do it before
+the text reaches the helper.
 
 **`node`** answers one node by id. Same columns as `find`.
 

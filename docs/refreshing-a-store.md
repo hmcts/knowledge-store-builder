@@ -231,10 +231,13 @@ knowledgestore status --drift
 ```
 
 `index` rewrites the query index from the graph and the ticket layer. Re-run it
-after any change to either. A reader that opens a stale index answers about a
-graph that is gone. `status` reports the index as stale when it was built from
-`graph.json.gz` and that file or the ticket layer has changed; an index built from
-the plain `graph.json` is reported as not checked, because `status` reads no graph. A rebuild over unchanged inputs gives the same bytes, so an
+after any change to either. It reads `graph.json.gz` whenever that exists, which
+the sequence above has just written, and the plain `graph.json` only when there is
+no archive. A reader that opens a stale index answers about a graph that is gone.
+`status` reports the index as stale when it was built from `graph.json.gz` and that
+file or the ticket layer has changed; an index built from the plain `graph.json` is
+reported as not checked, because `status` reads no graph. A rebuild over unchanged
+inputs gives the same bytes, whether or not `graph.json` is on disk, so an
 unchanged store commits no diff.
 
 `content-set` rewrites `knowledge/corpus/content-files.txt`, the list a corpus

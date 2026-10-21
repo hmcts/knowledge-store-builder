@@ -1,7 +1,8 @@
 """Build the query index: one SQLite file a reader opens instead of parsing the graph.
 
-Reads the graph and the ticket layer, writes `knowledge/index/store.sqlite` and its
-deterministic archive beside it. Run it after any change to the graph or to
+Reads the graph (the committed `graph.json.gz` when it exists, the plain
+`graph.json` only when there is no archive) and the ticket layer, writes
+`knowledge/index/store.sqlite` and its deterministic archive beside it. Run it after any change to the graph or to
 `file-tickets.json.gz`, because the index is a copy of both and `status` reports
 when it has stopped matching.
 
@@ -54,9 +55,13 @@ def _describe(report: store_index.IndexReport) -> str:
 
 
 def main() -> int:
-    graph = graph_files.graph_to_read(config.GRAPH_PATH)
+    # The committed archive wins whenever it exists: it is the artefact `status` can
+    # compare against, and the bytes then do not depend on whether a builder happens
+    # to have the gitignored plain graph beside it.
+    packed = config.GRAPH_PATH.with_name(config.GRAPH_PATH.name + ".gz")
+    graph = graph_files.graph_to_read(packed)
     if graph is None:
-        candidates = [config.GRAPH_PATH, graph_files.counterpart(config.GRAPH_PATH)]
+        candidates = [config.GRAPH_PATH, packed]
         print(
             "No graph found: looked for " + " and ".join(str(path) for path in candidates),
             file=sys.stderr,

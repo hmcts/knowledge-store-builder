@@ -88,6 +88,32 @@ class TheStageWritesTheIndex(StageCase):
         self.run_stage()
         self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), first)
 
+    def test_the_archive_is_read_when_both_graphs_exist(self):
+        """Breaks if the stage prefers the gitignored plain graph: the index would record
+        a file `status` never compares, and a builder and a peer would differ."""
+        write_graph(self.archive, NODES + [node("z9", "Archive only", file="x.py")], LINKS)
+        code, _, _ = self.run_stage()
+        self.assertEqual(code, 0)
+        connection = sqlite3.connect(self.sqlite.as_uri() + "?mode=ro", uri=True)
+        try:
+            self.assertEqual(connection.execute("SELECT count(*) FROM nodes").fetchone(), (6,))
+            self.assertEqual(
+                connection.execute("SELECT value FROM meta WHERE key = 'graph'").fetchone(),
+                ("graphify-out/graph.json.gz",),
+            )
+        finally:
+            connection.close()
+
+    def test_a_builder_with_both_graphs_and_a_peer_with_only_the_archive_write_the_same_bytes(self):
+        """Breaks if the bytes depend on whether the plain graph happens to be on disk:
+        an unchanged store would then commit a diff on every other machine."""
+        write_graph(self.archive, NODES, LINKS)
+        self.run_stage()
+        builder = (self.sqlite.read_bytes(), self.gz.read_bytes())
+        self.plain.unlink()
+        self.run_stage()
+        self.assertEqual((self.sqlite.read_bytes(), self.gz.read_bytes()), builder)
+
     def test_the_archive_graph_is_read_when_the_plain_one_is_absent(self):
         """Breaks if the stage demands the gitignored plain graph: a fresh checkout holds
         only `graph.json.gz`, and the stage must run there."""
@@ -326,11 +352,21 @@ class StatusReportsTheIndex(StageCase):
         write_graph(self.plain, NODES + [node("z9", "Newer", file="x.py")], LINKS)
         self.assertIn("current with the graph", self.index_line(self.status_text()))
 
+    def test_with_both_graphs_present_status_is_current_then_stale_after_the_archive_changes(self):
+        """Breaks if the documented sequence (gzip, then index, with graph.json still on
+        disk) leaves status unable to judge: it must compare against the archive."""
+        write_graph(self.archive, NODES, LINKS)
+        self.assertEqual(self.run_stage()[0], 0)
+        self.assertTrue(self.plain.is_file())
+        self.assertIn("current with the graph", self.index_line(self.status_text()))
+        write_graph(self.archive, NODES + [node("z9", "One more", file="x.py")], LINKS)
+        self.assertIn("stale", self.index_line(self.status_text()))
+
     def test_an_index_built_from_the_plain_graph_is_never_hashed(self):
         """Breaks if status reads the plain graph (CLAUDE.md 6.6): it can be gigabytes.
         The file is made unreadable, so a read would fail rather than answer, and the
         line must still say why freshness was not checked."""
-        self.run_stage()  # the plain graph wins, so meta.graph is graph.json
+        self.run_stage()  # no archive exists, so meta.graph is graph.json
         self.unreadable(self.plain)
         line = self.index_line(self.status_text())
         self.assertIn("freshness not checked: built from the plain graph", line)

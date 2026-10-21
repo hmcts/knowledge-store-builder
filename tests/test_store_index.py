@@ -309,6 +309,21 @@ class WhatTheIndexHolds(IndexCase):
         self.assertEqual(report.ticket_files, 0)
         self.assertEqual(report.nodes, 5)
 
+    def test_ticket_files_counts_only_the_files_that_carry_a_ticket(self):
+        """Breaks if an entry with no tickets is counted: the report says how many files
+        carry tickets, and an entry holding only dates or an empty section carries none."""
+        layer = {
+            "svc-a": {
+                **TICKETS["svc-a"],
+                "empty.md": {"first": "2024-01-01", "last": "2024-01-01"},
+                "hollow.md": {"tickets": {}, "proposed": {}},
+            }
+        }
+        write_tickets(self.tickets, layer)
+        report = self.build()
+        self.assertEqual(report.ticket_files, 2)
+        self.assertEqual(self.query("SELECT count(DISTINCT file) FROM tickets"), [(2,)])
+
 
 def logical_dump(path: Path) -> dict:
     """Every table except `meta`, row keys included, and FTS5's own shadow tables.

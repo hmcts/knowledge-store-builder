@@ -6,9 +6,9 @@ open one file read-only and ask, not load the whole graph to answer. This module
 writes that file, and a deterministic gzip of it beside it.
 
 **Integer keys.** Every long node id appears once, in `nodes`. The edge table and
-both of its indexes hold integers. Repeating the id string everywhere was measured
-at five times the size (1,664 MB against 350 MB on the largest local store graph),
-which is the difference between an archive GitHub accepts and one it refuses.
+both of its indexes hold integers. Repeating the id string everywhere was several
+times the size on a large store, which is the difference between an archive GitHub
+accepts and one it refuses. The stage prints both sizes; measure your own.
 
 **Deterministic, per SQLite build.** Two runs on the same inputs give the same
 bytes (CLAUDE.md 1.3). What makes that hold:
@@ -31,8 +31,8 @@ rebuild is byte-identical.
 
 **Disk.** Staging tables live in SQLite's temp directory (`TMPDIR`), pinned to a
 file rather than memory. Allow for the staging and sort spill there, plus the
-finished `.building` file and its archive beside the output. At 750,000 nodes and
-1,450,000 links the index is about 380 MB and its archive 66 MB.
+finished `.building` file and its archive beside the output. The index scales with
+nodes and links, and the stage prints its size and its archive's.
 
 **Written once or not at all.** The build goes to a temporary file beside the
 output and is renamed into place, so a graph that turns out to be truncated part
@@ -141,17 +141,14 @@ def _link_rows(graph: Path):
 
 
 def _ticket_rows(layer: dict):
-    """One row per (repo, path, ticket), sorted so the staging order is a function of
-    the layer's content. Returns the rows and the number of files the layer names."""
-    rows = []
-    files = 0
+    """One row per (repo, path, ticket), yielded in the layer's own order. The order
+    does not matter: the final insert sorts, so the bytes follow the content."""
     for repo, paths in layer.items():
         if not isinstance(paths, dict):
             continue
         for path, entry in paths.items():
             if not isinstance(entry, dict):
                 continue
-            files += 1
             seen: set[str] = set()
             for section, landed in _TICKET_SECTIONS:
                 counts = entry.get(section)
@@ -161,8 +158,7 @@ def _ticket_rows(layer: dict):
                     if ticket in seen:
                         continue
                     seen.add(ticket)
-                    rows.append((repo, path, ticket, count, landed))
-    return rows, files
+                    yield (repo, path, ticket, count, landed)
 
 
 def _scalar(connection: sqlite3.Connection, sql: str) -> int:
@@ -283,11 +279,14 @@ def _build_database(path: Path, graph: Path, layer: dict, meta: dict) -> dict:
 
         connection.executemany("INSERT INTO stg_nodes VALUES (?,?,?,?,?,?,?)", _node_rows(graph))
         connection.executemany("INSERT INTO stg_links VALUES (?,?,?)", _link_rows(graph))
-        ticket_rows, ticket_files = _ticket_rows(layer)
-        connection.executemany("INSERT INTO stg_tickets VALUES (?,?,?,?,?)", ticket_rows)
+        connection.executemany("INSERT INTO stg_tickets VALUES (?,?,?,?,?)", _ticket_rows(layer))
 
         counts = _fill(connection)
-        counts["ticket_files"] = ticket_files
+        # Files that contributed a ticket row, counted from what was staged: an entry
+        # with no tickets is not a file that carries tickets.
+        counts["ticket_files"] = _scalar(
+            connection, "SELECT count(*) FROM (SELECT DISTINCT repo, path FROM stg_tickets)"
+        )
 
         connection.executemany("INSERT INTO meta(key, value) VALUES (?, ?)", sorted(meta.items()))
         for table in ("stg_nodes", "stg_links", "stg_tickets"):
