@@ -7144,7 +7144,7 @@ MUTATIONS = (
         "relationships.py",
         '        "references": edge.references,\n',
         '        "references": len(shown),\n',
-        "#455: counting references from the truncated example list makes every heavily used provider read as used three times; the same cap-shaped defect the module edges once had, which lost 290 of 388 relationships on one estate",
+        "#455: counting references from the truncated example list makes every heavily used provider read as used three times; the same cap-shaped defect the module edges once had, which once lost most of a store's module relationships",
         (
             "test_build_relationships.SvcATest.test_references_are_never_capped_by_the_example_limit",
         ),

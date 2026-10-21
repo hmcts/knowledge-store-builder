@@ -377,6 +377,10 @@ class BadParserResultTest(_StoreKinds):
                 f"\ndef publishes(clone):\n    return [({TOKEN!r}, 5)]\n",
                 ("publishes()", "str", "int"),
             ),
+            (
+                f"\nraise RuntimeError({TOKEN!r})\n",
+                ("scripts/subscriptions.py", "RuntimeError"),
+            ),
         )
         for override, expected in cases:
             with self.subTest(override=override):

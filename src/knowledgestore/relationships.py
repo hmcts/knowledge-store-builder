@@ -979,7 +979,8 @@ def _load_module(kind: str, path: Path, given: str):
     except Exception as error:
         sys.modules.pop(name, None)
         raise UsageError(
-            f"relationship kind {kind!r}: `module` {given} failed to import: {error!r}"
+            f"relationship kind {kind!r}: `module` {given} failed to import "
+            f"({type(error).__name__})"
         ) from error
     return module
 
