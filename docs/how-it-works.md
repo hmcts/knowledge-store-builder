@@ -107,7 +107,10 @@ The **intent index** (`src/knowledgestore/build_intent_index.py`) mines those
 datasets: ticket ids matching `[A-Z][A-Z0-9]{1,9}-\d{1,6}` (configurable) are
 extracted from commit subjects — and from commit bodies where the subject names
 none — producing a file → tickets map with first and last touch dates, and a
-per-ticket record of what its commits said.
+per-ticket record of what its commits said. A match whose prefix is listed in
+`KSB_TICKET_PREFIX_DENY` (`CVE,GHSA` by default) is not a ticket: the default
+pattern would read `CVE-2024-12345` as ticket `CVE-2024`, and dependency-bump
+messages cite advisories in numbers.
 
 That record keeps the commit text in **three fields**, because one curated
 description can only ever carry one source: a description (the subject where it

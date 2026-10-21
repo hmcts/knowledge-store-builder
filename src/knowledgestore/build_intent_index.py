@@ -165,6 +165,23 @@ class RedactionReport:
     emptied: int = 0
 
 
+def ticket_ids(text: str) -> list[str]:
+    """Every ticket id text names, in order, less those whose prefix is denied.
+
+    The default pattern reads `CVE-2024-12345` as ticket `CVE-2024`, and
+    dependency-bump messages cite advisories in numbers. Filtered after matching,
+    on the prefix, rather than written into the pattern, so a store whose tracker
+    genuinely uses a denied key restores it with `KSB_TICKET_PREFIX_DENY` instead
+    of rewriting `TICKET_PATTERN`. Read when called, like every setting here.
+    """
+    denied = frozenset(config.TICKET_PREFIX_DENY)
+    return [
+        ticket
+        for ticket in config.TICKET_PATTERN.findall(text)
+        if ticket.split("-", 1)[0] not in denied
+    ]
+
+
 def clean_description(subject: str) -> str:
     """Strip leading ticket references, leaving the human description."""
     cleaned = subject.strip()
@@ -330,7 +347,7 @@ def body_ticket_ids(body: str, boilerplate: frozenset[str] = frozenset()) -> lis
     between runs, and set iteration order is not.
     """
     ids: list[str] = []
-    for ticket in config.TICKET_PATTERN.findall(clean_body(body, boilerplate)):
+    for ticket in ticket_ids(clean_body(body, boilerplate)):
         if ticket not in ids:
             ids.append(ticket)
         if len(ids) == BODY_TICKET_LIMIT:
@@ -456,13 +473,10 @@ def squash_bullet_tickets(commit: dict, boilerplate: frozenset[str] = frozenset(
     blocks = _body_blocks(commit_body(commit), boilerplate)
     if _rejection(_flatten(blocks)) != "merge-list":
         return []
-    bullets = [line.lstrip() for block in blocks for line in block]
-    named = [
-        ticket
-        for line in bullets
-        if line.startswith(MERGE_BULLET)
-        for ticket in config.TICKET_PATTERN.findall(line)
-    ]
+    named: list[str] = []
+    for line in (raw.lstrip() for block in blocks for raw in block):
+        if line.startswith(MERGE_BULLET):
+            named.extend(ticket_ids(line))
     return list(dict.fromkeys(named))
 
 
@@ -582,7 +596,7 @@ def commit_tickets(commit: dict, boilerplate: frozenset[str] = frozenset()) -> l
     The body is read only when the subject names nothing, so a body mentioning
     neighbouring work cannot dilute links the subject already states.
     """
-    subject_tickets = list(dict.fromkeys(config.TICKET_PATTERN.findall(commit["subject"])))
+    subject_tickets = list(dict.fromkeys(ticket_ids(commit["subject"])))
     if subject_tickets:
         return subject_tickets
     return body_ticket_ids(commit_body(commit), boilerplate)

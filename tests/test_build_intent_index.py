@@ -271,6 +271,67 @@ class BodyTicketIdsTest(SettingsIsolated):
         self.assertEqual(intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"), [])
 
 
+class TicketPrefixDenyTest(SettingsIsolated):
+    """An advisory id is not a piece of the estate's work (#464).
+
+    The break: the default pattern reads `CVE-2024-12345` as ticket `CVE-2024`,
+    so every dependency bump that cited an advisory linked its files to a
+    "ticket" per advisory year. A store whose tracker genuinely uses a denied key
+    must still be able to restore it by setting.
+    """
+
+    BODY = "Raises the parser floor past CVE-2024-1234 for QX-1 before the scan runs."
+
+    def test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does(self):
+        self.assertEqual(intent.body_ticket_ids(self.BODY), ["QX-1"])
+
+    def test_an_advisory_id_the_pattern_matches_links_no_ticket(self):
+        """GHSA ids rarely match - their segments mix letters in - but an
+        all-digit first segment does, which is why the default lists `GHSA`."""
+        body = "Raises the parser floor past GHSA-2389-c4fq-9xwr for QX-1 before the scan."
+        self.assertEqual(config.TICKET_PATTERN.findall(body), ["GHSA-2389", "QX-1"])
+        self.assertEqual(intent.body_ticket_ids(body), ["QX-1"])
+
+    def test_a_subject_keeps_its_ticket_and_loses_the_cve_id(self):
+        commit = make_commit("QX-1: raise the parser floor for CVE-2023-4567")
+        self.assertEqual(intent.commit_tickets(commit), ["QX-1"])
+
+    def test_a_subject_naming_only_a_cve_id_is_unticketed(self):
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit("Bump the parser for CVE-2024-12345")
+        self.assertFalse(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(len(files), 0)
+        self.assertEqual(len(descriptions), 0)
+
+    def test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket(self):
+        commit = squash_commit(
+            "QX-1: raise dependency floors (#42)",
+            ("Bump the parser for CVE-2024-12345", "QX-2: pin the parser"),
+            ["src/a.ts"],
+        )
+        self.assertEqual(intent.squash_bullet_tickets(commit), ["QX-2"])
+
+    def test_emptying_the_list_restores_every_match(self):
+        """Catches a store whose tracker uses a denied key left with no recourse."""
+        config.configure(TICKET_PREFIX_DENY="")
+        self.assertEqual(intent.body_ticket_ids(self.BODY), ["CVE-2024", "QX-1"])
+
+    def test_the_list_is_read_from_a_comma_separated_string(self):
+        """Catches `configure(TICKET_PREFIX_DENY="QX, cve")` read as single letters."""
+        config.configure(TICKET_PREFIX_DENY="QX, cve")
+        self.assertEqual(intent.body_ticket_ids(self.BODY + " See ZZ-9."), ["ZZ-9"])
+
+    def test_the_environment_sets_the_list_and_defaults_it(self):
+        self.assertEqual(config.TICKET_PREFIX_DENY, ["CVE", "GHSA"])
+        with mock.patch.dict(os.environ, {"KSB_TICKET_PREFIX_DENY": ""}):
+            importlib.reload(config)
+        try:
+            self.assertEqual(config.TICKET_PREFIX_DENY, [])
+            self.assertEqual(intent.body_ticket_ids(self.BODY), ["CVE-2024", "QX-1"])
+        finally:
+            importlib.reload(config)
+
+
 class ApplyCommitTest(SettingsIsolated):
     def _commit(self, subject, merge=False, date="2024-05-01T10:00:00+00:00", body=""):
         return {

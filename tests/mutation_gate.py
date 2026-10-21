@@ -5461,8 +5461,8 @@ MUTATIONS = (
     Mutation(
         "prose under a squash list is read as one of its commits",
         "build_intent_index.py",
-        "        if line.startswith(MERGE_BULLET)\n        for ticket",
-        "        for ticket",
+        "        if line.startswith(MERGE_BULLET):\n            named.extend",
+        "        if True:\n            named.extend",
         "a ticket a squash body only mentioned was promoted as though it landed there",
         (
             "test_build_intent_index.SquashPromotionTest.test_a_ticket_outside_the_bullets_is_not_promoted",
@@ -5498,6 +5498,55 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+        ),
+    ),
+    Mutation(
+        "a denied ticket prefix is linked again",
+        "build_intent_index.py",
+        '        if ticket.split("-", 1)[0] not in denied',
+        "        if True",
+        "dependency bumps citing advisories linked their files to `CVE-<year>` as though "
+        "it were a ticket (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
+            "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+        ),
+    ),
+    Mutation(
+        "a subject's denied ticket prefix is linked again",
+        "build_intent_index.py",
+        '    subject_tickets = list(dict.fromkeys(ticket_ids(commit["subject"])))',
+        '    subject_tickets = list(dict.fromkeys(config.TICKET_PATTERN.findall(commit["subject"])))',
+        "a dependency bump's subject citing an advisory became a ticketed commit (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
+        ),
+    ),
+    Mutation(
+        "a body's denied ticket prefix is linked again",
+        "build_intent_index.py",
+        "    for ticket in ticket_ids(clean_body(body, boilerplate)):",
+        "    for ticket in config.TICKET_PATTERN.findall(clean_body(body, boilerplate)):",
+        "a body citing an advisory linked its files to `CVE-<year>` (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
+            "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+        ),
+    ),
+    Mutation(
+        "configure leaves TICKET_PREFIX_DENY as given",
+        "config.py",
+        '    "TICKET_PREFIX_DENY": _prefix_list,\n',
+        "",
+        "configure(TICKET_PREFIX_DENY='QX, CVE') denied single letters rather than prefixes (#464)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
         ),
     ),
     Mutation(
