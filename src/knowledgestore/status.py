@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import datetime
 import gzip
+import json
 import re
 import shutil
 import sqlite3
@@ -35,6 +36,8 @@ from . import (
     merge_inputs,
     provenance,
     record_clustering,
+    relationships,
+    store_manifest,
     store_paths,
     telemetry,
 )
@@ -1176,6 +1179,136 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _uncovered(manifest: dict) -> list[str]:
+    """Files under `knowledge/` that no layer, declared extra layer or excused
+    path accounts for.
+
+    Judged against the manifest as written, like the rest of its report: a layer
+    or declaration added since is not in it. Paths the library has decided are not
+    layers (`store_manifest.NOT_A_LAYER`) are excused, so what is left is a file
+    nobody has said a reader should know about.
+    """
+    root = config.ROOT
+    claimed = [
+        path.rstrip("/")
+        for entry in (*manifest["layers"].values(), *manifest.get("extra_layers", {}).values())
+        for path in (entry.get("paths") or [entry.get("path", "")])
+        if path
+    ]
+    for name in store_manifest.NOT_A_LAYER:
+        value = getattr(config, name, None)
+        if isinstance(value, Path) and root in value.parents:
+            claimed.append(value.relative_to(root).as_posix())
+    claimed.append(config.STORE_MANIFEST_PATH.relative_to(root).as_posix())
+    found = []
+    for path in sorted((root / "knowledge").rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        if path.is_file() and not any(rel == c or rel.startswith(c + "/") for c in claimed):
+            found.append(rel)
+    return found
+
+
+def _relationships_format_problem() -> str:
+    """Why `repository-dependencies.json` is not this layer's format, or "".
+
+    Unreadable counts as unrecognised: the stamp lives there, and `kinds.json`
+    alone cannot say whose layer it is.
+    """
+    path = config.REPOSITORY_DEPENDENCIES_PATH
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
+        return f"{_relative(path)} is unreadable ({error})"
+    return relationships.format_problem(body)
+
+
+def _report_relationships() -> None:
+    """The relationships layer's edges per kind, from `kinds.json` alone.
+
+    Per kind rather than one total, because one edge can carry two kinds and a sum
+    would count it twice. Never fails: an absent or unreadable file is reported.
+    """
+    path = config.RELATIONSHIP_KINDS_PATH
+    if not path.is_file():
+        print("Relationships: not built - `knowledgestore relationships` writes it")
+        return
+    problem = _relationships_format_problem()
+    if problem:
+        print(f"Relationships: unrecognised format ({_relative(path)}: {problem})")
+        return
+    try:
+        kinds = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
+        print(f"Relationships: {_relative(path)} is unreadable ({error})")
+        return
+    if not isinstance(kinds, dict):
+        print(f"Relationships: {_relative(path)} is not a JSON object")
+        return
+    parts = []
+    for name, entry in sorted(kinds.items()):
+        edges = entry.get("edges") if isinstance(entry, dict) else None
+        count = edges if isinstance(edges, int) else 0
+        parts.append(f"{name} {count} {'edge' if count == 1 else 'edges'}")
+    print(f"Relationships: {', '.join(parts) or 'no kinds'} ({_relative(path)})")
+
+
+def _report_manifest() -> None:
+    """What the store's manifest says is built, and which layers it says are not.
+
+    Read from the manifest file, never recomputed: hashing every layer is the
+    manifest stage's work. So this is the last manifest written, which lags any
+    stage run since - the digest is how a reader tells. Unreadable in any way is
+    a line of its own, never a failure (CLAUDE.md 6.7): the file is committed, so
+    it is merge-resolved by hand and may come from a later format.
+    """
+    path = config.STORE_MANIFEST_PATH
+    if path.is_dir():
+        print(f"Store manifest: unreadable ({path}) - it is a directory, not a file")
+        return
+    if not path.is_file():
+        print("Store manifest: none - run `knowledgestore manifest` after the last stage")
+        return
+    try:
+        manifest = io.read_json(path)
+        if not isinstance(manifest, dict):
+            raise ValueError("not an object")
+        layers = manifest["layers"]
+        format_ = manifest["format"]
+        summary = (
+            f"Store manifest: format {format_['major']}.{format_['minor']}, "
+            f"digest {manifest['digest']}, "
+            + (
+                f"sources as of {manifest['sources_as_of']}"
+                if manifest.get("sources_as_of")
+                else "no source date recorded"
+            )
+        )
+        # `False` only: a layer nothing measured is unknown, which is not absent.
+        absent = sorted(
+            name + (" (local only)" if layer.get("local_only") else "")
+            for name, layer in layers.items()
+            if layer["present"] is False
+        )
+        # `present` and `recognised` is False: the files exist, the stamp is not read.
+        unrecognised = sorted(
+            name
+            for name, layer in layers.items()
+            if layer["present"] is True and layer.get("recognised") is False
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        print(f"Store manifest: unreadable ({path}) - rewrite it with `knowledgestore manifest`")
+        return
+    print(summary)
+    print(f"  absent: {', '.join(absent) if absent else 'none'}")
+    for name in unrecognised:
+        print(
+            f"  not recognised: {name} - present, but it reads as absent to consumers "
+            "until rebuilt with this library"
+        )
+    uncovered = _uncovered(manifest)
+    print(f"  uncovered: {', '.join(uncovered) if uncovered else 'none'}")
+
+
 def _report_telemetry() -> None:
     """What the last build measured, so an operator can see the numbers at all.
 
@@ -1493,6 +1626,8 @@ def main(argv=None) -> int:
 
     _report_merge_inputs()
 
+    _report_relationships()
+
     _report_intent(recorded)
 
     _report_missing_extractors()
@@ -1508,6 +1643,8 @@ def main(argv=None) -> int:
     _report_freshness()
 
     _report_clustering()
+
+    _report_manifest()
 
     _report_telemetry()
 

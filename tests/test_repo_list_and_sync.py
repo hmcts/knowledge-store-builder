@@ -548,6 +548,9 @@ class CliTest(SettingsIsolated):
                 "packages",
                 # before clustering, so deployment nodes join communities
                 "deployments",
+                # reads clones and provenance, never the graph; beside the stages
+                # whose module and chart edges it must agree with (#455)
+                "relationships",
                 # after every stage that adds nodes, so they are linked too, and
                 # before clustering, because it rewrites both graph files
                 "source-urls",
@@ -559,9 +562,11 @@ class CliTest(SettingsIsolated):
                 "topics",
                 "deepdive",
                 "explorer",
-                # last of the builders: it is a copy of the graph and the ticket
+                # last of the builders but one: it is a copy of the graph and the ticket
                 # layer, so it runs once both have settled (#457)
                 "index",
+                # last build stage: it measures the files every stage above wrote
+                "manifest",
                 "status",
                 # a diagnostic, not a build step: it reads the per-repository
                 # graphs before they are merged, which is the only point at

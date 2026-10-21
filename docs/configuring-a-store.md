@@ -11,7 +11,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | Variable | Default | Purpose |
 |---|---|---|
 | `KSB_ROOT` | current directory | Store root; `knowledgestore --root <path>` sets the same value for one command |
-| `KSB_GITHUB_ORG` | none | GitHub organisation used by discovery |
+| `KSB_GITHUB_ORG` | none | GitHub organisation used by discovery. Also the organisation a Terraform module source must name to mean a clone whose own clone URL is not on GitHub, for the `packages` graph edges, the `relationships` layer and the `gaps` report; a clone on GitHub is matched against its own organisation |
 | `KSB_TICKET_PATTERN` | uppercase project key and number | Ticket IDs recognised in commit messages |
 | `KSB_TICKET_PREFIX_DENY` | `CVE,GHSA` | Prefixes of matches that are not tickets, applied after `KSB_TICKET_PATTERN` wherever tickets are read — commit messages and Gherkin tags, scenarios and file names — and compared case-insensitively. The default pattern reads `CVE-2024-12345` as ticket `CVE-2024`, and dependency-update messages cite advisories in numbers. Comma-separated; set it empty, or drop a prefix, if your tracker genuinely uses one of these keys |
 | `KSB_TICKET_BROWSE_URL` | none | URL prefix used to turn ticket IDs into links |

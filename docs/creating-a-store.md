@@ -438,6 +438,24 @@ Add business specifications after the merge:
 knowledgestore gherkin
 ```
 
+Write the relationships layer, which records which repositories depend on which:
+
+```bash
+export KSB_CHART_REPO_PATTERN='chart-{name}'   # optional: where a chart's repository is, by name
+export KSB_UMBRELLA_REPOS=charts-bundle         # optional: repositories that bundle others' charts
+knowledgestore relationships
+```
+
+It reads the clones and `knowledge/provenance.json`, never the graph, so its place
+in the order is a convention. It prints one line per kind, giving the number of
+edges, references, unresolved targets and skipped declarations. Read the
+unresolved count: these are dependencies the store does not hold. Leave
+`KSB_CHART_REPO_PATTERN` unset unless the estate names chart repositories by a
+rule. A clone holding a Flux `HelmRelease` needs the `deploy` extra (PyYAML):
+without it the stage exits 1 and names the file. The
+[relationships layer](how-it-works.md#the-relationships-layer) lists the files it
+writes and the resolution order.
+
 Then link every node to its file at the commit the store was built from:
 
 ```bash
@@ -617,8 +635,15 @@ knowledgestore record-clustering
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
 knowledgestore index
+knowledgestore manifest
 knowledgestore status
 ```
+
+`manifest` runs last, after every stage that writes a layer, and writes
+`knowledge/store-manifest.json`: which layers the store holds, where, and a
+content digest for each. It refuses, writing nothing, when it cannot name the
+store: set `KSB_STORE_ID`, or give the clone an `origin` remote. Commit the file
+with the store. See [The store manifest](how-it-works.md#the-store-manifest).
 
 `record-clustering` writes `graphify-out/clustering-inputs.json`, naming the
 partitioner the clustering environment offered: graphify uses graspologic's Leiden

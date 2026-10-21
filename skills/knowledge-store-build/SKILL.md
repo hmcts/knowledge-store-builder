@@ -765,8 +765,25 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
+knowledgestore relationships   # knowledge/relationships/: which repositories reference which
 knowledgestore source-urls     # a `url` on each node: its file at the build commit
+knowledgestore manifest        # the relationships are a layer: re-run it
 ```
+
+`relationships` reads the clones and `knowledge/provenance.json`, never the
+graph. It prints one line per kind: edges, references, unresolved targets and
+skipped declarations. **Read the unresolved count**: those are dependencies the
+store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
+(for example `chart-{name}`) only when the estate names chart repositories by a
+rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle others' charts.
+A conflict (two clones publishing one chart, coordinate or package) is printed
+and resolved to the first by name. It exits 1 on a parser failure, an
+unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
+extra), and 2 when it cannot write. A store whose clones declare a
+dependency the four built-in kinds do not read registers its own kind in
+`config/relationship-kinds.json`, and `KSB_RELATIONSHIP_EXAMPLES` caps the
+example lines per edge; see
+[docs/how-it-works.md](../../docs/how-it-works.md#a-stores-own-kinds).
 
 `source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
 they add are linked too. It reads `config/repositories.txt` and
@@ -796,6 +813,7 @@ and immediately afterwards, and build the page:
 knowledgestore record-clustering   # -> graphify-out/clustering-inputs.json
 knowledgestore explorer            # the self-contained search page
 knowledgestore index               # the query index readers open instead of the graph
+knowledgestore manifest            # run last: knowledge/store-manifest.json
 ```
 
 `index` is a copy of the graph and the ticket layer, so run it after both have
@@ -805,6 +823,13 @@ settled and again after any change to either. `status` says when an index built 
 When the archive passes `KSB_INDEX_WARN_MB` (default 90) the stage warns and still
 exits 0: GitHub rejects a file over 100 MB, so the store decides whether to commit
 it. The build needs temporary disk under `TMPDIR` for staging and sort spill.
+
+`manifest` records what the store holds, measured from the files the other stages
+wrote, so it runs last, and again after any later stage that writes a layer
+(summaries, topics, deep dives, the semantic index) or it describes an older
+store. It refuses and writes nothing when it cannot name the store: set
+`KSB_STORE_ID`, or give the clone an `origin` remote. Its `digest` is how a reader
+tells a store that changed from one that did not.
 
 Stages are independent and idempotent — re-run one without repeating the rest.
 
@@ -857,6 +882,7 @@ what discovers the tickets:
 
 ```bash
 knowledgestore fetch-tickets     # -> knowledge/intent/ticket-tracker.json.gz
+knowledgestore manifest          # the ticket layer changed: re-run before committing
 ```
 
 With no credentials it names the missing settings, writes nothing and exits 0 —
@@ -1190,6 +1216,7 @@ a random 20–30 against their digests claim by claim. See
 
 ```bash
 knowledgestore summaries verify --sample 200   # grounding, after merging
+knowledgestore manifest                        # the summaries are a layer: re-run it
 ```
 
 Compares the identifiers each summary cites against those its digest contains,
@@ -1209,6 +1236,7 @@ knowledgestore summaries snapshot   # BEFORE re-clustering; writes two files, co
 # ... add repositories, merge, re-cluster ...
 knowledgestore summaries remap      # AFTER: re-keys prose whose community is unchanged
 knowledgestore summaries snapshot   # re-key the baseline to the new clustering
+knowledgestore manifest             # the summaries layer changed: re-run before committing
 ```
 
 **`adrift` first, and never straight after a snapshot.** Community ids are
@@ -1430,6 +1458,7 @@ Write `docs/topics/<slug>.md` from each dossier, then:
 ```bash
 knowledgestore topics merge     # validates and renders to briefs.json
 knowledgestore explorer         # embed into the page
+knowledgestore manifest         # the briefs are a layer: re-run it
 ```
 
 Brief structure that works:
@@ -1493,6 +1522,7 @@ Then:
 ```bash
 knowledgestore deepdive merge
 knowledgestore explorer
+knowledgestore manifest     # the deep dives are a layer: re-run it
 ```
 
 ## Checking a store's health
@@ -1543,6 +1573,7 @@ like `--central`.
 ```bash
 pip install 'hmcts-knowledge-store-builder[semantic]'
 knowledgestore semantic     # -> knowledge/semantic/ (committed)
+knowledgestore manifest     # the index is a layer: re-run it
 ```
 
 A model embeds the graph's own vocabulary once, locally; only the
@@ -1619,6 +1650,7 @@ rather than hunting the store. See `docs/building-a-knowledge-store.md` §9.
 
 ```bash
 knowledgestore explorer
+knowledgestore manifest                     # last: it describes the store as it now is
 knowledgestore check-evidence               # must pass before you commit
 node tests/explorer/estate-regression.mjs   # if the estate has one
 ```

@@ -47,6 +47,7 @@ vault, which is exactly the map being withheld.
 from __future__ import annotations
 
 import copy
+import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -61,6 +62,29 @@ KUSTOMIZATION_GROUP = "kustomize.toolkit.fluxcd.io"
 # names something that is not a chart source, so emitting a chart dependency from
 # it would be a guess presented as evidence.
 CHART_SOURCE_KINDS = frozenset({"GitRepository", "HelmRepository", "OCIRepository", "Bucket"})
+
+
+@functools.cache
+def yaml_loader():
+    """PyYAML's safe loader, reading a bare `=` as the string it is. Only called
+    once `import yaml` has succeeded.
+
+    PyYAML resolves a plain `=` to YAML 1.1's `value` type and the safe loader has
+    no constructor for it, so a release whose values hold a policy rule
+    (`op: =`) fails to load whole and its chart reference with it. Kubernetes reads
+    the same scalar as `"="`. One loader for every reader of Flux YAML - the
+    `deployments` graph stage and the relationships layer - so a release one of
+    them reads is never a release the other cannot parse.
+    """
+
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_constructor("tag:yaml.org,2002:value", yaml.SafeLoader.construct_yaml_str)
+    return Loader
+
 
 # `clusters/<env>/<cluster>/apps.yaml` and `clusters/<env>/apps.yaml` both name
 # their environment at index 1. Anything shallower carries no such segment.

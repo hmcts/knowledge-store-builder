@@ -254,6 +254,16 @@ class SourceUrlsStageTest(SettingsIsolated):
         self.assertIn("1 clone URL is not on github.com", report)
         self.assertIn("1 repository not in config/repositories.txt", report)
 
+    def test_the_linked_count_is_recorded_for_the_store_manifest(self):
+        """Breaks if the stage stops recording `source_urls.linked`, or records a
+        count other than the nodes it linked: the store manifest's
+        `graph.source_urls` flag reads it, and without it every store reports the
+        flag as unknown. 7 linked, as the report test above derives."""
+        self._write_graph(_graph())
+        self._run()
+        recorded = json.loads(config.TELEMETRY_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(recorded["measurements"]["source_urls.linked"], 7)
+
     def test_a_rerun_is_byte_identical(self):
         """Breaks if a second run reorders keys or rewrites links differently - two
         runs on the same inputs must produce the same bytes (CLAUDE.md 1.3)."""

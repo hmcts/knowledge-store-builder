@@ -49,6 +49,7 @@ SELF_PARSING = frozenset(
         "size-cuts",
         "cost",
         "answers",
+        "relationships",
     }
 )
 
@@ -171,6 +172,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_deployments",
         "add per-environment deployment config and join it to services (opt-in)",
     ),
+    "relationships": (
+        "build_relationships",
+        "write which repositories reference which (modules, charts, artifacts, packages)",
+    ),
     "source-urls": (
         "build_source_urls",
         "give each graph node a `url` to its file at the commit the store was built from",
@@ -199,6 +204,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "index": (
         "build_store_index",
         "build the query index readers open instead of parsing the graph",
+    ),
+    "manifest": (
+        "build_store_manifest",
+        "write knowledge/store-manifest.json, what the store holds (run last)",
     ),
     "status": (
         "status",
