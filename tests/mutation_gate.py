@@ -7295,6 +7295,47 @@ MUTATIONS = (
         "a store of N repositories reports N+1, the extra one named with the empty string",
         ("test_store_index.WhatTheIndexHolds.test_a_node_with_no_repository_is_not_a_repository",),
     ),
+    Mutation(
+        "index queries: the documented neighbours query reads the outgoing edges backwards",
+        "docs/how-it-works.md",
+        "JOIN edges e ON e.source = s.k",
+        "JOIN edges e ON e.target = s.k",
+        "a reader following the page gets the nodes that point at a node labelled as the ones it points at, and every row still looks like an edge",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented find query drops a node with no repository",
+        "docs/how-it-works.md",
+        "LEFT JOIN repos r ON r.k = f.repo\nWHERE labels MATCH",
+        "JOIN repos r ON r.k = f.repo\nWHERE labels MATCH",
+        "an inner join on repos loses every node whose files.repo is NULL, with no error and no count of what went missing",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_documented_helper_makes_free_text_a_safe_match_argument",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented files_for_ticket query no longer lists landed files first",
+        "docs/how-it-works.md",
+        "ORDER BY t.landed DESC, coalesce(r.name, ''), f.path",
+        "ORDER BY coalesce(r.name, ''), f.path",
+        "a proposed ticket reads as evidence ahead of one that landed",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_each_documented_query_returns_the_hand_listed_rows",
+        ),
+    ),
+    Mutation(
+        "index queries: the documented match helper stops doubling a quote",
+        "docs/how-it-works.md",
+        "w.replace('\"', '\"\"')",
+        "w",
+        "a word holding a quote becomes an FTS5 syntax error or, worse, an operator, for whoever copies the helper",
+        (
+            "test_store_index.TheDocumentedQueriesAreTheContract.test_the_documented_helper_makes_free_text_a_safe_match_argument",
+        ),
+    ),
 )
 
 

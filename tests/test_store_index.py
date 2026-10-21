@@ -17,6 +17,7 @@ import dataclasses
 import gzip
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -566,6 +567,202 @@ class FullTextSearchIsAvailable(unittest.TestCase):
         """Breaks if the probe reports FTS5 missing where it works, which would refuse
         every build here."""
         self.assertTrue(store_index.fts5_available())
+
+
+DOCUMENT = Path(__file__).resolve().parents[1] / "docs" / "how-it-works.md"
+
+# `<!-- index-query: NAME -->` on the line before a fenced `sql` block names a query a
+# reader is told to run; `<!-- index-helper: NAME -->` does the same for a `python`
+# block. The test runs each block as written.
+_BLOCK = re.compile(r"<!-- index-(query|helper): (\w+) -->\n```(?:sql|python)\n(.*?)```", re.DOTALL)
+
+
+def tagged_blocks(text: str, kind: str) -> dict[str, str]:
+    """The fenced blocks of one kind in `text`, by tag. A tag used twice raises: two
+    blocks for one name would leave one of them untested."""
+    found: dict[str, str] = {}
+    for tagged, name, body in _BLOCK.findall(text):
+        if tagged != kind:
+            continue
+        if name in found:
+            raise ValueError(f"index-{kind} {name} appears twice")
+        found[name] = body
+    return found
+
+
+def mismatches(documented: dict[str, str], expected: dict, connection) -> list[str]:
+    """Every way the documented queries disagree with the hand-listed expectations:
+    a tag with no expectation, an expectation with no tag, and any case whose rows
+    differ. Empty means they agree."""
+    problems = [
+        f"{name}: documented, no expected rows"
+        for name in sorted(documented.keys() - expected.keys())
+    ]
+    problems += [
+        f"{name}: expected rows, not documented"
+        for name in sorted(expected.keys() - documented.keys())
+    ]
+    for name in sorted(documented.keys() & expected.keys()):
+        for params, rows in expected[name]:
+            got = connection.execute(documented[name], params).fetchall()
+            if got != rows:
+                problems.append(f"{name}{params}: got {got}, expected {rows}")
+    return problems
+
+
+# One node with no repository, found through its label, with a ticket entry under the
+# empty repository name so the ticket queries meet a NULL `files.repo` too.
+ORPHAN = {"id": "n0", "label": "Orphan gateway note", "source_file": "loose.txt"}
+QUERY_LINKS = LINKS + [{"source": "n0", "target": "a2", "relation": "calls"}]
+QUERY_TICKETS = {
+    "svc-a": {
+        **TICKETS["svc-a"],
+        "docs/readme.md": {
+            "tickets": {"PROJ-3": 1},
+            "proposed": {"PROJ-1": 1},
+            "first": "2024-02-01",
+            "last": "2024-02-01",
+        },
+    },
+    "": {"loose.txt": {"tickets": {"PROJ-1": 1, "PROJ-9": 3}, "first": "x", "last": "y"}},
+}
+
+A1_ROW = (
+    "a1",
+    "Payment gateway feature",
+    "svc-a",
+    "feature",
+    "features/pay.feature",
+    "https://example.test/svc-a/features/pay.feature",
+    0,
+)
+A3_ROW = ("a3", "Gateway client", "svc-a", "class", "src/Client.java", None, 1)
+N0_ROW = ("n0", "Orphan gateway note", "", "", "loose.txt", None, None)
+
+# Written out by hand. `find`: a3's label has two words, a1's and n0's three, so a3 is
+# the better match and a1 and n0 tie on rank and fall back to id.
+EXPECTED = {
+    "find": [
+        (('"gateway"*', None, None, 20), [A3_ROW, A1_ROW, N0_ROW]),
+        (('"gateway"*', None, None, 2), [A3_ROW, A1_ROW]),
+        (('"gateway"*', "svc-a", None, 20), [A3_ROW, A1_ROW]),
+        (('"gateway"*', "", None, 20), [N0_ROW]),
+        (('"gateway"*', None, "class", 20), [A3_ROW]),
+        (('"nothing"*', None, None, 20), []),
+    ],
+    "node": [
+        (("a3",), [A3_ROW]),
+        (("n0",), [N0_ROW]),
+        (("ghost",), []),
+    ],
+    "neighbours": [
+        (
+            ("a2", None),
+            [("out", "calls", "a3"), ("in", "calls", "n0"), ("in", "contains", "a1")],
+        ),
+        (("a2", "contains"), [("in", "contains", "a1")]),
+        (("a3", None), [("in", "calls", "a2"), ("out", "calls", "b1")]),
+        (("ghost", None), []),
+    ],
+    "tickets_for_file": [
+        (("svc-a", "features/pay.feature"), [("PROJ-1", 2, 1), ("PROJ-2", 1, 0)]),
+        (("", "loose.txt"), [("PROJ-1", 1, 1), ("PROJ-9", 3, 1)]),
+        (("nope", "loose.txt"), []),
+    ],
+    "files_for_ticket": [
+        (
+            ("PROJ-1",),
+            [
+                ("", "loose.txt", 1, 1),
+                ("svc-a", "features/pay.feature", 2, 1),
+                ("svc-a", "docs/readme.md", 1, 0),
+            ],
+        ),
+        (("PROJ-0",), []),
+    ],
+}
+
+
+class TheDocumentedQueriesAreTheContract(IndexCase):
+    """`docs/how-it-works.md` tells a reader which SQL to run. A reader such as the MCP
+    server runs that SQL, so it is held against a real built index."""
+
+    def setUp(self):
+        super().setUp()
+        write_graph(self.graph, NODES + [ORPHAN], QUERY_LINKS)
+        write_tickets(self.tickets, QUERY_TICKETS)
+        self.build()
+        self.connection = sqlite3.connect(self.out.as_uri() + "?mode=ro", uri=True)
+        self.addCleanup(self.connection.close)
+        self.text = DOCUMENT.read_text(encoding="utf-8")
+
+    def test_each_documented_query_returns_the_hand_listed_rows(self):
+        """Breaks if a documented query is wrong for the schema: a direction swapped,
+        a join that drops a node with no repository, a lost tiebreak, a landed
+        ticket listed after a proposed one."""
+        documented = tagged_blocks(self.text, "query")
+        self.assertEqual(mismatches(documented, EXPECTED, self.connection), [])
+
+    def test_a_documented_query_without_an_expectation_fails(self):
+        """Breaks if a query can be added to the page and go untested: the check that
+        reads the page must name a tag no expectation covers."""
+        documented = {"one": "SELECT 1", "added": "SELECT 1"}
+        expected = {"one": [((), [(1,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["added: documented, no expected rows"],
+        )
+
+    def test_an_expectation_without_a_documented_query_fails(self):
+        """Breaks if a query can be deleted from the page and its expectation linger
+        green: the check must name an expectation with no tag behind it."""
+        documented = {"one": "SELECT 1"}
+        expected = {"one": [((), [(1,)])], "gone": [((), [(1,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["gone: expected rows, not documented"],
+        )
+
+    def test_a_wrong_expectation_is_reported_as_a_mismatch(self):
+        """CLAUDE.md 2.9: the comparison must be able to fail in this run. Breaks if
+        `mismatches` reports nothing whatever the rows are, which would make the
+        contract test above pass over any SQL. The queries here are the instrument's
+        own, so a change to the page cannot make this pass or fail."""
+        documented = {"one": "SELECT 1"}
+        expected = {"one": [((), [(2,)])]}
+        self.assertEqual(
+            mismatches(documented, expected, self.connection),
+            ["one(): got [(1,)], expected [(2,)]"],
+        )
+
+    def test_a_tag_used_twice_is_refused(self):
+        """Breaks if the second of two blocks for one name silently replaces the first,
+        leaving one documented query unrun."""
+        block = "<!-- index-query: node -->\n```sql\nSELECT 1\n```\n"
+        with self.assertRaises(ValueError):
+            tagged_blocks(block + block, "query")
+
+    def test_the_documented_helper_makes_free_text_a_safe_match_argument(self):
+        """Breaks if the documented recipe lets FTS5 syntax through as an operator:
+        `gateway OR order` must need all three words (and so match nothing), not
+        either; a lone quote must not raise; a quote inside a word is doubled."""
+        scope: dict = {}
+        exec(tagged_blocks(self.text, "helper")["match_argument"], scope)
+        match_argument = scope["match_argument"]
+        find = tagged_blocks(self.text, "query")["find"]
+
+        def ids(text):
+            rows = self.connection.execute(find, (match_argument(text), None, None, 20))
+            return [row[0] for row in rows]
+
+        self.assertEqual(match_argument("Gate pay"), '"Gate"* "pay"*')
+        self.assertEqual(ids("Gate pay"), ["a1"])
+        self.assertEqual(ids("gateway OR order"), [])
+        self.assertEqual(ids('gateway "'), ["a3", "a1", "n0"])
+        self.assertEqual(ids("gateway NEAR"), [])
+        self.assertEqual(ids('"gateway'), ["a3", "a1", "n0"])
+        self.assertEqual(match_argument('say "hi"'), '"say"* """hi"""*')
+        self.assertEqual(match_argument("  "), "")
 
 
 if __name__ == "__main__":

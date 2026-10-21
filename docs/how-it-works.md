@@ -395,15 +395,113 @@ only and never decompresses the archive. When `meta.graph` names the committed
 the plain graph, which can be gigabytes, `status` says freshness is not checked
 rather than read it.
 
-The queries a reader runs against the index are:
+The queries a reader runs against the index are below. Each block is held by
+`tests/test_store_index.py`, which runs it as written against a built index and
+compares the rows with a hand-written list, so what follows is what the schema
+answers. Bind the `?` parameters; never build the SQL from text.
 
-| Query | Answers |
-|---|---|
-| `find` | nodes whose label matches a full-text search, best match first |
-| `node` | one node by id |
-| `neighbours` | the outgoing and incoming edges of one node, with the relation and the other end's id |
-| `tickets_for_file` | the tickets that touched a `(repo, path)`, and whether each landed |
-| `files_for_ticket` | the files a ticket touched, landed ones first |
+Open the file read-only (`sqlite3.connect("file:store.sqlite?mode=ro", uri=True)`).
+A node with no repository has a NULL `files.repo`, so every query that names a
+repository joins `repos` with `LEFT JOIN` and reads `coalesce(r.name, '')`: an
+inner join would drop that node without an error. `''` therefore means "no
+repository" in a parameter as well as in a result.
+
+**`find`** answers nodes whose label matches a full-text search, best match first
+(`bm25`, then id, so a tie is stable). `?1` is an FTS5 `MATCH` argument, `?2` a
+repository name or NULL, `?3` a kind or NULL, `?4` the limit. Columns:
+`id, label, repo, kind, path, url, community`.
+
+<!-- index-query: find -->
+```sql
+SELECT n.id, n.label, coalesce(r.name, ''), n.kind, f.path, n.url, n.community
+FROM labels
+JOIN nodes n ON n.k = labels.rowid
+JOIN files f ON f.k = n.file
+LEFT JOIN repos r ON r.k = f.repo
+WHERE labels MATCH ?1
+  AND (?2 IS NULL OR coalesce(r.name, '') = ?2)
+  AND (?3 IS NULL OR n.kind = ?3)
+ORDER BY bm25(labels), n.id
+LIMIT ?4
+```
+
+Free text is not a `MATCH` argument. `NEAR`, `OR`, `*`, a column filter and an
+unbalanced quote are all FTS5 syntax, and a user's words can hold any of them.
+Quote each word, double any `"` inside it, and end it with `*` for a prefix match.
+The words are then ANDed and none is an operator.
+
+<!-- index-helper: match_argument -->
+```python
+def match_argument(text):
+    words = [w for w in text.split() if any(c.isalnum() for c in w)]
+    return " ".join('"' + w.replace('"', '""') + '"*' for w in words)
+```
+
+An empty result from `match_argument` has nothing to search for, so do not run
+`find` with it.
+
+**`node`** answers one node by id. Same columns as `find`.
+
+<!-- index-query: node -->
+```sql
+SELECT n.id, n.label, coalesce(r.name, ''), n.kind, f.path, n.url, n.community
+FROM nodes n
+JOIN files f ON f.k = n.file
+LEFT JOIN repos r ON r.k = f.repo
+WHERE n.id = ?1
+```
+
+**`neighbours`** answers the edges of one node with the relation and the id at the
+other end. `?1` is the node id and `?2` a relation name or NULL. The direction
+column is `out` when the node is the source and `in` when it is the target.
+Ordered by relation, then the other end's id, then direction.
+
+<!-- index-query: neighbours -->
+```sql
+SELECT 'out' AS direction, rel.name AS relation, t.id AS other
+FROM nodes s
+JOIN edges e ON e.source = s.k
+JOIN relations rel ON rel.k = e.relation
+JOIN nodes t ON t.k = e.target
+WHERE s.id = ?1 AND (?2 IS NULL OR rel.name = ?2)
+UNION ALL
+SELECT 'in', rel.name, s.id
+FROM nodes t
+JOIN edges e ON e.target = t.k
+JOIN relations rel ON rel.k = e.relation
+JOIN nodes s ON s.k = e.source
+WHERE t.id = ?1 AND (?2 IS NULL OR rel.name = ?2)
+ORDER BY 2, 3, 1
+```
+
+**`tickets_for_file`** answers the tickets that touched one file. `?1` is the
+repository (`''` for none) and `?2` the repository-relative path. `landed` is 1
+for a ticket in the landed history and 0 for a proposed one. Landed first, then
+ticket id. Columns: `ticket, count, landed`.
+
+<!-- index-query: tickets_for_file -->
+```sql
+SELECT t.ticket, t.count, t.landed
+FROM files f
+LEFT JOIN repos r ON r.k = f.repo
+JOIN tickets t ON t.file = f.k
+WHERE coalesce(r.name, '') = ?1 AND f.path = ?2
+ORDER BY t.landed DESC, t.ticket
+```
+
+**`files_for_ticket`** answers the files one ticket touched, landed ones first,
+then by repository and path. `?1` is the ticket id. Columns:
+`repo, path, count, landed`.
+
+<!-- index-query: files_for_ticket -->
+```sql
+SELECT coalesce(r.name, ''), f.path, t.count, t.landed
+FROM tickets t
+JOIN files f ON f.k = t.file
+LEFT JOIN repos r ON r.k = f.repo
+WHERE t.ticket = ?1
+ORDER BY t.landed DESC, coalesce(r.name, ''), f.path
+```
 
 ## Reproducibility as a discipline
 
