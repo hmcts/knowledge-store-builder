@@ -85,20 +85,28 @@ def shape_error(body: object) -> str:
     if not isinstance(edges, list):
         return "`edges` is not a list"
     for number, edge in enumerate(edges):
-        if not isinstance(edge, dict):
-            return f"edge {number} is not an object"
-        for name in ("kinds", "refs_pinned"):
-            if not isinstance(edge.get(name, {}), dict):
-                return f"edge {number}'s `{name}` is not an object"
-        unpinned = edge.get("refs_unpinned", 0)
-        if not isinstance(unpinned, int) or isinstance(unpinned, bool):
-            return f"edge {number}'s `refs_unpinned` is not an integer"
+        problem = _edge_shape_error(number, edge)
+        if problem:
+            return problem
     unresolved = body.get("unresolved_targets_outside_estate", {})
     if not isinstance(unresolved, dict):
         return "`unresolved_targets_outside_estate` is not an object"
     for kind, targets in unresolved.items():
         if not isinstance(targets, dict) or not all(isinstance(t, dict) for t in targets.values()):
             return f"`unresolved_targets_outside_estate.{kind}` is not an object of objects"
+    return ""
+
+
+def _edge_shape_error(number: int, edge: object) -> str:
+    """Why edge `number` cannot be compared, or ""."""
+    if not isinstance(edge, dict):
+        return f"edge {number} is not an object"
+    for name in ("kinds", "refs_pinned"):
+        if not isinstance(edge.get(name, {}), dict):
+            return f"edge {number}'s `{name}` is not an object"
+    unpinned = edge.get("refs_unpinned", 0)
+    if not isinstance(unpinned, int) or isinstance(unpinned, bool):
+        return f"edge {number}'s `refs_unpinned` is not an integer"
     return ""
 
 
@@ -123,37 +131,59 @@ def differences(here: dict, there: dict) -> list[str]:
     found = []
     ours, theirs = _edge_index(here), _edge_index(there)
     for key in sorted(set(ours) | set(theirs)):
-        consumer, provider, chart = key
-        name = f"{consumer} -> {provider}" + (f" [{chart}]" if chart else "")
-        kinds_a, pins_a, unpinned_a = ours.get(key, ({}, {}, 0))
-        kinds_b, pins_b, unpinned_b = theirs.get(key, ({}, {}, 0))
-        for kind in sorted(set(kinds_a) | set(kinds_b)):
-            if kinds_a.get(kind, 0) != kinds_b.get(kind, 0):
-                found.append(
-                    f"{name} {kind}: {kinds_a.get(kind, 0)} references here, "
-                    f"{kinds_b.get(kind, 0)} there"
-                )
-        kinds = ",".join(sorted(set(kinds_a) | set(kinds_b)))
-        if pins_a != pins_b:
-            found.append(f"{name} {kinds}: refs_pinned {pins_a} here, {pins_b} there")
-        if unpinned_a != unpinned_b:
-            found.append(f"{name} {kinds}: refs_unpinned {unpinned_a} here, {unpinned_b} there")
+        found.extend(
+            _edge_differences(key, ours.get(key, ({}, {}, 0)), theirs.get(key, ({}, {}, 0)))
+        )
     unresolved_a = here.get("unresolved_targets_outside_estate") or {}
     unresolved_b = there.get("unresolved_targets_outside_estate") or {}
     for kind in sorted(set(unresolved_a) | set(unresolved_b)):
-        targets_a, targets_b = unresolved_a.get(kind) or {}, unresolved_b.get(kind) or {}
-        for target in sorted(set(targets_a) | set(targets_b)):
-            if targets_a.get(target) != targets_b.get(target):
-                found.append(
-                    f"unresolved {kind} {target}: {targets_a.get(target)} here, "
-                    f"{targets_b.get(target)} there"
-                )
+        found.extend(
+            _unresolved_differences(
+                kind, unresolved_a.get(kind) or {}, unresolved_b.get(kind) or {}
+            )
+        )
     return found
+
+
+def _edge_differences(
+    key: tuple[str, str, str], ours: tuple[dict, dict, int], theirs: tuple[dict, dict, int]
+) -> list[str]:
+    """How one (consumer, provider, chart) edge differs between here and there."""
+    found = []
+    consumer, provider, chart = key
+    name = f"{consumer} -> {provider}" + (f" [{chart}]" if chart else "")
+    kinds_a, pins_a, unpinned_a = ours
+    kinds_b, pins_b, unpinned_b = theirs
+    for kind in sorted(set(kinds_a) | set(kinds_b)):
+        if kinds_a.get(kind, 0) != kinds_b.get(kind, 0):
+            found.append(
+                f"{name} {kind}: {kinds_a.get(kind, 0)} references here, "
+                f"{kinds_b.get(kind, 0)} there"
+            )
+    kinds = ",".join(sorted(set(kinds_a) | set(kinds_b)))
+    if pins_a != pins_b:
+        found.append(f"{name} {kinds}: refs_pinned {pins_a} here, {pins_b} there")
+    if unpinned_a != unpinned_b:
+        found.append(f"{name} {kinds}: refs_unpinned {unpinned_a} here, {unpinned_b} there")
+    return found
+
+
+def _unresolved_differences(kind: str, targets_a: dict, targets_b: dict) -> list[str]:
+    """Each unresolved target of one kind that differs between here and there."""
+    return [
+        f"unresolved {kind} {target}: {targets_a.get(target)} here, {targets_b.get(target)} there"
+        for target in sorted(set(targets_a) | set(targets_b))
+        if targets_a.get(target) != targets_b.get(target)
+    ]
 
 
 def _compare(layer: relationships.Layer, path: Path) -> int:
     try:
-        there = json.loads(path.read_text(encoding="utf-8"))
+        # NOSONAR(S8707) - reading the path the operator named with `--compare` is the
+        # purpose of the flag, and nothing is written there. Grounds are stated once
+        # in `build_community_summaries.merge`; this site cites them rather than
+        # restating them, so the two cannot drift.
+        there = json.loads(path.read_text(encoding="utf-8"))  # NOSONAR(S8707)
     except (OSError, ValueError) as error:
         print(f"Cannot read {path} to compare against: {error}", file=sys.stderr)
         return 1

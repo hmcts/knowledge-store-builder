@@ -7046,7 +7046,7 @@ MUTATIONS = (
         "relationships: a Terraform source outside a module block is read as a dependency",
         "relationships.py",
         "    in_module = _module_source_offsets(text)",
-        "    in_module = {m.start() for m in _TF_ANY_SOURCE.finditer(text)} | {m.start() for m in _TF_SOURCE.finditer(text)}",
+        "    in_module = {m.start() for m in _TF_ANY_SOURCE.finditer(text)}",
         "#455: `source` is also an `aws_s3_object` file argument and a `required_providers` address, so reading every one reports file paths and provider addresses as module dependencies the store does not hold - plausible rows in the unresolved report, none of them a dependency",
         (
             "test_ingestion_gaps.TerraformEvidence.test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing",
@@ -7085,8 +7085,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a heredoc body is read as Terraform structure",
         "relationships.py",
-        "            if heredoc:",
-        "            if False:",
+        "    if heredoc:\n        return _heredoc_end(text, heredoc)\n",
+        "    if False:\n        return _heredoc_end(text, heredoc)\n",
         "#455: a heredoc body is free text, so a `}` or an unbalanced quote in it (a policy document, a script) ends or swallows the module block and the module's `source` is silently dropped from the layer",
         (
             "test_relationships_parsers.TerraformScopeTest.test_a_heredoc_body_is_not_structure",
@@ -7130,7 +7130,7 @@ MUTATIONS = (
     Mutation(
         "relationships: an unresolved target loses who references it",
         "relationships.py",
-        "                        entry.referenced_by.add(clone.name)\n",
+        "    entry.referenced_by.add(consumer)\n",
         "",
         "#455 comment 3: an unresolved target with no `referenced_by` is a dependency nobody can act on - the report says the estate needs something and not which repositories need it",
         (
@@ -7225,16 +7225,16 @@ MUTATIONS = (
     Mutation(
         "relationships: a pin is written unmasked",
         "relationships.py",
-        "                        edge.refs[secret_mask.mask(ref.ref)] += 1\n",
-        "                        edge.refs[ref.ref] += 1\n",
+        "        edge.refs[secret_mask.mask(ref.ref)] += 1\n",
+        "        edge.refs[ref.ref] += 1\n",
         "#455 review: a pin is store text and a key of a committed file - an npm spec can be a URL carrying `access_token=`, a Terraform `?ref=` can hold a token - and example lines were masked while the pin beside them was not",
         ("test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",),
     ),
     Mutation(
         "relationships: an unopenable file reads as empty",
         "relationships.py",
-        "                    text = read_text_or_raise(clone / rel)\n",
-        "                    text = read_text(clone / rel)\n",
+        "        text = read_text_or_raise(clone / rel)\n",
+        "        text = read_text(clone / rel)\n",
         "#455 review: a file the stage cannot open was read as empty, so its references vanished from the layer with nothing counted or named; only a POM that failed to parse was reported",
         (
             "test_build_relationships.UnreadableTest.test_a_file_that_cannot_be_opened_is_counted_and_named_per_kind",
@@ -7243,8 +7243,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a credentialed GitHub module source names no repository",
         "relationships.py",
-        "        github = _TF_SOURCE.match(strip_userinfo(match.group(0)))\n",
-        "        github = _TF_SOURCE.match(match.group(0))\n",
+        "        github = _github_source(strip_userinfo(address))\n",
+        "        github = _github_source(address)\n",
         "#455: a credential in a module source URL (`https://user:token@github.com/...`) hid the repository from the GitHub form, so the source read as an address outside the estate and the graph drew no edge to a repository the estate holds",
         (
             "test_ingestion_gaps.TerraformEvidence.test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing",
@@ -7287,8 +7287,8 @@ MUTATIONS = (
     Mutation(
         "relationships: an ssh source is GitHub only with the `git` login",
         "relationships.py",
-        '        (?:https://|git@|ssh://(?:[^@/"]+@)?)?github\\.com[/:]\n',
-        "        (?:https://|git@|ssh://git@)?github\\.com[/:]\n",
+        """_TF_SCHEME = re.compile(r'(?:git::)?(?:https://|git@|ssh://(?:[^@/"]+@)?)?')\n""",
+        "_TF_SCHEME = re.compile(r'(?:git::)?(?:https://|git@|ssh://git@)?')\n",
         "#455 review: stripping `user:token@` from `ssh://user:token@github.com/...` leaves `ssh://github.com`, and a deploy key's login is not always `git`; read only as `ssh://git@` either names no repository and is reported as an address the estate does not hold",
         (
             "test_relationships_parsers.CredentialTest.test_an_ssh_source_with_any_login_or_a_credential_names_its_repository",
@@ -7297,8 +7297,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a store parser's exception text is echoed in the refusal",
         "relationships.py",
-        '                        f"{kind.name}: the parser raised {type(error).__name__} "\n',
-        '                        f"{kind.name}: the parser raised {error!r} "\n',
+        '            f"{kind.name}: the parser raised {type(error).__name__} on {clone.name}/{rel}"\n',
+        '            f"{kind.name}: the parser raised {error!r} on {clone.name}/{rel}"\n',
         "#455 review: a store's parser raises with whatever text it holds, which can be a credential it read, and the refusal is printed where a build log keeps it",
         (
             "test_relationships_store_kinds.BadParserResultTest.test_a_refusal_names_the_kind_the_file_and_the_type_and_echoes_no_store_text",
@@ -7448,8 +7448,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a floating reference is counted as a pin",
         "relationships.py",
-        "                        if ref.ref:\n",
-        "                        if True:\n",
+        "    if ref.ref:\n",
+        "    if True:\n",
         "#460 parity: a reference with no pin was counted in `refs_pinned` under an empty-string key, so a reader summing pins counted floating references as pinned and a store converting its own output had to invent the key",
         (
             "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
@@ -7459,8 +7459,8 @@ MUTATIONS = (
     Mutation(
         "relationships: --compare ignores unpinned references",
         "build_relationships.py",
-        "        if unpinned_a != unpinned_b:\n",
-        "        if False:\n",
+        "    if unpinned_a != unpinned_b:\n",
+        "    if False:\n",
         "#460 parity: the parity gate must see every field it is used to retire a script on; a pinned reference turned floating would otherwise compare equal",
         (
             "test_build_relationships.StageTest.test_compare_reports_a_difference_in_unpinned_references",
@@ -7510,8 +7510,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a store kind may shadow a built-in",
         "relationships.py",
-        "        if name in builtin_names:\n",
-        "        if False:\n",
+        "    if name in builtin_names:\n",
+        "    if False:\n",
         "#455: a store replacing `npm_package` changes what a built-in name means for that store alone, so a consumer reading `kinds.json` cannot rely on the name",
         (
             "test_relationships_store_kinds.RejectedDeclarationTest.test_a_kind_cannot_shadow_a_built_in",

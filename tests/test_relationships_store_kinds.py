@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from test_build_relationships import GITHUB, TOKEN, _Store, _write  # noqa: E402
+from test_build_relationships import GITHUB, TOKEN, _Store, _write, snapshot  # noqa: E402
 from knowledgestore import relationships  # noqa: E402
 
 KIND = "event_subscription"
@@ -71,6 +71,11 @@ ESTATE = {
 }
 
 
+def load_kinds(root: Path):
+    """The kinds the store at `root` declares in its configuration."""
+    return relationships.load_store_kinds(root, root / "config" / "relationship-kinds.json")
+
+
 class _StoreKinds(_Store):
     def estate(self, extra=None) -> None:
         """Only the clones named: the shared fixture estate would add its own kinds'
@@ -85,11 +90,6 @@ class _StoreKinds(_Store):
         body = CONFIG if config_body is None else config_body
         (self.root / "config" / "relationship-kinds.json").write_text(
             json.dumps(body), encoding="utf-8"
-        )
-
-    def load(self):
-        return relationships.load_store_kinds(
-            self.root, self.root / "config" / "relationship-kinds.json"
         )
 
     def layer_dir(self) -> Path:
@@ -150,8 +150,8 @@ class StoreKindLayerTest(_StoreKinds):
         object reorders nothing visible until two kinds publish one target and the
         first wins (CLAUDE.md 1.3)."""
         self.declare({"zz_last": CONFIG[KIND], "aa_first": CONFIG[KIND]})
-        self.assertEqual([k.name for k in self.load()], ["aa_first", "zz_last"])
-        self.assertEqual({k.origin for k in self.load()}, {"store"})
+        self.assertEqual([k.name for k in load_kinds(self.root)], ["aa_first", "zz_last"])
+        self.assertEqual({k.origin for k in load_kinds(self.root)}, {"store"})
 
     def test_two_stores_in_one_process_do_not_share_a_module(self):
         """Break caught: a fixed module name, so the second store's `subscriptions`
@@ -159,7 +159,7 @@ class StoreKindLayerTest(_StoreKinds):
         store directory put on `sys.path`, which would let one store's `import x`
         resolve to another's file."""
         self.declare()
-        first = self.load()[0]
+        first = load_kinds(self.root)[0]
         other = self.root / "other-store"
         (other / "scripts").mkdir(parents=True)
         (other / "config").mkdir()
@@ -184,7 +184,7 @@ class RejectedDeclarationTest(_StoreKinds):
     def rejected(self, entry: dict, field: str) -> None:
         self.declare({KIND: {**CONFIG[KIND], **entry}})
         with self.assertRaisesRegex(relationships.UsageError, field) as caught:
-            self.load()
+            load_kinds(self.root)
         self.assertIn(KIND, str(caught.exception))
 
     def test_a_module_outside_the_store_is_refused_before_it_runs(self):
@@ -223,7 +223,7 @@ class RejectedDeclarationTest(_StoreKinds):
         built-in kind changes per store and a consumer cannot rely on the name."""
         self.declare({"npm_package": CONFIG[KIND]})
         with self.assertRaisesRegex(relationships.UsageError, "kind name") as caught:
-            self.load()
+            load_kinds(self.root)
         self.assertIn("npm_package", str(caught.exception))
 
     def test_a_bad_kind_name_is_refused(self):
@@ -233,7 +233,7 @@ class RejectedDeclarationTest(_StoreKinds):
             with self.subTest(bad=bad):
                 self.declare({bad: CONFIG[KIND]})
                 with self.assertRaisesRegex(relationships.UsageError, "kind name"):
-                    self.load()
+                    load_kinds(self.root)
 
     def test_a_missing_function_is_refused(self):
         """Break caught: a misspelt function name found only when the first clone is
@@ -249,7 +249,7 @@ class RejectedDeclarationTest(_StoreKinds):
                 entry = {k: v for k, v in CONFIG[KIND].items() if k != key}
                 self.declare({KIND: entry})
                 with self.assertRaisesRegex(relationships.UsageError, key):
-                    self.load()
+                    load_kinds(self.root)
 
     def test_every_declaration_is_checked_before_any_module_is_imported(self):
         """Break caught: modules imported as the file is read, so a bad second
@@ -260,7 +260,7 @@ class RejectedDeclarationTest(_StoreKinds):
             script=f"open({str(marker)!r}, 'w').close()\n" + SCRIPT,
         )
         with self.assertRaisesRegex(relationships.UsageError, "globs"):
-            self.load()
+            load_kinds(self.root)
         self.assertFalse(marker.exists())
 
     def test_a_missing_or_malformed_field_is_refused(self):
@@ -280,14 +280,14 @@ class StoreKindFailureTest(_StoreKinds):
         self.declare()
         code, _, err = self.run_stage()
         self.assertEqual(code, 0, err)
-        before = self.snapshot()
+        before = snapshot(self.root)
 
         _write(self.repos / "billing", {"broken.events": "explode\n"})
         code, _, err = self.run_stage()
         self.assertEqual(code, 1)
         self.assertIn(KIND, err)
         self.assertIn("billing/broken.events", err)
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(snapshot(self.root), before)
 
     def test_a_script_that_fails_to_import_exits_1_naming_the_kind_and_file(self):
         """Break caught: a syntax error in the store's script escaping as a
@@ -412,7 +412,7 @@ class StoreKindMaskingTest(_StoreKinds):
         self.declare(script=script)
         code, _, err = self.run_stage()
         self.assertEqual(code, 0, err)
-        written = "".join(text for text in (v.decode() for v in self.snapshot().values()))
+        written = "".join(text for text in (v.decode() for v in snapshot(self.root).values()))
         self.assertIn("broker.example.test/orders.created", written)
         self.assertNotIn(TOKEN, written)
         self.assertNotIn(GITHUB, written)
@@ -487,7 +487,7 @@ class EveryKindReportsWhatItCannotResolveTest(_StoreKinds):
             }
         )
         self.declare()
-        kinds = (*relationships.BUILTIN, *self.load())
+        kinds = (*relationships.BUILTIN, *load_kinds(self.root))
         self.assertEqual(len(kinds), 5)
         layer = self.build(kinds=kinds)
         outside = {

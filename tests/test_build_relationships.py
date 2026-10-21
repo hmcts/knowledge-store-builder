@@ -73,6 +73,16 @@ def _write(clone: Path, files: dict[str, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def snapshot(root: Path) -> dict[str, bytes]:
+    """Every file of the store's relationships layer, by layer-relative path."""
+    base = root / "knowledge" / "relationships"
+    return {
+        str(path.relative_to(base)): path.read_bytes()
+        for path in sorted(base.rglob("*"))
+        if path.is_file()
+    }
+
+
 class _Store(SettingsIsolated):
     """A temporary store whose `repositories/` holds the fixture estate."""
 
@@ -130,14 +140,6 @@ class _Store(SettingsIsolated):
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = build_relationships.main(list(argv))
         return code, out.getvalue(), err.getvalue()
-
-    def snapshot(self) -> dict[str, bytes]:
-        base = self.root / "knowledge" / "relationships"
-        return {
-            str(path.relative_to(base)): path.read_bytes()
-            for path in sorted(base.rglob("*"))
-            if path.is_file()
-        }
 
 
 SVC_A_LINE = 'source = "git::https://github.com/example-org/tf-network.git?ref=v4.2.0"'
@@ -956,9 +958,9 @@ class StageTest(_Store):
         1.3): unsorted keys, a set iterated, a timestamp."""
         self.estate()
         self.assertEqual(self.run_stage()[0], 0)
-        first = self.snapshot()
+        first = snapshot(self.root)
         self.assertEqual(self.run_stage()[0], 0)
-        self.assertEqual(self.snapshot(), first)
+        self.assertEqual(snapshot(self.root), first)
         self.assertEqual(
             sorted(first),
             [

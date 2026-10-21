@@ -200,25 +200,28 @@ def _line_of(text: str, offset: int) -> tuple[int, str]:
 # use and none dominates by design: on a real estate the scp-style `git@` form
 # outnumbered the documented `git::https://` one several times over, so handling only
 # the documented form would have missed most of the reuse.
-_TF_SOURCE = re.compile(
-    r"""source\s*=\s*"
-        (?:git::)?
-        # The scheme is optional in Terraform: its GitHub detector accepts a bare
-        # `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made
-        # shared modules invisible on a real estate (#125). The opening quote anchors
-        # this, so `notgithub.com/...` cannot match. An ssh URL may carry any login
-        # name, and none once a `user:token@` credential has been stripped.
-        (?:https://|git@|ssh://(?:[^@/"]+@)?)?github\.com[/:]
-        (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
-        (?:\.git)?(?P<tail>[?/][^"]*)?"
-    """,
-    re.VERBOSE,
+# Matched against a source's address in two steps, the forge's prefix and then the
+# repository, because one expression holding both is past what a reader can check.
+# The scheme is optional in Terraform: its GitHub detector accepts a bare
+# `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made shared
+# modules invisible on a real estate (#125). The prefix is anchored at the start of
+# the address, so `notgithub.com/...` cannot match. An ssh URL may carry any login
+# name, and none once a `user:token@` credential has been stripped.
+_TF_SCHEME = re.compile(r'(?:git::)?(?:https://|git@|ssh://(?:[^@/"]+@)?)?')
+_TF_GITHUB = re.compile(
+    r"github\.com[/:](?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?(?P<tail>[?/].*)?"
 )
 _TF_ANY_SOURCE = re.compile(r'source\s*=\s*"(?P<address>[^"]*)"')
 _LOCAL_SOURCE = ("./", "../", "/")
 _HEREDOC = re.compile(r"<<-?(?P<tag>[A-Za-z_]\w*)")
 _PIN_PARAMS = ("ref", "depth")
 _MODULE_BLOCK = re.compile(r'(?<![\w-])module\s+"[^"]*"\s*\{')
+
+
+def _github_source(address: str) -> re.Match | None:
+    """The organisation, repository and tail of a GitHub module source, or None."""
+    prefix = _TF_SCHEME.match(address)
+    return _TF_GITHUB.fullmatch(address, prefix.end() if prefix else 0)
 
 
 def _ref_of(tail: str | None) -> str:
@@ -245,36 +248,57 @@ def _module_source_offsets(text: str) -> set[int]:
     """
     found: set[int] = set()
     for block in _MODULE_BLOCK.finditer(text):
-        i, depth = block.end(), 1
-        while i < len(text) and depth:
-            ch = text[i]
-            if ch == '"':
-                i = _string_end(text, i)
-                continue
-            heredoc = _HEREDOC.match(text, i)
-            if heredoc:
-                i = _heredoc_end(text, heredoc)
-                continue
-            if ch == "#" or text.startswith("//", i):
-                i = text.find("\n", i)
-                i = len(text) if i < 0 else i
-                continue
-            if text.startswith("/*", i):
-                i = text.find("*/", i)
-                i = len(text) if i < 0 else i + 2
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            elif depth == 1 and text.startswith("source", i) and not _word_before(text, i):
-                match = _TF_ANY_SOURCE.match(text, i)
-                if match:
-                    found.add(match.start())
-                    i = match.end()
-                    continue
-            i += 1
+        found.update(_block_source_offsets(text, block.end()))
     return found
+
+
+def _block_source_offsets(text: str, start: int) -> list[int]:
+    """The `source` attributes at the top level of the block whose body opens at
+    `start`, read up to its closing brace."""
+    found = []
+    i, depth = start, 1
+    while i < len(text) and depth:
+        inert = _inert_end(text, i)
+        if inert is not None:
+            i = inert
+            continue
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif depth == 1:
+            match = _source_attribute(text, i)
+            if match:
+                found.append(match.start())
+                i = match.end()
+                continue
+        i += 1
+    return found
+
+
+def _inert_end(text: str, i: int) -> int | None:
+    """The offset after a string, heredoc or comment opening at `i`, or None when
+    none opens there. Braces and `source` inside one are not structure."""
+    if text[i] == '"':
+        return _string_end(text, i)
+    heredoc = _HEREDOC.match(text, i)
+    if heredoc:
+        return _heredoc_end(text, heredoc)
+    if text[i] == "#" or text.startswith("//", i):
+        end = text.find("\n", i)
+        return len(text) if end < 0 else end
+    if text.startswith("/*", i):
+        end = text.find("*/", i)
+        return len(text) if end < 0 else end + 2
+    return None
+
+
+def _source_attribute(text: str, i: int) -> re.Match | None:
+    """A `source = "..."` attribute starting at `i`, not the tail of a longer name."""
+    if text.startswith("source", i) and not _word_before(text, i):
+        return _TF_ANY_SOURCE.match(text, i)
+    return None
 
 
 def _string_end(text: str, start: int) -> int:
@@ -346,7 +370,7 @@ def _terraform_references(_clone: Path, rel: str, text: str) -> list[Reference]:
         ):
             continue
         line, linetext = _line_of(text, match.start())
-        github = _TF_SOURCE.match(strip_userinfo(match.group(0)))
+        github = _github_source(strip_userinfo(address))
         # The organisation is carried, not checked: the layer decides whether it is
         # the estate's, because only the layer knows the estate.
         if github:
@@ -407,17 +431,26 @@ def _comment_free(line: str) -> str:
         if skip:
             skip = False
         elif quote:
-            if ch == "\\" and quote == '"':
-                skip = True
-            elif ch == quote and quote == "'" and line[i + 1 : i + 2] == "'":
-                skip = True  # `''` is an escaped quote inside a single-quoted scalar
-            elif ch == quote:
-                quote = ""
+            quote, skip = _in_quote(line, i, quote)
         elif ch in "\"'" and line[:i].rstrip()[-1:] in ("", ":", "-", ",", "[", "{"):
             quote = ch
         elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i].rstrip()
     return line.rstrip()
+
+
+def _in_quote(line: str, i: int, quote: str) -> tuple[str, bool]:
+    """The quote still open after `line[i]`, and whether the next character is
+    escaped. Inside double quotes `\\` escapes; inside single quotes `''` is an
+    escaped quote."""
+    ch = line[i]
+    if ch == "\\" and quote == '"':
+        return quote, True
+    if ch == quote and quote == "'" and line[i + 1 : i + 2] == "'":
+        return quote, True
+    if ch == quote:
+        return "", False
+    return quote, False
 
 
 def _scalar(text: str) -> str:
@@ -500,23 +533,38 @@ def _block_dependencies(block: list[tuple[int, str]]) -> list[dict]:
     dash_indent = key_indent = -1
     for indent, content in block:
         if content == "-" or content.startswith("- "):
-            if dash_indent < 0 or indent <= dash_indent:
-                dash_indent = indent
-                body = content[1:].lstrip()
-                key_indent = indent + len(content) - len(body)
-                items.append({})
-                if body.startswith("{"):
-                    flowed = _flow_complete(body, [])
-                    items[-1].update(flowed if isinstance(flowed, dict) else {})
-                    continue
-                content, indent = body, key_indent
-            else:
+            if 0 <= dash_indent < indent:
+                continue  # a dash nested inside an item's value
+            dash_indent = indent
+            body, key_indent, item = _open_item(content, indent)
+            items.append(item)
+            if body is None:
                 continue
-        if items and indent == key_indent and ":" in content:
-            key, _, value = content.partition(":")
-            if key.strip() in _DEP_KEYS and value.strip():
-                items[-1][key.strip()] = _scalar(value)
+            content, indent = body, key_indent
+        if items and indent == key_indent:
+            _read_dependency_key(items[-1], content)
     return [_keep(item) for item in items if item]
+
+
+def _open_item(content: str, indent: int) -> tuple[str | None, int, dict]:
+    """A sequence item opening on `content`: the text after its dash, the indent its
+    keys sit at, and the item so far. A flow mapping (`- {name: x}`) is the whole
+    item, so its text comes back as None."""
+    body = content[1:].lstrip()
+    key_indent = indent + len(content) - len(body)
+    if body.startswith("{"):
+        flowed = _flow_complete(body, [])
+        return None, key_indent, dict(flowed) if isinstance(flowed, dict) else {}
+    return body, key_indent, {}
+
+
+def _read_dependency_key(item: dict, content: str) -> None:
+    """`name`, `version` or `repository` from a `key: value` line, into `item`."""
+    if ":" not in content:
+        return
+    key, _, value = content.partition(":")
+    if key.strip() in _DEP_KEYS and value.strip():
+        item[key.strip()] = _scalar(value)
 
 
 def chart_yaml(text: str) -> tuple[str, list[dict]]:
@@ -796,12 +844,7 @@ def pom(text: str) -> Pom:
     if parent:
         scope["project.parent.groupId"] = parent[0]
         scope["project.parent.version"] = parent[2]
-    properties = {}
-    props_node = project.child("properties")
-    for node in props_node.children if props_node else []:
-        properties[node.tag] = "".join(node.text).strip()
-    for _ in range(8):
-        properties = {k: _resolve(v, {**properties, **scope}) for k, v in properties.items()}
+    properties = _pom_properties(project, scope)
     scope = {**properties, **scope}
     result = Pom(
         _resolve(group, scope),
@@ -810,6 +853,25 @@ def pom(text: str) -> Pom:
         parent,
         properties,
     )
+    result.dependencies.extend(_pom_dependencies(project, scope))
+    return result
+
+
+def _pom_properties(project: _Node, scope: dict) -> dict[str, str]:
+    """`<properties>`, each resolved against the others and `scope`."""
+    properties = {}
+    props_node = project.child("properties")
+    for node in props_node.children if props_node else []:
+        properties[node.tag] = "".join(node.text).strip()
+    for _ in range(8):
+        properties = {k: _resolve(v, {**properties, **scope}) for k, v in properties.items()}
+    return properties
+
+
+def _pom_dependencies(project: _Node, scope: dict) -> list[tuple[str, str, str, int]]:
+    """(group, artifact, version, line) of each dependency under `<project>` and its
+    profiles, resolved against `scope`. One naming no group or artifact is not read."""
+    found = []
     holders = [project]
     for profiles in project.kids("profiles"):
         holders.extend(profiles.kids("profile"))
@@ -819,11 +881,10 @@ def pom(text: str) -> Pom:
                 artifact = dependency.child("artifactId")
                 dep_group = _resolve(dependency.value("groupId"), scope)
                 dep_artifact = _resolve(dependency.value("artifactId"), scope)
-                if not (dep_group and dep_artifact and artifact):
-                    continue
-                dep_version = _resolve(dependency.value("version"), scope)
-                result.dependencies.append((dep_group, dep_artifact, dep_version, artifact.line))
-    return result
+                if dep_group and dep_artifact and artifact:
+                    dep_version = _resolve(dependency.value("version"), scope)
+                    found.append((dep_group, dep_artifact, dep_version, artifact.line))
+    return found
 
 
 def _maven_references(_clone: Path, rel: str, text: str) -> list[Reference]:
@@ -1039,6 +1100,27 @@ def _function(kind: str, module, field_name: str, name: object) -> Callable:
     return function
 
 
+_KIND_NAME_FIELD = "kind name"
+
+
+def _checked_declaration(name: str, entry: object, builtin_names: set[str]) -> tuple[str, ...]:
+    """The globs of one declared kind, once its name, shape, globs and function
+    names are usable. Raises `UsageError` naming the first that is not."""
+    if not KIND_NAME.fullmatch(name):
+        raise _declared(name, _KIND_NAME_FIELD, "must match ^[a-z][a-z0-9_]*$")
+    if name in builtin_names:
+        raise _declared(name, _KIND_NAME_FIELD, "shadows a built-in kind")
+    if not isinstance(entry, dict):
+        raise _declared(name, _KIND_NAME_FIELD, "must map to an object")
+    globs = entry.get("globs")
+    if not isinstance(globs, list) or not globs or not all(isinstance(g, str) and g for g in globs):
+        raise _declared(name, "globs", "must be a non-empty list of glob strings")
+    for field_name in ("references", "publishes"):
+        if not isinstance(entry.get(field_name), str) or not entry[field_name]:
+            raise _declared(name, field_name, "must name a function in the module")
+    return tuple(globs)
+
+
 def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
     """The kinds a store registers in `config_path`, ordered by name; none when the
     file does not exist. Raises `UsageError` for anything the file declares badly."""
@@ -1056,23 +1138,8 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
     checked = []
     for name in sorted(declared):
         entry = declared[name]
-        if not KIND_NAME.fullmatch(name):
-            raise _declared(name, "kind name", "must match ^[a-z][a-z0-9_]*$")
-        if name in builtin_names:
-            raise _declared(name, "kind name", "shadows a built-in kind")
-        if not isinstance(entry, dict):
-            raise _declared(name, "kind name", "must map to an object")
-        globs = entry.get("globs")
-        if (
-            not isinstance(globs, list)
-            or not globs
-            or not all(isinstance(g, str) and g for g in globs)
-        ):
-            raise _declared(name, "globs", "must be a non-empty list of glob strings")
-        for field_name in ("references", "publishes"):
-            if not isinstance(entry.get(field_name), str) or not entry[field_name]:
-                raise _declared(name, field_name, "must name a function in the module")
-        checked.append((name, entry, tuple(globs), _module_path(root, name, entry.get("module"))))
+        globs = _checked_declaration(name, entry, builtin_names)
+        checked.append((name, entry, globs, _module_path(root, name, entry.get("module"))))
     kinds = []
     for name, entry, globs, path in checked:
         module = _load_module(name, path, entry["module"])
@@ -1456,25 +1523,13 @@ def _scan_layer(clones, kinds, resolver, root):
     for clone in clones:
         for kind in kinds:
             for rel in files_of(clone, kind):
-                try:
-                    text = read_text_or_raise(clone / rel)
-                    found = kind.references(clone, rel, text)
-                    set_aside = kind.skips(clone, rel, text)
-                    skipped[kind.name].update(set_aside)
-                except MissingDependency as missing:
-                    raise KindError(
-                        f"{kind.name}: {_store_relative(root, clone / rel)} {missing} - "
-                        f"pip install '{PACKAGE}[{missing.extra}]'"
-                    ) from missing
-                except (OSError, ValueError):
+                parsed = _parse_file(kind, clone, rel, root)
+                if parsed is None:
                     unreadable.append(_store_relative(root, clone / rel))
                     skipped[kind.name][UNREADABLE] += 1
                     continue
-                except Exception as error:
-                    raise KindError(
-                        f"{kind.name}: the parser raised {type(error).__name__} "
-                        f"on {clone.name}/{rel}"
-                    ) from error
+                found, set_aside = parsed
+                skipped[kind.name].update(set_aside)
                 _check_references(kind, clone, rel, found)
                 read[kind.name] += len(found) + sum(set_aside.values())
                 for ref in found:
@@ -1482,29 +1537,55 @@ def _scan_layer(clones, kinds, resolver, root):
                     if outcome == "self":
                         skipped[kind.name]["self"] += 1
                     elif outcome == "unresolved":
-                        # A target is written as a key of a committed file, so it
-                        # is masked like an example line.
-                        entry = unresolved[kind.name].setdefault(
-                            secret_mask.mask(value), _Unresolved()
-                        )
-                        entry.references += 1
-                        entry.referenced_by.add(clone.name)
+                        _add_unresolved(unresolved[kind.name], value, clone.name)
                     else:
                         edge = edges.setdefault(
                             (clone.name, value, secret_mask.mask(ref.chart)), _Edge()
                         )
-                        edge.references += 1
-                        edge.kinds[kind.name] += 1
-                        # A pin is store text and a key of a committed file: an npm
-                        # spec can be a URL carrying `access_token=`. A reference that
-                        # gives none is counted beside the pins, not under a "" key.
-                        if ref.ref:
-                            edge.refs[secret_mask.mask(ref.ref)] += 1
-                        else:
-                            edge.unpinned += 1
-                        edge.examples.append((ref.rel, ref.line, ref.text))
+                        _add_to_edge(edge, kind.name, ref)
     _check_conservation(read, edges, unresolved, skipped)
     return edges, unresolved, skipped, sorted(unreadable)
+
+
+def _parse_file(kind: Kind, clone: Path, rel: str, root: Path):
+    """The kind's references in one file and what it set aside, or None when the
+    file cannot be read. A missing library or any other failure of the parser stops
+    the layer as a `KindError` naming the kind and the file."""
+    try:
+        text = read_text_or_raise(clone / rel)
+        return kind.references(clone, rel, text), kind.skips(clone, rel, text)
+    except MissingDependency as missing:
+        raise KindError(
+            f"{kind.name}: {_store_relative(root, clone / rel)} {missing} - "
+            f"pip install '{PACKAGE}[{missing.extra}]'"
+        ) from missing
+    except (OSError, ValueError):
+        return None
+    except Exception as error:
+        raise KindError(
+            f"{kind.name}: the parser raised {type(error).__name__} on {clone.name}/{rel}"
+        ) from error
+
+
+def _add_unresolved(targets: dict[str, _Unresolved], value: str, consumer: str) -> None:
+    # A target is written as a key of a committed file, so it is masked like an
+    # example line.
+    entry = targets.setdefault(secret_mask.mask(value), _Unresolved())
+    entry.references += 1
+    entry.referenced_by.add(consumer)
+
+
+def _add_to_edge(edge: _Edge, kind_name: str, ref: Reference) -> None:
+    edge.references += 1
+    edge.kinds[kind_name] += 1
+    # A pin is store text and a key of a committed file: an npm spec can be a URL
+    # carrying `access_token=`. A reference that gives none is counted beside the
+    # pins, not under a "" key.
+    if ref.ref:
+        edge.refs[secret_mask.mask(ref.ref)] += 1
+    else:
+        edge.unpinned += 1
+    edge.examples.append((ref.rel, ref.line, ref.text))
 
 
 def build(
@@ -1627,7 +1708,10 @@ def write(layer: Layer, cfg) -> None:
             with os.fdopen(handle, "w", encoding="utf-8") as out:
                 out.write(dumps(body))
             # `mkstemp` creates 0600; the layer is committed and read by others.
-            os.chmod(temporary, 0o666 & ~umask)
+            # NOSONAR(S2612) - deliberate: `0o666 & ~umask` is the mode a plain
+            # `open(path, "w")` gives the same file, so the layer is no more open
+            # than any other file this library writes.
+            os.chmod(temporary, 0o666 & ~umask)  # NOSONAR(S2612)
     except BaseException:
         for temporary, _ in staged:
             Path(temporary).unlink(missing_ok=True)

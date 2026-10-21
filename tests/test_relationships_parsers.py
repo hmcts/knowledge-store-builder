@@ -547,8 +547,11 @@ class HelmReleaseTest(SettingsIsolated):
         """Break caught: a file holding a `HelmRelease` that does not parse read as
         holding none, so the layer cannot count what it lost."""
         text = "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec: {unclosed: [\n"
-        with _clone({"r.yaml": text}) as root, self.assertRaises(ValueError):
-            relationships.scan(Path(root), _kind("helm_chart"))
+        kind = _kind("helm_chart")
+        with _clone({"r.yaml": text}) as root:
+            clone = Path(root)
+            with self.assertRaises(ValueError):
+                relationships.scan(clone, kind)
 
     def test_the_kind_reports_the_release_as_a_chart_reference(self):
         """Break caught: the release read but not turned into a reference, or its
