@@ -175,6 +175,55 @@ A file that cannot be opened, or a POM that does not parse, is counted as
 identical bytes, and a repository no longer cloned loses its `by-repo` file in the
 same run.
 
+### A store's own kinds
+
+A store whose clones declare a dependency the four kinds do not read, such as an
+event subscription or an internal manifest, gets its edges, pins and unresolved
+targets in the same layer by registering a kind in
+`config/relationship-kinds.json`:
+
+```json
+{"event_subscription": {"module": "scripts/subscriptions.py",
+                        "references": "references",
+                        "publishes": "publishes",
+                        "globs": ["**/*.events"]}}
+```
+
+`knowledgestore relationships` then runs the kind over every clone. Its edges
+carry the kind's name, and `kinds.json` lists it with `"origin": "store"` beside
+the built-ins' `"origin": "builtin"`. The file is the entry point because a store
+repository is not a Python package, so there is nothing to install one from.
+
+The module defines two functions, named in the file:
+
+- `references(clone, rel, text)` reads one file whose path matches `globs` (`rel`
+  is relative to `clone`, a `pathlib.Path`) and returns a list of
+  `knowledgestore.relationships.Reference`. A `ValueError` means the file cannot
+  be read: it is counted as `unreadable` and named, and the stage goes on. Any
+  other exception stops the stage with exit 1, naming the kind and the file, and
+  writes nothing, so the previous layer stays as it was.
+- `publishes(clone)` returns `(target, repo-relative path)` pairs for what the
+  clone offers to others, and `[]` for a kind that only references.
+
+A kind follows the rules the built-ins do. Resolution, the `self` rule,
+conflicts, unresolved targets and their `referenced_by` are the layer's, not the
+parser's. A credential in a `Reference` is dropped (`user:token@` in a URL) or
+masked before anything is written, whichever kind produced it. Store kinds are
+loaded in name order.
+
+A declaration the stage refuses, with exit 1 and before any store code runs:
+
+- a kind name that does not match `^[a-z][a-z0-9_]*$`, or that is a built-in's;
+- a `module` that is absolute, contains `..`, or resolves (through a symlink or
+  otherwise) outside the store root, or that is not a file;
+- a function the module does not define, or `globs` that is not a non-empty list.
+
+**Trust boundary.** A store's module is Python the stage runs with the builder's
+own permissions: it can read and write anything the operator can. The stage loads
+it only from inside the store root, and never adds the store directory to
+`sys.path`, but it does not sandbox it. Register code you would run from the same
+checkout by hand.
+
 ## The history layers
 
 Commit history is exported in **one `git log` pass per repository**

@@ -7061,6 +7061,7 @@ MUTATIONS = (
             "test_relationships_parsers.CredentialTest.test_a_credential_in_a_url_reaches_no_field_of_any_kind",
             "test_relationships_parsers.CredentialTest.test_a_credentialed_github_source_names_its_repository",
             "test_relationships_parsers.UserinfoTest.test_an_ssh_login_name_is_kept_and_a_credential_is_not",
+            "test_relationships_store_kinds.StoreKindMaskingTest.test_a_credential_in_a_store_kinds_reference_reaches_no_file",
         ),
     ),
     Mutation(
@@ -7123,6 +7124,8 @@ MUTATIONS = (
             "test_build_relationships.OrgCheckTest.test_a_module_in_another_organisation_is_not_the_estates",
             "test_build_relationships.SvcATest.test_every_unresolved_terraform_target_is_reported_in_full",
             "test_build_relationships.SvcATest.test_referenced_by_is_complete_and_sorted",
+            "test_relationships_store_kinds.EveryKindReportsWhatItCannotResolveTest.test_a_resolvable_and_an_unresolvable_reference_per_kind",
+            "test_relationships_store_kinds.StoreKindLayerTest.test_a_store_kind_produces_edges_unresolved_targets_and_an_origin",
         ),
     ),
     Mutation(
@@ -7246,6 +7249,36 @@ MUTATIONS = (
         "#455: two parsers of one declaration drift - that is how the graph and the relationships layer came to disagree about module scope, organisations and credentials - so the graph reads Terraform sources only through `relationships`",
         (
             "test_package_edges.OneParserTest.test_no_module_outside_relationships_parses_these_declarations",
+        ),
+    ),
+    Mutation(
+        "relationships: a store kind's module path may climb with `..`",
+        "relationships.py",
+        '    if given.is_absolute() or ".." in given.parts:\n',
+        "    if False:\n",
+        "#455: a store kind's parser is code the builder runs, so the config may only name a file inside the store; `..` is refused lexically because `realpath` collapses it and would launder a path that climbs out and back in",
+        (
+            "test_relationships_store_kinds.RejectedDeclarationTest.test_a_dotdot_path_is_refused_even_when_it_lands_inside",
+        ),
+    ),
+    Mutation(
+        "relationships: a store kind's module may be reached through a symlink out of the store",
+        "relationships.py",
+        "    if os.path.commonpath([real_root, real]) != real_root:\n",
+        "    if False:\n",
+        "#455: containment on the written path alone lets a link inside the store lead to code outside it, which the builder then runs",
+        (
+            "test_relationships_store_kinds.RejectedDeclarationTest.test_a_symlink_that_escapes_the_store_is_refused",
+        ),
+    ),
+    Mutation(
+        "relationships: a store kind may shadow a built-in",
+        "relationships.py",
+        "        if name in builtin_names:\n",
+        "        if False:\n",
+        "#455: a store replacing `npm_package` changes what a built-in name means for that store alone, so a consumer reading `kinds.json` cannot rely on the name",
+        (
+            "test_relationships_store_kinds.RejectedDeclarationTest.test_a_kind_cannot_shadow_a_built_in",
         ),
     ),
 )

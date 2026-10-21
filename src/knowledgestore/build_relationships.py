@@ -4,7 +4,8 @@
     knowledgestore relationships --compare PATH    # compare against another build
 
 Every kind in `relationships.BUILTIN` - Terraform module sources, Helm charts,
-Maven artifacts and npm packages - is run over every clone under `repositories/`.
+Maven artifacts and npm packages - and every kind the store registers in
+`config/relationship-kinds.json` is run over every clone under `repositories/`.
 Each reference resolves to a repository in the estate, to itself (counted and
 dropped), or to `unresolved_targets_outside_estate`: a dependency the store does
 not hold is a finding, never an absence. Three outputs, under
@@ -25,7 +26,7 @@ bytes, and a repository no longer cloned loses its `by-repo` file in the same ru
 and every unresolved target that differs. It exits 1 on any difference: it is the
 tool a store uses to retire a script that wrote the same file.
 
-Exit codes: 0 on success; 1 on a parser failure, an unreadable configuration or
+Exit codes: 0 on success; 1 on a parser failure, a kind declaration that cannot be used, an unreadable configuration or
 `extra` input, a missing `repositories/`, or a `--compare` difference; 2 when the
 layer cannot be written.
 """
@@ -193,10 +194,13 @@ def main(argv: list[str] | None = None) -> int:
 
     clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
     try:
+        store_kinds = relationships.load_store_kinds(
+            config.ROOT, config.RELATIONSHIP_KINDS_CONFIG_PATH
+        )
         layer = relationships.build(
             config.ROOT,
             clones,
-            relationships.BUILTIN,
+            (*relationships.BUILTIN, *store_kinds),
             config.GITHUB_ORG,
             config.CHART_REPO_PATTERN,
             set(config.UMBRELLA_REPOS),

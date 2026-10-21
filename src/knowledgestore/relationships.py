@@ -21,10 +21,12 @@ to read a Flux `HelmRelease`, which is arbitrary YAML.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import importlib.util
 import json
 import os
 import re
+import sys
 import tempfile
 from collections import Counter
 from collections.abc import Callable, Set
@@ -912,6 +914,122 @@ BUILTIN: tuple[Kind, ...] = (
     Kind("maven_artifact", "builtin", ("**/pom.xml",), _maven_references, _maven_publishes),
     Kind("npm_package", "builtin", ("**/package.json",), _npm_references, npm_publishes),
 )
+
+
+# --- a store's own kinds --------------------------------------------------------
+#
+# `config/relationship-kinds.json` registers a kind whose parser lives in the store:
+#
+#     {"<kind>": {"module": "scripts/<file>.py", "references": "<function>",
+#                 "publishes": "<function>", "globs": ["**/*.xml"]}}
+#
+# The file is the entry point. Store repositories are not Python packages (they ship
+# `requirements.txt` and `scripts/`), so there is nothing to install an entry point
+# from. A store's module is code the builder runs with its own authority: it is
+# loaded only from inside the store root, which is the repository an operator is
+# already building, and never from anywhere a config could point it.
+
+KIND_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class UsageError(ValueError):
+    """`config/relationship-kinds.json` is not a usable declaration. Raised before
+    any store code runs, naming the kind and the field."""
+
+
+def _declared(kind: str, field_name: str, problem: str) -> UsageError:
+    return UsageError(f"relationship kind {kind!r}: `{field_name}` {problem}")
+
+
+def _module_path(root: Path, kind: str, module: object) -> Path:
+    """The file `module` names, which must be inside `root`.
+
+    Checked lexically first - `realpath` collapses `..`, so resolving first would
+    launder the path this rejects - and then on the real path, so a symlink inside
+    the store cannot lead out of it.
+    """
+    if not isinstance(module, str) or not module:
+        raise _declared(kind, "module", "must be a path inside the store, as a string")
+    given = Path(module)
+    if given.is_absolute() or ".." in given.parts:
+        raise _declared(kind, "module", f"must be relative to the store, with no `..`: {module}")
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(os.path.join(real_root, module))
+    if os.path.commonpath([real_root, real]) != real_root:
+        raise _declared(kind, "module", f"resolves outside the store: {module}")
+    if not os.path.isfile(real):
+        raise _declared(kind, "module", f"is not a file in the store: {module}")
+    return Path(real)
+
+
+def _load_module(kind: str, path: Path, given: str):
+    """The file as a module under a name unique to its real path, so two stores in
+    one process cannot share one. The store's directory is never put on `sys.path`:
+    that would let any `import` in a store resolve to another file of the store's."""
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
+    name = f"knowledgestore_store_kind_{digest}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise _declared(kind, "module", f"cannot be loaded as Python: {given}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:
+        sys.modules.pop(name, None)
+        raise UsageError(
+            f"relationship kind {kind!r}: `module` {given} failed to import: {error!r}"
+        ) from error
+    return module
+
+
+def _function(kind: str, module, field_name: str, name: object) -> Callable:
+    function = getattr(module, name, None) if isinstance(name, str) else None
+    if not callable(function):
+        raise _declared(kind, field_name, f"names no function in the module: {name!r}")
+    return function
+
+
+def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
+    """The kinds a store registers in `config_path`, ordered by name; none when the
+    file does not exist. Raises `UsageError` for anything the file declares badly."""
+    if not config_path.is_file():
+        return ()
+    try:
+        declared = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise UsageError(f"{config_path}: not readable as JSON: {error}") from error
+    if not isinstance(declared, dict):
+        raise UsageError(f"{config_path}: must be a JSON object keyed by kind name")
+    builtin_names = {kind.name for kind in BUILTIN}
+    kinds = []
+    for name in sorted(declared):
+        entry = declared[name]
+        if not KIND_NAME.match(name):
+            raise _declared(name, "kind name", "must match ^[a-z][a-z0-9_]*$")
+        if name in builtin_names:
+            raise _declared(name, "kind name", "shadows a built-in kind")
+        if not isinstance(entry, dict):
+            raise _declared(name, "kind name", "must map to an object")
+        globs = entry.get("globs")
+        if (
+            not isinstance(globs, list)
+            or not globs
+            or not all(isinstance(g, str) and g for g in globs)
+        ):
+            raise _declared(name, "globs", "must be a non-empty list of glob strings")
+        path = _module_path(root, name, entry.get("module"))
+        module = _load_module(name, path, entry["module"])
+        kinds.append(
+            Kind(
+                name,
+                "store",
+                tuple(globs),
+                _function(name, module, "references", entry.get("references")),
+                _function(name, module, "publishes", entry.get("publishes")),
+            )
+        )
+    return tuple(kinds)
 
 
 # --- the layer ----------------------------------------------------------------
