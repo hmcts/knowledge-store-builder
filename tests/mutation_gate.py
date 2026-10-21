@@ -5284,8 +5284,8 @@ MUTATIONS = (
     Mutation(
         "a branch-only commit is linked as landed work",
         "build_intent_index.py",
-        '            entry["tickets" if landed_link else "proposed"][ticket] += 1',
-        '            entry["tickets"][ticket] += 1',
+        '        entry["tickets" if landed_link else "proposed"][ticket] += 1',
+        '        entry["tickets"][ticket] += 1',
         "an operator found an unmerged branch's ticket stated as what a file implements",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
@@ -5321,8 +5321,8 @@ MUTATIONS = (
     Mutation(
         "a ticket landed through a branch file is still flagged as only proposed",
         "build_intent_index.py",
-        '                descriptions[ticket]["landed"] = True',
-        "                pass",
+        '            descriptions[ticket]["landed"] = True',
+        "            pass",
         "a squash-merged ticket's record said it had never landed",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
@@ -5336,8 +5336,8 @@ MUTATIONS = (
     Mutation(
         "a ticket landed on a file is also listed as proposed there",
         "build_intent_index.py",
-        '        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
-        '        proposed = dict(data["proposed"])',
+        '    proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
+        '    proposed = dict(data["proposed"])',
         "one ticket on one file read as both implemented and only proposed",
         (
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
@@ -5381,6 +5381,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
             "test_build_intent_index.RedactedValuesTest.test_branch_only_text_is_redacted_like_landed_text",
             "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
@@ -5652,8 +5653,8 @@ MUTATIONS = (
     Mutation(
         "a link landed by its own commit is counted as promoted",
         "build_intent_index.py",
-        '            links.promoted += sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])',
-        '            links.promoted += sum(1 for t, n in data["promoted"].items())',
+        '    return sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])',
+        '    return sum(1 for t, n in data["promoted"].items())',
         "the promoted count over-reported links a default-branch commit had landed anyway",
         (
             "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
@@ -5714,8 +5715,8 @@ MUTATIONS = (
     Mutation(
         "omit still publishes the unlanded files of a branch commit",
         "build_intent_index.py",
-        "            made = {ticket: True for ticket, landed_link in made.items() if landed_link}",
-        "            pass",
+        "        made = {ticket: True for ticket, landed_link in made.items() if landed_link}",
+        "        pass",
         "a store that opted out of proposals still got them from a commit that was partly landed",
         (
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",

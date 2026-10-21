@@ -702,23 +702,49 @@ def _fold_files(
     A branch commit's link that `link_landed` finds landed counts as landed, and
     marks its ticket landed too; under `omit` its other links are left out.
     """
-    omit_proposed, promoted = links
-    is_landed = landed(commit)
     date = commit["author_date"][:10]
     for changed in commit.get("files", []):
-        made = {ticket: link_landed(commit, changed, ticket, promoted) for ticket in tickets}
-        if omit_proposed:
-            made = {ticket: True for ticket, landed_link in made.items() if landed_link}
+        made = _links_made(commit, changed, tickets, links)
         if not made:
             continue
         entry = files[changed["path"]]
-        for ticket, landed_link in made.items():
-            entry["tickets" if landed_link else "proposed"][ticket] += 1
-            if landed_link and not is_landed:
-                descriptions[ticket]["landed"] = True
-                if not changed.get("landed"):
-                    entry["promoted"][ticket] += 1
+        _add_links(entry, made, commit, changed, descriptions)
         _widen_range(entry, date)
+
+
+def _links_made(
+    commit: dict,
+    changed: dict,
+    tickets: list[str],
+    links: tuple[bool, frozenset[tuple[str, str]]],
+) -> dict[str, bool]:
+    """The links one commit makes on one file, ticket -> whether it landed.
+
+    Under `omit` only the landed ones, so a proposal is never written.
+    """
+    omit_proposed, promoted = links
+    made = {ticket: link_landed(commit, changed, ticket, promoted) for ticket in tickets}
+    if omit_proposed:
+        made = {ticket: True for ticket, landed_link in made.items() if landed_link}
+    return made
+
+
+def _add_links(
+    entry: dict,
+    made: dict[str, bool],
+    commit: dict,
+    changed: dict,
+    descriptions: dict[str, dict],
+) -> None:
+    """Count one file's links as landed or proposed, and for a branch commit's
+    landed link mark its ticket landed and note what a squash promoted."""
+    is_landed = landed(commit)
+    for ticket, landed_link in made.items():
+        entry["tickets" if landed_link else "proposed"][ticket] += 1
+        if landed_link and not is_landed:
+            descriptions[ticket]["landed"] = True
+            if not changed.get("landed"):
+                entry["promoted"][ticket] += 1
 
 
 def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: BodyReport) -> None:
@@ -784,17 +810,29 @@ def index_repository(
     finalised = {}
     for path, data in files.items():
         if links is not None:
-            # Promoted only where every landed commit of the link was promoted:
-            # a link something else landed would have been landed without it.
-            links.promoted += sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])
-        entry = {"tickets": dict(sorted(data["tickets"].items(), key=lambda kv: -kv[1]))}
-        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}
-        if proposed:
-            entry["proposed"] = dict(sorted(proposed.items(), key=lambda kv: (-kv[1], kv[0])))
-        entry["first"] = data["first"]
-        entry["last"] = data["last"]
-        finalised[path] = entry
+            links.promoted += _promoted_links(data)
+        finalised[path] = _file_record(data)
     return finalised, commits_seen
+
+
+def _promoted_links(data: dict) -> int:
+    """How many of one file's landed links a squash's promotion alone landed.
+
+    Only where every landed commit of the link was promoted: a link something
+    else landed would have been landed without it.
+    """
+    return sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])
+
+
+def _file_record(data: dict) -> dict:
+    """One file's entry in the committed index, from its accumulated links."""
+    entry = {"tickets": dict(sorted(data["tickets"].items(), key=lambda kv: -kv[1]))}
+    proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}
+    if proposed:
+        entry["proposed"] = dict(sorted(proposed.items(), key=lambda kv: (-kv[1], kv[0])))
+    entry["first"] = data["first"]
+    entry["last"] = data["last"]
+    return entry
 
 
 def _ranked(pool: dict[str, int], limit: int) -> list[str]:
