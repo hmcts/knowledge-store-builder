@@ -83,8 +83,8 @@ def _rel(path: Path) -> str:
 
 
 # In the order a reader meets them. Paths come from `config` wherever it names
-# them; `relationships` (#455) and `index` (#457) are written by no stage yet, so
-# config does not name them and they are spelled here.
+# them; `relationships` (#455) is written by no stage yet, so config does not name
+# it and it is spelled here.
 LAYERS: tuple[Layer, ...] = (
     # The committed archive first: every store commits it and gitignores the plain
     # file, which the stages write beside it under the same name.
@@ -107,7 +107,13 @@ LAYERS: tuple[Layer, ...] = (
     Layer("relationships", ("knowledge/relationships/by-repo",), "dir"),
     # The archive first, as for the graph: on a large estate the plain index is
     # over GitHub's 100 MB file limit, so a store commits only the `.gz`.
-    Layer("index", ("knowledge/index/store.sqlite.gz", "knowledge/index/store.sqlite")),
+    Layer(
+        "index",
+        (
+            _rel(config.INDEX_PATH.with_name(config.INDEX_PATH.name + ".gz")),
+            _rel(config.INDEX_PATH),
+        ),
+    ),
 )
 
 

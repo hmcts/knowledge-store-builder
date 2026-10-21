@@ -910,13 +910,13 @@ def _unaccounted(namespace, root: Path, layers, not_a_layer) -> list[str]:
 
 
 class EveryArtefactIsAccountedFor(unittest.TestCase):
-    # When #457 (`INDEX_PATH`) and #455 (the relationships directory, the
-    # relationship-kinds path and its config path) merge, their config names fail
+    # When #455 (the relationships directory, the relationship-kinds path and its
+    # config path) merges, their config names fail
     # `test_every_config_path_is_a_layer_or_named_as_not_one` until each is
-    # accounted for. `LAYERS` already holds `index` and `relationships` by literal
-    # path, so the merger maps `INDEX_PATH` and the relationships directory to those
-    # layers by making config and the layer agree on one path, and lists the
-    # relationship kinds files here in `NOT_A_LAYER` or as a layer.
+    # accounted for. `LAYERS` already holds `relationships` by literal path, so the
+    # merger maps the relationships directory to it by making config and the layer
+    # agree on one path, and lists the relationship kinds files here in
+    # `NOT_A_LAYER` or as a layer.
 
     def test_every_config_path_is_a_layer_or_named_as_not_one(self):
         """Breaks if a stage gains an artefact path in config that is neither a

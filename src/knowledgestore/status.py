@@ -19,6 +19,7 @@ import datetime
 import gzip
 import re
 import shutil
+import sqlite3
 import subprocess
 import zlib
 from collections.abc import Callable
@@ -799,6 +800,84 @@ def _report_graph_report(verify: bool) -> None:
         )
 
 
+def index_state() -> dict:
+    """Whether the query index is there, how big its archive is, and whether it is current.
+
+    `current` is True, False, or None when the comparison is not made, and `note`
+    says why. The comparison is made only when `meta.graph` names the committed
+    `.gz`: the graph and the ticket layer are hashed and set against
+    `meta.graph_sha256` and `meta.file_tickets_sha256`. An index built from the plain
+    graph is not compared, because that file can be gigabytes and `status` reads no
+    graph (CLAUDE.md 6.6). `meta` is read from the plain index file only, so the
+    archive is never decompressed. The file named is the one the index was built from,
+    never a fixed `graph.json.gz`, which would call a plain-built index stale.
+    Never raises (CLAUDE.md 6.7): an unreadable file is `current=None`.
+    """
+    plain = config.INDEX_PATH
+    archive = plain.with_name(plain.name + ".gz")
+    state: dict = {
+        "plain": plain.is_file(),
+        "archive_bytes": archive.stat().st_size if archive.is_file() else None,
+        "current": None,
+        "note": "needs the plain store.sqlite",
+    }
+    if not state["plain"]:
+        return state
+    try:
+        connection = sqlite3.connect(plain.as_uri() + "?mode=ro", uri=True)
+        try:
+            meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
+        finally:
+            connection.close()
+    except (sqlite3.Error, OSError):
+        state["note"] = "could not read its meta"
+        return state
+    named, recorded = meta.get("graph"), meta.get("graph_sha256")
+    if not named or not recorded:
+        state["note"] = "its meta names no graph"
+        return state
+    if not named.endswith(".gz"):
+        state["note"] = "built from the plain graph"
+        return state
+    root = config.ROOT.resolve()
+    graph = (root / named).resolve()
+    if not graph.is_relative_to(root) or not graph.is_file():
+        state["note"] = "the graph it names is absent or outside the store"
+        return state
+    try:
+        (graph_digest,) = io.layer_digests([graph], root).values()
+        (tickets_digest,) = io.layer_digests([config.INTENT_INDEX_PATH], root).values()
+    except OSError:
+        state["note"] = "could not read the graph or ticket layer it was built from"
+        return state
+    state["current"] = graph_digest == recorded and tickets_digest == meta.get(
+        "file_tickets_sha256"
+    )
+    return state
+
+
+def _report_index() -> None:
+    state = index_state()
+    if not state["plain"] and state["archive_bytes"] is None:
+        print("Query index: none - run `knowledgestore index` to build it")
+        return
+    size = (
+        f"archive {state['archive_bytes']:,} bytes"
+        if state["archive_bytes"] is not None
+        else "no archive"
+    )
+    if state["current"] is True:
+        verdict = "current with the graph and tickets it was built from"
+    elif state["current"] is False:
+        verdict = (
+            "stale: the graph or ticket layer has changed since it was built - "
+            "run `knowledgestore index`"
+        )
+    else:
+        verdict = f"freshness not checked: {state['note']}"
+    print(f"Query index: {size}, {verdict}")
+
+
 def _report_drift(recorded: dict) -> None:
     """Print the --drift section: gh availability, provenance, then results."""
     if not shutil.which("gh"):
@@ -1479,6 +1558,8 @@ def main(argv=None) -> int:
     _report_telemetry()
 
     _report_graph_report(arguments.verify_graph)
+
+    _report_index()
 
     if arguments.drift:
         _report_drift(recorded)

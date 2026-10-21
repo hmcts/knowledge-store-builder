@@ -225,11 +225,22 @@ Recompress the graph, rebuild the page and check store health and source drift:
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore content-set
 knowledgestore explorer
+knowledgestore index
 knowledgestore manifest
 knowledgestore check-evidence
 knowledgestore status
 knowledgestore status --drift
 ```
+
+`index` rewrites the query index from the graph and the ticket layer. Re-run it
+after any change to either. It reads `graph.json.gz` whenever that exists, which
+the sequence above has just written, and the plain `graph.json` only when there is
+no archive. A reader that opens a stale index answers about a graph that is gone.
+`status` reports the index as stale when it was built from `graph.json.gz` and that
+file or the ticket layer has changed; an index built from the plain `graph.json` is
+reported as not checked, because `status` reads no graph. A rebuild over unchanged
+inputs gives the same bytes, whether or not `graph.json` is on disk, so an
+unchanged store commits no diff.
 
 `manifest` runs after every stage that changes a layer. Its `digest` moves when
 any layer's content does, which is how a reader holding an older clone learns it
