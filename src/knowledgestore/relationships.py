@@ -1410,9 +1410,9 @@ UNREADABLE = "unreadable"
 
 
 class ConservationError(KindError):
-    """A reference was read and then placed nowhere: not an edge, not an unresolved
-    target, not a counted skip. The stage stops before writing a layer that would
-    read as complete without it."""
+    """A kind's references read and references placed do not balance: one was
+    dropped (not an edge, not an unresolved target, not a counted skip) or counted
+    twice. The stage stops before writing a layer that would read as complete."""
 
 
 def unaccounted(
@@ -1442,6 +1442,9 @@ def unaccounted(
 
 
 def _check_conservation(read, edges, unresolved, skipped) -> None:
+    # Covered by the mutation entries "relationships: a self reference is placed
+    # nowhere" (a dropped reference must stop the build) and "relationships: the
+    # conservation check counts unreadable files as placed references".
     problems = unaccounted(
         read,
         Counter(kind for edge in edges.values() for kind in edge.kinds.elements()),

@@ -127,8 +127,8 @@ with how often it is referenced and every repository that references it.
 - `repository-dependencies.json`: every edge with both ends, the unresolved
   targets, and `conflicts`.
 - `kinds.json`: per kind, its origin, what its pins are (`pins`), and its counts
-  of edges, references and unresolved targets, plus what was skipped and why. It is small enough to read
-  without opening the others.
+  of edges, references and unresolved targets, plus what was skipped and why. It
+  is small enough to read without opening the others.
 
 **An edge** aggregates every reference from one repository to another, per chart:
 
