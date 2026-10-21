@@ -48,3 +48,11 @@ graphify . :: extract from inside each clone, then `graphify merge-graphs`; see 
 # would walk straight past a longer entry. The build skill discusses the flag in
 # prose and in a comparison table, neither of which is a fenced block.
 --no-cluster :: extract with plain `graphify update .`; the build skill measures what the flag costs, and `knowledgestore dangling-endpoints` measures it on your own estate
+
+# Listing file paths to `git sparse-checkout set` in the default cone mode. Cone
+# mode takes directories only, and current git refuses a file path the tree holds
+# with a fatal error, so the question skill's clone stopped with the store's
+# top-level files and no graph. A later `git pull` does not fix such a clone,
+# because it refreshes only the paths the clone already selects; the skill's
+# repair step does. The leading `/` of the current form keeps it from matching.
+git sparse-checkout set graphify-out/graph.json.gz :: `git sparse-checkout set --no-cone` with paths anchored by a leading `/`; see the knowledge-store skill's step 6, and its repair step for a clone the old form made

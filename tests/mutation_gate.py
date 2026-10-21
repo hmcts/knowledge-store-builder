@@ -8982,6 +8982,48 @@ MUTATIONS = (
             "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
     ),
+    Mutation(
+        "the question skill's clone goes back to cone mode",
+        "skills/knowledge-store/SKILL.md",
+        "git sparse-checkout set --no-cone /graphify-out/graph.json.gz \\\n"
+        "  /graphify-out/GRAPH_REPORT.md /graphify-out/.graphify_labels.json \\\n"
+        "  /knowledge/ /docs/ /knowledge_context.md\n",
+        "git sparse-checkout set graphify-out/graph.json.gz graphify-out/GRAPH_REPORT.md \\\n"
+        "  graphify-out/.graphify_labels.json knowledge docs knowledge_context.md\n",
+        "#450: current git refuses a file path in cone mode, so every asker's first clone "
+        "stopped with the store's top-level files and no graph, and the skill shipped that way",
+        (
+            "test_docs_integrity.RealRepositoryTest.test_no_command_block_runs_a_retired_instruction",
+            "test_docs_integrity.RealRepositoryTest.test_the_gate_passes_as_a_whole",
+            "test_skill_clone_block.FreshnessBlockTest.test_a_clone_ahead_of_its_remote_is_current",
+            "test_skill_clone_block.FreshnessBlockTest.test_a_clone_behind_its_remote_says_by_how_many_commits",
+            "test_skill_clone_block.FreshnessBlockTest.test_a_rewritten_remote_is_diverged",
+            "test_skill_clone_block.FreshnessBlockTest.test_an_unreachable_remote_is_unknown_with_the_reason",
+            "test_skill_clone_block.FreshnessBlockTest.test_an_untouched_clone_is_current",
+            "test_skill_clone_block.FreshnessBlockTest.test_the_check_leaves_a_full_clone_unshallow",
+            "test_skill_clone_block.FreshnessBlockTest.test_the_update_brings_a_depth_one_clone_current",
+            "test_skill_clone_block.RepairBlockTest.test_repair_leaves_a_complete_clone_alone",
+            "test_skill_clone_block.ResetCheckBlockTest.test_a_clean_clone_of_a_rewritten_store_is_safe_and_the_reset_lands",
+            "test_skill_clone_block.ResetCheckBlockTest.test_local_commits_refuse_the_reset",
+            "test_skill_clone_block.ResetCheckBlockTest.test_uncommitted_changes_refuse_the_reset",
+            "test_skill_clone_block.SkillCloneBlockTest.test_the_clone_block_fetches_the_store_files_and_leaves_the_page_behind",
+        ),
+    ),
+    Mutation(
+        "the question skill's repair goes back to cone mode",
+        "skills/knowledge-store/SKILL.md",
+        "sparse-checkout set --no-cone /graphify-out/graph.json.gz \\\n"
+        "       /graphify-out/GRAPH_REPORT.md /graphify-out/.graphify_labels.json \\\n"
+        "       /knowledge/ /docs/ /knowledge_context.md &&\n",
+        "sparse-checkout set graphify-out/graph.json.gz \\\n"
+        "       graphify-out/GRAPH_REPORT.md graphify-out/.graphify_labels.json \\\n"
+        "       knowledge docs knowledge_context.md &&\n",
+        "#463: the repair exists for clones the #450 defect broke; written in the same cone "
+        "mode it fails the same way, and the clone it was run on stays without a graph",
+        (
+            "test_skill_clone_block.RepairBlockTest.test_repair_restores_what_step_six_selects_to_a_cone_mode_clone",
+        ),
+    ),
 )
 
 

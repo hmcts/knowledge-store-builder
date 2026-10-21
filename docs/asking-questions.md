@@ -265,3 +265,18 @@ and start with `./`; a path such as `.claude/skills/` is invalid, while
 
 The plugin installs from `main`, so a published manifest error must be corrected
 there. After it is corrected, follow [Update the plugin](#update-the-plugin).
+
+### My clone has no graph
+
+The store clone holds the store's top-level files and no `graphify-out/`
+directory, so `/knowledge-store:knowledge-store` does not recognise it as a
+store, or finds no graph in it.
+
+An earlier version of the skill's clone step listed file paths in a mode current
+git refuses, so the clone stopped before it fetched the graph. `git pull` does not
+fix it, because a pull refreshes only the files the clone already selects.
+
+Ask `/knowledge-store:knowledge-store` to repair the clone, and give it the
+clone's directory. It runs the skill's
+[repair step](../skills/knowledge-store/SKILL.md#repair-a-clone-with-no-graph),
+which fixes the clone in place and reports whether the graph is now on disk.

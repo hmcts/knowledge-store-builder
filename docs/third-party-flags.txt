@@ -22,5 +22,6 @@
 --numstat :: git
 --diff-merges :: git
 --no-cone :: git
+--depth :: git
 --comments :: twg
 --store-id :: mcp-server

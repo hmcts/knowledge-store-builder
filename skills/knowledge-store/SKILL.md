@@ -27,6 +27,11 @@ what this skill wrote the first time it asked.
 cat ~/.config/knowledge-store/locations 2>/dev/null
 ```
 
+A remembered clone with no `graphify-out/graph.json.gz` was made by an earlier
+version of step 6. Repair it with
+[Repair a clone with no graph](#repair-a-clone-with-no-graph) rather than
+cloning again.
+
 **3. Is it somewhere obvious?** One cheap look before troubling them:
 
 ```bash
@@ -82,7 +87,110 @@ grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
 Mention that `KNOWLEDGE_STORE` in their shell profile pins a default, which is
 worth doing if they mostly query one estate.
 
+## Repair a clone with no graph
+
+An earlier version of step 6 listed file paths in cone mode, which current git
+refuses, so its clones stopped with the store's top-level files and no graph.
+`git pull` does not fix one: a pull refreshes only the paths the clone already
+selects. Repair it in place, filling in the clone's directory:
+
+```bash
+# skill-block: repair
+STORE=<store-directory>   # e.g. a line of ~/.config/knowledge-store/locations
+if [ -f "$STORE/graphify-out/graph.json.gz" ]; then
+  echo "REPAIR: not needed"
+elif git -C "$STORE" sparse-checkout set --no-cone /graphify-out/graph.json.gz \
+       /graphify-out/GRAPH_REPORT.md /graphify-out/.graphify_labels.json \
+       /knowledge/ /docs/ /knowledge_context.md &&
+     git -C "$STORE" pull --ff-only --quiet &&
+     [ -f "$STORE/graphify-out/graph.json.gz" ]; then
+  echo "REPAIR: done"
+else
+  echo "REPAIR: failed"
+fi
+```
+
+It selects the same paths as step 6, and prints `REPAIR: done` only when the
+graph is on disk afterwards. On `REPAIR: failed`, show the asker the output and
+offer a fresh clone with step 6 into a new directory. Do not delete the old one:
+it may hold their work.
+
 ## Step 2 — Prepare the store (run silently, only what is stale or missing)
+
+### Check freshness, once per session
+
+A clone goes stale silently, so check it once per session, after the store is
+found and before the first answer:
+
+```bash
+# skill-block: freshness
+STORE=<store-directory>
+# No --depth here: on a maintainer's full clone it would make the repository shallow.
+# BatchMode and no terminal prompt, so a missing key or passphrase fails instead of hanging.
+if ! err=$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+    git -C "$STORE" fetch --quiet origin main 2>&1); then
+  echo "FRESHNESS: UNKNOWN $(printf '%s\n' "$err" | head -n 1)"
+elif git -C "$STORE" merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+  echo "FRESHNESS: current"
+elif git -C "$STORE" merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+  echo "FRESHNESS: BEHIND $(git -C "$STORE" rev-list --count HEAD..origin/main)"
+else
+  echo "FRESHNESS: DIVERGED"
+fi
+```
+
+It prints one line. Act on it:
+
+| Line | What to do |
+|---|---|
+| `FRESHNESS: current` | Nothing, and say nothing. A clone ahead of `origin/main`, such as a maintainer's, reports this too. |
+| `FRESHNESS: BEHIND <n>` | Say the store is `n` commits behind and offer the update below. Answering without updating is fine, but say the answer comes from a stale store. |
+| `FRESHNESS: DIVERGED` | The store's history was rewritten, for example squashed. Run the reset check below, and offer the reset only when it prints `safe`. |
+| `FRESHNESS: UNKNOWN <reason>` | Say freshness could not be checked, give the reason, and answer from disk. |
+
+**Update**, when the asker agrees. It fast-forwards only, so it cannot discard
+anything:
+
+```bash
+# skill-block: update
+STORE=<store-directory>
+git -C "$STORE" merge --ff-only --quiet origin/main
+```
+
+Then run the prepare block below, which decompresses the newer graph.
+
+**Check before offering a reset.** `git reset --hard origin/main` discards
+uncommitted changes and local commits, so never offer it on `DIVERGED` alone.
+This check reads the clone and changes nothing:
+
+```bash
+# skill-block: reset-check
+STORE=<store-directory>
+# Work of theirs is an uncommitted change, or a commit that no remote branch has ever had.
+# Commits origin/main used to point at count as the remote's, not theirs: after a rewrite
+# they are on no remote branch, yet they are exactly what the reset is meant to replace.
+# The fetch that saw the rewrite logged the old value, in the first column of the log.
+log=$(git -C "$STORE" rev-parse --path-format=absolute --git-path logs/refs/remotes/origin/main)
+seen=$(cut -d' ' -f1,2 "$log" 2>/dev/null | tr ' ' '\n' | grep -v '^0*$')
+if ! dirty=$(git -C "$STORE" status --porcelain) \
+   || ! mine=$(git -C "$STORE" rev-list --ignore-missing HEAD --not --remotes $seen); then
+  echo "RESET-CHECK: refuse could not inspect the clone"
+elif [ -n "$dirty" ]; then
+  echo "RESET-CHECK: refuse uncommitted changes"
+elif [ -n "$mine" ]; then
+  echo "RESET-CHECK: refuse local commits not on any remote branch"
+else
+  echo "RESET-CHECK: safe"
+fi
+```
+
+- `RESET-CHECK: safe` — offer the reset, and run it only when the asker says
+  yes: `git -C "$STORE" reset --hard origin/main`. Then run the prepare block.
+- `RESET-CHECK: refuse <reason>` — do not offer the reset. Give the asker the
+  reason, leave the clone as it is, and answer from disk, saying the store has
+  diverged from its remote.
+
+### Decompress the graph and install the CLI
 
 ```bash
 [ -f graphify-out/graph.json.gz ] \
@@ -100,9 +208,7 @@ had become. A `git pull` made it worse: it moves the `.gz` and leaves the stale
 plain file, so the step taken to get current data guaranteed stale data. `-f` is
 required, because without it `gunzip` refuses to overwrite.
 
-Offer `git pull` when the question concerns recent changes: a clone goes stale
-silently, and `graphify-out/GRAPH_REPORT.md` records the commit the graph was
-built from.
+`graphify-out/GRAPH_REPORT.md` records the commit the graph was built from.
 
 Querying needs no particular library version - a store is committed static files.
 If you do run a stage and it reports `unknown stage`, check
