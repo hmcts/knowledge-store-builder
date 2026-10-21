@@ -393,7 +393,8 @@ last by `knowledgestore manifest` and committed with the store.
 - **The format version** is `format.major` and `format.minor`. The major number
   changes when a reader written for the old version would misread the store, the
   minor when a layer or field is added. A reader written for one major number
-  should not read another.
+  should not read another. A test fails if the
+  manifest's shape changes without a format bump.
 
 The store's id is `KSB_STORE_ID`, else the repository name of the clone's
 `origin` remote, never the directory name: readers identify a store by it.

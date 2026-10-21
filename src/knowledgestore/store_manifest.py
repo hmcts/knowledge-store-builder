@@ -45,6 +45,13 @@ from . import __version__, config, io, provenance, telemetry
 from .git_env import git_env
 
 FORMAT: tuple[int, int] = (1, 0)
+# The hash of the manifest's shape - every key path with its type, never a value -
+# as recorded under FORMAT. Change both together, never one: `tests/
+# test_manifest_format_guard.py` computes the shape and fails when it differs from
+# this, and says which bump it needs (minor for an added layer or field, major for a
+# removal, rename or type change). The shape is then added to
+# `tests/manifest_format_shapes.json` under the new FORMAT, and this is set to its hash.
+FORMAT_SHAPE = "1193e041f65df92f4d93a8de1c831a6054a6795493fcd6bd0491af614a6648ab"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.

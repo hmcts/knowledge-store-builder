@@ -7439,6 +7439,16 @@ MUTATIONS = (
         ("test_build_deployments.Layer.test_the_pair_count_is_recorded_for_the_store_manifest",),
     ),
     Mutation(
+        "store manifest: a field added without a format bump",
+        "store_manifest.py",
+        '        "sources_as_of": sources_as_of(root),\n',
+        '        "sources_as_of": sources_as_of(root),\n        "added_without_a_bump": True,\n',
+        "readers such as the MCP server trust FORMAT; a field added while it stays (1, 0) would change what they read with nothing failing, and the guard is what says a bump and a recorded shape are owed",
+        (
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_matches_the_format_it_is_recorded_under",
+        ),
+    ),
+    Mutation(
         "store manifest: a file layer linking out of the store is hashed",
         "store_manifest.py",
         '    _held(path, root)\n    if kind != "dir":\n',
