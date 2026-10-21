@@ -617,8 +617,15 @@ knowledgestore record-clustering
 gzip -9 -n -c graphify-out/graph.json > graphify-out/graph.json.gz
 knowledgestore explorer
 knowledgestore index
+knowledgestore manifest
 knowledgestore status
 ```
+
+`manifest` runs last, after every stage that writes a layer, and writes
+`knowledge/store-manifest.json`: which layers the store holds, where, and a
+content digest for each. It refuses, writing nothing, when it cannot name the
+store: set `KSB_STORE_ID`, or give the clone an `origin` remote. Commit the file
+with the store. See [The store manifest](how-it-works.md#the-store-manifest).
 
 `record-clustering` writes `graphify-out/clustering-inputs.json`, naming the
 partitioner the clustering environment offered: graphify uses graspologic's Leiden

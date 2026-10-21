@@ -43,8 +43,12 @@ def read_external() -> dict[str, dict]:
     return external if isinstance(external, dict) else {}
 
 
-def read() -> dict[str, dict]:
-    """Recorded provenance by repository name, or {} when never recorded."""
-    data = io.read_json_dict(config.PROVENANCE_PATH)
+def read(path: Path | None = None) -> dict[str, dict]:
+    """Recorded provenance by repository name, or {} when never recorded.
+
+    `path` defaults to the configured record; the store manifest passes the
+    record of the store it is describing.
+    """
+    data = io.read_json_dict(config.PROVENANCE_PATH if path is None else path)
     repos = data.get("repositories", {})
     return repos if isinstance(repos, dict) else {}

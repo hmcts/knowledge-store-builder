@@ -125,14 +125,17 @@ def _validate(measurements: Mapping[str, int]) -> None:
             )
 
 
-def read() -> dict[str, int]:
+def read(path: Path | None = None) -> dict[str, int]:
     """The last recorded value of every metric, or {} when nothing is recorded.
+
+    `path` defaults to the configured record; the store manifest passes the
+    record of the store it is describing.
 
     Non-integer values are dropped rather than trusted: the artefact is committed,
     so it gets hand-edited and merge-resolved, and a string where a count belongs
     would otherwise reach the arithmetic below.
     """
-    document = io.read_json_dict(config.TELEMETRY_PATH)
+    document = io.read_json_dict(config.TELEMETRY_PATH if path is None else path)
     measurements = document.get("measurements")
     if not isinstance(measurements, dict):
         return {}

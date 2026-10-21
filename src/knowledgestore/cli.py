@@ -200,6 +200,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_store_index",
         "build the query index readers open instead of parsing the graph",
     ),
+    "manifest": (
+        "build_store_manifest",
+        "write knowledge/store-manifest.json, what the store holds (run last)",
+    ),
     "status": (
         "status",
         "report provenance, layer coverage, dangling citations and page freshness",

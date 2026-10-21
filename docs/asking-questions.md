@@ -82,6 +82,29 @@ If it finds more than one possible store, it asks which estate you mean. If it
 finds none, it asks whether you already have a clone or which store to clone and
 where to put it.
 
+### Where the query skills remember your stores
+
+Every store's query skill shares one file, `~/.config/knowledge-store/locations`.
+A server started with `--store-id` resolves the id through it, so the format is a
+contract:
+
+- **Path:** `~/.config/knowledge-store/locations`, shared by every store's query
+  skill. A store-specific file is not read.
+- **Format:** UTF-8 text, one absolute path per line, each the root of a store
+  clone. There are no comments and no other fields.
+- **Writing:** append only, and only when that exact line is absent. The
+  `knowledge-store` skill does this on first clone:
+  `grep -qxF "$(pwd)" ~/.config/knowledge-store/locations || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations`.
+  A user may query several stores, so the file is a list and is never
+  overwritten.
+- **Reading:** a reader skips blank lines and lines whose path no longer exists.
+  It identifies a store by the `store.id` in that path's
+  `knowledge/store-manifest.json`, never by the directory name. When two entries
+  carry the same id, the reader refuses and names both, rather than picking one.
+
+A store's own skill that records its clone somewhere else should also append to
+this file, so a server started with `--store-id` can find the clone.
+
 ## Understand the answer
 
 Under the [grounding contract](grounding-and-verification.md), every claim traces
