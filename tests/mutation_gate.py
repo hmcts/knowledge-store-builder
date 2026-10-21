@@ -6950,13 +6950,15 @@ MUTATIONS = (
     Mutation(
         "a squash merge's ticket ids are read as prose again",
         "build_intent_index.py",
-        '    if reason == "merge-list":\n        return cleaned, MERGE_BODY_TICKET_LIMIT, True\n',
+        '    if squashed and reason == "merge-list":\n'
+        "        return cleaned, MERGE_BODY_TICKET_LIMIT, True\n",
         "",
-        "shipped in v0.17.0 and found by an evaluation of the CFT store: a squash "
-        "merge's bullets are the commits it collapsed, but the `merge-list` prose "
-        "rejection threw away their ticket ids, and the branch those commits came "
-        "from is never an ancestor of the default branch - so 33 of 120 sampled "
-        "`proposed` links were work that had landed, filed as work that had not",
+        "shipped in v0.17.0 and found by measuring a store's `proposed` layer "
+        "against the repositories it was built from: a squash merge's bullets are "
+        "the commits it collapsed, but the `merge-list` prose rejection threw away "
+        "their ticket ids, and the branch those commits came from is never an "
+        "ancestor of the default branch - so a large minority of sampled `proposed` "
+        "links were work that had landed, filed as work that had not",
         (
             "test_build_intent_index.BodyTicketIdsTest.test_a_squash_merge_list_contributes_its_ids",
             "test_build_intent_index.BodyTicketIdsTest.test_a_squash_merge_list_is_capped_at_its_own_limit",
@@ -6969,12 +6971,26 @@ MUTATIONS = (
         "build_intent_index.py",
         "    if subject_tickets and not squashed:\n",
         "    if subject_tickets:\n",
-        "shipped in v0.17.0: where a squash merge's subject named the pull request's "
-        "own ticket, the anti-dilution rule dropped every ticket its bullets named, "
-        "and those ids then survived only on the unlanded branch - published as "
+        "shipped in v0.17.0: where a squash merge's subject named the request's own "
+        "ticket, the anti-dilution rule dropped every ticket its bullets named, and "
+        "those ids then survived only on the unlanded branch - published as "
         "`proposed` though the work was on the default branch",
         (
             "test_build_intent_index.ApplyCommitTest.test_a_squash_merge_links_the_tickets_its_bullets_name",
+        ),
+    ),
+    Mutation(
+        "any bulleted body is read as a squash merge",
+        "build_intent_index.py",
+        "        commit_body(commit), boilerplate, bool(SQUASH_SUBJECT.search(subject))\n",
+        "        commit_body(commit), boilerplate, True\n",
+        "caught in review of the fix above: `merge-list` classes any body with two "
+        "`* ` lines, which is also how a person writes a bulleted description, so "
+        "reading the bullets of every such commit would link its neighbouring work "
+        "to every file it touched - up to MERGE_BODY_TICKET_LIMIT of them - which is "
+        "the dilution the subject-wins rule exists to prevent",
+        (
+            "test_build_intent_index.ApplyCommitTest.test_a_hand_written_bullet_list_does_not_dilute_a_ticketed_subject",
         ),
     ),
 )

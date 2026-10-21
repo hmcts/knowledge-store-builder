@@ -272,19 +272,28 @@ class BodyTicketIdsTest(SettingsIsolated):
         commits this one collapsed, so the ids in them landed here.
         """
         self.assertEqual(
-            intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"),
+            intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three", squashed=True),
             ["DD-1", "DD-2", "DD-3"],
         )
+
+    def test_a_bullet_list_that_is_not_a_squash_merge_contributes_no_ids(self):
+        """The prose net still rejects a bullet list the caller cannot vouch for."""
+        self.assertEqual(intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"), [])
 
     def test_a_squash_merge_list_is_capped_at_its_own_limit(self):
         body = "\n".join(
             f"* AA-{n} change {n}" for n in range(1, intent.MERGE_BODY_TICKET_LIMIT + 5)
         )
-        self.assertEqual(len(intent.body_ticket_ids(body)), intent.MERGE_BODY_TICKET_LIMIT)
+        self.assertEqual(
+            len(intent.body_ticket_ids(body, squashed=True)), intent.MERGE_BODY_TICKET_LIMIT
+        )
 
     def test_bot_text_still_contributes_no_ids(self):
         """A machine's body says nothing about this commit, squashed or not."""
-        self.assertEqual(intent.body_ticket_ids("* Bump dep from 1 to 2\n* Signed-off-by: bot"), [])
+        self.assertEqual(
+            intent.body_ticket_ids("* Bump dep from 1 to 2\n* Signed-off-by: bot", squashed=True),
+            [],
+        )
 
 
 class ApplyCommitTest(SettingsIsolated):
@@ -340,32 +349,43 @@ class ApplyCommitTest(SettingsIsolated):
     def test_a_squash_merge_links_the_tickets_its_bullets_name(self):
         """Catches landed work being published as `proposed`.
 
-        A squash merge's subject names the pull request's own ticket and its
-        bullets name the commits it collapsed. Reading the subject alone kept
-        only the first, and because the branch the rest came from is never an
-        ancestor of the default branch, they were then filed as work that never
-        landed. Shape taken from ia-case-api 288f8507 and cnp-module-key-vault
-        fd9db0a.
+        A forge squash-merge body: the request's own key in the subject with the
+        number appended, the collapsed commits as `* ` bullets. Reading the
+        subject alone kept only the first key, and because the branch the rest
+        came from is never an ancestor of the default branch, they were then
+        filed as work that never landed.
         """
         files, descriptions = make_files(), make_descriptions()
         commit = self._commit(
-            "RIA-7579 Merge SNL -> Master (#1497)",
-            body="* RIA-7002 add the hearing requirements handler\n"
-            "* RIA-7483 create the flag handler\n",
+            "ABC-1 merge the feature branch (#11)",
+            body="* DEF-2 add the first handler\n* GHI-3 add the second handler\n",
         )
         self.assertTrue(intent.apply_commit(commit, files, descriptions))
-        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["RIA-7579", "RIA-7002", "RIA-7483"])
+        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["ABC-1", "DEF-2", "GHI-3"])
         self.assertEqual(files["src/x.ts"]["proposed"], {})
 
     def test_a_squash_merge_whose_subject_names_nothing_still_links_its_bullets(self):
         files, descriptions = make_files(), make_descriptions()
         commit = self._commit(
-            "Make default creator access policy conditional (#72)",
-            body="* allow developer group object id override\n"
-            "* DTSPO-31965: add preview Jenkins access opt-in\n",
+            "make the default policy conditional (#12)",
+            body="* allow the group id to be overridden\n* DEF-2 add the opt-in\n",
         )
         self.assertTrue(intent.apply_commit(commit, files, descriptions))
-        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["DTSPO-31965"])
+        self.assertEqual(list(files["src/x.ts"]["tickets"]), ["DEF-2"])
+
+    def test_a_hand_written_bullet_list_does_not_dilute_a_ticketed_subject(self):
+        """Catches the squash exception widening to any bulleted description.
+
+        Same `* ` shape, no request number in the subject, so these bullets are
+        neighbouring work and only the subject's key may be linked.
+        """
+        files, descriptions = make_files(), make_descriptions()
+        commit = self._commit(
+            "ABC-1 tidy the config",
+            body="* see DEF-2\n* follows GHI-3\n",
+        )
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(files["src/x.ts"]["tickets"], {"ABC-1": 1})
 
     def test_body_contributes_at_most_three_tickets(self):
         """Catches one release-note body attributing a file to every ticket it lists."""

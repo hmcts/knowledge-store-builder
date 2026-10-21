@@ -129,10 +129,15 @@ A squash merge is the one place the prose nets do not decide a link. Its bullets
 are the commits it collapsed, so their ticket ids landed in that commit, and the
 branch they came from is never an ancestor of the default branch — reading the
 bullets as prose, or letting the subject's own ticket stand for all of them,
-publishes landed work as `proposed`. For that body shape alone the ids are read
-from the filtered lines rather than the prose, under their own larger cap, and
-the subject's ids and the bullets' ids are unioned. A body a machine wrote, or
-one that is a list of squashed authors, is still no evidence of anything.
+publishes landed work as `proposed`. For that commit alone the ids are read from
+the filtered lines rather than the prose, under their own larger cap, and the
+subject's ids and the bullets' ids are unioned.
+
+The commit is recognised from its subject, by the request number the forge
+appends, and never from the bullets alone: a hand-written bulleted description
+has the same shape, and its bullets are neighbouring work that must not be
+linked. A body a machine wrote, or one that is a list of squashed authors, is
+still no evidence of anything.
 
 A body is reduced to prose before it is read: separators, a merge's list of
 commits, git trailers, anything an automated author wrote, and each repository's
