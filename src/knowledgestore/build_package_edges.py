@@ -24,57 +24,22 @@ from __future__ import annotations
 
 import json
 import sys
-import re
+from collections.abc import Mapping
 
-from . import config, graph_files, io
+from . import config, graph_files, io, relationships
 
 FORMAT = "packages"
-MANIFEST = "package.json"
+MANIFEST = relationships.NPM_MANIFEST
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 
-# Terraform module reuse. An infrastructure estate's shared dependencies are
-# declared here rather than in a language manifest, so an estate can be built
-# almost entirely from shared modules and still report "0 shared packages".
-#
-# Unlike an npm package, the reference names the providing repository outright,
-# so no manifest lookup is needed - the edge is repository to repository.
-# Both forms are in use and neither dominates by design: on one estate the
-# scp-style `git@` form outnumbered `git::https://` five to one, so handling only
-# the documented form would have missed most of the reuse.
+# Every declaration parser lives in `relationships`, which also writes the
+# dependency layer: the graph reads Terraform sources, npm publishers and npm
+# dependencies through it, so the two cannot disagree about who depends on whom.
 TERRAFORM_SUFFIX = ".tf"
-_TF_SOURCE = re.compile(
-    r"""source\s*=\s*"
-        (?:git::)?
-        # The scheme is optional in Terraform: its GitHub detector accepts a bare
-        # `github.com/org/repo` and rewrites it to HTTPS itself. Requiring one made
-        # 5 shared modules invisible on a 361-repository estate (#125). The opening
-        # quote anchors this, so `notgithub.com/...` cannot match.
-        (?:https://|git@|ssh://git@)?github\.com[/:]
-        (?P<org>[\w.-]+)/(?P<repo>[\w.-]+?)
-        (?:\.git)?(?:[?/][^"]*)?"
-    """,
-    re.VERBOSE,
-)
+# The graph's consumer set has always been these two; the layer also reads peers.
+CONSUMER_SECTIONS = ("dependencies", "devDependencies")
 MAX_EVIDENCE_FILES = 5  # edges per (consumer, package); totals go in metadata
 _IMPORT = "from {q}{name}{q}", "require({q}{name}{q})", "from {q}{name}/"
-
-
-def _named_packages(repo_dir) -> list[tuple[str, str]]:
-    """(package name, repo-relative package.json path) declared by one clone."""
-    found = []
-    candidates = [repo_dir / MANIFEST]
-    for sub in ("projects", "packages", "libs"):
-        candidates.extend(sorted((repo_dir / sub).glob(f"*/{MANIFEST}")))
-    for manifest in candidates:
-        if not manifest.is_file():
-            continue
-        try:
-            name = json.loads(manifest.read_text(encoding="utf-8")).get("name")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        if name:
-            found.append((str(name), str(manifest.relative_to(repo_dir))))
-    return found
 
 
 def _declared_dependencies(repo_dir) -> set[str]:
@@ -82,10 +47,11 @@ def _declared_dependencies(repo_dir) -> set[str]:
     if not manifest.is_file():
         return set()
     try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = relationships.package_json(manifest.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
         return set()
-    return set(data.get("dependencies", {})) | set(data.get("devDependencies", {}))
+    sections = relationships.npm_dependencies(data, CONSUMER_SECTIONS)
+    return {name for block in sections.values() for name in block}
 
 
 def _importing_files(repo_dir, package: str) -> list[str]:
@@ -138,15 +104,6 @@ def _strip_layer(graph: dict) -> None:
     ]
 
 
-def terraform_references(text: str) -> set[str]:
-    """Repository names a Terraform file declares as module sources.
-
-    Deliberately only GitHub-hosted sources. A registry or local path reference
-    names no repository, so reporting one would be a guess.
-    """
-    return {m.group("repo") for m in _TF_SOURCE.finditer(text)}
-
-
 def _module_node(repo_name: str, in_estate: bool) -> dict:
     """A referenced module, identified by the repository that provides it.
 
@@ -176,41 +133,33 @@ def _module_node(repo_name: str, in_estate: bool) -> dict:
     }
 
 
-def _own_terraform_files(clone):
-    """This repository's own .tf files.
+def _module_references(
+    clones: list, orgs: Mapping[str, str] | None = None
+) -> dict[tuple[str, str], list[str]]:
+    """(consumer repo, provider) -> the files declaring it, sorted.
 
-    .terraform is Terraform's download cache: it holds copies of the upstream
-    modules, whose sources would otherwise read as this repository's dependencies.
-    Measured at zero files on the estate this was built against, so a guard rather
-    than a fix - but a cache committed once would quietly invent reuse.
+    Only sources naming a GitHub repository: a registry address names no repository
+    to link to, so a node for one would be a guess. The provider is
+    `relationships.module_provider`'s, against `orgs` (`relationships.estate_orgs`;
+    by default every clone in any organisation).
     """
-    for path in clone.rglob(f"*{TERRAFORM_SUFFIX}"):
-        if ".terraform" not in path.parts:
-            yield path
-
-
-def _read_text(path) -> str:
-    """File contents, or "" if it cannot be read. One unreadable file is not worth
-    abandoning an estate scan for."""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def _module_references(clones: list) -> dict[tuple[str, str], list[str]]:
-    """(consumer repo, provider repo) -> the files declaring it, sorted."""
+    if orgs is None:
+        orgs = relationships.estate_orgs((clone.name for clone in clones), {}, "")
+    kind = relationships.builtin("terraform_module")
     found: dict[tuple[str, str], set[str]] = {}
     for clone in clones:
-        for path in _own_terraform_files(clone):
-            for provider in terraform_references(_read_text(path)):
-                if provider == clone.name:
-                    continue  # a repository referencing itself is not reuse
-                found.setdefault((clone.name, provider), set()).add(str(path.relative_to(clone)))
+        for ref in relationships.scan(clone, kind):
+            provider = relationships.module_provider(ref, orgs)
+            # A repository referencing itself is not reuse.
+            if provider is None or provider == clone.name:
+                continue
+            found.setdefault((clone.name, provider), set()).add(ref.rel)
     return {pair: sorted(files) for pair, files in found.items()}
 
 
-def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
+def _add_module_layer(
+    graph: dict, clones: list, orgs: Mapping[str, str]
+) -> tuple[int, int, int, int]:
     """Module nodes and consumer edges from Terraform sources.
 
     Returns (modules, consumer pairs, edges). The evidence cap is per
@@ -229,7 +178,7 @@ def _add_module_layer(graph: dict, clones: list) -> tuple[int, int, int, int]:
             anchors[node_repo] = node_id
     estate = {clone.name for clone in clones}
     existing = {n["id"] for n in graph["nodes"]}
-    references = _module_references(clones)
+    references = _module_references(clones, orgs)
 
     edges = 0
     capped = 0
@@ -286,7 +235,7 @@ def _discover_providers(clones: list) -> dict[str, tuple[str, str]]:
     """package name -> (provider repo, manifest path); first repo wins a conflict."""
     providers: dict[str, tuple[str, str]] = {}
     for repo_dir in clones:
-        for name, manifest_rel in _named_packages(repo_dir):
+        for name, manifest_rel in relationships.npm_publishes(repo_dir):
             if name not in providers or repo_dir.name < providers[name][0]:
                 providers[name] = (repo_dir.name, manifest_rel)
     return providers
@@ -352,12 +301,19 @@ def main() -> int:
         return 1
 
     clones = sorted(d for d in config.REPOSITORIES_DIR.iterdir() if (d / ".git").is_dir())
+    try:
+        orgs = relationships.store_estate_orgs(clone.name for clone in clones)
+    except ValueError as error:
+        print(f"Cannot read the store's repository list: {error}", file=sys.stderr)
+        return 1
     providers = _discover_providers(clones)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
-    module_count, module_pairs, module_edges, module_external = _add_module_layer(graph, clones)
+    module_count, module_pairs, module_edges, module_external = _add_module_layer(
+        graph, clones, orgs
+    )
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)

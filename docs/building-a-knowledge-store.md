@@ -864,9 +864,10 @@ interpreter, such as `python -c "open('a.md')"`, is not counted.
 `skipped`. An answer that states something is absent has the sentence quoted,
 so a reader can overrule it.
 
-**`--compare` pairs by exact question text.** A question asked in only one run
-is listed under that run. A question asked several times in one run is
-compared as the median of its repetitions, and the repetitions are listed.
+**`knowledgestore answers --compare` pairs by exact question text.** A question
+asked in only one run is listed under that run. A question asked several times
+in one run is compared as the median of its repetitions, and the repetitions are
+listed.
 
 These are measures of cost and citation hygiene. A cheaper, better-cited answer
 can still be wrong: correctness needs judging.

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: chart-web
+version: 0.3.0
+dependencies:
+  - name: common
+    version: "1.2.3"
+    repository: https://charts.example.test/stable
+  - name: redis
+    version: ~17.0.0
+    repository: 'oci://registry.example.test/charts'

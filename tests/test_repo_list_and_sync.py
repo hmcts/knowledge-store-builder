@@ -548,6 +548,9 @@ class CliTest(SettingsIsolated):
                 "packages",
                 # before clustering, so deployment nodes join communities
                 "deployments",
+                # reads clones and provenance, never the graph; beside the stages
+                # whose module and chart edges it must agree with (#455)
+                "relationships",
                 # after every stage that adds nodes, so they are linked too, and
                 # before clustering, because it rewrites both graph files
                 "source-urls",

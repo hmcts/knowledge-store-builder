@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, deploy_flux, deploy_values, graph_files, io, telemetry
+from . import config, deploy_flux, deploy_values, graph_files, io, relationships, telemetry
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -95,11 +95,14 @@ def _documents(text: str) -> list[object] | None:
     `safe_load_all`, not `safe_load`: a cluster's Kustomizations are conventionally
     one file of `---`-separated documents, and reading only the first would take
     the environment binding of every document after it with no sign that anything
-    was missed.
+    was missed. Through `deploy_flux.yaml_loader`, the relationships layer's loader,
+    so a release whose values hold a bare `=` is read here as it is there.
     """
     yaml = _yaml()
     try:
-        return list(yaml.safe_load_all(deploy_values.strip_template(text)))
+        return list(
+            yaml.load_all(deploy_values.strip_template(text), Loader=deploy_flux.yaml_loader())
+        )
     except yaml.YAMLError:
         return None
 
@@ -414,6 +417,7 @@ class _Fact:
     config: dict[str, str]
     extra: dict[str, object] = field(default_factory=dict)
     chart_source: str = ""
+    chart: str = ""
 
 
 def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -> dict:
@@ -442,6 +446,10 @@ def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -
 
 def _chart_node(source: str, in_estate: bool) -> dict:
     """A chart source, identified by the repository providing the chart.
+
+    "Source" is the providing repository `_chart_provider` resolved, which is the
+    release's `sourceRef` only when nothing in the estate provides the chart. The
+    metadata `kind` keeps the name `chart_source`, which published graphs carry.
 
     The shape `build_package_edges` gives a Terraform module (#122): the provider
     names the node, and `repo` is set only when the estate actually holds that
@@ -535,7 +543,13 @@ class _FluxTally:
         self.unattached: list[str] = []
         self.unnamed_environments: list[str] = []
         self.unnamed_services: list[str] = []
+        # providing repository -> whether the estate holds it. Named for the
+        # `chart_source` node kind; a key is the resolved provider, which is the
+        # `sourceRef` only for a chart nothing in the estate provides.
         self.chart_sources: dict[str, bool] = {}
+        # chart name -> the clone defining it, read once and only when a fact
+        # names a chart: most estates have no Flux tree, and this walks every clone.
+        self.chart_definitions: dict[str, str] | None = None
         self.chart_edges = 0
         self.both_routes: list[str] = []
 
@@ -597,6 +611,7 @@ def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
             deploy_values.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
             extra,
             fact.chart.source,
+            fact.chart.name,
         )
     return facts
 
@@ -622,19 +637,58 @@ def _merged_facts(
     return facts
 
 
+def _chart_provider(fact: _Fact, reps: dict[str, str], flux: _FluxTally) -> tuple[str, bool]:
+    """The repository a fact's chart comes from, and whether the estate holds it.
+
+    Resolved by `relationships.resolve_chart`, the rule the dependency layer uses,
+    so the graph and the layer name the same repository: the store's naming pattern,
+    then the clone defining the chart, then the `sourceRef` when it is a repository
+    the graph holds. Unresolved, the node is the `sourceRef` itself, outside the
+    estate - a dependency the store does not hold is still a dependency.
+    """
+    if flux.chart_definitions is None:
+        # Only clones the graph holds: in the estate means one thing here, that the
+        # graph holds the repository, so a chart defined by a clone it does not hold
+        # falls back to its `sourceRef` rather than claiming that clone.
+        clones = (
+            sorted(
+                d
+                for d in config.REPOSITORIES_DIR.iterdir()
+                if (d / ".git").is_dir() and d.name in reps
+            )
+            if config.REPOSITORIES_DIR.is_dir()
+            else []
+        )
+        flux.chart_definitions = relationships.chart_definitions(clones, set(config.UMBRELLA_REPOS))
+    provider = relationships.resolve_chart(
+        fact.chart,
+        fact.chart_source,
+        set(reps),
+        config.CHART_REPO_PATTERN,
+        flux.chart_definitions,
+    )
+    if provider is None:
+        return fact.chart_source, False
+    return provider, True
+
+
 def _chart_edges(
     graph: dict, fact: _Fact, node_id: str, reps: dict[str, str], tally: _Tally
 ) -> None:
-    """The chart source a fact declares, as a node and a dependency edge."""
-    source = fact.chart_source
-    if not source:
+    """The chart a fact declares, as a node for its providing repository and a
+    dependency edge. A release naming no `sourceRef` gets none, as before charts
+    were resolved: resolution changes where an edge points, not which releases
+    have one."""
+    if not fact.chart_source:
         return
-    if source not in tally.flux.chart_sources:
-        in_estate = source in reps
-        tally.flux.chart_sources[source] = in_estate
-        graph["nodes"].append(_chart_node(source, in_estate))
+    provider, in_estate = _chart_provider(fact, reps, tally.flux)
+    if not provider:
+        return
+    if provider not in tally.flux.chart_sources:
+        tally.flux.chart_sources[provider] = in_estate
+        graph["nodes"].append(_chart_node(provider, in_estate))
     # Cited on the fact's own file, which is the declaration the chart is part of.
-    graph["links"].append(_edge(node_id, f"{source}::chart", "uses_chart", fact.rel))
+    graph["links"].append(_edge(node_id, f"{provider}::chart", "uses_chart", fact.rel))
     tally.flux.chart_edges += 1
     tally.edges += 1
 
@@ -820,6 +874,10 @@ def main() -> int:
         # unknown, and a count from an earlier configured run does not outlive it.
         telemetry.record({"deployments.pairs": 0})
         return 0
+    problem = relationships.chart_pattern_problem(config.CHART_REPO_PATTERN)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)

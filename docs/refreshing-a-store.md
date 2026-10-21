@@ -28,6 +28,7 @@ knowledgestore sync
 knowledgestore export-history
 knowledgestore context
 knowledgestore intent
+knowledgestore relationships
 ```
 
 Skip `summaries snapshot` only when the store has no summaries to preserve.
@@ -388,8 +389,10 @@ not the configuration.
 **`sync` takes no flags.** An unrecognised one is refused and nothing runs.
 Removing a clone is the manual step in the table above.
 
-`knowledge/provenance.json` is the one thing that self-corrects, because `sync`
-rewrites it from the configured set.
+`knowledge/provenance.json` self-corrects, because `sync` rewrites it from the
+configured set. So does `knowledge/relationships/`, once the clone is gone:
+`relationships` removes the `by-repo` file of a repository it no longer finds
+under `repositories/`, and its edges with it.
 
 [`knowledgestore merge-inputs`](#check-what-the-merge-will-read) names any clone
 whose graph `config/repositories.txt` does not declare. Nothing does the same for
@@ -605,6 +608,31 @@ The library and plugin update separately: this changes the pinned library
 release, not the installed plugin. See
 [Update the plugin](asking-questions.md#update-the-plugin) when you need newer
 skills.
+
+### Moving to a newer graphify
+
+Raising graphify across a wide version gap, for example from 0.9.40 to 0.9.93,
+changes the AST layer's content. Treat it as a planned migration, not a routine
+refresh:
+
+- **Re-extract everything.** graphify's cache schema changes, so the first
+  `extract-ast` after the upgrade re-reads every file.
+- **Expect most Terraform node ids to change.** Terraform file nodes become
+  path-qualified. Re-cluster, then expect community summaries to need
+  re-authoring, because they are keyed by community id and carried only onto an
+  identical set.
+- **Expect other nodes to appear.** SQL gains index nodes, and Java gains nodes
+  for annotations and external types. Dangling Terraform edges disappear.
+- **Re-check any AST-share threshold the store uses.** Nodes grow by roughly a
+  tenth while edges stay about flat, so a ratio or percentage tuned on the old
+  layer will move.
+
+Compare node and edge counts before and after with the `extract-ast` summary,
+and run the extraction on one repository with Terraform first.
+
+A store pins a library release and installs graphify itself, so it can stay on
+its current graphify until it plans this. Nothing in the library checks the
+installed graphify version at runtime.
 
 ### A lock you maintain by hand
 

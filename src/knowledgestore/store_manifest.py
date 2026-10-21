@@ -82,9 +82,7 @@ def _rel(path: Path) -> str:
     return path.relative_to(config.ROOT).as_posix()
 
 
-# In the order a reader meets them. Paths come from `config` wherever it names
-# them; `relationships` (#455) is written by no stage yet, so config does not name
-# it and it is spelled here.
+# In the order a reader meets them. Paths come from `config`.
 LAYERS: tuple[Layer, ...] = (
     # The committed archive first: every store commits it and gitignores the plain
     # file, which the stages write beside it under the same name.
@@ -104,7 +102,9 @@ LAYERS: tuple[Layer, ...] = (
     Layer("deep_dives", (_rel(config.DEEPDIVES_PATH),)),
     Layer("semantic", (_rel(config.SYNONYMS_PATH),)),
     Layer("explorer", (_rel(config.EXPLORER_PATH),)),
-    Layer("relationships", ("knowledge/relationships/by-repo",), "dir"),
+    # The whole directory, so a change to `repository-dependencies.json` or
+    # `kinds.json` changes the digest as well as one to a `by-repo` file.
+    Layer("relationships", (_rel(config.RELATIONSHIPS_DIR),), "dir"),
     # The archive first, as for the graph: on a large estate the plain index is
     # over GitHub's 100 MB file limit, so a store commits only the `.gz`.
     Layer(
@@ -121,6 +121,7 @@ LAYERS: tuple[Layer, ...] = (
 # `tests/test_store_manifest.py`: a path the library writes that is neither a layer
 # nor here fails the suite, so adding an artefact forces the decision whether a
 # reader should be told about it. Keyed by the config name.
+_IN_RELATIONSHIPS = "inside the relationships layer, digested with its directory"
 NOT_A_LAYER: dict[str, str] = {
     # inputs a person maintains
     "BOUNDARY_PATH": "a hand-maintained input: the estate's declared boundary",
@@ -159,6 +160,12 @@ NOT_A_LAYER: dict[str, str] = {
     "DEEPDIVES_DOCS_DIR": "the written deep-dive pages that dives.json is built from",
     # intent-stage sidecar
     "TICKET_TITLES_PATH": "committed titles the explorer build reads as input; not an asker-facing layer",
+    # the relationships layer: one directory layer, so its files are digested with it
+    "RELATIONSHIPS_BY_REPO_DIR": _IN_RELATIONSHIPS,
+    "REPOSITORY_DEPENDENCIES_PATH": _IN_RELATIONSHIPS,
+    "RELATIONSHIP_KINDS_PATH": _IN_RELATIONSHIPS,
+    "RELATIONSHIPS_EXTRA_DIR": "the store's own inputs to `extra`, inside the relationships layer",
+    "RELATIONSHIP_KINDS_CONFIG_PATH": "a hand-maintained input: the store's own relationship kinds",
     # the manifest's own sources and output
     "TELEMETRY_PATH": "what the stages measured; the manifest reads it for flags",
     "STORE_MANIFEST_PATH": "the manifest itself",
