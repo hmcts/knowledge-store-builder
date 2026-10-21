@@ -2556,6 +2556,7 @@ MUTATIONS = (
         "is the same either way",
         (
             "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
             "test_telemetry.ExplorerWiringTest.test_a_join_that_died_between_builds_is_warned_about",
             "test_telemetry.IntentWiringTest.test_a_collapsed_inventory_is_warned_about_on_the_next_build",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
@@ -2593,6 +2594,7 @@ MUTATIONS = (
         "this gate exists for",
         (
             "test_build_intent_index.BranchTextTest.test_the_run_counts_tickets_carrying_branch_text",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_repositories_whose_history_predates_reach",
             "test_telemetry.TelemetryRecordTest.test_another_stage_s_measurements_survive_this_stage_s_record",
@@ -5379,13 +5381,26 @@ MUTATIONS = (
     Mutation(
         "a branch-only commit is linked as landed work",
         "build_intent_index.py",
-        '            entry["tickets" if file_landed else "proposed"][ticket] += 1',
-        '            entry["tickets"][ticket] += 1',
+        '        entry["tickets" if landed_link else "proposed"][ticket] += 1',
+        '        entry["tickets"][ticket] += 1',
         "an operator found an unmerged branch's ticket stated as what a file implements",
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
             "test_build_intent_index.ProposedLinksTest.test_proposed_values_are_counts_never_branch_names",
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_bot_authored_squash_body_promotes_nothing",
+            "test_build_intent_index.SquashPromotionTest.test_a_bulleted_body_without_a_pull_request_number_promotes_nothing",
+            "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
+            "test_build_intent_index.SquashPromotionTest.test_a_single_bullet_is_not_a_list_of_collapsed_commits",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_into_another_branch_promotes_nothing",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_a_ticket_outside_the_bullets_is_not_promoted",
+            "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
@@ -5393,10 +5408,11 @@ MUTATIONS = (
     Mutation(
         "a branch file whose content landed is published as proposed",
         "build_intent_index.py",
-        '        file_landed = is_landed or changed.get("landed")',
-        "        file_landed = is_landed",
+        '    if landed(commit) or changed.get("landed"):',
+        "    if landed(commit):",
         "squash-merged work, whose commits are on no default-branch path, read as a proposal",
         (
+            "test_build_intent_index.BranchTextTest.test_a_branch_commit_whose_content_landed_is_landed_text",
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
@@ -5411,13 +5427,18 @@ MUTATIONS = (
         (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_file_whose_content_landed_is_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
+            "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
+            "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
         "a ticket landed on a file is also listed as proposed there",
         "build_intent_index.py",
-        '        proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
-        '        proposed = dict(data["proposed"])',
+        '    proposed = {t: n for t, n in data["proposed"].items() if t not in data["tickets"]}',
+        '    proposed = dict(data["proposed"])',
         "one ticket on one file read as both implemented and only proposed",
         (
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
@@ -5461,6 +5482,7 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_history_exported_before_reach_existed_is_all_landed",
             "test_build_intent_index.RedactedValuesTest.test_branch_only_text_is_redacted_like_landed_text",
             "test_build_intent_index.RedactedValuesTest.test_redaction_leaves_the_ticket_and_its_links_alone",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
             "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
         ),
@@ -5475,6 +5497,8 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_out_branch_only_material_entirely",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
@@ -5492,7 +5516,316 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_tag_reach_is_landed",
+            "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
+            "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
             "test_telemetry.IntentWiringTest.test_the_stage_records_how_much_work_is_only_proposed",
+        ),
+    ),
+    Mutation(
+        "a squash merge's bullets are never read",
+        "build_intent_index.py",
+        "    promoted = squash_promotions(ndjson, boilerplate)",
+        "    promoted = frozenset()",
+        "a GitHub squash merge left its branch's links published as `proposed`, though "
+        "the work was on the default branch (#453)",
+        (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked",
+            "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
+            "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
+            "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
+            "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "a squash into another branch promotes its bullets",
+        "build_intent_index.py",
+        '    if commit.get("is_merge") or not landed(commit):',
+        '    if commit.get("is_merge"):',
+        "a squash into a release or develop branch read as landed work (#453 review)",
+        (
+            "test_build_intent_index.SquashAcceptanceTest.test_3_a_squash_into_a_non_default_branch_changes_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_into_another_branch_promotes_nothing",
+        ),
+    ),
+    Mutation(
+        "a bulleted body without a pull-request number is read as a squash",
+        "build_intent_index.py",
+        '    if not SQUASH_SUBJECT.search(commit["subject"]):',
+        "    if False:",
+        "a person's own bulleted description vouched for every ticket it mentioned (#453 review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_bulleted_body_without_a_pull_request_number_promotes_nothing",
+        ),
+    ),
+    Mutation(
+        "any body under a squash subject is read as its list of commits",
+        "build_intent_index.py",
+        '    if _rejection(_flatten(blocks)) != "merge-list":',
+        "    if False:",
+        "a body that is not GitHub's list of collapsed commits vouched for its tickets",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_single_bullet_is_not_a_list_of_collapsed_commits",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
+        ),
+    ),
+    Mutation(
+        "prose under a squash list is read as one of its commits",
+        "build_intent_index.py",
+        "        if line.startswith(MERGE_BULLET):\n            named.extend",
+        "        if True:\n            named.extend",
+        "a ticket a squash body only mentioned was promoted as though it landed there",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_ticket_outside_the_bullets_is_not_promoted",
+        ),
+    ),
+    Mutation(
+        "a squash promotes a bullet ticket on files it did not touch",
+        "build_intent_index.py",
+        '    return (changed["path"], ticket) in promoted',
+        "    return any(ticket == named for _, named in promoted)",
+        "a branch's link to a file the squash never carried read as landed (#453 review)",
+        (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "a squash links its bullet tickets to every file it touched",
+        "build_intent_index.py",
+        "    tickets = commit_tickets(commit, boilerplate)\n",
+        "    tickets = list(\n"
+        "        dict.fromkeys(\n"
+        "            commit_tickets(commit, boilerplate) + squash_bullet_tickets(commit, boilerplate)\n"
+        "        )\n"
+        "    )\n",
+        "#453's first design: each bullet's ticket spread over every file a large squash "
+        "touched, multiplying landed links no commit made",
+        (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
+            "test_build_intent_index.SquashPromotionTest.test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked",
+            "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
+            "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
+            "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
+            "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "a denied ticket prefix is linked again",
+        "config.py",
+        '        if ticket.split("-", 1)[0].upper() not in denied',
+        "        if True",
+        "dependency bumps citing advisories linked their files to `CVE-<year>` as though "
+        "it were a ticket (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
+            "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "a subject's denied ticket prefix is linked again",
+        "build_intent_index.py",
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))',
+        '    subject_tickets = list(dict.fromkeys(config.TICKET_PATTERN.findall(commit["subject"])))',
+        "a dependency bump's subject citing an advisory became a ticketed commit (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
+        ),
+    ),
+    Mutation(
+        "a body's denied ticket prefix is linked again",
+        "build_intent_index.py",
+        "    for ticket in config.ticket_ids(clean_body(body, boilerplate)):",
+        "    for ticket in config.TICKET_PATTERN.findall(clean_body(body, boilerplate)):",
+        "a body citing an advisory linked its files to `CVE-<year>` (#453 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
+            "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+        ),
+    ),
+    Mutation(
+        "configure leaves TICKET_PREFIX_DENY as given",
+        "config.py",
+        '    "TICKET_PREFIX_DENY": _prefix_list,\n',
+        "",
+        "configure(TICKET_PREFIX_DENY='QX, CVE') denied single letters rather than prefixes (#464)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
+        ),
+    ),
+    Mutation(
+        "omit publishes the unpromoted tickets of a kept branch commit",
+        "build_intent_index.py",
+        "        if omit_proposed and not text_landed:\n            continue\n",
+        "",
+        "under KSB_PROPOSED_LINKS=omit a branch commit kept for one promoted ticket "
+        "published its other tickets as proposals (#453 reimplementation review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
+        ),
+    ),
+    Mutation(
+        "a lower-case advisory prefix is linked again",
+        "config.py",
+        '        if ticket.split("-", 1)[0].upper() not in denied',
+        '        if ticket.split("-", 1)[0] not in denied',
+        "a case-insensitive KSB_TICKET_PATTERN read `cve-2024` past the deny-list (#464 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix",
+        ),
+    ),
+    Mutation(
+        "a Gherkin tag's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '        feature["tags"].update(tag.lstrip("@") for tag in line.split())\n'
+        '        feature["tickets"].update(config.ticket_ids(line))',
+        '        feature["tags"].update(tag.lstrip("@") for tag in line.split())\n'
+        '        feature["tickets"].update(config.TICKET_PATTERN.findall(line))',
+        "a feature tagged with an advisory was linked to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "a Gherkin scenario's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '            feature["scenarios"].append(name)\n'
+        '        feature["tickets"].update(config.ticket_ids(line))',
+        '            feature["scenarios"].append(name)\n'
+        '        feature["tickets"].update(config.TICKET_PATTERN.findall(line))',
+        "a scenario naming an advisory linked its feature to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "a feature file name's advisory id is a ticket again",
+        "extract_gherkin.py",
+        '        "tickets": set(config.ticket_ids(path.stem)),',
+        '        "tickets": set(config.TICKET_PATTERN.findall(path.stem)),',
+        "a feature file named after an advisory was linked to `CVE-<year>` (#464 review)",
+        (
+            "test_extract_gherkin.ParseFeatureTest.test_an_advisory_id_is_not_a_ticket_in_a_tag_a_scenario_or_a_file_name",
+        ),
+    ),
+    Mutation(
+        "the run stops recording how many links squash merges promoted",
+        "build_intent_index.py",
+        '            "intent.links_promoted": links.promoted,',
+        '            "intent.links_promoted": 0,',
+        "a rebuild moved links from `proposed` and nothing in the run could say how many "
+        "(#453 reimplementation review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "a link landed by its own commit is counted as promoted",
+        "build_intent_index.py",
+        '    return sum(1 for t, n in data["promoted"].items() if n == data["tickets"][t])',
+        '    return sum(1 for t, n in data["promoted"].items())',
+        "the promoted count over-reported links a default-branch commit had landed anyway",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_the_run_counts_the_links_squash_merges_promoted",
+        ),
+    ),
+    Mutation(
+        "the distinct landed ticket count takes in proposed tickets",
+        "build_intent_index.py",
+        '        {t for files in index.values() for d in files.values() for t in d["tickets"]}',
+        "        {t for files in index.values() for d in files.values()"
+        ' for t in [*d["tickets"], *d.get("proposed", {})]}',
+        "the summary's ticket count was read as all tickets while it counted landed ones "
+        "(#466 review)",
+        (
+            "test_repo_list_and_sync.IntentSummariseTest.test_reports_counts",
+            "test_telemetry.IntentWiringTest.test_the_stage_records_the_inventory_it_indexed",
+        ),
+    ),
+    Mutation(
+        "a subject naming only an advisory keeps its body unread",
+        "build_intent_index.py",
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))\n'
+        "    if subject_tickets:",
+        '    subject_tickets = list(dict.fromkeys(config.ticket_ids(commit["subject"])))\n'
+        '    if subject_tickets or config.TICKET_PATTERN.search(commit["subject"]):',
+        "the ticket a branch commit's body named was lost behind an advisory in its subject "
+        "(#466 review)",
+        (
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
+            "test_build_intent_index.TicketPrefixDenyTest.test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket",
+        ),
+    ),
+    Mutation(
+        "a squash reachable only from a tag promotes nothing",
+        "build_intent_index.py",
+        '    if commit.get("is_merge") or not landed(commit):',
+        '    if commit.get("is_merge") or commit.get("reach", "default") != "default":',
+        "a squash on a tagged release line left its landed branch work published as "
+        "`proposed`, against the rule `landed()` applies to every commit (#466 review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_reachable_only_from_a_tag_promotes",
+        ),
+    ),
+    Mutation(
+        "a bot-authored squash body vouches for its bullets",
+        "build_intent_index.py",
+        "    blocks = _body_blocks(commit_body(commit), boilerplate)",
+        '    blocks = _body_blocks(str(commit.get("body") or ""), boilerplate)',
+        "a machine's bullet list promoted links as though a person had listed the "
+        "collapsed commits (#466 review)",
+        (
+            "test_build_intent_index.SquashPromotionTest.test_a_bot_authored_squash_body_promotes_nothing",
+        ),
+    ),
+    Mutation(
+        "a body listing squashed authors is not rejected",
+        "build_intent_index.py",
+        "    if any(line.lower().startswith(AUTHOR_LINE) for line in lines):\n"
+        '        return "squashed-authors"\n',
+        "",
+        "a squashed range's author list read as prose, and under a squash subject as "
+        "its list of collapsed commits (#466 review)",
+        (
+            "test_build_intent_index.CleanBodyTest.test_body_embedding_original_authors_is_rejected",
+            "test_build_intent_index.SquashPromotionTest.test_a_squash_body_listing_squashed_authors_promotes_nothing",
         ),
     ),
     Mutation(
@@ -5508,22 +5841,28 @@ MUTATIONS = (
     Mutation(
         "omit drops a branch commit whose files landed",
         "build_intent_index.py",
-        '    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):',
+        "    if omit_proposed and not any(\n"
+        "        link_landed(commit, f, t, promoted) for f in files_changed for t in tickets\n"
+        "    ):",
         "    if omit_proposed:",
         "KSB_PROPOSED_LINKS=omit discarded squash-merged work along with the proposals",
         (
             "test_build_intent_index.ProposedLinksTest.test_omit_keeps_a_branch_file_whose_content_landed",
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
         "omit still publishes the unlanded files of a branch commit",
         "build_intent_index.py",
-        "        if omit_proposed and not file_landed:",
-        "        if False:",
+        "        made = {ticket: True for ticket, landed_link in made.items() if landed_link}",
+        "        pass",
         "a store that opted out of proposals still got them from a commit that was partly landed",
         (
             "test_build_intent_index.ProposedLinksTest.test_omit_leaves_the_unlanded_files_of_a_partly_landed_commit_out",
+            "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
+            "test_build_intent_index.SquashPromotionTest.test_omit_leaves_out_a_ticket_the_squash_did_not_promote",
         ),
     ),
     Mutation(
@@ -6624,11 +6963,14 @@ MUTATIONS = (
     Mutation(
         "squash-landed text is kept apart as branch-only",
         "build_intent_index.py",
-        '    text_landed = is_landed or any(f.get("landed") for f in commit.get("files", []))',
-        "    text_landed = is_landed",
+        "        text_landed = is_landed or any(\n"
+        '            link_landed(commit, f, ticket, promoted) for f in commit.get("files", [])\n'
+        "        )",
+        "        text_landed = is_landed",
         "a squash merge's own account of its work was labelled as never landed (#429)",
         (
             "test_build_intent_index.BranchTextTest.test_a_branch_commit_whose_content_landed_is_landed_text",
+            "test_build_intent_index.SquashPromotionTest.test_a_promoted_tickets_branch_text_is_landed_text",
         ),
     ),
     Mutation(

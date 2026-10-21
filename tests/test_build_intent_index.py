@@ -9,6 +9,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import defaultdict
@@ -35,6 +37,7 @@ def make_files():
         lambda: {
             "tickets": defaultdict(int),
             "proposed": defaultdict(int),
+            "promoted": defaultdict(int),
             "first": None,
             "last": None,
         }
@@ -267,6 +270,117 @@ class BodyTicketIdsTest(SettingsIsolated):
 
     def test_rejected_body_contributes_no_ids(self):
         self.assertEqual(intent.body_ticket_ids("* DD-1 one\n* DD-2 two\n* DD-3 three"), [])
+
+
+class TicketPrefixDenyTest(SettingsIsolated):
+    """An advisory id is not a piece of the estate's work (#464).
+
+    The break: the default pattern reads `CVE-2024-12345` as ticket `CVE-2024`,
+    so every dependency bump that cited an advisory linked its files to a
+    "ticket" per advisory year. A store whose tracker genuinely uses a denied key
+    must still be able to restore it by setting.
+    """
+
+    BODY = "Raises the parser floor past CVE-2024-1234 for QX-1 before the scan runs."
+
+    def test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does(self):
+        self.assertEqual(intent.body_ticket_ids(self.BODY), ["QX-1"])
+
+    def test_an_advisory_id_the_pattern_matches_links_no_ticket(self):
+        """GHSA ids rarely match - their segments mix letters in - but an
+        all-digit first segment does, which is why the default lists `GHSA`."""
+        body = "Raises the parser floor past GHSA-2389-c4fq-9xwr for QX-1 before the scan."
+        self.assertEqual(config.TICKET_PATTERN.findall(body), ["GHSA-2389", "QX-1"])
+        self.assertEqual(intent.body_ticket_ids(body), ["QX-1"])
+
+    def test_a_subject_keeps_its_ticket_and_loses_the_cve_id(self):
+        commit = make_commit("QX-1: raise the parser floor for CVE-2023-4567")
+        self.assertEqual(intent.commit_tickets(commit), ["QX-1"])
+
+    def test_a_subject_naming_only_a_cve_id_is_unticketed(self):
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit("Bump the parser for CVE-2024-12345")
+        self.assertFalse(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(len(files), 0)
+        self.assertEqual(len(descriptions), 0)
+
+    def test_a_subject_naming_only_a_cve_id_falls_through_to_its_body(self):
+        """Catches a denied id still blocking the body as though the subject had
+        named a ticket: a subject naming no ticket is the case the body is read for."""
+        commit = make_commit(
+            "Bump the parser for CVE-2024-12345",
+            body="Completes QX-4 by pinning the parser across the workspaces.",
+        )
+        self.assertEqual(intent.commit_tickets(commit), ["QX-4"])
+
+    def test_a_merge_naming_a_ticket_and_an_advisory_links_nothing(self):
+        """Catches the deny-list reaching a merge commit: a merge's file list is
+        the whole branch, so it is skipped whatever its subject names."""
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit(
+            "Merge pull request #206 from example-org/QX-5-suppress_cve-2018-10237"
+        )
+        commit["is_merge"] = True
+        self.assertFalse(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(len(files), 0)
+
+    def test_the_branch_commit_suppressing_the_advisory_links_its_bodys_ticket(self):
+        """The commit beside that merge which does link: its subject names only
+        the advisory, so - as for any subject naming no ticket - the body's
+        ticket is read. Before the deny-list `CVE-2018` stood in the subject and
+        kept the body unread."""
+        files, descriptions = make_files(), make_descriptions()
+        commit = make_commit(
+            "Temporarily suppressing CVE-2018-10237 for a library",
+            body="Needs more investigation (QX-5)",
+        )
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(dict(files["src/x.ts"]["tickets"]), {"QX-5": 1})
+        config.configure(TICKET_PREFIX_DENY="")
+        files, descriptions = make_files(), make_descriptions()
+        self.assertTrue(intent.apply_commit(commit, files, descriptions))
+        self.assertEqual(dict(files["src/x.ts"]["tickets"]), {"CVE-2018": 1})
+
+    def test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket(self):
+        commit = squash_commit(
+            "QX-1: raise dependency floors (#42)",
+            ("Bump the parser for CVE-2024-12345", "QX-2: pin the parser"),
+            ["src/a.ts"],
+        )
+        self.assertEqual(intent.squash_bullet_tickets(commit), ["QX-2"])
+
+    def test_emptying_the_list_restores_every_match(self):
+        """Catches a store whose tracker uses a denied key left with no recourse."""
+        config.configure(TICKET_PREFIX_DENY="")
+        self.assertEqual(intent.body_ticket_ids(self.BODY), ["CVE-2024", "QX-1"])
+
+    def test_the_list_is_read_from_a_comma_separated_string(self):
+        """Catches `configure(TICKET_PREFIX_DENY="QX, cve")` read as single letters."""
+        config.configure(TICKET_PREFIX_DENY="QX, cve")
+        self.assertEqual(intent.body_ticket_ids(self.BODY + " See ZZ-9."), ["ZZ-9"])
+
+    def test_the_environment_sets_the_list_and_defaults_it(self):
+        # The default is asserted with the variable removed, so an operator who
+        # exports it does not fail the suite.
+        unset = {k: v for k, v in os.environ.items() if k != "KSB_TICKET_PREFIX_DENY"}
+        try:
+            with mock.patch.dict(os.environ, unset, clear=True):
+                importlib.reload(config)
+            self.assertEqual(config.TICKET_PREFIX_DENY, ["CVE", "GHSA"])
+            with mock.patch.dict(os.environ, {"KSB_TICKET_PREFIX_DENY": ""}):
+                importlib.reload(config)
+            self.assertEqual(config.TICKET_PREFIX_DENY, [])
+            self.assertEqual(intent.body_ticket_ids(self.BODY), ["CVE-2024", "QX-1"])
+        finally:
+            importlib.reload(config)
+
+    def test_a_case_insensitive_pattern_still_denies_a_lower_case_prefix(self):
+        """Catches the prefix compared as matched: a `(?i)` KSB_TICKET_PATTERN
+        reads `cve-2024-1234` as `cve-2024`, which the upper-cased list misses."""
+        config.configure(TICKET_PATTERN=re.compile(r"(?i)\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b"))
+        body = "Raises the parser floor past cve-2024-1234 for QX-1 before the scan runs."
+        self.assertEqual(config.TICKET_PATTERN.findall(body), ["cve-2024", "QX-1"])
+        self.assertEqual(intent.body_ticket_ids(body), ["QX-1"])
 
 
 class ApplyCommitTest(SettingsIsolated):
@@ -1779,6 +1893,421 @@ class BranchTextTest(SettingsIsolated):
                 }
             ),
         )
+
+
+def squash_commit(subject, bullets, paths, reach="default", ref=None, prose=""):
+    """A GitHub squash merge as `export-history` records one: the pull request's
+    number on the subject, and the commits it collapsed as `* ` bullets."""
+    body = "\n".join(f"* {bullet}" for bullet in bullets)
+    if prose:
+        body = f"{body}\n\n{prose}"
+    commit = make_commit(subject, body=body, reach=reach, ref=ref)
+    commit["files"] = [{"path": path} for path in paths]
+    return commit
+
+
+def draft_commit(subject, paths, ref="team/parser"):
+    """A branch commit whose links are proposed, touching several files."""
+    commit = branch_commit(subject, ref=ref)
+    commit["files"] = [{"path": path} for path in paths]
+    return commit
+
+
+def index_commits(commits):
+    """The file index and ticket records the real stage builds from these commits."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ndjson = write_ndjson(tmp, commits)
+        descriptions = intent.ticket_pool()
+        index, _ = intent.index_repository(ndjson, descriptions)
+    return index, intent.ticket_records(descriptions)
+
+
+class SquashPromotionTest(SettingsIsolated):
+    """A landed squash merge promotes the proposed links its bullets name.
+
+    The break: GitHub's squash merge collapses a branch into one commit on the
+    default branch, and the branch it came from never becomes an ancestor of it.
+    So a ticket named only on that branch was published as `proposed` on every
+    file it touched, though the work landed. The squash's bullets are the record
+    that it did. They promote a link the branch already made; they never make one,
+    because each bullet's own commit touched only some of the squash's files.
+    """
+
+    SQUASH = "Add the invoice parser (#41)"
+    BULLETS = ("QX-2: draft the invoice parser", "tidy the parser tests")
+
+    def test_a_landed_squash_promotes_the_proposed_links_it_touched(self):
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/b.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts", "src/b.ts"]),
+            ]
+        )
+        for path in ("src/a.ts", "src/b.ts"):
+            self.assertEqual(index[path]["tickets"], {"QX-2": 1})
+            self.assertNotIn("proposed", index[path])
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_a_file_the_squash_did_not_touch_keeps_its_proposed_link(self):
+        """Catches a bullet ticket promoted on every file its branch commit touched."""
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/c.ts"]["tickets"], {})
+        self.assertEqual(index["src/c.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked(self):
+        """Catches a squash linking each bullet ticket to every file it touched,
+        which is how a large squash multiplies landed links (#453's first design)."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                make_commit("QX-6: widen the totals column", path="src/b.ts", reach="default"),
+                squash_commit(
+                    self.SQUASH,
+                    ("QX-2: draft the invoice parser", "QX-5: read the currency code"),
+                    ["src/a.ts", "src/b.ts"],
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/b.ts"]["tickets"], {"QX-6": 1})
+        self.assertNotIn("proposed", index["src/b.ts"])
+        self.assertNotIn("QX-5", records)
+
+    def test_a_squash_into_another_branch_promotes_nothing(self):
+        """Catches a squash into a release or develop branch read as landed work."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(
+                    self.SQUASH, self.BULLETS, ["src/a.ts"], reach="branch", ref="release/2"
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+        self.assertTrue(records["QX-2"]["proposed"])
+
+    def test_the_result_does_not_depend_on_which_commit_comes_first(self):
+        """Catches a promotion that only sees links made before the squash.
+
+        `git log` lists the squash first, as the newer commit, so a single pass
+        promoting as it goes would find nothing yet proposed to promote.
+        """
+        draft = draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"])
+        squash = squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"])
+        squash_first = index_commits([squash, draft])
+        draft_first = index_commits([draft, squash])
+        self.assertEqual(squash_first, draft_first)
+        index, _ = squash_first
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/c.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_squash_reachable_only_from_a_tag_promotes(self):
+        """Catches promotion narrowed to the default branch: a squash on a release
+        line that was tagged landed by the same rule `landed()` applies to every
+        commit, and its branch's links are landed work."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/b.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"], reach="tag"),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("proposed", index["src/a.ts"])
+        self.assertEqual(index["src/b.ts"]["proposed"], {"QX-2": 1})
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_a_bot_authored_squash_body_promotes_nothing(self):
+        """Catches a machine's bullet list read as evidence: a body an automated
+        author wrote is no evidence of anything, bullets or not."""
+        squash = squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"])
+        squash["author"] = squash["committer"] = {
+            "name": "dependabot[bot]",
+            "email": "support@example.example",
+        }
+        index, records = index_commits(
+            [draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]), squash]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+        self.assertTrue(records["QX-2"]["proposed"])
+
+    def test_a_squash_body_listing_squashed_authors_promotes_nothing(self):
+        """Catches a body carrying a squashed range's authors read as a list of
+        collapsed commits: that shape is rejected before the bullets are read."""
+        squash = squash_commit(
+            self.SQUASH,
+            self.BULLETS,
+            ["src/a.ts"],
+            prose="Author: A Person <a.person@example.example>",
+        )
+        index, _ = index_commits(
+            [draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]), squash]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_bulleted_body_without_a_pull_request_number_promotes_nothing(self):
+        """Catches a hand-written bulleted description read as a squash merge.
+
+        The subject cites a pull request without ending in its number, so only
+        the signature check, not a cheaper test for `(#`, can tell it apart.
+        """
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit("Tidy what (#40) left in the parser", self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_single_bullet_is_not_a_list_of_collapsed_commits(self):
+        """Catches a body that is not GitHub's squash list being read as one.
+
+        The subject names a ticket so the body is not read for links at all, as
+        it would be under a ticketless subject - that is a different rule.
+        """
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit("QX-1: add the invoice parser (#41)", self.BULLETS[:1], ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-1": 1})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_ticket_outside_the_bullets_is_not_promoted(self):
+        """Catches prose under a squash list read as a collapsed commit."""
+        index, _ = index_commits(
+            [
+                draft_commit("QX-7: sketch the currency table", ["src/a.ts"]),
+                squash_commit(
+                    self.SQUASH,
+                    self.BULLETS,
+                    ["src/a.ts"],
+                    prose="The currency table in QX-7 follows in a later change.",
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-7": 1})
+
+    def test_a_promoted_tickets_branch_text_is_landed_text(self):
+        """Catches a promoted ticket's own words labelled branch-only, as the
+        file-level carve-out already counts a squash-landed commit's text."""
+        tickets, _, _ = run_stage(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        record = tickets["QX-2"]
+        self.assertEqual(record["s"], ["draft the invoice parser"])
+        self.assertNotIn("ps", record)
+        self.assertNotIn("proposed", record)
+
+    def test_omit_keeps_a_promoted_link(self):
+        """Catches KSB_PROPOSED_LINKS=omit discarding work a squash landed."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("src/c.ts", index)
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_omit_leaves_out_a_ticket_the_squash_did_not_promote(self):
+        """Catches `omit` publishing a proposal because it shares a branch commit
+        with a promoted ticket: the commit is kept for QX-2 alone."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = index_commits(
+            [
+                draft_commit("QX-2 QX-3: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("proposed", index["src/a.ts"])
+        self.assertNotIn("QX-3", records)
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_the_run_counts_the_links_squash_merges_promoted(self):
+        """Catches the promotion's size unrecorded, so the figure a rebuild moves
+        cannot be re-derived from the run. Hand-derived: TK-1 on a.ts and b.ts are
+        promoted; TK-2 on a.ts was landed by its own commit already, and TK-1 on
+        c.ts is outside the squash."""
+        commits = [
+            draft_commit("TK-1 change", ["src/a.ts", "src/b.ts", "src/c.ts"]),
+            draft_commit("TK-1 change again", ["src/a.ts"]),
+            draft_commit("TK-2 change", ["src/a.ts"]),
+            make_commit("TK-2 landed change", path="src/a.ts", reach="default"),
+            squash_commit("Feature (#7)", ("TK-1 change", "TK-2 change"), ["src/a.ts", "src/b.ts"]),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "history" / "repo-a"
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            config.configure(
+                HISTORY_DIR=root / "history",
+                INTENT_INDEX_PATH=root / "file-tickets.json.gz",
+                TICKET_DESCRIPTIONS_PATH=root / "ticket-descriptions.json.gz",
+                TELEMETRY_PATH=root / "telemetry.json",
+            )
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertEqual(intent.main(), 0)
+            recorded = telemetry.read()
+        self.assertIn("Links promoted from `proposed` by squash merges: 2.", printed.getvalue())
+        self.assertEqual(recorded["intent.links_promoted"], 2)
+
+    def test_two_runs_under_different_hash_seeds_write_identical_bytes(self):
+        """Catches promotion output ordered by set iteration, which differs
+        between processes (CLAUDE.md 1.3) and is invisible within one."""
+        commits = [
+            squash_commit(
+                self.SQUASH,
+                ("QX-2: draft the invoice parser", "QX-3: read the currency code"),
+                ["src/a.ts", "src/b.ts"],
+            ),
+            draft_commit("QX-3: QX-2: read the currency code", ["src/a.ts", "src/b.ts"]),
+            draft_commit("QX-9: QX-8: sketch a later change", ["src/a.ts", "src/b.ts"]),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "history" / "repo-a"
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            outputs = [self._build(Path(tmp), seed) for seed in ("1", "2")]
+        self.assertEqual(outputs[0], outputs[1])
+
+    @staticmethod
+    def _build(root: Path, seed: str) -> tuple[bytes, bytes]:
+        out = root / f"out-{seed}"
+        script = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from knowledgestore import build_intent_index, config\n"
+            "root, out = Path(sys.argv[1]), Path(sys.argv[2])\n"
+            "config.configure(HISTORY_DIR=root / 'history',\n"
+            "    INTENT_INDEX_PATH=out / 'file-tickets.json.gz',\n"
+            "    TICKET_DESCRIPTIONS_PATH=out / 'ticket-descriptions.json.gz',\n"
+            "    TELEMETRY_PATH=out / 'telemetry.json')\n"
+            "raise SystemExit(build_intent_index.main())\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-B", "-c", script, str(root), str(out)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": str(ROOT / "src")},
+        )
+        assert completed.returncode == 0, completed.stderr
+        return (
+            gzip.decompress((out / "file-tickets.json.gz").read_bytes()),
+            gzip.decompress((out / "ticket-descriptions.json.gz").read_bytes()),
+        )
+
+
+def link_pairs(index):
+    """`(landed, proposed)` as sets of `(path, ticket)`."""
+    landed = {(path, t) for path, entry in index.items() for t in entry["tickets"]}
+    proposed = {(path, t) for path, entry in index.items() for t in entry.get("proposed", {})}
+    return landed, proposed
+
+
+class SquashAcceptanceTest(SettingsIsolated):
+    """The acceptance cases agreed in #453's review, each a small synthetic history.
+
+    A squash merge may only promote a link that already exists; it never makes
+    one. Ticket keys have two letters because the default pattern needs them.
+    """
+
+    BULLETS = ("TK-1 change", "tidy the module")
+
+    def test_1_promotes_an_existing_proposed_pair(self):
+        index, _ = index_commits(
+            [
+                draft_commit("TK-1 change", ["a.tf", "b.tf"]),
+                squash_commit("Feature (#7)", self.BULLETS, ["a.tf"]),
+            ]
+        )
+        self.assertEqual(index["a.tf"]["tickets"], {"TK-1": 1})
+        self.assertNotIn("proposed", index["a.tf"])
+        self.assertEqual(index["b.tf"]["proposed"], {"TK-1": 1})
+        self.assertEqual(sorted(index), ["a.tf", "b.tf"])
+
+    def test_2_adds_no_file_the_tickets_own_commits_never_touched(self):
+        index, _ = index_commits(
+            [
+                draft_commit("TK-1 change", ["a.tf", "b.tf"]),
+                squash_commit("Feature (#7)", self.BULLETS, ["a.tf", "c.tf"]),
+            ]
+        )
+        self.assertEqual(index["a.tf"]["tickets"], {"TK-1": 1})
+        self.assertEqual(index["b.tf"]["proposed"], {"TK-1": 1})
+        self.assertNotIn("c.tf", index)
+
+    def test_3_a_squash_into_a_non_default_branch_changes_nothing(self):
+        draft = draft_commit("TK-2 change", ["a.tf", "b.tf"])
+        squash = squash_commit(
+            "Feature (#8)", ("TK-2 change", "tidy the module"), ["a.tf"], "branch", "develop"
+        )
+        self.assertEqual(index_commits([draft, squash]), index_commits([draft]))
+
+    def test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing(self):
+        index, records = index_commits(
+            [
+                draft_commit("TK-3 change", ["d.tf"]),
+                squash_commit("Feature (#9)", ("TK-3 change", "tidy"), ["a.tf"]),
+            ]
+        )
+        self.assertNotIn("a.tf", index)
+        self.assertEqual(index["d.tf"]["proposed"], {"TK-3": 1})
+        self.assertTrue(records["TK-3"]["proposed"])
+
+    def test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches(
+        self,
+    ):
+        """The store-level invariant: `tickets` gains exactly the promoted pairs,
+        `proposed` loses exactly those and gains nothing, and the total number of
+        links is unchanged. The baseline is the same history without its squash
+        merges, whose ticketless subjects make no link of their own; the promoted
+        set is derived by hand from the fixture."""
+        drafts = [
+            draft_commit("TK-1 change", ["a.tf", "b.tf", "c.tf"]),
+            draft_commit("TK-2 change", ["a.tf", "d.tf"], ref="team/two"),
+            draft_commit("TK-3 change", ["e.tf"], ref="team/three"),
+            draft_commit("TK-4 change", ["a.tf"], ref="team/four"),
+            make_commit("TK-5 landed change", path="b.tf", reach="default"),
+        ]
+        squashes = [
+            # Landed: names TK-1, TK-2, TK-3; touches a, b, f.
+            squash_commit(
+                "Feature (#7)",
+                ("TK-1 change", "TK-2 change", "TK-3 change"),
+                ["a.tf", "b.tf", "f.tf"],
+            ),
+            # Into develop: names TK-4 on a.tf - promotes nothing.
+            squash_commit("Feature (#8)", ("TK-4 change", "tidy"), ["a.tf"], "branch", "develop"),
+            # No pull-request number: not a squash, promotes nothing.
+            squash_commit("Tidy the modules", ("TK-1 change", "tidy"), ["c.tf"]),
+        ]
+        base_landed, base_proposed = link_pairs(index_commits(drafts)[0])
+        landed, proposed = link_pairs(index_commits(squashes[:1] + drafts + squashes[1:])[0])
+        promoted = {("a.tf", "TK-1"), ("b.tf", "TK-1"), ("a.tf", "TK-2")}
+        self.assertLessEqual(promoted, base_proposed)
+        self.assertEqual(landed - base_landed, promoted)
+        self.assertEqual(base_landed - landed, set())
+        self.assertEqual(base_proposed - proposed, promoted)
+        self.assertEqual(proposed - base_proposed, set())
+        self.assertEqual(len(landed) + len(proposed), len(base_landed) + len(base_proposed))
 
 
 if __name__ == "__main__":

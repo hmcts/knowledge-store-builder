@@ -115,14 +115,14 @@ def parse_feature_line(line: str, feature: Feature) -> None:
     """
     if line.startswith("@"):
         feature["tags"].update(tag.lstrip("@") for tag in line.split())
-        feature["tickets"].update(config.TICKET_PATTERN.findall(line))
+        feature["tickets"].update(config.ticket_ids(line))
     elif line.startswith("Feature:"):
         feature["name"] = line.split(":", 1)[1].strip() or None
     elif line.startswith(("Scenario:", "Scenario Outline:")):
         name = line.split(":", 1)[1].strip()
         if name:
             feature["scenarios"].append(name)
-        feature["tickets"].update(config.TICKET_PATTERN.findall(line))
+        feature["tickets"].update(config.ticket_ids(line))
     elif STEP_KEYWORD.match(line):
         feature["steps"].add(normalise_step(STEP_KEYWORD.sub("", line)))
 
@@ -134,7 +134,7 @@ def parse_feature(path: Path, repo_dir: Path) -> Feature | None:
         "scenarios": [],
         "steps": set(),
         "tags": set(),
-        "tickets": set(config.TICKET_PATTERN.findall(path.stem)),
+        "tickets": set(config.ticket_ids(path.stem)),
     }
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         parse_feature_line(raw.strip(), feature)
