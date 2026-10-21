@@ -1036,6 +1036,18 @@ class StageTest(_Store):
         self.assertIn("svc-c -> svc-a", out)
         self.assertIn("refs_unpinned 1 here, 0 there", out)
 
+    def test_compare_help_says_it_reads_only_this_stages_own_format(self):
+        """Break caught: `--compare` described as reading another build or another
+        tool's output, so a store points it at its script's file and reads the
+        shape refusal as a failed parity check. Parity with a script is reached by
+        converting the script's output to this format first."""
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            build_relationships.main(["--help"])
+        text = " ".join(out.getvalue().split())
+        self.assertIn("in this stage's own layer format only", text)
+        self.assertNotIn("another", text)
+
     def test_compare_refuses_a_file_of_the_wrong_shape_cleanly(self):
         """Break caught: a malformed comparison file ending in a traceback rather
         than an exit 1 that says what is wrong with it."""

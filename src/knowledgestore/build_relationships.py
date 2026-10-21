@@ -1,7 +1,7 @@
 """Which repositories depend on which others, as a layer an agent reads whole.
 
     knowledgestore relationships                   # build and write the layer
-    knowledgestore relationships --compare PATH    # compare against another build
+    knowledgestore relationships --compare PATH    # compare against a layer file
 
 Every kind in `relationships.BUILTIN` - Terraform module sources, Helm charts,
 Maven artifacts and npm packages - and every kind the store registers in
@@ -23,8 +23,11 @@ bytes, and a repository no longer cloned loses its `by-repo` file in the same ru
 
 `--compare PATH` builds the layer, writes nothing, and prints every
 (consumer, provider, chart, kind) whose references or pins differ from PATH's,
-and every unresolved target that differs. It exits 1 on any difference: it is the
-tool a store uses to retire a script that wrote the same file.
+and every unresolved target that differs. It exits 1 on any difference. PATH must
+be a `repository-dependencies.json` in this stage's own layer format: nothing
+else is read. A file of another shape exits 1 with "Cannot compare against
+PATH: ..." and compares nothing. Parity with another tool is reached by
+converting that tool's output to this format first, which is the store's job.
 
 Exit codes: 0 on success; 1 on a parser failure, a kind declaration that cannot be used, an unreadable configuration or
 `extra` input, a missing `repositories/`, a Flux `HelmRelease` with PyYAML not
@@ -176,7 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--compare",
         metavar="PATH",
-        help="build without writing, and compare against another repository-dependencies.json",
+        help=(
+            "build without writing, and compare against PATH, a repository-dependencies.json "
+            "in this stage's own layer format only; convert any other tool's output to "
+            "this format first"
+        ),
     )
     arguments = parser.parse_args(argv)
 

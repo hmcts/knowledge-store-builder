@@ -204,6 +204,16 @@ balance stops the stage with exit 1, naming the kind and each figure, and nothin
 is written. Two runs over the same clones write identical bytes, and a
 repository no longer cloned loses its `by-repo` file in the same run.
 
+**Comparing two builds.** `knowledgestore relationships --compare PATH` builds
+the layer, writes nothing, and prints every (consumer, provider, chart, kind)
+whose references or pins differ from PATH's, and every unresolved target that
+differs, exiting 1 on any difference. PATH must be a
+`repository-dependencies.json` in this stage's own layer format, such as one an
+earlier run wrote; `--compare` reads nothing else. A file of any other shape
+exits 1 with `Cannot compare against PATH: …` and compares nothing. To check
+parity with a script a store already runs, the store converts that script's
+output to this format first, then compares.
+
 A Flux `HelmRelease` is read with PyYAML, which the `deploy` extra installs
 (`pip install 'hmcts-knowledge-store-builder[deploy]'`). Without it, a run over a
 clone holding a release stops with exit 1 and writes nothing, naming the file, the
