@@ -579,14 +579,25 @@ _BLOCK = re.compile(r"<!-- index-(query|helper): (\w+) -->\n```(?:sql|python)\n(
 
 def tagged_blocks(text: str, kind: str) -> dict[str, str]:
     """The fenced blocks of one kind in `text`, by tag. A tag used twice raises: two
-    blocks for one name would leave one of them untested."""
+    blocks for one name would leave one of them untested. So does a tag comment that
+    does not yield a block (a blank line after it, a hyphenated name, another fence
+    language): every tag comment on the page must be one this function ran, or it is a
+    query the test never saw."""
     found: dict[str, str] = {}
+    extracted = 0
     for tagged, name, body in _BLOCK.findall(text):
         if tagged != kind:
             continue
+        extracted += 1
         if name in found:
             raise ValueError(f"index-{kind} {name} appears twice")
         found[name] = body
+    comments = len(re.findall(rf"<!--\s*index-{kind}\b", text))
+    if comments != extracted:
+        raise ValueError(
+            f"{comments} index-{kind} tag comment(s) on the page but {extracted} block(s) "
+            "read: a tag is malformed and its block is not being tested"
+        )
     return found
 
 
@@ -665,9 +676,33 @@ EXPECTED = {
         (("ghost", None), []),
     ],
     "tickets_for_file": [
-        (("svc-a", "features/pay.feature"), [("PROJ-1", 2, 1), ("PROJ-2", 1, 0)]),
-        (("", "loose.txt"), [("PROJ-1", 1, 1), ("PROJ-9", 3, 1)]),
+        (
+            ("svc-a", "features/pay.feature"),
+            [
+                ("PROJ-1", 2, 1, "svc-a", "features/pay.feature"),
+                ("PROJ-2", 1, 0, "svc-a", "features/pay.feature"),
+            ],
+        ),
+        (
+            ("", "loose.txt"),
+            [("PROJ-1", 1, 1, "", "loose.txt"), ("PROJ-9", 3, 1, "", "loose.txt")],
+        ),
         (("nope", "loose.txt"), []),
+        # No path: every file of the repository, landed first, then ticket, then path.
+        (
+            ("svc-a", None),
+            [
+                ("PROJ-1", 2, 1, "svc-a", "features/pay.feature"),
+                ("PROJ-3", 1, 1, "svc-a", "docs/readme.md"),
+                ("PROJ-1", 1, 0, "svc-a", "docs/readme.md"),
+                ("PROJ-2", 1, 0, "svc-a", "features/pay.feature"),
+            ],
+        ),
+        (
+            ("", None),
+            [("PROJ-1", 1, 1, "", "loose.txt"), ("PROJ-9", 3, 1, "", "loose.txt")],
+        ),
+        (("nope", None), []),
     ],
     "files_for_ticket": [
         (
@@ -743,26 +778,59 @@ class TheDocumentedQueriesAreTheContract(IndexCase):
             tagged_blocks(block + block, "query")
 
     def test_the_documented_helper_makes_free_text_a_safe_match_argument(self):
-        """Breaks if the documented recipe lets FTS5 syntax through as an operator:
-        `gateway OR order` must need all three words (and so match nothing), not
-        either; a lone quote must not raise; a quote inside a word is doubled."""
+        """Breaks if the documented recipe lets FTS5 syntax through as an operator
+        (`gateway OR order` must need all three words, so match nothing), raises on a
+        lone quote, stops marking words as prefixes, or tokenises differently from the
+        index: `pay_gate` and `feature-gateway` are two words each there."""
         scope: dict = {}
         exec(tagged_blocks(self.text, "helper")["match_argument"], scope)
         match_argument = scope["match_argument"]
         find = tagged_blocks(self.text, "query")["find"]
 
         def ids(text):
-            rows = self.connection.execute(find, (match_argument(text), None, None, 20))
+            rows = self.connection.execute(find, (match_argument(text), None, None, -1))
             return [row[0] for row in rows]
 
-        self.assertEqual(match_argument("Gate pay"), '"Gate"* "pay"*')
+        self.assertEqual(match_argument("Gate pay Gate"), '"gate"* "pay"*')
         self.assertEqual(ids("Gate pay"), ["a1"])
+        self.assertEqual(ids("pay_gate"), ["a1"])
+        self.assertEqual(ids("feature-gateway"), ["a1"])
         self.assertEqual(ids("gateway OR order"), [])
         self.assertEqual(ids('gateway "'), ["a3", "a1", "n0"])
         self.assertEqual(ids("gateway NEAR"), [])
         self.assertEqual(ids('"gateway'), ["a3", "a1", "n0"])
-        self.assertEqual(match_argument('say "hi"'), '"say"* """hi"""*')
         self.assertEqual(match_argument("  "), "")
+
+    def test_a_helper_the_page_names_and_this_test_does_not_know_fails(self):
+        """Breaks if a helper can be added to the page and go unrun."""
+        self.assertEqual(set(tagged_blocks(self.text, "helper")), {"match_argument"})
+
+    def test_a_malformed_tag_fails_the_gate_loudly(self):
+        """Breaks if a tag that does not match the block pattern is skipped: its query
+        would be on the page, untested, and nothing would say so."""
+        good = "<!-- index-query: node -->\n```sql\nSELECT 1\n```\n"
+        self.assertEqual(tagged_blocks(good, "query"), {"node": "SELECT 1\n"})
+        for bad in (
+            "<!-- index-query: node -->\n\n```sql\nSELECT 1\n```\n",  # blank line
+            "<!-- index-query: files-for-ticket -->\n```sql\nSELECT 1\n```\n",  # hyphen
+            "<!-- index-query: node -->\n```sqlite\nSELECT 1\n```\n",  # other fence
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                tagged_blocks(bad, "query")
+        with self.assertRaises(ValueError):
+            tagged_blocks("<!-- index-helper: h -->\n\n```python\nx = 1\n```\n", "helper")
+
+    def test_the_ticket_query_searches_the_file_index_and_does_not_confuse_repositories(self):
+        """Breaks if the repository filter goes back to `coalesce(r.name, '') = ?`, which
+        scans every file, or if an unknown repository is read as `no repository`."""
+        sql = tagged_blocks(self.text, "query")["tickets_for_file"]
+        for params in (("svc-a", None), ("svc-a", "docs/readme.md"), ("", None)):
+            plan = [row[3] for row in self.connection.execute("EXPLAIN QUERY PLAN " + sql, params)]
+            with self.subTest(params=params):
+                self.assertTrue(any(d.startswith("SEARCH f ") for d in plan), plan)
+                self.assertFalse(any(d.startswith("SCAN") for d in plan), plan)
+        self.assertNotEqual(self.connection.execute(sql, ("", None)).fetchall(), [])
+        self.assertEqual(self.connection.execute(sql, ("unknown", None)).fetchall(), [])
 
 
 if __name__ == "__main__":

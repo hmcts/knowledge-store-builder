@@ -408,8 +408,8 @@ repository" in a parameter as well as in a result.
 
 **`find`** answers nodes whose label matches a full-text search, best match first
 (`bm25`, then id, so a tie is stable). `?1` is an FTS5 `MATCH` argument, `?2` a
-repository name or NULL, `?3` a kind or NULL, `?4` the limit. Columns:
-`id, label, repo, kind, path, url, community`.
+repository name or NULL, `?3` a kind or NULL, `?4` the limit, where `-1` means no
+limit. Columns: `id, label, repo, kind, path, url, community`.
 
 <!-- index-query: find -->
 ```sql
@@ -427,18 +427,31 @@ LIMIT ?4
 
 Free text is not a `MATCH` argument. `NEAR`, `OR`, `*`, a column filter and an
 unbalanced quote are all FTS5 syntax, and a user's words can hold any of them.
-Quote each word, double any `"` inside it, and end it with `*` for a prefix match.
-The words are then ANDed and none is an operator.
+Split the text into words with FTS5's own `unicode61` tokenizer, the one the index
+was built with, so `pay_gate` and `feature-gateway` become two words each, as they
+are in a label. Quote each word, double any `"` inside it, and end it with `*` for
+a prefix match. The words are then ANDed and none is an operator. A Python
+tokenizer is not a substitute: SQLite's Unicode tables are its own, and an
+imitation disagrees with the index on some characters.
 
 <!-- index-helper: match_argument -->
 ```python
+import sqlite3
+
 def match_argument(text):
-    words = [w for w in text.split() if any(c.isalnum() for c in w)]
-    return " ".join('"' + w.replace('"', '""') + '"*' for w in words)
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE VIRTUAL TABLE words USING fts5(text, tokenize='unicode61')")
+    db.execute("CREATE VIRTUAL TABLE terms USING fts5vocab(words, 'instance')")
+    db.execute("INSERT INTO words(text) VALUES (?)", (text,))
+    found = [t for (t,) in db.execute("SELECT term FROM terms ORDER BY offset")]
+    db.close()
+    return " ".join('"' + t.replace('"', '""') + '"*' for t in dict.fromkeys(found))
 ```
 
 An empty result from `match_argument` has nothing to search for, so do not run
-`find` with it.
+`find` with it. The MCP server also refuses text over 1024 bytes or over 32 words,
+because every word is a prefix scan of the label index: bound the text before it
+reaches the helper.
 
 **`node`** answers one node by id. Same columns as `find`.
 
@@ -474,19 +487,24 @@ WHERE t.id = ?1 AND (?2 IS NULL OR rel.name = ?2)
 ORDER BY 2, 3, 1
 ```
 
-**`tickets_for_file`** answers the tickets that touched one file. `?1` is the
-repository (`''` for none) and `?2` the repository-relative path. `landed` is 1
-for a ticket in the landed history and 0 for a proposed one. Landed first, then
-ticket id. Columns: `ticket, count, landed`.
+**`tickets_for_file`** answers the tickets that touched a file, or every file of a
+repository. `?1` is the repository (`''` for none) and `?2` the repository-relative
+path, or NULL for every file of that repository. `landed` is 1 for a ticket in the
+landed history and 0 for a proposed one. Landed first, then ticket id, then path.
+Columns: `ticket, count, landed, repo, path`. An unknown repository returns no rows;
+it is never read as "no repository". The `CASE` resolves the name to its key once,
+so the lookup searches the `(repo, path)` index instead of scanning `files`.
 
 <!-- index-query: tickets_for_file -->
 ```sql
-SELECT t.ticket, t.count, t.landed
+SELECT t.ticket, t.count, t.landed, coalesce(r.name, ''), f.path
 FROM files f
 LEFT JOIN repos r ON r.k = f.repo
 JOIN tickets t ON t.file = f.k
-WHERE coalesce(r.name, '') = ?1 AND f.path = ?2
-ORDER BY t.landed DESC, t.ticket
+WHERE f.repo IS CASE WHEN ?1 = '' THEN NULL
+                     ELSE coalesce((SELECT k FROM repos WHERE name = ?1), -1) END
+  AND (?2 IS NULL OR f.path = ?2)
+ORDER BY t.landed DESC, t.ticket, f.path
 ```
 
 **`files_for_ticket`** answers the files one ticket touched, landed ones first,
