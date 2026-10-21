@@ -393,6 +393,76 @@ def _within(root: Path, rel: str) -> bool:
     return root.resolve() in (root / rel).resolve().parents
 
 
+def _declared(root: Path) -> tuple[str, dict] | None:
+    """The extra-layers declaration and where it was read from, or None without one."""
+    declared_at = _rel(config.STORE_EXTRA_LAYERS_PATH)
+    path = root / declared_at
+    if not path.is_file():
+        return None
+    try:
+        declared = io.read_json(path)
+    except ValueError as error:
+        raise UsageError(f"{declared_at} is not valid JSON: {error}") from error
+    if not isinstance(declared, dict):
+        raise UsageError(f"{declared_at} must map each layer name to its declaration")
+    return declared_at, declared
+
+
+def _extra_fields(name: str, entry) -> tuple[str, str]:
+    """The path and description an extra layer declares, or a refusal naming it."""
+    if not isinstance(entry, dict):
+        raise UsageError(f"extra layer {name!r} must be an object with a path and description")
+    rel, description = entry.get("path"), entry.get("description")
+    if not isinstance(rel, str) or not rel:
+        raise UsageError(f"extra layer {name!r} declares no path")
+    if not isinstance(description, str) or not description:
+        raise UsageError(f"extra layer {name!r} declares no description")
+    return rel, description
+
+
+def _extra_kind(name: str, entry: dict) -> str | None:
+    """The kind an extra layer declares, when it declares one and it is known."""
+    if "kind" not in entry:
+        return None
+    if entry["kind"] not in EXTRA_KINDS:
+        raise UsageError(
+            f"extra layer {name!r} declares kind {entry['kind']!r}; the only kind is "
+            + ", ".join(repr(kind) for kind in EXTRA_KINDS)
+        )
+    return entry["kind"]
+
+
+def _extra_layer(root: Path, name: str, entry, run) -> dict:
+    """One declared extra layer, checked and measured the way a library layer is."""
+    rel, description = _extra_fields(name, entry)
+    # Absolute is refused even when it resolves inside this clone: it names
+    # this checkout's directory, which no other clone has.
+    if Path(rel).is_absolute() or not _within(root, rel):
+        raise UsageError(
+            f"extra layer {name!r} must name a path below the store root, relative "
+            f"to it: {rel!r} does not."
+        )
+    # Written the way library layers are: normalised, with a directory marked by
+    # a trailing slash, so `./answers` and `answers/../answers` name one layer.
+    rel = posixpath.normpath(rel)
+    target = root / rel
+    # The library's own rule: a file, or a directory holding something.
+    kind = "dir" if target.is_dir() else "file"
+    exists, present, entries = _probe(root, rel, kind, run)
+    described = {
+        "path": _listed(rel, kind),
+        "description": description,
+        "present": present,
+        "digest": _digest(target, kind, root, entries) if present else None,
+    }
+    if exists and not present:
+        described["local_only"] = True
+    declared_kind = _extra_kind(name, entry)
+    if declared_kind is not None:
+        described["kind"] = declared_kind
+    return described
+
+
 def extra_layers(root: Path, run=run_git) -> dict:
     """The store's own layers, from `config/store-extra-layers.json` when it exists.
 
@@ -400,59 +470,16 @@ def extra_layers(root: Path, run=run_git) -> dict:
     against its own clone, so an absolute path or one that climbs out names a
     file no other clone holds - or one that is not the store's to publish.
     """
-    declared_at = _rel(config.STORE_EXTRA_LAYERS_PATH)
-    path = root / declared_at
-    if not path.is_file():
+    found = _declared(root)
+    if found is None:
         return {}
-    try:
-        declared = io.read_json(path)
-    except ValueError as error:
-        raise UsageError(f"{declared_at} is not valid JSON: {error}") from error
-    if not isinstance(declared, dict):
-        raise UsageError(f"{declared_at} must map each layer name to its declaration")
-    result: dict[str, dict] = {}
     library = {layer.name for layer in LAYERS} | {"deployments"}
-    for name, entry in sorted(declared.items()):
+    result: dict[str, dict] = {}
+    for name, entry in sorted(found[1].items()):
         if name in library:
             # The store digest is keyed by layer name across both tables.
             raise UsageError(f"extra layer {name!r} takes the name of a library layer")
-        if not isinstance(entry, dict):
-            raise UsageError(f"extra layer {name!r} must be an object with a path and description")
-        rel, description = entry.get("path"), entry.get("description")
-        if not isinstance(rel, str) or not rel:
-            raise UsageError(f"extra layer {name!r} declares no path")
-        if not isinstance(description, str) or not description:
-            raise UsageError(f"extra layer {name!r} declares no description")
-        # Absolute is refused even when it resolves inside this clone: it names
-        # this checkout's directory, which no other clone has.
-        if Path(rel).is_absolute() or not _within(root, rel):
-            raise UsageError(
-                f"extra layer {name!r} must name a path below the store root, relative "
-                f"to it: {rel!r} does not."
-            )
-        # Written the way library layers are: normalised, with a directory marked by
-        # a trailing slash, so `./answers` and `answers/../answers` name one layer.
-        rel = posixpath.normpath(rel)
-        target = root / rel
-        # The library's own rule: a file, or a directory holding something.
-        kind = "dir" if target.is_dir() else "file"
-        exists, present, entries = _probe(root, rel, kind, run)
-        described = {
-            "path": _listed(rel, kind),
-            "description": description,
-            "present": present,
-            "digest": _digest(target, kind, root, entries) if present else None,
-        }
-        if exists and not present:
-            described["local_only"] = True
-        if "kind" in entry:
-            if entry["kind"] not in EXTRA_KINDS:
-                raise UsageError(
-                    f"extra layer {name!r} declares kind {entry['kind']!r}; the only kind is "
-                    + ", ".join(repr(kind) for kind in EXTRA_KINDS)
-                )
-            described["kind"] = entry["kind"]
-        result[name] = described
+        result[name] = _extra_layer(root, name, entry, run)
     return result
 
 

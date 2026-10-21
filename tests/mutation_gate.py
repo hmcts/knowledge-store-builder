@@ -6966,8 +6966,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: an extra layer's path is recorded as declared",
         "store_manifest.py",
-        '            "path": _listed(rel, kind),\n',
-        '            "path": entry["path"],\n',
+        '        "path": _listed(rel, kind),\n',
+        '        "path": entry["path"],\n',
         "`./answers` and `answers/../answers` would stay three spellings of one layer, and a directory would carry no trailing slash",
         (
             "test_store_manifest.ExtraLayers.test_equivalent_spellings_of_a_path_are_recorded_one_way",
@@ -6996,8 +6996,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: an absolute extra-layer path inside the store is accepted",
         "store_manifest.py",
-        "        if Path(rel).is_absolute() or not _within(root, rel):\n",
-        "        if not _within(root, rel):\n",
+        "    if Path(rel).is_absolute() or not _within(root, rel):\n",
+        "    if not _within(root, rel):\n",
         "an absolute path to this checkout's own file resolves inside the root here and names nothing in any other clone",
         ("test_store_manifest.ExtraLayers.test_an_absolute_path_inside_the_store_is_refused",),
     ),
@@ -7012,8 +7012,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: an empty declared directory is a present extra layer",
         "store_manifest.py",
-        "        exists, present, entries = _probe(root, rel, kind, run)\n",
-        "        exists, present, entries = _probe(root, rel, kind, run)\n        present = target.exists()\n",
+        "    exists, present, entries = _probe(root, rel, kind, run)\n",
+        "    exists, present, entries = _probe(root, rel, kind, run)\n    present = target.exists()\n",
         "an extra layer would count a directory a stage created and left empty, which the library's own directory layers do not",
         (
             "test_store_manifest.ExtraLayers.test_an_empty_declared_directory_is_not_present",
@@ -7414,8 +7414,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: an extra layer may point outside the store",
         "store_manifest.py",
-        "        if Path(rel).is_absolute() or not _within(root, rel):\n",
-        "        if Path(rel).is_absolute():\n",
+        "    if Path(rel).is_absolute() or not _within(root, rel):\n",
+        "    if Path(rel).is_absolute():\n",
         "a declared layer naming an absolute or climbing path names a file no other clone holds, or one that is not the store's to publish",
         (
             "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
@@ -7427,8 +7427,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: a declared extra layer is always present",
         "store_manifest.py",
-        '            "present": present,\n',
-        '            "present": True,\n',
+        '        "present": present,\n',
+        '        "present": True,\n',
         "a store declaring a layer it has not yet written would advertise it, and a reader would open a missing file",
         (
             "test_store_manifest.ExtraLayers.test_a_path_that_climbs_and_returns_is_accepted",
@@ -7440,17 +7440,17 @@ MUTATIONS = (
     Mutation(
         "store manifest: an unknown extra-layer kind is accepted",
         "store_manifest.py",
-        '            if entry["kind"] not in EXTRA_KINDS:\n',
-        "            if False:\n",
+        '    if entry["kind"] not in EXTRA_KINDS:\n',
+        "    if False:\n",
         "a misspelt `answer` would pass, and a reader serving written answers would never see the layer",
         ("test_store_manifest.ExtraLayers.test_a_malformed_declaration_is_refused",),
     ),
     Mutation(
         "store manifest: an extra layer without a path is skipped",
         "store_manifest.py",
-        '            raise UsageError(f"extra layer {name!r} declares no path")\n',
-        "            continue\n",
-        "a declaration missing its path would drop out of the manifest with no message, and the store would lose a layer unnoticed",
+        '        raise UsageError(f"extra layer {name!r} declares no path")\n',
+        '        return "nothing-declared", description\n',
+        "a declaration missing its path would be accepted under an invented one with no message, and the store would advertise a layer it never declared",
         ("test_store_manifest.ExtraLayers.test_a_malformed_declaration_is_refused",),
     ),
     Mutation(
@@ -7696,8 +7696,8 @@ MUTATIONS = (
     Mutation(
         "store manifest: extra layers ignore git's rules",
         "store_manifest.py",
-        "        exists, present, entries = _probe(root, rel, kind, run)\n",
-        '        exists, present, entries = _probe(root, rel, kind, lambda _: "")\n',
+        "    exists, present, entries = _probe(root, rel, kind, run)\n",
+        '    exists, present, entries = _probe(root, rel, kind, lambda _: "")\n',
         "a store's own layer that git ignores would be offered to askers that cannot read it",
         (
             "test_store_manifest.WhatACloneReceives.test_a_directory_digest_covers_only_the_files_a_clone_receives",

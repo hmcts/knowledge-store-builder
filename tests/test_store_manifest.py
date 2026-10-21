@@ -71,6 +71,10 @@ def _git_repo(root: Path, origin: str | None) -> None:
         )
 
 
+def _present(manifest: dict) -> dict:
+    return {name: layer["present"] for name, layer in manifest["layers"].items()}
+
+
 class _Store(SettingsIsolated):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -80,9 +84,6 @@ class _Store(SettingsIsolated):
     def compute(self) -> dict:
         config.configure(STORE_ID="example-store")
         return store_manifest.compute(self.root)
-
-    def present(self) -> dict:
-        return {name: layer["present"] for name, layer in self.compute()["layers"].items()}
 
 
 class AnEmptyStore(_Store):
@@ -94,7 +95,7 @@ class AnEmptyStore(_Store):
         self.assertEqual(sorted(manifest["layers"]), list(ALL_LAYERS))
         expected: dict[str, bool | None] = {name: False for name in ALL_LAYERS}
         expected["deployments"] = None  # nothing measured, so unknown rather than absent
-        self.assertEqual(self.present(), expected)
+        self.assertEqual(_present(self.compute()), expected)
         digests = {name: layer["digest"] for name, layer in manifest["layers"].items()}
         self.assertEqual(digests, {name: None for name in ALL_LAYERS})
         self.assertIsNone(manifest["sources_as_of"])
@@ -127,7 +128,7 @@ class WhichLayersArePresent(_Store):
         # Deployments live inside the graph; with no telemetry nothing says whether
         # the stage put any there, so the answer is unknown, not absent.
         expected["deployments"] = None
-        self.assertEqual(self.present(), expected)
+        self.assertEqual(_present(self.compute()), expected)
 
     def test_every_layer_reads_its_own_path(self):
         """Breaks if any one layer's path is wrong: each file is created alone and
@@ -155,7 +156,7 @@ class WhichLayersArePresent(_Store):
             with self.subTest(layer=name), tempfile.TemporaryDirectory() as raw:
                 self.root = Path(raw)
                 _touch(self.root, rel)
-                present = [n for n, p in self.present().items() if p]
+                present = [n for n, p in _present(self.compute()).items() if p]
                 self.assertEqual(present, [name])
 
     def test_the_content_file_list_is_a_present_digested_layer(self):
@@ -172,7 +173,7 @@ class WhichLayersArePresent(_Store):
         """Breaks if a directory layer counts as present because the directory
         exists: `mkdir` alone has not built history."""
         (self.root / "knowledge" / "git-history").mkdir(parents=True)
-        self.assertFalse(self.present()["history"])
+        self.assertFalse(_present(self.compute())["history"])
 
     def test_directory_layers_are_listed_with_a_trailing_slash(self):
         """Breaks if a directory layer's path is indistinguishable from a file's."""
@@ -472,8 +473,9 @@ class ExtraLayers(_Store):
             }
         )
         found = store_manifest.extra_layers(self.root)
+        recorded = {name: found[name]["path"] for name in found}
         self.assertEqual(
-            {name: found[name]["path"] for name in found},
+            recorded,
             {
                 "dotted": "answers/",
                 "climbed": "answers/",
