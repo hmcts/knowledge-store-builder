@@ -58,15 +58,14 @@ a repository the store does hold is no gap at all.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import boundary, build_package_edges, config
+from . import boundary, build_package_edges, config, relationships
 
 # How many leading dot-segments make a namespace. Two is too wide: a group id
 # whose first two segments are a country or sector prefix and a shared parent
@@ -339,21 +338,14 @@ def _read_pom(evidence: Evidence, repo: str, rel: str, text: str) -> None:
 
 
 def _read_package_json(evidence: Evidence, repo: str, rel: str, text: str) -> None:
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return
-    if not isinstance(data, dict):
-        return
+    data = relationships.package_json(text)
     name = data.get("name")
     if isinstance(name, str) and name:
         evidence.built.add(npm_coordinate(name))
         evidence.built_from[PACKAGE_JSON] += 1
+    sections = relationships.npm_dependencies(data, ("dependencies", "devDependencies"))
     for key, scope in (("dependencies", "main"), ("devDependencies", "test")):
-        declared = data.get(key)
-        if not isinstance(declared, dict):
-            continue
-        for dependency in sorted(declared):
+        for dependency in sorted(sections.get(key, {})):
             coordinate = npm_coordinate(dependency)
             if coordinate.group:
                 _record(evidence, coordinate, scope, repo, rel)
@@ -361,21 +353,31 @@ def _read_package_json(evidence: Evidence, repo: str, rel: str, text: str) -> No
                 evidence.unscoped.add(dependency)
 
 
-def _read_terraform(evidence: Evidence, repo: str, text: str) -> None:
-    """Module sources, through the parser that already reads them (#122).
+def _read_terraform(
+    evidence: Evidence, clone: Path, rel: str, text: str, orgs: Mapping[str, str]
+) -> None:
+    """Module sources, through the parser the graph and the relationships layer
+    read them with (#122, #455), and named as the graph names them
+    (`relationships.module_provider`).
 
     Reused rather than rewritten: an estate can be built almost entirely from
     shared modules, both source forms are in use, and a divergent copy of that
     regex would report different reuse from the one already in the graph.
     """
-    for provider in build_package_edges.terraform_references(text):
-        if provider != repo:
+    repo = clone.name
+    for ref in relationships.builtin("terraform_module").references(clone, rel, text):
+        provider = relationships.module_provider(ref, orgs)
+        if provider and provider != repo:
             evidence.modules.setdefault(provider, set()).add(repo)
 
 
-def read_clone(evidence: Evidence, clone: Path) -> None:
-    """Fold one repository's build files into the evidence."""
+def read_clone(evidence: Evidence, clone: Path, orgs: Mapping[str, str] | None = None) -> None:
+    """Fold one repository's build files into the evidence. `orgs` is
+    `relationships.estate_orgs` for the estate; by default a module source in any
+    organisation names the clone of its name."""
     repo = clone.name
+    if orgs is None:
+        orgs = relationships.estate_orgs([repo], {}, "")
     evidence.held.add(repo)
     published = gradle_identity(clone)
     evidence.built |= published
@@ -394,14 +396,17 @@ def read_clone(evidence: Evidence, clone: Path) -> None:
             _read_package_json(evidence, repo, rel, _read(path))
         elif path.suffix == build_package_edges.TERRAFORM_SUFFIX:
             evidence.scanned[".tf"] += 1
-            _read_terraform(evidence, repo, _read(path))
+            _read_terraform(evidence, clone, rel, _read(path), orgs)
 
 
-def read_estate(clones: list[Path]) -> Evidence:
-    """Every clone's build evidence, in one deterministic pass."""
+def read_estate(clones: list[Path], orgs: Mapping[str, str] | None = None) -> Evidence:
+    """Every clone's build evidence, in one deterministic pass. `orgs` as for
+    `read_clone`."""
+    if orgs is None:
+        orgs = relationships.estate_orgs((clone.name for clone in clones), {}, "")
     evidence = Evidence()
     for clone in sorted(clones):
-        read_clone(evidence, clone)
+        read_clone(evidence, clone, orgs)
     return evidence
 
 
@@ -693,8 +698,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first")
         return 1
 
+    try:
+        orgs = relationships.store_estate_orgs(clone.name for clone in clones)
+    except ValueError as error:
+        print(f"Cannot read the store's repository list: {error}", file=sys.stderr)
+        return 1
     declared, unreadable = _declaration()
-    print("\n".join(report(read_estate(clones), declared, arguments.limit, unreadable)))
+    evidence = read_estate(clones, orgs)
+    print("\n".join(report(evidence, declared, arguments.limit, unreadable)))
     if unreadable:
         print(f"\n{unreadable}", file=sys.stderr)
         return 1

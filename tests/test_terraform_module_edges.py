@@ -24,25 +24,44 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_package_edges as packages  # noqa: E402
+from knowledgestore import relationships  # noqa: E402
+
+
+def _module_block(source: str) -> str:
+    """A source line as Terraform writes it: inside a module block, which is the
+    only place the parser reads one (#455)."""
+    return f'module "m" {{\n  {source}\n}}\n'
+
+
+def terraform_references(text: str) -> set[str]:
+    """The repositories a Terraform file names as module sources, through the parser
+    the graph stage reads them with. A bare `source = ...` line is wrapped in a
+    module block; a text already holding one is read as it stands."""
+    if "module " not in text:
+        text = _module_block(text)
+    kind = relationships.builtin("terraform_module")
+    return {
+        ref.resolved_repo for ref in kind.references(Path(), "main.tf", text) if ref.resolved_repo
+    }
 
 
 class TerraformReferenceTest(SettingsIsolated):
     def test_the_scp_style_form_is_recognised(self):
         """The majority form on a real estate."""
         self.assertEqual(
-            packages.terraform_references('source = "git@github.com:hmcts/cnp-module-key-vault"'),
-            {"cnp-module-key-vault"},
+            terraform_references('source = "git@github.com:example-org/tf-module-key-vault"'),
+            {"tf-module-key-vault"},
         )
 
     def test_a_ref_parameter_does_not_become_part_of_the_name(self):
         self.assertEqual(
-            packages.terraform_references('source = "git@github.com:org/mod?ref=master"'),
+            terraform_references('source = "git@github.com:org/mod?ref=master"'),
             {"mod"},
         )
 
     def test_the_documented_git_https_form_is_recognised(self):
         self.assertEqual(
-            packages.terraform_references(
+            terraform_references(
                 'source = "git::https://github.com/org/terraform-module-sql.git?ref=main"'
             ),
             {"terraform-module-sql"},
@@ -50,7 +69,7 @@ class TerraformReferenceTest(SettingsIsolated):
 
     def test_the_dot_git_suffix_is_stripped(self):
         self.assertEqual(
-            packages.terraform_references('source = "git::https://github.com/org/mod.git"'),
+            terraform_references('source = "git::https://github.com/org/mod.git"'),
             {"mod"},
         )
 
@@ -70,7 +89,7 @@ class TerraformReferenceTest(SettingsIsolated):
             ('source = "github.com/org/mod"', {"mod"}),
         ):
             with self.subTest(source=source):
-                self.assertEqual(packages.terraform_references(source), want)
+                self.assertEqual(terraform_references(source), want)
 
     def test_a_lookalike_host_does_not_match(self):
         """Making the scheme optional must not widen which hosts count."""
@@ -80,18 +99,18 @@ class TerraformReferenceTest(SettingsIsolated):
             'source = "raw.githubusercontent.com/org/mod"',
         ):
             with self.subTest(source=source):
-                self.assertEqual(packages.terraform_references(source), set())
+                self.assertEqual(terraform_references(source), set())
 
     def test_ssh_form_is_recognised(self):
         self.assertEqual(
-            packages.terraform_references('source = "ssh://git@github.com/org/mod"'),
+            terraform_references('source = "ssh://git@github.com/org/mod"'),
             {"mod"},
         )
 
     def test_whitespace_alignment_does_not_defeat_it(self):
         """Terraform files align `=`, so the spacing varies from file to file."""
         self.assertEqual(
-            packages.terraform_references('source             = "git@github.com:org/mod"'),
+            terraform_references('source             = "git@github.com:org/mod"'),
             {"mod"},
         )
 
@@ -104,14 +123,14 @@ class TerraformReferenceTest(SettingsIsolated):
             'source = "app.terraform.io/example/vpc/aws"',
         ):
             with self.subTest(source=source):
-                self.assertEqual(packages.terraform_references(source), set())
+                self.assertEqual(terraform_references(source), set())
 
     def test_several_references_in_one_file_are_all_found(self):
         text = (
             'module "a" {\n  source = "git@github.com:org/one"\n}\n'
             'module "b" {\n  source = "git::https://github.com/org/two.git?ref=v1"\n}\n'
         )
-        self.assertEqual(packages.terraform_references(text), {"one", "two"})
+        self.assertEqual(terraform_references(text), {"one", "two"})
 
 
 class EveryConsumerIsRepresentedTest(SettingsIsolated):
@@ -136,7 +155,7 @@ class EveryConsumerIsRepresentedTest(SettingsIsolated):
     def test_no_consuming_repository_is_dropped(self):
         import tempfile
 
-        shared = 'source = "git@github.com:org/shared-module"\n'
+        shared = _module_block('source = "git@github.com:org/shared-module"')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             # More consumers than MAX_EVIDENCE_FILES, deliberately, and named so
@@ -155,7 +174,7 @@ class EveryConsumerIsRepresentedTest(SettingsIsolated):
     def test_surplus_evidence_within_one_pair_is_what_gets_capped(self):
         import tempfile
 
-        shared = 'source = "git@github.com:org/shared-module"\n'
+        shared = _module_block('source = "git@github.com:org/shared-module"')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             layout = {f"one-repo/f{i:02d}.tf": shared for i in range(9)}
@@ -174,8 +193,10 @@ class EveryConsumerIsRepresentedTest(SettingsIsolated):
             clones = self._tree(
                 root,
                 {
-                    "app/main.tf": 'source = "git@github.com:org/real-dep"\n',
-                    "app/.terraform/modules/x/main.tf": 'source = "git@github.com:org/not-ours"\n',
+                    "app/main.tf": _module_block('source = "git@github.com:org/real-dep"'),
+                    "app/.terraform/modules/x/main.tf": _module_block(
+                        'source = "git@github.com:org/not-ours"'
+                    ),
                 },
             )
             providers = {provider for _, provider in packages._module_references(clones)}

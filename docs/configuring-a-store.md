@@ -11,7 +11,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | Variable | Default | Purpose |
 |---|---|---|
 | `KSB_ROOT` | current directory | Store root; `knowledgestore --root <path>` sets the same value for one command |
-| `KSB_GITHUB_ORG` | none | GitHub organisation used by discovery |
+| `KSB_GITHUB_ORG` | none | GitHub organisation used by discovery. Also the organisation a Terraform module source must name to mean a clone whose own clone URL is not on GitHub, for the `packages` graph edges, the `relationships` layer and the `gaps` report; a clone on GitHub is matched against its own organisation |
 | `KSB_TICKET_PATTERN` | uppercase project key and number | Ticket IDs recognised in commit messages |
 | `KSB_TICKET_BROWSE_URL` | none | URL prefix used to turn ticket IDs into links |
 | `KSB_EXPLORER_TITLE` | `Estate Explorer` | Browser-page title |

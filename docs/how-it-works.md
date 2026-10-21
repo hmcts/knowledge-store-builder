@@ -94,6 +94,205 @@ shatter a stable community into fragments, and prose attached to the whole
 does not describe a part. The measured cost of that, and the economics of
 refreshing generally, are in the operator guide §7.
 
+## The relationships layer
+
+Which repositories depend on which others is answered from their own
+declarations, not from the graph (`src/knowledgestore/relationships.py`, written
+by `knowledgestore relationships`). Four kinds are read:
+
+| Kind | Declared in | Target |
+|---|---|---|
+| `terraform_module` | a `module` block's `source` | the repository a GitHub source names, or the address as written |
+| `helm_chart` | `Chart.yaml` `dependencies`, and a Flux `HelmRelease`'s chart | the chart name |
+| `maven_artifact` | `pom.xml` `<dependencies>`, including under `<profiles>` | `groupId:artifactId` |
+| `npm_package` | `package.json` `dependencies`, `devDependencies` and `peerDependencies` | the package name |
+
+Each reference resolves to a repository in the estate, to the repository that
+declared it, or to nothing the store holds. A reference whose resolution lands on
+its own repository (a sibling Maven module, a module source naming its own
+repository) is counted under `skipped` as `self` and is not an edge. Publishing the
+target is not enough: an umbrella that also defines a chart another clone owns
+depends on that clone, and a coordinate two clones publish resolves by the conflict
+rule below, whichever of them declared it. A local module path is counted under
+`skipped` as `local`. A target the store does
+not hold is never dropped: `unresolved_targets_outside_estate` lists it per kind,
+with how often it is referenced and every repository that references it.
+
+**Three outputs**, under `knowledge/relationships/`:
+
+- `by-repo/<repo>.json`, one per clone: its `depends_on` and `depended_on_by`
+  edges, the `commit` and `base_url` from `knowledge/provenance.json` (`null` when
+  none is recorded), and `extra`, copied from `extra/<repo>.json` when the store
+  writes one. The stage never interprets `extra`.
+- `repository-dependencies.json`: every edge with both ends, the unresolved
+  targets, and `conflicts`. Its top level opens with
+  `"format": {"layer": "relationships", "major": 1, "minor": 0}`, the stamp that
+  says whose layer this is: major changes for an incompatible change, minor for an
+  addition. A reader refuses a file with no stamp or another major, so a store's
+  own differently shaped `knowledge/relationships/` is never read as this layer.
+  `kinds.json` carries no stamp; readers find it here.
+- `kinds.json`: per kind, its origin, what its pins are (`pins`), and its counts
+  of edges, references and unresolved targets, plus what was skipped and why. It
+  is small enough to read without opening the others.
+
+**An edge** aggregates every reference from one repository to another, per chart:
+
+```json
+{"repository": "<other end>", "chart": "", "references": 7,
+ "kinds": {"terraform_module": 7},
+ "refs_pinned": {"v4.2.0": 5}, "refs_unpinned": 2,
+ "examples": [{"url": "https://github.com/<org>/<repo>/blob/<sha>/<path>#L12",
+               "line": "source = \"git::…?ref=v4.2.0\""}]}
+```
+
+`refs_pinned` counts each pin as written, and `refs_unpinned` counts the
+references that give none (floating), so the two sum to `references`, the full
+count. What a pin is depends on the kind, and `kinds.json` says so in each kind's
+`pins`:
+
+| Kind | `pins` | A pin is |
+|---|---|---|
+| `helm_chart` | `chart versions` | a `Chart.yaml` dependency's `version`, or a `HelmRelease`'s chart `version` |
+| `terraform_module` | `git refs` | the `ref=` of a module source |
+| `maven_artifact` | `version specs` | a dependency's `<version>`, properties resolved within the POM |
+| `npm_package` | `version specs` | the version range as written (`^2.1.0`) |
+
+A store's own kind has `pins` `as the store's parser writes them`: the phrase is
+the library's, never text from the store. `examples` holds at most
+`KSB_RELATIONSHIP_EXAMPLES` (default 3), sorted by path and line, and each `line`
+is passed through the secret mask before it is written, as is every pin, unresolved
+target and conflict key. `chart` is `""` for every
+kind but `helm_chart`, so one repository of shared charts yields an edge per
+chart rather than one edge that hides which.
+
+**A chart resolves** to the first of these that holds:
+
+1. `KSB_CHART_REPO_PATTERN` with `{name}` replaced, when it is set and names a
+   clone. It is empty by default.
+2. The clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella. The
+   `Chart.yaml` can be at the clone's root or in any subdirectory
+   (`<clone>/<chart>/Chart.yaml`), unless it is vendored (below).
+3. An umbrella (`KSB_UMBRELLA_REPOS`) that defines it.
+4. For a Flux `HelmRelease` only, a `sourceRef` that names a clone.
+5. Otherwise, unresolved.
+
+A `Chart.yaml` under another chart's `charts/` directory is a vendored copy of a
+dependency, and is neither published nor read. When two clones publish one chart,
+coordinate or package, the first by name wins and both are listed under
+`conflicts`. A Terraform GitHub source belongs to the estate only when its
+repository is a clone and its organisation is that clone's own, ignoring case. A
+clone's organisation is read from its clone URL in `config/repositories.txt`, so a
+store holding clones from several organisations matches each against its own. A
+clone whose URL is not on GitHub, or that the list does not name, takes
+`KSB_GITHUB_ORG`, and an unset organisation matches any. A source outside the
+estate is reported as `<org>/<repo>`.
+
+The graph reads the same declarations through the same parsers. The `packages`
+stage's `USES_MODULE` edges and the `gaps` report take Terraform sources from a
+module block's own literal `source`, with the organisation check above, and the
+`deployments` stage's `uses_chart` edges resolve a chart in the order above. So
+the graph, the report and this layer name the same repository for one
+declaration, and the two chart settings apply to both.
+
+A file that cannot be opened, a POM that does not parse, or a file naming a
+`HelmRelease` that does not parse as YAML, is counted as `unreadable` for its kind
+and named in the run's output. The rest of the estate is still read. A bare `=` in
+a release's values (`op: =`) is read as the string `"="`, as Kubernetes reads it,
+by this layer and by the `deployments` stage alike.
+
+**No reference vanishes.** Every reference the parsers read ends as exactly one
+of these: a reference in an edge, a reference to an unresolved target, or a skip
+counted under its reason. Before writing, the stage checks this per kind: the
+references read, plus the declarations a parser set aside (`local`), must equal
+the references in edges, plus those of unresolved targets, plus every skip but
+`unreadable`, which counts files rather than references. A kind that does not
+balance stops the stage with exit 1, naming the kind and each figure, and nothing
+is written. Two runs over the same clones write identical bytes, and a
+repository no longer cloned loses its `by-repo` file in the same run.
+
+**Comparing two builds.** `knowledgestore relationships --compare PATH` builds
+the layer, writes nothing, and prints every (consumer, provider, chart, kind)
+whose references or pins differ from PATH's, and every unresolved target that
+differs, exiting 1 on any difference. PATH must be a
+`repository-dependencies.json` in this stage's own layer format, such as one an
+earlier run wrote; `--compare` reads nothing else. A file of any other shape, or
+with no format stamp or another major, exits 1 with `Cannot compare against PATH: …` and compares nothing. To check
+parity with a script a store already runs, the store converts that script's
+output to this format first, then compares.
+
+A Flux `HelmRelease` is read with PyYAML, which the `deploy` extra installs
+(`pip install 'hmcts-knowledge-store-builder[deploy]'`). Without it, a run over a
+clone holding a release stops with exit 1 and writes nothing, naming the file, the
+missing library and the extra, because a release the stage cannot read would
+leave its references out of a layer that reads as complete. A release is a file
+with a `kind: HelmRelease` line; one that only mentions the word, such as a
+pipeline running `flux reconcile helmrelease`, is not. An estate holding no
+release builds without PyYAML.
+
+### A store's own kinds
+
+A store whose clones declare a dependency the four kinds do not read, such as an
+event subscription or an internal manifest, gets its edges, pins and unresolved
+targets in the same layer by registering a kind in
+`config/relationship-kinds.json`:
+
+```json
+{"event_subscription": {"module": "scripts/subscriptions.py",
+                        "references": "references",
+                        "publishes": "publishes",
+                        "globs": ["**/*.events"]}}
+```
+
+`knowledgestore relationships` then runs the kind over every clone. Its edges
+carry the kind's name, and `kinds.json` lists it with `"origin": "store"` beside
+the built-ins' `"origin": "builtin"`. The file is the entry point because a store
+repository is not a Python package, so there is nothing to install one from.
+
+The module defines two functions, named in the file:
+
+- `references(clone, rel, text)` reads one file whose path matches `globs` (`rel`
+  is relative to `clone`, a `pathlib.Path`) and returns a list of
+  `knowledgestore.relationships.Reference`. A `ValueError` means the file cannot
+  be read: it is counted as `unreadable` and named, and the stage goes on. Any
+  other exception stops the stage with exit 1, naming the kind and the file, and
+  writes nothing, so the previous layer stays as it was.
+- `publishes(clone)` returns `(target, repo-relative path)` pairs for what the
+  clone offers to others, and `[]` for a kind that only references.
+
+Each `Reference` must carry the kind's registered name as its `kind`: a
+reference under another name would resolve against another kind's publishers and
+vanish, so the stage stops instead. `chart` must be empty, because only
+`helm_chart` has one. A parser that returns anything but a list of `Reference`,
+or a `publishes` that returns anything but pairs of strings, stops the stage the
+same way, naming the kind and the file (for `publishes`, the clone).
+
+A kind follows the rules the built-ins do. Resolution, the `self` rule,
+conflicts, unresolved targets and their `referenced_by` are the layer's, not the
+parser's. A credential in a `Reference` is dropped (`user:token@` in a URL) or
+masked before anything is written, whichever kind produced it. Store kinds are
+loaded in name order.
+
+A declaration the stage refuses, with exit 1 and before any store code runs:
+
+- a kind name that does not match `^[a-z][a-z0-9_]*$`, or that is a built-in's;
+- a `module` that is absolute, contains `..`, or resolves (through a symlink or
+  otherwise) outside the store root, or that is not a file;
+- `globs` that is not a non-empty list, or a `references` or `publishes` that is
+  not a function name.
+
+Every declaration is checked before any module is imported, so a bad declaration
+never follows store code that has already run. Only then are the modules
+imported, and a named function that a module does not define stops the stage the
+same way.
+
+**Trust boundary.** A store's module is Python the stage runs with the builder's
+own permissions: it can read and write anything the operator can. The stage loads
+it only from inside the store root, and never adds the store directory to
+`sys.path`, but it does not sandbox it. There is no timeout: a parser that
+hangs hangs the stage, as any operator code would. A module cannot import a
+sibling with `import x`, because the store directory is not on `sys.path`; load it
+through `__file__`. Register code you would run from the same checkout by hand.
+
 ## The history layers
 
 Commit history is exported in **one `git log` pass per repository**

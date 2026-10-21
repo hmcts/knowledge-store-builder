@@ -631,6 +631,67 @@ class BoundaryIntegration(GapsTestCase):
         self.assertIn("unbuilt here by construction", rendered)
 
 
+class TerraformEvidence(GapsTestCase):
+    """The module sources the report counts, read through the parser the graph and
+    the relationships layer use (#455), so the three name the same repositories."""
+
+    def module_gaps(self) -> list[str]:
+        """The repositories the rendered report lists as consumed and not held."""
+        lines = self.rendered().splitlines()
+        heading = next(
+            (i for i, line in enumerate(lines) if "Terraform modules consumed" in line), None
+        )
+        if heading is None:
+            return []
+        section = []
+        for line in lines[heading + 1 :]:
+            if not line.strip():
+                break
+            section.append(line.split()[0])
+        return section
+
+    def test_only_a_module_blocks_literal_source_is_read_and_a_credential_hides_nothing(self):
+        """Break caught: a resource's or a top-level `source`, or an interpolated one,
+        read as a module dependency; or the GitHub form matched before the
+        credential is dropped, so `https://user:token@github.com/...` names nothing.
+        The token must not reach the report either."""
+        token = "xxxxx-not-a-real-token"
+        _write(
+            self.clone("infra-live") / "main.tf",
+            'source = "github.com/example-org/tf-top-level"\n'
+            'resource "aws_s3_object" "o" {\n'
+            '  source = "github.com/example-org/tf-resource"\n'
+            "}\n"
+            'module "built" {\n'
+            '  source = "github.com/example-org/${var.name}"\n'
+            "}\n"
+            'module "cred" {\n'
+            f'  source = "git::https://user:{token}@github.com/example-org/tf-cred.git"\n'
+            "}\n",
+        )
+        rendered = self.rendered()
+        self.assertEqual(self.module_gaps(), ["tf-cred"])
+        self.assertNotIn(token, rendered)
+
+    def test_each_clone_is_compared_against_its_own_organisation(self):
+        """Break caught: a source matched on the repository name alone, or against
+        `KSB_GITHUB_ORG` alone, in a store holding clones from two organisations.
+        `other-org/shared-mod` is the clone the store holds, so it is no gap;
+        `example-org/shared-mod` is somebody else's, so it is one."""
+        self.clone("shared-mod")
+        _write(
+            self.clone("infra-live") / "main.tf",
+            'module "theirs" {\n  source = "github.com/other-org/shared-mod"\n}\n'
+            'module "wrong" {\n  source = "github.com/example-org/shared-mod"\n}\n',
+        )
+        _write(
+            config.REPOSITORIES_CONFIG,
+            "shared-mod|git@github.com:Other-Org/shared-mod.git|main\n"
+            "infra-live|git@github.com:example-org/infra-live.git|main\n",
+        )
+        self.assertEqual(self.module_gaps(), ["example-org/shared-mod"])
+
+
 class TheReport(GapsTestCase):
     def test_the_scope_of_what_was_read_is_stated(self):
         """Break: print the ranking without the funnel. A number whose scope the

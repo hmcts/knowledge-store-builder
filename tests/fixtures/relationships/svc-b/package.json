@@ -1,0 +1,12 @@
+{
+  "name": "svc-b-web",
+  "dependencies": {
+    "@example/ui": "^2.1.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.4.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}

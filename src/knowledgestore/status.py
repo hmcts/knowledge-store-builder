@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import datetime
 import gzip
+import json
 import re
 import shutil
 import sqlite3
@@ -35,6 +36,7 @@ from . import (
     merge_inputs,
     provenance,
     record_clustering,
+    relationships,
     store_paths,
     telemetry,
 )
@@ -1176,6 +1178,50 @@ def _report_citations() -> None:
         print("Corpus citations: none checked - no committed prose cites the corpus yet")
 
 
+def _relationships_format_problem() -> str:
+    """Why `repository-dependencies.json` is not this layer's format, or "".
+
+    Unreadable counts as unrecognised: the stamp lives there, and `kinds.json`
+    alone cannot say whose layer it is.
+    """
+    path = config.REPOSITORY_DEPENDENCIES_PATH
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
+        return f"{_relative(path)} is unreadable ({error})"
+    return relationships.format_problem(body)
+
+
+def _report_relationships() -> None:
+    """The relationships layer's edges per kind, from `kinds.json` alone.
+
+    Per kind rather than one total, because one edge can carry two kinds and a sum
+    would count it twice. Never fails: an absent or unreadable file is reported.
+    """
+    path = config.RELATIONSHIP_KINDS_PATH
+    if not path.is_file():
+        print("Relationships: not built - `knowledgestore relationships` writes it")
+        return
+    problem = _relationships_format_problem()
+    if problem:
+        print(f"Relationships: unrecognised format ({_relative(path)}: {problem})")
+        return
+    try:
+        kinds = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
+        print(f"Relationships: {_relative(path)} is unreadable ({error})")
+        return
+    if not isinstance(kinds, dict):
+        print(f"Relationships: {_relative(path)} is not a JSON object")
+        return
+    parts = []
+    for name, entry in sorted(kinds.items()):
+        edges = entry.get("edges") if isinstance(entry, dict) else None
+        count = edges if isinstance(edges, int) else 0
+        parts.append(f"{name} {count} {'edge' if count == 1 else 'edges'}")
+    print(f"Relationships: {', '.join(parts) or 'no kinds'} ({_relative(path)})")
+
+
 def _report_manifest() -> None:
     """What the store's manifest says is built, and which layers it says are not.
 
@@ -1536,6 +1582,8 @@ def main(argv=None) -> int:
     _report_failed_syncs(recorded)
 
     _report_merge_inputs()
+
+    _report_relationships()
 
     _report_intent(recorded)
 

@@ -181,7 +181,21 @@ class WhichLayersArePresent(_Store):
         """Breaks if a directory layer's path is indistinguishable from a file's."""
         layers = compute(self)["layers"]
         self.assertEqual(layers["history"]["paths"], ["knowledge/git-history/"])
-        self.assertEqual(layers["relationships"]["paths"], ["knowledge/relationships/by-repo/"])
+        self.assertEqual(layers["relationships"]["paths"], ["knowledge/relationships/"])
+
+    def test_the_relationships_digest_covers_the_whole_directory(self):
+        """Breaks if the relationships layer digests `by-repo/` alone, so a change
+        to `repository-dependencies.json` or `kinds.json` leaves the manifest's
+        digest, and a reader's idea of whether the layer moved, unchanged."""
+        base = self.root / "knowledge" / "relationships"
+        (base / "by-repo").mkdir(parents=True)
+        (base / "by-repo" / "a.json").write_text("{}\n", encoding="utf-8")
+        (base / "kinds.json").write_text("{}\n", encoding="utf-8")
+        (base / "repository-dependencies.json").write_text('{"edges": []}\n', encoding="utf-8")
+        before = compute(self)["layers"]["relationships"]["digest"]
+        (base / "repository-dependencies.json").write_text('{"edges": [1]}\n', encoding="utf-8")
+        (base / "kinds.json").write_text('{"k": 1}\n', encoding="utf-8")
+        self.assertNotEqual(compute(self)["layers"]["relationships"]["digest"], before)
 
 
 class CompressedAndPlainVariants(_Store):
@@ -910,14 +924,6 @@ def _unaccounted(namespace, root: Path, layers, not_a_layer) -> list[str]:
 
 
 class EveryArtefactIsAccountedFor(unittest.TestCase):
-    # When #455 (the relationships directory, the relationship-kinds path and its
-    # config path) merges, their config names fail
-    # `test_every_config_path_is_a_layer_or_named_as_not_one` until each is
-    # accounted for. `LAYERS` already holds `relationships` by literal path, so the
-    # merger maps the relationships directory to it by making config and the layer
-    # agree on one path, and lists the relationship kinds files here in
-    # `NOT_A_LAYER` or as a layer.
-
     def test_every_config_path_is_a_layer_or_named_as_not_one(self):
         """Breaks if a stage gains an artefact path in config that is neither a
         manifest layer nor named in `NOT_A_LAYER`: a reader would never be told

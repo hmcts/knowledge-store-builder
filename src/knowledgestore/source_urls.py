@@ -117,6 +117,17 @@ def github_origin(clone_url: str) -> tuple[str, str] | None:
     return (match.group("org"), match.group("repo")) if match else None
 
 
+def configured_clone_urls() -> dict[str, str]:
+    """Clone URL by repository name, from `config/repositories.txt`; empty when the
+    store has no list. A malformed list raises `ValueError` from its own parser,
+    naming the line."""
+    if not config.REPOSITORIES_CONFIG.is_file():
+        return {}
+    return {
+        entry.name: entry.clone_url for entry in read_repository_config(config.REPOSITORIES_CONFIG)
+    }
+
+
 @dataclass(frozen=True)
 class BlobUrl:
     """The parts of a github.com file link. `path` is decoded; `anchor` has no `#`."""
@@ -219,6 +230,7 @@ class SourceUrls:
     """
 
     def __init__(self, clone_urls: dict[str, str], shas: dict[str, str]):
+        self._clone_urls = dict(clone_urls)
         self._bases: dict[str, str] = {}
         self._missing: dict[str, str] = {}
         self._shas: dict[str, str] = {}
@@ -253,12 +265,7 @@ class SourceUrls:
         provenance file raises `ValueError` naming that file, so a caller reporting
         the error names the file that actually failed.
         """
-        clone_urls: dict[str, str] = {}
-        if config.REPOSITORIES_CONFIG.is_file():
-            clone_urls = {
-                entry.name: entry.clone_url
-                for entry in read_repository_config(config.REPOSITORIES_CONFIG)
-            }
+        clone_urls = configured_clone_urls()
         try:
             recorded = provenance.read()
         except ValueError as error:
@@ -311,6 +318,10 @@ class SourceUrls:
     def repositories_at(self, org: str, name: str) -> tuple[str, ...]:
         """The configured repositories cloned from github.com/<org>/<name>, by local name."""
         return tuple(sorted(self._origins.get((org.lower(), name.lower()), ())))
+
+    def clone_url(self, repo: str) -> str:
+        """The clone URL the store configured for `repo`, or "" when it names none."""
+        return self._clone_urls.get(repo, "")
 
     def build_sha(self, repo: str) -> str:
         """The commit provenance records for `repo`, or "" when it records none."""
