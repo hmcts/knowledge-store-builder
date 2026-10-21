@@ -9,6 +9,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import defaultdict
@@ -1778,6 +1780,236 @@ class BranchTextTest(SettingsIsolated):
                     "n": 3,
                 }
             ),
+        )
+
+
+def squash_commit(subject, bullets, paths, reach="default", ref=None, prose=""):
+    """A GitHub squash merge as `export-history` records one: the pull request's
+    number on the subject, and the commits it collapsed as `* ` bullets."""
+    body = "\n".join(f"* {bullet}" for bullet in bullets)
+    if prose:
+        body = f"{body}\n\n{prose}"
+    commit = make_commit(subject, body=body, reach=reach, ref=ref)
+    commit["files"] = [{"path": path} for path in paths]
+    return commit
+
+
+def draft_commit(subject, paths, ref="team/parser"):
+    """A branch commit whose links are proposed, touching several files."""
+    commit = branch_commit(subject, ref=ref)
+    commit["files"] = [{"path": path} for path in paths]
+    return commit
+
+
+def index_commits(commits):
+    """The file index and ticket records the real stage builds from these commits."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ndjson = write_ndjson(tmp, commits)
+        descriptions = intent.ticket_pool()
+        index, _ = intent.index_repository(ndjson, descriptions)
+    return index, intent.ticket_records(descriptions)
+
+
+class SquashPromotionTest(SettingsIsolated):
+    """A landed squash merge promotes the proposed links its bullets name.
+
+    The break: GitHub's squash merge collapses a branch into one commit on the
+    default branch, and the branch it came from never becomes an ancestor of it.
+    So a ticket named only on that branch was published as `proposed` on every
+    file it touched, though the work landed. The squash's bullets are the record
+    that it did. They promote a link the branch already made; they never make one,
+    because each bullet's own commit touched only some of the squash's files.
+    """
+
+    SQUASH = "Add the invoice parser (#41)"
+    BULLETS = ("QX-2: draft the invoice parser", "tidy the parser tests")
+
+    def test_a_landed_squash_promotes_the_proposed_links_it_touched(self):
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/b.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts", "src/b.ts"]),
+            ]
+        )
+        for path in ("src/a.ts", "src/b.ts"):
+            self.assertEqual(index[path]["tickets"], {"QX-2": 1})
+            self.assertNotIn("proposed", index[path])
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_a_file_the_squash_did_not_touch_keeps_its_proposed_link(self):
+        """Catches a bullet ticket promoted on every file its branch commit touched."""
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/c.ts"]["tickets"], {})
+        self.assertEqual(index["src/c.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked(self):
+        """Catches a squash linking each bullet ticket to every file it touched,
+        which is how a large squash multiplies landed links (#453's first design)."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                make_commit("QX-6: widen the totals column", path="src/b.ts", reach="default"),
+                squash_commit(
+                    self.SQUASH,
+                    ("QX-2: draft the invoice parser", "QX-5: read the currency code"),
+                    ["src/a.ts", "src/b.ts"],
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/b.ts"]["tickets"], {"QX-6": 1})
+        self.assertNotIn("proposed", index["src/b.ts"])
+        self.assertNotIn("QX-5", records)
+
+    def test_a_squash_into_another_branch_promotes_nothing(self):
+        """Catches a squash into a release or develop branch read as landed work."""
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(
+                    self.SQUASH, self.BULLETS, ["src/a.ts"], reach="branch", ref="release/2"
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+        self.assertTrue(records["QX-2"]["proposed"])
+
+    def test_the_result_does_not_depend_on_which_commit_comes_first(self):
+        """Catches a promotion that only sees links made before the squash.
+
+        `git log` lists the squash first, as the newer commit, so a single pass
+        promoting as it goes would find nothing yet proposed to promote.
+        """
+        draft = draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"])
+        squash = squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"])
+        squash_first = index_commits([squash, draft])
+        draft_first = index_commits([draft, squash])
+        self.assertEqual(squash_first, draft_first)
+        index, _ = squash_first
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertEqual(index["src/c.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_bulleted_body_without_a_pull_request_number_promotes_nothing(self):
+        """Catches a hand-written bulleted description read as a squash merge.
+
+        The subject cites a pull request without ending in its number, so only
+        the signature check, not a cheaper test for `(#`, can tell it apart.
+        """
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit("Tidy what (#40) left in the parser", self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_single_bullet_is_not_a_list_of_collapsed_commits(self):
+        """Catches a body that is not GitHub's squash list being read as one.
+
+        The subject names a ticket so the body is not read for links at all, as
+        it would be under a ticketless subject - that is a different rule.
+        """
+        index, _ = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit("QX-1: add the invoice parser (#41)", self.BULLETS[:1], ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-1": 1})
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-2": 1})
+
+    def test_a_ticket_outside_the_bullets_is_not_promoted(self):
+        """Catches prose under a squash list read as a collapsed commit."""
+        index, _ = index_commits(
+            [
+                draft_commit("QX-7: sketch the currency table", ["src/a.ts"]),
+                squash_commit(
+                    self.SQUASH,
+                    self.BULLETS,
+                    ["src/a.ts"],
+                    prose="The currency table in QX-7 follows in a later change.",
+                ),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["proposed"], {"QX-7": 1})
+
+    def test_a_promoted_tickets_branch_text_is_landed_text(self):
+        """Catches a promoted ticket's own words labelled branch-only, as the
+        file-level carve-out already counts a squash-landed commit's text."""
+        tickets, _, _ = run_stage(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        record = tickets["QX-2"]
+        self.assertEqual(record["s"], ["draft the invoice parser"])
+        self.assertNotIn("ps", record)
+        self.assertNotIn("proposed", record)
+
+    def test_omit_keeps_a_promoted_link(self):
+        """Catches KSB_PROPOSED_LINKS=omit discarding work a squash landed."""
+        config.configure(PROPOSED_LINKS="omit")
+        index, records = index_commits(
+            [
+                draft_commit("QX-2: draft the invoice parser", ["src/a.ts", "src/c.ts"]),
+                squash_commit(self.SQUASH, self.BULLETS, ["src/a.ts"]),
+            ]
+        )
+        self.assertEqual(index["src/a.ts"]["tickets"], {"QX-2": 1})
+        self.assertNotIn("src/c.ts", index)
+        self.assertNotIn("proposed", records["QX-2"])
+
+    def test_two_runs_under_different_hash_seeds_write_identical_bytes(self):
+        """Catches promotion output ordered by set iteration, which differs
+        between processes (CLAUDE.md 1.3) and is invisible within one."""
+        commits = [
+            squash_commit(
+                self.SQUASH,
+                ("QX-2: draft the invoice parser", "QX-3: read the currency code"),
+                ["src/a.ts", "src/b.ts"],
+            ),
+            draft_commit("QX-3: QX-2: read the currency code", ["src/a.ts", "src/b.ts"]),
+            draft_commit("QX-9: QX-8: sketch a later change", ["src/a.ts", "src/b.ts"]),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "history" / "repo-a"
+            history.mkdir(parents=True)
+            write_ndjson(history, commits)
+            outputs = [self._build(Path(tmp), seed) for seed in ("1", "2")]
+        self.assertEqual(outputs[0], outputs[1])
+
+    @staticmethod
+    def _build(root: Path, seed: str) -> tuple[bytes, bytes]:
+        out = root / f"out-{seed}"
+        script = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from knowledgestore import build_intent_index, config\n"
+            "root, out = Path(sys.argv[1]), Path(sys.argv[2])\n"
+            "config.configure(HISTORY_DIR=root / 'history',\n"
+            "    INTENT_INDEX_PATH=out / 'file-tickets.json.gz',\n"
+            "    TICKET_DESCRIPTIONS_PATH=out / 'ticket-descriptions.json.gz',\n"
+            "    TELEMETRY_PATH=out / 'telemetry.json')\n"
+            "raise SystemExit(build_intent_index.main())\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-B", "-c", script, str(root), str(out)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": str(ROOT / "src")},
+        )
+        assert completed.returncode == 0, completed.stderr
+        return (
+            gzip.decompress((out / "file-tickets.json.gz").read_bytes()),
+            gzip.decompress((out / "ticket-descriptions.json.gz").read_bytes()),
         )
 
 

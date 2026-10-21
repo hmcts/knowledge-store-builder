@@ -125,6 +125,23 @@ behind by a rebase repeats subjects the default branch already holds. A ticket
 found only on a branch keeps its text in the three main fields: the whole record
 is marked `proposed`, and that text is all the evidence it has.
 
+A link found only on a branch is filed under `proposed`, and two carve-outs move
+one to the landed `tickets` because the work reached the default branch by
+another route. They are the same rule at two levels. **Per file:** a branch
+commit's file whose content is on the default branch counts as landed, because a
+squash merge carried it there under a different commit. **Per ticket:** a GitHub
+squash merge — a subject ending `(#<n>)` over a body listing the collapsed
+commits as `* ` bullets, itself reachable from the default branch — promotes the
+proposed links its bullets name on the files it touched. It only promotes: a
+bullet's ticket is never linked to a file no branch commit linked it to, because
+each collapsed commit touched only some of the squash's files, and a large squash
+would otherwise spread every ticket it lists over all of them. A squash into a
+release or develop branch landed nothing and promotes nothing. Squash merges are
+read in a pass of their own before any commit is folded in, so the result does
+not depend on whether `git log` lists a squash before or after the commits it
+collapsed. A promoted ticket's commit text counts as landed text, as it does
+under the per-file rule.
+
 A body is reduced to prose before it is read: separators, a merge's list of
 commits, git trailers, anything an automated author wrote, and each repository's
 own recurring template lines are discarded, because none of them evidences

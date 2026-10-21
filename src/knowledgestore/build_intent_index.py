@@ -106,6 +106,10 @@ def _identity_pattern() -> re.Pattern[str] | None:
 
 MERGE_BULLET = "* "
 MIN_MERGE_BULLETS = 2
+# GitHub's squash-merge signature: the pull request's number appended to the
+# subject. Paired with a body of bullets - the commits it collapsed - it is what
+# separates a squash from a person's own bulleted description.
+SQUASH_SUBJECT = re.compile(r"\(#\d+\)\s*$")
 MIN_BODY_CHARS = 25
 # One body must not attribute a file to every ticket it happens to list.
 BODY_TICKET_LIMIT = 3
@@ -436,6 +440,76 @@ def lacks_reach(ndjson: Path) -> bool:
     return seen
 
 
+def squash_bullet_tickets(commit: dict, boilerplate: frozenset[str] = frozenset()) -> list[str]:
+    """The tickets a landed GitHub squash merge's bullets name, or none.
+
+    A squash collapses a branch into one commit on the default branch, and the
+    branch never becomes an ancestor of it, so the branch's own links read as
+    proposed though the work landed. The bullets are the record that it did. Only
+    a squash that is itself landed counts: one into a release or develop branch
+    landed nothing. Unredacted, like every ticket read here: an id is a link.
+    """
+    if commit.get("is_merge") or not landed(commit):
+        return []
+    if not SQUASH_SUBJECT.search(commit["subject"]):
+        return []
+    blocks = _body_blocks(commit_body(commit), boilerplate)
+    if _rejection(_flatten(blocks)) != "merge-list":
+        return []
+    bullets = [line.lstrip() for block in blocks for line in block]
+    named = [
+        ticket
+        for line in bullets
+        if line.startswith(MERGE_BULLET)
+        for ticket in config.TICKET_PATTERN.findall(line)
+    ]
+    return list(dict.fromkeys(named))
+
+
+def squash_promotions(
+    ndjson: Path, boilerplate: frozenset[str] = frozenset()
+) -> frozenset[tuple[str, str]]:
+    """Every `(path, ticket)` a landed squash merge vouches for in one dataset.
+
+    Read in a pass of its own, before any commit is folded, so the result does not
+    depend on whether `git log` lists a squash before or after the branch commits
+    it collapsed. Only membership is ever asked of it, so its order cannot reach
+    the output.
+    """
+    pairs: set[tuple[str, str]] = set()
+    with ndjson.open(encoding="utf-8") as source:
+        for line in source:
+            # Cheap rejection before parsing: the signature cannot be absent from
+            # the raw line if the subject carries it.
+            if "(#" not in line:
+                continue
+            commit = json.loads(line)
+            tickets = squash_bullet_tickets(commit, boilerplate)
+            for changed in commit.get("files", []) if tickets else []:
+                pairs.update((changed["path"], ticket) for ticket in tickets)
+    return frozenset(pairs)
+
+
+def link_landed(
+    commit: dict,
+    changed: dict,
+    ticket: str,
+    promoted: frozenset[tuple[str, str]] = frozenset(),
+) -> bool:
+    """Whether the link a commit makes between one of its files and one ticket is
+    landed work rather than a proposal.
+
+    Landed when the commit is. For a branch commit, when the file's content landed
+    - a squash merge carried it to the default branch under another commit - or,
+    the ticket-level twin of that carve-out, when a landed squash merge touched
+    the file and its bullets name the ticket. The squash never makes a link of its
+    own here: it can only vouch for one a branch commit already made.
+    """
+    if landed(commit) or changed.get("landed"):
+        return True
+    return (changed["path"], ticket) in promoted
+
+
 def ticket_pool() -> defaultdict[str, dict]:
     """The per-ticket accumulator `apply_commit` folds commits into.
 
@@ -520,9 +594,12 @@ def apply_commit(
     descriptions: dict[str, dict],
     boilerplate: frozenset[str] = frozenset(),
     redactions: RedactionReport | None = None,
+    promoted: frozenset[tuple[str, str]] = frozenset(),
 ) -> bool:
     """Fold one commit's tickets into the per-file entries and the per-ticket
     pools of description, subject and body text. True if ticketed.
+
+    `promoted` is what `squash_promotions` found for this commit's repository.
 
     The three pools are independent on purpose. A description is curated - the
     subject where it says something, the body where it does not - so it can carry
@@ -541,14 +618,17 @@ def apply_commit(
     if commit.get("is_merge"):
         return False
     is_landed = landed(commit)
-    # Under `omit` a branch commit is kept only for the files whose content
-    # landed (a squash merge leaves its work on the default branch under other
-    # commits); the rest of it is a proposal, which `omit` leaves out entirely.
-    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"
-    if omit_proposed and not any(f.get("landed") for f in commit.get("files", [])):
-        return False
     tickets = commit_tickets(commit, boilerplate)
     if not tickets:
+        return False
+    # Under `omit` a branch commit is kept only for the links that landed (a
+    # squash merge leaves its work on the default branch under other commits);
+    # the rest of it is a proposal, which `omit` leaves out entirely.
+    omit_proposed = not is_landed and config.PROPOSED_LINKS == "omit"
+    files_changed = commit.get("files", [])
+    if omit_proposed and not any(
+        link_landed(commit, f, t, promoted) for f in files_changed for t in tickets
+    ):
         return False
     counts = None if redactions is None else redactions.by_rule
     subject_text = sensitive.redact(commit["subject"], counts)
@@ -557,9 +637,14 @@ def apply_commit(
     subject = stored_value(clean_description(subject_text), redactions)
     prose = stored_value(body_evidence(body, boilerplate), redactions)
     _fold_tickets(
-        commit, tickets, descriptions, (description, subject, prose), omit_proposed, counts
+        commit,
+        tickets,
+        descriptions,
+        (description, subject, prose),
+        (omit_proposed, promoted),
+        counts,
     )
-    _fold_files(commit, tickets, files, descriptions, omit_proposed)
+    _fold_files(commit, tickets, files, descriptions, (omit_proposed, promoted))
     return True
 
 
@@ -568,19 +653,22 @@ def _fold_tickets(
     tickets: list[str],
     descriptions: dict[str, dict],
     texts: tuple[str, str, str],
-    omit_proposed: bool,
+    links: tuple[bool, frozenset[tuple[str, str]]],
     counts: Counter[str] | None,
 ) -> None:
     """Add one commit to each named ticket's pool: count, repository, dates, text,
     and where it was found - landed, or the branch it sits on.
 
-    A branch commit with a file whose content landed is landed text, as
-    `_fold_files` makes its tickets landed: a squash merge put that work on the
+    A branch commit with a link that landed is landed text for that ticket, as
+    `_fold_files` makes the ticket landed: a squash merge put that work on the
     default branch, and its message is the account of it."""
+    omit_proposed, promoted = links
     is_landed = landed(commit)
-    text_landed = is_landed or any(f.get("landed") for f in commit.get("files", []))
     date = commit["author_date"][:10]
     for ticket in tickets:
+        text_landed = is_landed or any(
+            link_landed(commit, f, ticket, promoted) for f in commit.get("files", [])
+        )
         info = descriptions[ticket]
         info["count"] += 1
         info["repos"].add(commit["repository"])
@@ -597,26 +685,28 @@ def _fold_files(
     tickets: list[str],
     files: dict[str, dict],
     descriptions: dict[str, dict],
-    omit_proposed: bool,
+    links: tuple[bool, frozenset[tuple[str, str]]],
 ) -> None:
     """Link a commit's tickets to each file it touched, as landed or proposed.
 
-    A branch commit's file whose content landed counts as landed, and marks its
-    tickets landed too; under `omit` the other files of a branch commit are left out.
+    A branch commit's link that `link_landed` finds landed counts as landed, and
+    marks its ticket landed too; under `omit` its other links are left out.
     """
+    omit_proposed, promoted = links
     is_landed = landed(commit)
     date = commit["author_date"][:10]
     for changed in commit.get("files", []):
-        file_landed = is_landed or changed.get("landed")
-        if omit_proposed and not file_landed:
+        made = {ticket: link_landed(commit, changed, ticket, promoted) for ticket in tickets}
+        if omit_proposed:
+            made = {ticket: True for ticket, landed_link in made.items() if landed_link}
+        if not made:
             continue
         entry = files[changed["path"]]
-        for ticket in tickets:
-            entry["tickets" if file_landed else "proposed"][ticket] += 1
+        for ticket, landed_link in made.items():
+            entry["tickets" if landed_link else "proposed"][ticket] += 1
+            if landed_link and not is_landed:
+                descriptions[ticket]["landed"] = True
         _widen_range(entry, date)
-    if not is_landed and any(f.get("landed") for f in commit.get("files", [])):
-        for ticket in tickets:
-            descriptions[ticket]["landed"] = True
 
 
 def _record_discarded_body(commit: dict, boilerplate: frozenset[str], report: BodyReport) -> None:
@@ -648,8 +738,9 @@ def index_repository(
 ) -> tuple[dict[str, dict], int]:
     """Build the file -> ticket map for one repository's dataset.
 
-    Two passes: the first learns which body lines this repository repeats, the
-    second indexes with those lines removed. Boilerplate is per repository
+    Three passes: the first learns which body lines this repository repeats, the
+    second finds what its squash merges landed, and the third indexes with those
+    lines removed and those links promoted. Boilerplate is per repository
     because a template belongs to a team, and teams map to repositories far
     better than to a whole estate - a line that is a template in one repository
     can be a genuine one-off sentence in another.
@@ -658,6 +749,7 @@ def index_repository(
     boilerplate = learn_boilerplate(counts, bodies)
     if report is not None:
         report.boilerplate_lines += len(boilerplate)
+    promoted = squash_promotions(ndjson, boilerplate)
     files: dict[str, dict] = defaultdict(
         lambda: {
             "tickets": defaultdict(int),
@@ -672,7 +764,7 @@ def index_repository(
             commit = json.loads(line)
             if report is not None:
                 _record_discarded_body(commit, boilerplate, report)
-            if apply_commit(commit, files, descriptions, boilerplate, redactions):
+            if apply_commit(commit, files, descriptions, boilerplate, redactions, promoted):
                 commits_seen += 1
     finalised = {}
     for path, data in files.items():
