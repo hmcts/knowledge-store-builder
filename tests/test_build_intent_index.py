@@ -303,6 +303,15 @@ class TicketPrefixDenyTest(SettingsIsolated):
         self.assertEqual(len(files), 0)
         self.assertEqual(len(descriptions), 0)
 
+    def test_a_subject_naming_only_a_cve_id_falls_through_to_its_body(self):
+        """Catches a denied id still blocking the body as though the subject had
+        named a ticket: a subject naming no ticket is the case the body is read for."""
+        commit = make_commit(
+            "Bump the parser for CVE-2024-12345",
+            body="Completes QX-4 by pinning the parser across the workspaces.",
+        )
+        self.assertEqual(intent.commit_tickets(commit), ["QX-4"])
+
     def test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket(self):
         commit = squash_commit(
             "QX-1: raise dependency floors (#42)",
@@ -2072,6 +2081,101 @@ class SquashPromotionTest(SettingsIsolated):
             gzip.decompress((out / "file-tickets.json.gz").read_bytes()),
             gzip.decompress((out / "ticket-descriptions.json.gz").read_bytes()),
         )
+
+
+def link_pairs(index):
+    """`(landed, proposed)` as sets of `(path, ticket)`."""
+    landed = {(path, t) for path, entry in index.items() for t in entry["tickets"]}
+    proposed = {(path, t) for path, entry in index.items() for t in entry.get("proposed", {})}
+    return landed, proposed
+
+
+class SquashAcceptanceTest(SettingsIsolated):
+    """The acceptance cases agreed in #453's review, each a small synthetic history.
+
+    A squash merge may only promote a link that already exists; it never makes
+    one. Ticket keys have two letters because the default pattern needs them.
+    """
+
+    BULLETS = ("TK-1 change", "tidy the module")
+
+    def test_1_promotes_an_existing_proposed_pair(self):
+        index, _ = index_commits(
+            [
+                draft_commit("TK-1 change", ["a.tf", "b.tf"]),
+                squash_commit("Feature (#7)", self.BULLETS, ["a.tf"]),
+            ]
+        )
+        self.assertEqual(index["a.tf"]["tickets"], {"TK-1": 1})
+        self.assertNotIn("proposed", index["a.tf"])
+        self.assertEqual(index["b.tf"]["proposed"], {"TK-1": 1})
+        self.assertEqual(sorted(index), ["a.tf", "b.tf"])
+
+    def test_2_adds_no_file_the_tickets_own_commits_never_touched(self):
+        index, _ = index_commits(
+            [
+                draft_commit("TK-1 change", ["a.tf", "b.tf"]),
+                squash_commit("Feature (#7)", self.BULLETS, ["a.tf", "c.tf"]),
+            ]
+        )
+        self.assertEqual(index["a.tf"]["tickets"], {"TK-1": 1})
+        self.assertEqual(index["b.tf"]["proposed"], {"TK-1": 1})
+        self.assertNotIn("c.tf", index)
+
+    def test_3_a_squash_into_a_non_default_branch_changes_nothing(self):
+        draft = draft_commit("TK-2 change", ["a.tf", "b.tf"])
+        squash = squash_commit(
+            "Feature (#8)", ("TK-2 change", "tidy the module"), ["a.tf"], "branch", "develop"
+        )
+        self.assertEqual(index_commits([draft, squash]), index_commits([draft]))
+
+    def test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing(self):
+        index, records = index_commits(
+            [
+                draft_commit("TK-3 change", ["d.tf"]),
+                squash_commit("Feature (#9)", ("TK-3 change", "tidy"), ["a.tf"]),
+            ]
+        )
+        self.assertNotIn("a.tf", index)
+        self.assertEqual(index["d.tf"]["proposed"], {"TK-3": 1})
+        self.assertTrue(records["TK-3"]["proposed"])
+
+    def test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches(
+        self,
+    ):
+        """The store-level invariant: `tickets` gains exactly the promoted pairs,
+        `proposed` loses exactly those and gains nothing, and the total number of
+        links is unchanged. The baseline is the same history without its squash
+        merges, whose ticketless subjects make no link of their own; the promoted
+        set is derived by hand from the fixture."""
+        drafts = [
+            draft_commit("TK-1 change", ["a.tf", "b.tf", "c.tf"]),
+            draft_commit("TK-2 change", ["a.tf", "d.tf"], ref="team/two"),
+            draft_commit("TK-3 change", ["e.tf"], ref="team/three"),
+            draft_commit("TK-4 change", ["a.tf"], ref="team/four"),
+            make_commit("TK-5 landed change", path="b.tf", reach="default"),
+        ]
+        squashes = [
+            # Landed: names TK-1, TK-2, TK-3; touches a, b, f.
+            squash_commit(
+                "Feature (#7)",
+                ("TK-1 change", "TK-2 change", "TK-3 change"),
+                ["a.tf", "b.tf", "f.tf"],
+            ),
+            # Into develop: names TK-4 on a.tf - promotes nothing.
+            squash_commit("Feature (#8)", ("TK-4 change", "tidy"), ["a.tf"], "branch", "develop"),
+            # No pull-request number: not a squash, promotes nothing.
+            squash_commit("Tidy the modules", ("TK-1 change", "tidy"), ["c.tf"]),
+        ]
+        base_landed, base_proposed = link_pairs(index_commits(drafts)[0])
+        landed, proposed = link_pairs(index_commits(squashes[:1] + drafts + squashes[1:])[0])
+        promoted = {("a.tf", "TK-1"), ("b.tf", "TK-1"), ("a.tf", "TK-2")}
+        self.assertLessEqual(promoted, base_proposed)
+        self.assertEqual(landed - base_landed, promoted)
+        self.assertEqual(base_landed - landed, set())
+        self.assertEqual(base_proposed - proposed, promoted)
+        self.assertEqual(proposed - base_proposed, set())
+        self.assertEqual(len(landed) + len(proposed), len(base_landed) + len(base_proposed))
 
 
 if __name__ == "__main__":

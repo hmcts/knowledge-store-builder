@@ -5289,6 +5289,10 @@ MUTATIONS = (
             "test_build_intent_index.ProposedLinksTest.test_a_branch_only_link_is_proposed_not_a_ticket",
             "test_build_intent_index.ProposedLinksTest.test_landed_wins_on_one_file_and_proposed_stays_on_another",
             "test_build_intent_index.ProposedLinksTest.test_proposed_values_are_counts_never_branch_names",
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_bulleted_body_without_a_pull_request_number_promotes_nothing",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_single_bullet_is_not_a_list_of_collapsed_commits",
@@ -5420,6 +5424,9 @@ MUTATIONS = (
         "a GitHub squash merge left its branch's links published as `proposed`, though "
         "the work was on the default branch (#453)",
         (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
@@ -5435,6 +5442,8 @@ MUTATIONS = (
         '    if commit.get("is_merge"):',
         "a squash into a release or develop branch read as landed work (#453 review)",
         (
+            "test_build_intent_index.SquashAcceptanceTest.test_3_a_squash_into_a_non_default_branch_changes_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_squash_into_another_branch_promotes_nothing",
         ),
     ),
@@ -5475,6 +5484,10 @@ MUTATIONS = (
         "    return any(ticket == named for _, named in promoted)",
         "a branch's link to a file the squash never carried read as landed (#453 review)",
         (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_omit_keeps_a_promoted_link",
             "test_build_intent_index.SquashPromotionTest.test_the_result_does_not_depend_on_which_commit_comes_first",
@@ -5492,6 +5505,10 @@ MUTATIONS = (
         "#453's first design: each bullet's ticket spread over every file a large squash "
         "touched, multiplying landed links no commit made",
         (
+            "test_build_intent_index.SquashAcceptanceTest.test_1_promotes_an_existing_proposed_pair",
+            "test_build_intent_index.SquashAcceptanceTest.test_2_adds_no_file_the_tickets_own_commits_never_touched",
+            "test_build_intent_index.SquashAcceptanceTest.test_4_a_bullet_naming_a_ticket_no_commit_linked_adds_nothing",
+            "test_build_intent_index.SquashAcceptanceTest.test_promoted_pairs_are_exactly_the_proposed_pairs_a_landed_squash_names_and_touches",
             "test_build_intent_index.SquashPromotionTest.test_a_bullet_ticket_never_proposed_for_a_file_stays_unlinked",
             "test_build_intent_index.SquashPromotionTest.test_a_file_the_squash_did_not_touch_keeps_its_proposed_link",
             "test_build_intent_index.SquashPromotionTest.test_a_landed_squash_promotes_the_proposed_links_it_touched",
@@ -5511,6 +5528,7 @@ MUTATIONS = (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_cve_id_links_no_ticket_and_a_real_key_beside_it_still_does",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_squash_bullet_naming_a_cve_id_vouches_for_no_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
             "test_build_intent_index.TicketPrefixDenyTest.test_an_advisory_id_the_pattern_matches_links_no_ticket",
             "test_build_intent_index.TicketPrefixDenyTest.test_the_list_is_read_from_a_comma_separated_string",
@@ -5524,6 +5542,7 @@ MUTATIONS = (
         "a dependency bump's subject citing an advisory became a ticketed commit (#453 review)",
         (
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_keeps_its_ticket_and_loses_the_cve_id",
+            "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_falls_through_to_its_body",
             "test_build_intent_index.TicketPrefixDenyTest.test_a_subject_naming_only_a_cve_id_is_unticketed",
         ),
     ),
