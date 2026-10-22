@@ -1163,8 +1163,8 @@ def load_store_kinds(root: Path, config_path: Path) -> tuple[Kind, ...]:
 # dependency of nearly everything, with no way to ask which chart.
 
 # The layer's format version, stamped into `repository-dependencies.json`. Major
-# for incompatible changes, minor for additions.
-FORMAT = (1, 0)
+# for incompatible changes, minor for additions. 1.1 added `unresolved_conflicts`.
+FORMAT = (1, 1)
 LAYER = "relationships"
 PACKAGE = "hmcts-knowledge-store-builder"
 
@@ -1201,7 +1201,9 @@ class Layer:
 
     `dependencies` is the `repository-dependencies.json` body, `by_repo` each
     `by-repo/<repo>.json` body, `kinds` the `kinds.json` body. `conflicts` is
-    `{kind: {target: [repositories]}}`, the first of which was chosen; `skipped` is
+    `{kind: {target: [repositories]}}`, the first of which was chosen;
+    `unresolved_conflicts` has the same shape, for a chart no rule chooses between
+    its repositories, so none was chosen; `skipped` is
     `{kind: {reason: count}}`; `unreadable` names each file a parser could not read,
     store-relative.
     """
@@ -1210,6 +1212,7 @@ class Layer:
     by_repo: dict[str, dict]
     kinds: dict
     conflicts: dict
+    unresolved_conflicts: dict
     skipped: dict
     unreadable: list[str]
 
@@ -1291,9 +1294,10 @@ def resolve_chart(
     """The repository providing `chart`, or None when the estate holds none.
 
     In order: the pattern's repository when the pattern is set and names a clone;
-    the clone `defined` chose for the chart (a non-umbrella definition over an
-    umbrella's, first by name); and, for a Flux `HelmRelease`, a `sourceRef` that
-    names a clone - the graph's `uses_chart` rule, kept so the two agree.
+    the clone `defined` chose for the chart (the one non-umbrella definition, else
+    the one umbrella's; a chart with several is absent, never guessed); and, for a
+    Flux `HelmRelease`, a `sourceRef` that names a clone - the graph's `uses_chart`
+    rule, kept so the two agree.
     """
     if pattern:
         candidate = pattern.format(name=chart)
@@ -1323,24 +1327,33 @@ class _Unresolved:
 
 def _choose(
     kind: str, published: dict[str, list[str]], umbrellas: Set[str]
-) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """For one kind: target -> the clone chosen to provide it, and the conflicts
-    (masked target -> every candidate, the chosen one first).
+) -> tuple[dict[str, str], dict[str, list[str]], dict[str, list[str]]]:
+    """For one kind: target -> the clone chosen to provide it; the conflicts
+    (masked target -> every candidate, the chosen one first); and the charts left
+    unchosen (target, unmasked -> every candidate).
 
-    A clone that is not an umbrella over one that is, then the first by name.
+    A chart goes to the one clone defining it that is not an umbrella, else to the
+    one umbrella defining it, and otherwise to nobody: a chart several clones
+    define resolves by name order to whichever sorts first, which moves when a
+    repository is renamed and silently captures the consumers of every chart a
+    wrapper republishes (#475). Every other kind keeps the first by name.
     """
     chosen: dict[str, str] = {}
     conflicts: dict[str, list[str]] = {}
+    unchosen: dict[str, list[str]] = {}
     for target, repos in sorted(published.items()):
         # Only the chart resolver knows umbrellas: an umbrella bundles other
         # repositories' charts, and is the owner of none of them.
         own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos
         candidates = own or repos
+        if kind == "helm_chart" and len(candidates) > 1:
+            unchosen[target] = candidates
+            continue
         chosen[target] = candidates[0]
         if len(candidates) > 1:
             # A key of a committed file, so masked like every other one.
             conflicts[secret_mask.mask(target)] = candidates
-    return chosen, conflicts
+    return chosen, conflicts, unchosen
 
 
 class _Resolver:
@@ -1360,13 +1373,33 @@ class _Resolver:
         self.publishers = publishers
         self.chosen: dict[str, dict[str, str]] = {}
         self.conflicts: dict[str, dict[str, list[str]]] = {}
+        self.unchosen: dict[str, dict[str, list[str]]] = {}
         for kind, published in publishers.items():
-            self.chosen[kind], conflicts = _choose(kind, published, umbrellas)
+            self.chosen[kind], conflicts, unchosen = _choose(kind, published, umbrellas)
             if conflicts:
                 self.conflicts[kind] = conflicts
+            # A chart the naming pattern settles is no conflict: step 1 decides it
+            # before any definition is consulted.
+            unchosen = {
+                target: candidates
+                for target, candidates in unchosen.items()
+                if not (pattern and pattern.format(name=target) in self.estate)
+            }
+            if unchosen:
+                self.unchosen[kind] = unchosen
+
+    @property
+    def unresolved_conflicts(self) -> dict[str, dict[str, list[str]]]:
+        """`{kind: {masked target: [candidates]}}` for every chart left unchosen."""
+        return {
+            kind: {secret_mask.mask(target): repos for target, repos in targets.items()}
+            for kind, targets in self.unchosen.items()
+        }
 
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
-        """`("edge", provider)`, `("self", "")` or `("unresolved", target key)`."""
+        """`("edge", provider)`, `("self", "")`, `("ambiguous", "")` for a chart
+        several clones define and no rule chooses between, or
+        `("unresolved", target key)`."""
         if ref.resolved_repo is not None:
             if not names_estate_repo(ref, self.orgs):
                 return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
@@ -1378,6 +1411,9 @@ class _Resolver:
         else:
             provider = self.chosen.get(ref.kind, {}).get(ref.target)
         if provider is None:
+            if ref.target in self.unchosen.get(ref.kind, {}):
+                # In the estate, so not a target outside it; counted, never dropped.
+                return AMBIGUOUS, ""
             return "unresolved", ref.target
         # `self` is where resolution landed, never what the consumer happens to
         # publish: an umbrella that also defines a chart another clone owns depends
@@ -1391,7 +1427,7 @@ def chart_definitions(clones: list[Path], umbrellas: Set[str]) -> dict[str, str]
     """chart name -> the clone defining it, chosen as the layer chooses
     (`_choose`). What `resolve_chart` takes as `defined`, for a caller resolving
     charts outside the layer - the graph's `uses_chart` edges."""
-    chosen, _ = _choose("helm_chart", _publishers(clones, builtin("helm_chart")), umbrellas)
+    chosen, _, _ = _choose("helm_chart", _publishers(clones, builtin("helm_chart")), umbrellas)
     return chosen
 
 
@@ -1485,6 +1521,9 @@ def _check_references(kind: Kind, clone: Path, rel: str, found: object) -> None:
 
 
 UNREADABLE = "unreadable"
+# The skip reason for a reference to a chart several clones define with no rule to
+# choose between them (`unresolved_conflicts`).
+AMBIGUOUS = "ambiguous"
 
 
 class ConservationError(KindError):
@@ -1567,6 +1606,8 @@ def _place(ref, kind_name, consumer, resolver, edges, unresolved, skipped) -> No
     outcome, value = resolver.resolve(consumer, ref)
     if outcome == "self":
         skipped[kind_name]["self"] += 1
+    elif outcome == AMBIGUOUS:
+        skipped[kind_name][AMBIGUOUS] += 1
     elif outcome == "unresolved":
         _add_unresolved(unresolved[kind_name], value, consumer)
     else:
@@ -1691,10 +1732,12 @@ def build(
             "edges": flat,
             "unresolved_targets_outside_estate": unresolved_body,
             "conflicts": resolver.conflicts,
+            "unresolved_conflicts": resolver.unresolved_conflicts,
         },
         by_repo=by_repo,
         kinds=kinds_body,
         conflicts=resolver.conflicts,
+        unresolved_conflicts=resolver.unresolved_conflicts,
         skipped={kind: dict(sorted(counts.items())) for kind, counts in skipped.items()},
         unreadable=unreadable,
     )

@@ -775,8 +775,10 @@ graph. It prints one line per kind: edges, references, unresolved targets and
 skipped declarations. **Read the unresolved count**: those are dependencies the
 store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
 (for example `chart-{name}`) only when the estate names chart repositories by a
-rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle others' charts.
-A conflict (two clones publishing one chart, coordinate or package) is printed
+rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle or wrap others'
+charts. A chart two clones define, with neither setting to choose between them,
+is printed as a conflict and left unresolved, never guessed: name the wrapper or
+set the pattern. A Maven coordinate or npm package two clones publish is printed
 and resolved to the first by name. It exits 1 on a parser failure, an
 unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
 extra), and 2 when it cannot write. A store whose clones declare a
@@ -1666,6 +1668,34 @@ artefact, including anything mined before the rule existed. It names the ticket,
 the field and the rule and never the value — hold to that yourself: no matched
 value in your report, in a ticket, or in this conversation. A clean result means
 nothing matched the rules, never that the file holds no personal data.
+
+**The store plugin must declare the knowledge-store server.** Assistants answer
+a store's questions only through it, so a store plugin without it answers
+nothing. If `<store-plugin>/.mcp.json` is missing, add it, at the tag this
+library declares:
+
+```json
+{
+  "mcpServers": {
+    "knowledge-store": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.0",
+        "knowledge-store-mcp", "--store-id", "<id>"
+      ]
+    }
+  }
+}
+```
+
+`<id>` is the store's id from its manifest, not the plugin name:
+
+```bash
+jq -r .store.id knowledge/store-manifest.json
+```
+
+The reasoning, and what an asker needs, is in
+[Add the server to the store plugin](../../docs/creating-a-store.md#add-the-server-to-the-store-plugin).
 
 Commit `knowledge/`, `knowledge_context.md`, `docs/topics/` and
 `graphify-out/`. Never commit `repositories/`, `knowledge/git-history/` or the

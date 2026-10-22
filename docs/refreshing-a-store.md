@@ -13,6 +13,7 @@ To build a store for the first time, see
 | Work out which repository to add next | [Decide what to ingest next](#decide-what-to-ingest-next) |
 | Take repositories out of the estate | [Remove repositories](#remove-repositories) |
 | Change the library release used by the store | [Update the library version](#update-the-library-version) |
+| Move a store from v0.17 to v0.18 | [Moving to v0.18](moving-to-v0-18.md) |
 
 ## Refresh the store
 
@@ -545,19 +546,15 @@ source .venv/bin/activate
 ```
 
 Do this only when deliberately moving a store to another library release. A
-store that follows the reference layout names the library in `requirements.txt`
-with no version, and the lock is the pin: recompiling it, below, moves the store
-to the newest release. To hold a specific release instead, find the version on the
-[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases)
-and write `==X.Y.Z` on the library line.
-`check-install-docs` accepts either. A requirement with no version passes when
-the lock pins that package, and the stage reports the version the lock resolved
-it to; one the lock does not pin fails, naming the package. An `==` pin is
-compared against the lock exactly, so a lock that resolves another version fails.
-The stage still refuses when the input names no package at all, because a lock
-compared against nothing reports the same clean result as a lock that resolves
-everything. A store whose lock is not compiled from an input at all declares
-that instead — see [A lock you maintain by hand](#a-lock-you-maintain-by-hand).
+store moving from v0.17 to v0.18 also follows
+[Moving to v0.18](moving-to-v0-18.md), which adds the layers and the plugin
+step the MCP server needs.
+
+A store's `requirements.txt` names the library with no version, so it means "the
+latest". `requirements.lock` is the pin: compiled with hashes and committed, and
+every build installs from it, so a rebuild resolves the versions the store was
+built with. Releases are on the
+[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases).
 
 ```text
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
@@ -565,7 +562,22 @@ that instead — see [A lock you maintain by hand](#a-lock-you-maintain-by-hand)
 hmcts-knowledge-store-builder[ast]
 ```
 
-With a pin it reads `hmcts-knowledge-store-builder[ast]==X.Y.Z`.
+Add `deploy` to the extras (`[ast,deploy]`) where a clone holds a Flux
+`HelmRelease`. A store that needs one specific release writes `==X.Y.Z` after the
+extras instead, and keeps that line until it chooses to move.
+
+**A release can change what a store commits**, so moving to the latest is a
+deliberate re-lock and a rebuild, never a side effect of installing. Re-lock,
+commit the lock, then rebuild and review the diff of what the stages emit.
+
+`check-install-docs` accepts both forms. A requirement with no version passes
+when the lock pins that package, and the stage reports the version the lock
+resolved it to; one the lock does not pin fails, naming the package. An `==` pin
+is compared against the lock exactly, so a lock that resolves another version
+fails. The stage still refuses an input that names no package at all, because a
+lock compared against nothing reports the same clean result as a lock that
+resolves everything. A store whose lock is not compiled from an input at all declares that
+instead — see [A lock you maintain by hand](#a-lock-you-maintain-by-hand).
 
 Install `uv` if it is not already available. On macOS:
 
@@ -577,10 +589,15 @@ Recompile and install the lock file:
 
 ```bash
 uv pip compile requirements.txt --generate-hashes \
+  --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
   --emit-index-url --emit-build-options \
+  --upgrade-package hmcts-knowledge-store-builder \
   --output-file requirements.lock
 pip install -r requirements.lock
 ```
+
+`--upgrade-package` moves the library to the latest release and leaves every
+other pin in the lock where it was. Commit `requirements.lock`.
 
 The emit flags write the package feed and the binary-only setting into the lock,
 so installing from it needs no extra arguments.
@@ -635,9 +652,12 @@ refresh:
 Compare node and edge counts before and after with the `extract-ast` summary,
 and run the extraction on one repository with Terraform first.
 
-A store pins a library release and installs graphify itself, so it can stay on
-its current graphify until it plans this. Nothing in the library checks the
-installed graphify version at runtime.
+A store takes graphify from the library's `[ast]` extra and does not pin it
+separately, so its compiled lock records the graphify it resolved. It stays on
+that graphify until the lock is recompiled, so plan this before you recompile.
+Nothing in the library checks the installed graphify version at runtime:
+`knowledgestore check-grammars` checks that the HCL and SQL grammars are
+present, not which graphify version is installed.
 
 ### A lock you maintain by hand
 

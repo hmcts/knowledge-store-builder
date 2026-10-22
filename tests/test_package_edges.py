@@ -685,6 +685,60 @@ class ChartEstateTest(SettingsIsolated):
         )
 
 
+# Two clones defining the release's chart, neither the store's to choose by name
+# (#475). No golden entry: the graph took the first by name before.
+_TWO_DEFINERS = {
+    **_flux({"web": _release("web", "web", "HelmRepository", "example-helm")}),
+    "a-charts/web/Chart.yaml": "apiVersion: v2\nname: web\nversion: 1.0.0\n",
+    "b-charts/web/Chart.yaml": "apiVersion: v2\nname: web\nversion: 1.0.0\n",
+}
+SCENARIOS["chart-two-definers"] = (False, _TWO_DEFINERS, {"DEPLOY_REPOS": {"example-deploy"}})
+SCENARIOS["chart-two-definers-one-umbrella"] = (
+    False,
+    _TWO_DEFINERS,
+    {"DEPLOY_REPOS": {"example-deploy"}, "UMBRELLA_REPOS": {"a-charts"}},
+)
+
+
+class ChartDefinedTwiceTest(SettingsIsolated):
+    """The graph follows the layer's chart rule (#475), so the two name the same
+    repository for one release, or neither names one."""
+
+    def _chart_targets(self, name: str) -> list[list]:
+        found = scenario_edges(name)
+        return sorted(
+            [edge[1], edge[2]] + [node[1:] for node in found["nodes"] if node[0] == edge[2]]
+            for edge in found["edges"]
+            if edge[0] == "uses_chart"
+        )
+
+    @needs_yaml
+    def test_a_chart_two_clones_define_falls_back_to_its_source_ref(self):
+        """Break caught: the graph resolving the chart to the first definer by name,
+        `a-charts`, while the layer leaves it unresolved - an in-estate provider
+        claimed on a guess. With no rule to choose, the release keeps its
+        `sourceRef`, outside the estate."""
+        self.assertEqual(
+            self._chart_targets("chart-two-definers"),
+            [
+                [f"example-deploy::deploy:{env}:web", "example-helm::chart", ["", False]]
+                for env in ("_base", "prod")
+            ],
+        )
+
+    @needs_yaml
+    def test_a_declared_umbrella_leaves_the_chart_to_the_other_definer(self):
+        """Break caught: the graph ignoring `KSB_UMBRELLA_REPOS`, so the umbrella
+        that sorts first takes the chart its owner defines."""
+        self.assertEqual(
+            self._chart_targets("chart-two-definers-one-umbrella"),
+            [
+                [f"example-deploy::deploy:{env}:web", "b-charts::chart", ["b-charts", True]]
+                for env in ("_base", "prod")
+            ],
+        )
+
+
 class BareEqualsReleaseTest(SettingsIsolated):
     @needs_yaml
     def test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both(self):

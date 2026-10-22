@@ -36,12 +36,11 @@ files you commit alongside the code:
 Everything is a committed file. Consumers clone and read; nothing is computed
 at query time.
 
-## The three ways to ask
+## The ways to ask
 
-**In a browser** — open `explorer.html`. No install, no Claude licence, no
-network.
-
-**In Claude Code** — install the plugin and ask in English.
+**In Claude Code** — install the plugin and ask in English. The store's own
+plugin launches the knowledge-store MCP server on your machine, and every answer
+comes from the server's tools.
 
 ```
 /plugin marketplace add hmcts/knowledge-store-builder
@@ -79,6 +78,14 @@ gap.
 The plugin also carries skills for building and refreshing a store, exporting a
 finding, and assessing a backlog of tickets against what the platform now does.
 
+**In GitHub Copilot or another MCP client** — through the same knowledge-store
+MCP server, with the same tools and the same cited answers.
+[Use another assistant](docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent)
+routes you to your client's setup.
+
+**In a browser** — open `explorer.html`. No install, no Claude licence, no
+network.
+
 **From the terminal** — `graphify query` against the committed graph.
 
 ## Building a store
@@ -90,23 +97,29 @@ that sequence run in order, and each stage writes files the next one reads:
 knowledgestore discover        # list the estate's repositories
 knowledgestore sync            # clone or update them
 knowledgestore extract-ast     # the code layer, one repository at a time
+knowledgestore check-grammars  # refuse when graphify lacks the HCL or SQL grammar
 knowledgestore export-history  # per-repository commit history
 knowledgestore intent          # join files to the tickets that changed them
+knowledgestore relationships   # which repositories reference which
 knowledgestore explorer        # build the page
+knowledgestore index           # the query index the server reads
+knowledgestore manifest        # what the store holds; run it last
 knowledgestore status          # what is present, what is stale
 ```
 
 `knowledgestore` with no arguments lists every stage with a line each.
 `knowledgestore <stage> --help` explains one. The full sequence, the extraction
 extras and the authoring steps are in
-[Creating a knowledge store](docs/creating-a-store.md), which also carries the
-install command — the guides own install detail so there is one copy to keep
-correct.
+[Creating a knowledge store](docs/creating-a-store.md).
 
-Building needs Python 3.10+, Git, the GitHub CLI and
-[graphify](https://github.com/safishamsi/graphify), which does the extraction.
-This library prepares its inputs and enriches its output; it does not
-re-implement it.
+Building needs Python 3.10+, Git 2.48+, the GitHub CLI, and this library with
+its `[ast]` extra, which brings
+[graphify](https://github.com/safishamsi/graphify) for the extraction. This
+library prepares graphify's inputs and enriches its output; it does not
+re-implement it. The commands are in
+[Install the prerequisites](docs/creating-a-store.md#install-the-prerequisites)
+and [Install the pipeline](docs/creating-a-store.md#install-the-pipeline) — the
+guides own install detail so there is one copy to keep correct.
 
 ## Start here
 
@@ -117,8 +130,9 @@ re-implement it.
 | refresh a store you maintain | [Refreshing a store](docs/refreshing-a-store.md) |
 | see every command with nothing around it | [`CHEATSHEET.md`](CHEATSHEET.md) |
 
-Asking needs the plugin and nothing else — no Python, no `pip`. Without a
-Claude licence, `explorer.html` answers in a browser.
+Asking in Claude Code needs the plugin, the store's own plugin and `uv`, which
+runs the knowledge-store server on your machine. Without a Claude licence,
+`explorer.html` answers in a browser.
 
 ## How it is designed
 
@@ -127,8 +141,8 @@ Claude licence, `explorer.html` answers in a browser.
 - **The browser has no query-time LLM.** Whoever builds a store may have a
   licence; the people querying it may not, and `explorer.html` is committed for
   them. Everything an LLM writes during the build is committed as reviewed
-  static text. Claude Code reads the same evidence when a question needs a new
-  prose answer.
+  static text. An assistant reads the same evidence through the knowledge-store
+  server when a question needs a new prose answer.
 - **Deterministic where it can be.** Extraction, indexing and page composition
   are pure functions of the sources; two runs on the same inputs produce
   byte-identical output.
@@ -144,7 +158,7 @@ Claude licence, `explorer.html` answers in a browser.
 | Document | For |
 |---|---|
 | [`CHEATSHEET.md`](CHEATSHEET.md) | the commands, per surface, with nothing else around them |
-| [`docs/asking-questions.md`](docs/asking-questions.md) | asking questions with Claude Code, `explorer.html` or `graphify query` |
+| [`docs/asking-questions.md`](docs/asking-questions.md) | asking questions with Claude Code, GitHub Copilot or another MCP client, `explorer.html` or `graphify query` |
 | [`docs/creating-a-store.md`](docs/creating-a-store.md) | creating, building and publishing a new store |
 | [`docs/refreshing-a-store.md`](docs/refreshing-a-store.md) | refreshing an existing store and changing its pinned library version |
 | [`docs/configuring-a-store.md`](docs/configuring-a-store.md) | pipeline settings, BDD support and stage outputs |

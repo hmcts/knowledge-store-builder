@@ -9,10 +9,15 @@ guaranteed stale data.
 
 The reader on that route is the persona with the least ability to detect it — no
 graph, no CLI, nothing to compare an answer against. So the check is executable
-rather than a reading: **the command is extracted from the shipped skill and run**,
+rather than a reading: **the command is extracted from the shipped guide and run**,
 against the three states that matter. A test asserting a copy of the command would
-pass while the skill said something else, which is the failure mode this file
+pass while the guide said something else, which is the failure mode this file
 exists to prevent.
+
+The question skill carried the same command until it began answering through the
+knowledge-store server's tools, which read the committed archive themselves. The
+guide's terminal route is the one left that decompresses, so it is the one run
+here, and the skill is held to carrying no copy of its own to drift from it.
 
 Each test names the break it catches.
 """
@@ -44,7 +49,7 @@ def decompress_command(text: str) -> str:
     """The multi-line decompress command as the document ships it.
 
     Extracted rather than restated. A test carrying its own copy would pass while
-    the skill said something different, and the skill is what an agent executes.
+    the guide said something different, and the guide is what a reader runs.
     """
     match = re.search(
         r"\[ -f graphify-out/graph\.json\.gz \][^\n]*\n(?:\s+&&[^\n]*\n)+",
@@ -57,17 +62,17 @@ class AskRouteDecompressTest(unittest.TestCase):
     def setUp(self):
         self.skill = SKILL.read_text(encoding="utf-8")
         self.guide = GUIDE.read_text(encoding="utf-8")
-        self.command = decompress_command(self.skill)
+        self.command = decompress_command(self.guide)
 
     # --- the instruction itself ---------------------------------------------
 
-    def test_the_skill_still_carries_a_staleness_test(self):
+    def test_the_guide_still_carries_a_staleness_test(self):
         """Breaks if the command is reformatted such that this gate reads nothing.
 
         Without this the executable tests below would run an empty string and pass,
         which is the vacuous case a parse-based gate fails into.
         """
-        self.assertTrue(self.command, f"no decompress command found in {SKILL.name}")
+        self.assertTrue(self.command, f"no decompress command found in {GUIDE.name}")
         self.assertIn("-nt", self.command, "the command no longer tests staleness")
         self.assertIn("gunzip -kf", self.command, "without -f gunzip refuses to overwrite")
 
@@ -82,14 +87,14 @@ class AskRouteDecompressTest(unittest.TestCase):
             with self.subTest(document=name):
                 self.assertNotIn(SUPERSEDED, text)
 
-    def test_the_guide_and_the_skill_agree(self):
-        """Breaks if one is corrected and the other is not.
+    def test_the_skill_carries_no_copy_to_disagree_with_the_guide(self):
+        """Breaks if the skill regrows a decompress route of its own.
 
         A documented route stated twice can disagree, and the reader following the
-        prose has no way to know the skill says otherwise.
+        prose has no way to know the skill says otherwise. The skill answers through
+        the server's tools, so one copy, the guide's, is the whole route.
         """
-        self.assertIn("-nt", self.guide)
-        self.assertIn("gunzip -kf", self.guide)
+        self.assertEqual(decompress_command(self.skill), "")
 
     # --- running the shipped command ----------------------------------------
 

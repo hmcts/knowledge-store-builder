@@ -82,11 +82,14 @@ estate.** "No evidence of X" always means "no evidence of X in the repositories
 this store holds", and those are different claims. A published finding once
 concluded that a payload schema had never been readable in one place because its
 references did not resolve; they resolved perfectly, against a repository the
-estate did not hold. So before reporting an absence, read the **Declared
-boundary** section of `knowledge/repository-manifest.md` — written from the
-estate's `config/estate-boundary.txt` — and say which of the two claims you are
-making. Where an estate has declared no boundary, an absence is unexplained
-rather than a decision, and the manifest says so.
+estate did not hold. So when reporting an absence, say which of the two claims
+you are making, and where it turns on what the store holds, point the reader to
+the **Declared boundary** section of `knowledge/repository-manifest.md` —
+written from the estate's `config/estate-boundary.txt`. An assistant answering
+through the knowledge-store server points rather than reads, because the
+server's tools do not return the boundary. Where an estate has declared no
+boundary, an absence is unexplained rather than a decision, and the manifest
+says so.
 
 **Say which layer answered.** A committed topic brief, a community summary, raw
 graph nodes and commit history have different reliability. Prose was written at a

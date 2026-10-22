@@ -125,8 +125,9 @@ with how often it is referenced and every repository that references it.
   none is recorded), and `extra`, copied from `extra/<repo>.json` when the store
   writes one. The stage never interprets `extra`.
 - `repository-dependencies.json`: every edge with both ends, the unresolved
-  targets, and `conflicts`. Its top level opens with
-  `"format": {"layer": "relationships", "major": 1, "minor": 0}`, the stamp that
+  targets, `conflicts`, and `unresolved_conflicts` (charts no rule chooses a
+  repository for, below). Its top level opens with
+  `"format": {"layer": "relationships", "major": 1, "minor": 1}`, the stamp that
   says whose layer this is: major changes for an incompatible change, minor for an
   addition. A reader refuses a file with no stamp or another major, so a store's
   own differently shaped `knowledge/relationships/` is never read as this layer.
@@ -168,17 +169,30 @@ chart rather than one edge that hides which.
 **A chart resolves** to the first of these that holds:
 
 1. `KSB_CHART_REPO_PATTERN` with `{name}` replaced, when it is set and names a
-   clone. It is empty by default.
-2. The clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella. The
-   `Chart.yaml` can be at the clone's root or in any subdirectory
+   clone. It is empty by default; an estate that keeps each chart in a
+   repository named after it sets `chart-{name}`.
+2. The one clone whose `Chart.yaml` has `name: <chart>`, other than an umbrella.
+   The `Chart.yaml` can be at the clone's root or in any subdirectory
    (`<clone>/<chart>/Chart.yaml`), unless it is vendored (below).
-3. An umbrella (`KSB_UMBRELLA_REPOS`) that defines it.
+3. The one umbrella (`KSB_UMBRELLA_REPOS`) that defines it. An umbrella is any
+   repository that bundles or republishes other repositories' charts, a wrapper
+   repository included.
 4. For a Flux `HelmRelease` only, a `sourceRef` that names a clone.
 5. Otherwise, unresolved.
 
+**A chart is never resolved by name order.** When step 2 finds more than one
+clone, or step 3 finds more than one umbrella and step 2 none, no repository is
+chosen: the chart is listed under `unresolved_conflicts` with every candidate, and
+each reference to it that step 4 does not settle is counted under `skipped` as
+`ambiguous`. Name order moves when a repository is renamed, and on an estate with
+an undeclared wrapper it hands the wrapper every chart whose application sorts
+after it. Declare the wrapper in `KSB_UMBRELLA_REPOS`, or set
+`KSB_CHART_REPO_PATTERN`, and the conflict resolves. A chart the pattern settles
+is not listed.
+
 A `Chart.yaml` under another chart's `charts/` directory is a vendored copy of a
-dependency, and is neither published nor read. When two clones publish one chart,
-coordinate or package, the first by name wins and both are listed under
+dependency, and is neither published nor read. When two clones publish one Maven
+coordinate or npm package, the first by name wins and both are listed under
 `conflicts`. A Terraform GitHub source belongs to the estate only when its
 repository is a clone and its organisation is that clone's own, ignoring case. A
 clone's organisation is read from its clone URL in `config/repositories.txt`, so a
