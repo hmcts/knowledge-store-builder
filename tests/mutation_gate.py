@@ -9923,6 +9923,131 @@ MUTATIONS = (
             "test_skill_clone_block.RepairBlockTest.test_repair_restores_what_step_six_selects_to_a_cone_mode_clone",
         ),
     ),
+    Mutation(
+        "answers-layer: the title is the file stem even when the file has a heading",
+        "build_answers_layer.py",
+        '        "title": first_heading(body) or path.stem,\n',
+        '        "title": path.stem,\n',
+        "every written answer would be served under its file name, so a search on the question its heading states would rank it by body text alone",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_two_files_give_two_entries_with_their_headings_and_sources",
+        ),
+    ),
+    Mutation(
+        "answers-layer: a file with no heading gets an empty title",
+        "build_answers_layer.py",
+        '        "title": first_heading(body) or path.stem,\n',
+        '        "title": first_heading(body) or "",\n',
+        "a heading-less answer would be served with nothing to name it",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_a_file_with_no_heading_takes_its_title_from_its_stem",
+        ),
+    ),
+    Mutation(
+        "answers-layer: the commit date overrides the front-matter date",
+        "build_answers_layer.py",
+        '    as_of = fields.get("date") or (committed[0] if committed else None)\n',
+        '    as_of = (committed[0] if committed else None) or fields.get("date")\n',
+        "an answer written about an earlier state and committed later would read as true at its commit, which is the point-in-time claim #476 exists to make honest",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_front_matter_date_wins_over_the_commit_date",
+        ),
+    ),
+    Mutation(
+        "answers-layer: as_of is the author date, not the commit date",
+        "build_answers_layer.py",
+        '"--format=%H%x1f%cI"',
+        '"--format=%H%x1f%aI"',
+        "a rebased or cherry-picked answer would carry the date it was first drafted, not the date it entered the store",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_without_front_matter_the_last_commit_date_and_sha_are_used",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an uncommitted file is attributed to the last commit in the repository",
+        "build_answers_layer.py",
+        '"--", path.name]',
+        "]",
+        "a draft never committed would carry the SHA of an unrelated commit, which does not hold it",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_an_uncommitted_file_with_a_front_matter_date_has_no_commit",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an undated answer is written",
+        "build_answers_layer.py",
+        "    if not as_of:\n        return None\n",
+        "    if False:\n        return None\n",
+        "an answer with no date and no commit would be served with a null as_of and read as today's knowledge",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_file_with_neither_a_date_nor_a_commit_is_refused",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an id the server skips is written",
+        "build_answers_layer.py",
+        "        if not plain_segment(answer_id):\n",
+        "        if False:\n",
+        "a file in a subdirectory gives an id with a slash, which the server skips without telling the store, so the answer is published and never served",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_an_id_the_server_would_skip_is_refused_and_nothing_is_written",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an empty directory writes an empty layer",
+        "build_answers_layer.py",
+        "    if not files:\n",
+        "    if False:\n",
+        "a mistyped --markdown writes {}, which the manifest records as a present answers layer and the server serves as nothing",
+        ("test_build_answers_layer.OneEntryPerFile.test_a_directory_with_no_markdown_is_refused",),
+    ),
+    Mutation(
+        "answers-layer: the front matter is served in the html",
+        "build_answers_layer.py",
+        '        "html": markdown_to_html(body),\n',
+        '        "html": markdown_to_html(path.read_text(encoding="utf-8")),\n',
+        "an answer's front matter would be rendered as a paragraph at the top of every served body",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_front_matter_date_wins_over_the_commit_date",
+        ),
+    ),
+    Mutation(
+        "answers-layer: entries are written in file-system order",
+        "build_answers_layer.py",
+        '    files = sorted(p for p in source_dir.resolve().rglob("*.md") if p.is_file())\n',
+        '    files = sorted((p for p in source_dir.resolve().rglob("*.md") if p.is_file()), reverse=True)\n',
+        "two builds on different file systems would order the ids differently and write different bytes from one commit (CLAUDE.md 1.3)",
+        ("test_build_answers_layer.Determinism.test_two_runs_at_one_commit_write_identical_bytes",),
+    ),
+    Mutation(
+        "answers-layer: git's Z spelling of UTC is passed through",
+        "build_answers_layer.py",
+        '    if date.endswith("Z"):\n',
+        "    if False:\n",
+        "newer git writes UTC as Z and older git as +00:00, so one commit would give different bytes on two machines",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_utc_commit_date_is_spelled_one_way_whatever_git_wrote",
+        ),
+    ),
+    Mutation(
+        "answers-layer: source is the absolute path",
+        "build_answers_layer.py",
+        "        written = entry(path, path.relative_to(root).as_posix(), run)\n",
+        "        written = entry(path, path.as_posix(), run)\n",
+        "the server drops a source that is not a relative path of plain segments, so no served answer would say where it came from",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_two_files_give_two_entries_with_their_headings_and_sources",
+            "test_build_answers_layer.TheServerReadsIt.test_every_entry_has_the_shape_the_server_reads",
+        ),
+    ),
+    Mutation(
+        "answers-layer: a file outside the store root ends in a traceback or a foreign source",
+        "build_answers_layer.py",
+        "        if root not in path.parents:\n",
+        "        if False:\n",
+        "a --markdown outside the store would either crash on relative_to or publish a source no clone holds",
+        ("test_build_answers_layer.OneEntryPerFile.test_a_directory_outside_the_store_is_refused",),
+    ),
 )
 
 

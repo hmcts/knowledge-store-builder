@@ -677,6 +677,43 @@ Declare topics in `config/topics.txt` as
 question needs it, rather than predicting demand. The build skill defines the
 accepted Markdown and evidence checks.
 
+### Serve the store's own written answers
+
+A store's journeys, findings and design notes are usually a directory of
+Markdown. The MCP server's `answers` tool reads them only as one JSON file of
+entries, so write that file, then declare it as an extra layer:
+
+```bash
+knowledgestore answers-layer --markdown docs/answers --out knowledge/answers.json
+```
+
+```json
+{
+  "answers": {
+    "path": "knowledge/answers.json",
+    "description": "Written journeys and findings.",
+    "kind": "answers"
+  }
+}
+```
+
+The declaration goes in `config/store-extra-layers.json`. Declare the JSON file,
+never the Markdown directory: the server reports a directory as `not_read`.
+
+Each `.md` file becomes one entry, keyed by its name without `.md`: its first
+heading as `title` (else the file name), the body rendered as `html` with the
+topic briefs' Markdown subset, and its store-relative path as `source`.
+
+Written answers are point-in-time, so every entry carries `as_of` and `commit`.
+`as_of` is the front matter's `date:` when the file has one, otherwise the date
+of the last commit to the file, and `commit` is that commit's SHA, null for a
+dated file not yet committed. Two runs at one commit write identical bytes.
+
+The stage exits 1 and writes nothing when the directory holds no `.md` file,
+when a file has neither a `date:` nor a commit, or when a file sits in a
+subdirectory or has a space in its name — the server skips such an entry
+without saying so. Run it before `manifest`.
+
 ### Build and check the page
 
 Record which partitioner clustered the graph, recompress it after clustering or

@@ -51,6 +51,7 @@ SELF_PARSING = frozenset(
         "cost",
         "answers",
         "relationships",
+        "answers-layer",
     }
 )
 
@@ -204,6 +205,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "deepdive": (
         "build_deep_dives",
         "extract a repository evidence bundle, or merge written deep dives",
+    ),
+    "answers-layer": (
+        "build_answers_layer",
+        "write a store's written answers from Markdown as the layer the MCP server serves",
     ),
     "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
     "index": (

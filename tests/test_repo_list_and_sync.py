@@ -564,6 +564,9 @@ class CliTest(SettingsIsolated):
                 "semantic",
                 "topics",
                 "deepdive",
+                # the store's own written answers, beside the library's, and before the
+                # manifest that records the file it writes (#476)
+                "answers-layer",
                 "explorer",
                 # last of the builders but one: it is a copy of the graph and the ticket
                 # layer, so it runs once both have settled (#457)
