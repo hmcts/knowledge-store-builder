@@ -47,6 +47,20 @@ class McpJsonExample(unittest.TestCase):
             source = args[args.index("--from") + 1]
             self.assertTrue(source.endswith("@" + declared_tag()), source)
 
+    def test_the_example_runs_the_server_for_the_store_id(self):
+        """Catches an example that drops the entry point or `--store-id`.
+
+        Without `--store-id` the server cannot resolve a clone through the
+        locations file, so the plugin launches a server that serves nothing.
+        """
+        examples = guide_examples()
+        self.assertTrue(examples, "creating-a-store.md carries no mcpServers example")
+        for example in examples:
+            args = example["mcpServers"]["knowledge-store"]["args"]
+            self.assertIn("knowledge-store-mcp", args)
+            self.assertIn("--store-id", args)
+            self.assertEqual(args[args.index("--store-id") + 1], "example-store")
+
     def test_every_mcp_json_example_in_the_docs_pins_the_declared_tag(self):
         """Catches a stale tag in any shipped document, not only the builder guide."""
         paths = [ROOT / "README.md", ROOT / "CHEATSHEET.md"]

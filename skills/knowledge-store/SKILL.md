@@ -17,8 +17,9 @@ rebuild the store to answer a question** — the committed store is the product.
 A store is a repository: the graph and its retrieval layers are committed
 files, so they must be on disk. Work through this in order, and stay quiet
 about steps that were already satisfied. Whichever step settles on the clone,
-finish with step 7: the knowledge-store server finds a clone only through the
-file step 7 writes, so a clone that is not listed there cannot be served.
+finish with step 7: the knowledge-store server finds a clone through the file
+step 7 writes (or `KNOWLEDGE_STORE_PATH`), so a clone that is not listed there
+cannot be served unless that variable names it.
 
 **1. Is it here?** If the working directory contains `graphify-out/`, use it.
 

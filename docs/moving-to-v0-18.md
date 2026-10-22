@@ -124,12 +124,14 @@ your machine with `uv`. Do these once per machine, then once per store.
    git -C <store-clone> pull
    ```
 
-4. **Register a clone you made by hand.** The server finds a clone only through
-   `~/.config/knowledge-store/locations`. The skill writes that file when it
-   clones a store, so a clone it made is already listed. For any other clone:
+4. **Register a clone you made by hand.** The server finds a clone through
+   `~/.config/knowledge-store/locations` (or `KNOWLEDGE_STORE_PATH`). The skill
+   writes that file whenever it settles on a clone, so a clone it has used is
+   already listed. For any other clone:
 
    ```bash
    cd <store-clone>
+   mkdir -p ~/.config/knowledge-store
    grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
      || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
    ```

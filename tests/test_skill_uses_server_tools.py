@@ -160,7 +160,11 @@ class TheSkillUsesTheServerToolsTest(unittest.TestCase):
     def test_the_skill_carries_no_file_reading_answer_path(self):
         """Breaks if a command block that answers by reading the store's files -
         `graphify query`, a gzip read, `jq`, a recursive grep - returns to the
-        skill, which would put a second answering path beside the server's."""
+        skill, which would put a second answering path beside the server's.
+
+        It reads fenced blocks only: a prose instruction to run any of these
+        passes, because it is not where an agent copies a command from
+        (CLAUDE.md 2.10)."""
         found = file_reading_lines(self.skill)
         self.assertEqual(found, [], "; ".join(found))
 

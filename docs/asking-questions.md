@@ -110,8 +110,15 @@ contract:
 - **Format:** UTF-8 text, one absolute path per line, each the root of a store
   clone. There are no comments and no other fields.
 - **Writing:** append only, and only when that exact line is absent. The
-  `knowledge-store` skill does this on first clone:
-  `grep -qxF "$(pwd)" ~/.config/knowledge-store/locations || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations`.
+  `knowledge-store` skill does this whenever it settles on a clone, running
+  this from inside the clone:
+
+  ```bash
+  mkdir -p ~/.config/knowledge-store
+  grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
+    || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
+  ```
+
   A user may query several stores, so the file is a list and is never
   overwritten.
 - **Reading:** a reader skips blank lines and lines whose path no longer exists.
