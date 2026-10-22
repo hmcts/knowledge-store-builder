@@ -41,17 +41,17 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, config, io, provenance, telemetry
+from . import __version__, config, io, minimum_standard, provenance, telemetry
 from .git_env import git_env
 
-FORMAT: tuple[int, int] = (1, 1)
+FORMAT: tuple[int, int] = (1, 2)
 # The hash of the manifest's shape - every key path with its type, never a value -
 # as recorded under FORMAT. Change both together, never one: `tests/
 # test_manifest_format_guard.py` computes the shape and fails when it differs from
 # this, and says which bump it needs (minor for an added layer or field, major for a
 # removal, rename or type change). The shape is then added to
 # `tests/manifest_format_shapes.json` under the new FORMAT, and this is set to its hash.
-FORMAT_SHAPE = "09d8090fcae280045ab736919e80252c70fe3c78e40127f9541d235b8e89b952"
+FORMAT_SHAPE = "c8b6a0090ee5086cc4c4bbc6f5a8968341b5ce05a1a7c42466988c0b30488759"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.
@@ -105,6 +105,8 @@ LAYERS: tuple[Layer, ...] = (
     # The whole directory, so a change to `repository-dependencies.json` or
     # `kinds.json` changes the digest as well as one to a `by-repo` file.
     Layer("relationships", (_rel(config.RELATIONSHIPS_DIR),), "dir"),
+    # The whole directory, so the settings snapshot digests with the evidence it feeds.
+    Layer("minimum_standard", (_rel(config.MINIMUM_STANDARD_DIR),), "dir"),
     # The archive first, as for the graph: on a large estate the plain index is
     # over GitHub's 100 MB file limit, so a store commits only the `.gz`.
     Layer(
@@ -122,6 +124,7 @@ LAYERS: tuple[Layer, ...] = (
 # nor here fails the suite, so adding an artefact forces the decision whether a
 # reader should be told about it. Keyed by the config name.
 _IN_RELATIONSHIPS = "inside the relationships layer, digested with its directory"
+_IN_MINIMUM_STANDARD = "inside the minimum-standard layer, digested with its directory"
 NOT_A_LAYER: dict[str, str] = {
     # inputs a person maintains
     "BOUNDARY_PATH": "a hand-maintained input: the estate's declared boundary",
@@ -165,6 +168,11 @@ NOT_A_LAYER: dict[str, str] = {
     "REPOSITORY_DEPENDENCIES_PATH": _IN_RELATIONSHIPS,
     "RELATIONSHIP_KINDS_PATH": _IN_RELATIONSHIPS,
     "RELATIONSHIPS_EXTRA_DIR": "the store's own inputs to `extra`, inside the relationships layer",
+    # the minimum-standard layer: one directory layer, digested with its directory
+    "MINIMUM_STANDARD_BY_REPO_DIR": _IN_MINIMUM_STANDARD,
+    "MINIMUM_STANDARD_SUMMARY_PATH": _IN_MINIMUM_STANDARD,
+    "MINIMUM_STANDARD_SETTINGS_PATH": _IN_MINIMUM_STANDARD,
+    "PRODUCTS_CONFIG": "a hand-maintained input: the store's grouping of repositories into products",
     "RELATIONSHIP_KINDS_CONFIG_PATH": "a hand-maintained input: the store's own relationship kinds",
     # the manifest's own sources and output
     "TELEMETRY_PATH": "what the stages measured; the manifest reads it for flags",
@@ -552,6 +560,9 @@ def store_digest(layers: dict, extra: dict) -> str:
 # library's manifest yet; when it is, take both from its own format constant.
 RELATIONSHIPS_STAMP = "knowledge/relationships/repository-dependencies.json"
 RELATIONSHIPS_MAJOR = 1
+# The minimum-standard layer's stamp lives in its summary, and the major comes from the
+# module that writes it.
+MINIMUM_STANDARD_STAMP = "knowledge/minimum-standard/summary.json"
 
 
 def _relationships_recognised(root: Path) -> bool:
@@ -577,6 +588,19 @@ def _relationships_recognised(root: Path) -> bool:
     )
 
 
+def _minimum_standard_recognised(root: Path) -> bool:
+    """Whether the summary's stamp names this layer at a major this library reads.
+
+    A missing, damaged or foreign stamp is False, never a refusal, as for the
+    relationships layer.
+    """
+    try:
+        body = io.read_json(root / MINIMUM_STANDARD_STAMP)
+    except (OSError, ValueError):
+        return False
+    return minimum_standard.format_problem(body) == ""
+
+
 def compute(root: Path, run=run_git) -> dict:
     """The full manifest for the store at `root`."""
     store_id, github_org = store_identity(root, run)
@@ -590,6 +614,9 @@ def compute(root: Path, run=run_git) -> dict:
     # `None` with no layer: nothing was measured, so there is nothing to refuse.
     layers["relationships"]["recognised"] = (
         _relationships_recognised(root) if layers["relationships"]["present"] else None
+    )
+    layers["minimum_standard"]["recognised"] = (
+        _minimum_standard_recognised(root) if layers["minimum_standard"]["present"] else None
     )
     # Deployments are nodes inside the graph, so no file says whether the stage
     # added any; only the count it recorded can.

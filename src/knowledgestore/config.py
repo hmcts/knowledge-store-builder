@@ -564,6 +564,17 @@ RELATIONSHIP_KINDS_PATH = RELATIONSHIPS_DIR / "kinds.json"
 # repository. An input the stage copies, never one it edits.
 RELATIONSHIPS_EXTRA_DIR = RELATIONSHIPS_DIR / "extra"
 RELATIONSHIP_KINDS_CONFIG_PATH = ROOT / "config" / "relationship-kinds.json"
+
+# --- minimum-standard evidence (the `minimum-standard` stages) -------------
+# Dated, cited evidence per repository against the seven points of the GOV.UK
+# minimum standard. `github-settings.json` is written by its own stage and read by
+# the evidence stage, which never calls GitHub.
+MINIMUM_STANDARD_DIR = ROOT / "knowledge" / "minimum-standard"
+MINIMUM_STANDARD_BY_REPO_DIR = MINIMUM_STANDARD_DIR / "by-repo"
+MINIMUM_STANDARD_SUMMARY_PATH = MINIMUM_STANDARD_DIR / "summary.json"
+MINIMUM_STANDARD_SETTINGS_PATH = MINIMUM_STANDARD_DIR / "github-settings.json"
+# Optional: `{"<product>": ["<repo>", ...]}`, the store's own grouping.
+PRODUCTS_CONFIG = ROOT / "config" / "products.json"
 # The repository a chart lives in, by naming convention: `chart-{name}` makes
 # chart `web` the clone `chart-web`. Empty by default, because a convention is an
 # estate's and not this library's; resolution then starts at the clone whose
@@ -755,6 +766,14 @@ def _recompute_paths() -> None:
         RELATIONSHIP_KINDS_PATH=root / "knowledge" / "relationships" / "kinds.json",
         RELATIONSHIPS_EXTRA_DIR=root / "knowledge" / "relationships" / "extra",
         RELATIONSHIP_KINDS_CONFIG_PATH=root / "config" / "relationship-kinds.json",
+        MINIMUM_STANDARD_DIR=root / "knowledge" / "minimum-standard",
+        MINIMUM_STANDARD_BY_REPO_DIR=root / "knowledge" / "minimum-standard" / "by-repo",
+        MINIMUM_STANDARD_SUMMARY_PATH=root / "knowledge" / "minimum-standard" / "summary.json",
+        MINIMUM_STANDARD_SETTINGS_PATH=root
+        / "knowledge"
+        / "minimum-standard"
+        / "github-settings.json",
+        PRODUCTS_CONFIG=root / "config" / "products.json",
         # A store that pins its dependencies keeps these; a store that installs
         # the library directly has neither, and check-install-docs says so.
         REQUIREMENTS_PATH=root / "requirements.txt",

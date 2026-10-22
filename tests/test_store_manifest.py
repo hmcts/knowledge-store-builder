@@ -33,6 +33,7 @@ ALL_LAYERS = (
     "index",
     "intent",
     "labels",
+    "minimum_standard",
     "provenance",
     "relationships",
     "repository_manifest",
@@ -111,7 +112,7 @@ class AnEmptyStore(_Store):
 
         config.configure(GITHUB_ORG="example-org")
         manifest = compute(self)
-        self.assertEqual(manifest["format"], {"major": 1, "minor": 1})
+        self.assertEqual(manifest["format"], {"major": 1, "minor": 2})
         self.assertEqual(manifest["store"], {"id": "example-store", "github_org": "example-org"})
         self.assertEqual(manifest["library_version"], __version__)
 
@@ -145,6 +146,7 @@ class WhichLayersArePresent(_Store):
             "index": "knowledge/index/store.sqlite",
             "intent": "knowledge/intent/file-tickets.json.gz",
             "labels": "graphify-out/.graphify_labels.json",
+            "minimum_standard": "knowledge/minimum-standard/by-repo/example-repo.json",
             "provenance": "knowledge/provenance.json",
             "relationships": "knowledge/relationships/by-repo/example-repo.json",
             "repository_manifest": "knowledge/repository-manifest.md",
