@@ -16,7 +16,9 @@ rebuild the store to answer a question** — the committed store is the product.
 
 A store is a repository: the graph and its retrieval layers are committed
 files, so they must be on disk. Work through this in order, and stay quiet
-about steps that were already satisfied.
+about steps that were already satisfied. Whichever step settles on the clone,
+finish with step 7: the knowledge-store server finds a clone only through the
+file step 7 writes, so a clone that is not listed there cannot be served.
 
 **1. Is it here?** If the working directory contains `graphify-out/`, use it.
 
@@ -76,8 +78,10 @@ On a large estate this is the difference between tens and hundreds of
 megabytes. Someone who wants `explorer.html` in a browser needs a plain
 `git clone` instead — offer that if they mention the browser page.
 
-**7. Remember it, so this is asked once.** Append rather than overwrite: the
-file is a list, because a user may query more than one estate.
+**7. Register it, so this is asked once.** Do this for whichever clone steps 1
+to 6 settled on, not only a fresh one, and run it from inside that clone (`cd`
+there first). Append rather than overwrite: the file is a list, because a user
+may query more than one estate.
 
 ```bash
 mkdir -p ~/.config/knowledge-store
@@ -85,9 +89,10 @@ grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
   || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
 ```
 
-Mention that `KNOWLEDGE_STORE` in their shell profile pins a default, which is
-worth doing if they mostly query one estate. The server finds the clone through
-this file, by the store's id, so a clone missing from it cannot be served.
+Mention that `KNOWLEDGE_STORE` in their shell profile pins a default for this
+skill, which is worth doing if they mostly query one estate. The server does not
+read `KNOWLEDGE_STORE`: it finds the clone through this file, by the store's id,
+or through `KNOWLEDGE_STORE_PATH` when that is set in its environment.
 
 ## Repair a clone with no graph
 
@@ -240,22 +245,31 @@ same rules. Never read the store's files, decompress its graph, run `graphify`
 or search its corpus to answer: that is a second answering path with rules of
 its own.
 
+**Run Step 1 before checking for the tools.** The server looks for its clone
+once, when it starts, and exits if the locations file lists none for this store
+or the clone holds no `knowledge/store-manifest.json`. So on first use the tools
+are often missing only because Step 1 had not yet registered the clone.
+
 **When no knowledge-store tools are available, stop.** In Claude Code, `/mcp`
-lists the servers and whether each started. Give the asker this message, and
-answer nothing from the store until the server runs:
+lists the servers, whether each started, and reconnects one that did not. Give
+the asker this message, and answer nothing from the store until the server runs:
 
 ```text
 I cannot answer from this store: the knowledge-store server is not running
-here, and I never read files to answer instead.
+here, and I never read files to answer instead. One of three things is wrong.
 
-Either the store's plugin does not launch the server yet, or uv is not
-installed. The server runs with uv on your machine.
-
-- The store's maintainer adds the server to the store's plugin:
-  https://github.com/hmcts/knowledge-store-builder/blob/main/docs/creating-a-store.md#add-the-server-to-the-store-plugin
-- If `uv --version` fails in a terminal, install uv from
-  https://docs.astral.sh/uv/getting-started/installation/
-  and restart Claude Code.
+1. The clone is not registered yet, or has no manifest. The server starts only
+   when ~/.config/knowledge-store/locations lists the clone and the clone holds
+   knowledge/store-manifest.json. Once the clone is registered, reconnect the
+   server with /mcp, or restart Claude Code. A clone with no manifest needs its
+   store's maintainer to publish one.
+2. The store's plugin does not launch the server yet. The store's maintainer
+   adds it:
+   https://github.com/hmcts/knowledge-store-builder/blob/main/docs/creating-a-store.md#add-the-server-to-the-store-plugin
+3. uv is not installed. The server runs with uv on your machine. If
+   `uv --version` fails in a terminal, install uv from
+   https://docs.astral.sh/uv/getting-started/installation/
+   and restart Claude Code.
 ```
 
 The maintainer's step is
@@ -269,7 +283,7 @@ the question:
 |---|---|
 | `store_info` | How current the store is, which layers are present, and the commit each repository was built from. |
 | `find_repo` | Whether a repository is in the estate. A near miss is a different repository, offered as one and never answered about. |
-| `answers` | Answers the store has already written: topic briefs, deep dives and declared answer layers. Ask it first for an estate-level question or one repository's health. |
+| `answers` | Answers the store has already written that match the query: topic briefs, deep dives and declared answer layers, each cited by its layer, id and source. Ask it first for an estate-level question. |
 | `search` | Graph nodes whose name matches the words, with repository, kind and pinned URL. Narrow by repository, or by kind for features and scenarios. |
 | `node` | One graph node by id, with its pinned URL. |
 | `neighbours` | What a node connects to, one or two hops either way, optionally along one relation. |

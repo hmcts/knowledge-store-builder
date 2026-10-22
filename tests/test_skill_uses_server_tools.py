@@ -33,10 +33,19 @@ ANSWERING = "## Step 2 — Answer through the knowledge-store tools"
 # The answering path the skill retired, as a command block would spell it. Scoped
 # to the skill: `graphify query` and the corpus search stay documented for humans
 # in `docs/asking-questions.md`, so none of these may be retired repository-wide.
-FILE_READING = ("graphify query", "zcat", "gzip.open", "jq ", "grep -r")
+FILE_READING = ("graphify query", "zcat", "gunzip", "gzip.open", "jq ", "grep -r", "rg ")
 
 BUILDER_ANCHOR = "creating-a-store.md#add-the-server-to-the-store-plugin"
 UV_INSTALL = "https://docs.astral.sh/uv/getting-started/installation/"
+
+# The server resolves its clone once, at start-up, and exits when none is listed or
+# the clone has no manifest - the likeliest cause on first use, so it comes first.
+UNREGISTERED = "not registered"
+MANIFEST = "knowledge/store-manifest.json"
+RECONNECT = "reconnect the server with /mcp"
+NOT_LAUNCHED = "plugin does not launch the server"
+
+TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
 
@@ -57,7 +66,8 @@ def tool_table(text: str) -> list[str]:
 
 
 def tools_named(rows: list[str]) -> list[str]:
-    return [name for row in rows for name in IDENTIFIER.findall(row)]
+    """The tools the table routes to: the identifiers in each row's first column."""
+    return [name for row in rows for name in IDENTIFIER.findall(row.split("|")[1])]
 
 
 def fenced_blocks(text: str) -> list[str]:
@@ -101,8 +111,17 @@ def message_problems(message: str) -> list[str]:
         problems.append("does not say where to install `uv`")
     if BUILDER_ANCHOR not in message:
         problems.append("does not link the builder step that adds the server")
-    if "never read files" not in " ".join(message.split()):
+    flat = " ".join(message.split())
+    if "never read files" not in flat:
         problems.append('does not say "never read files"')
+    if UNREGISTERED not in flat or MANIFEST not in flat:
+        problems.append("does not name an unregistered clone or a missing manifest as a cause")
+    elif NOT_LAUNCHED in flat and flat.index(UNREGISTERED) > flat.index(NOT_LAUNCHED):
+        problems.append("does not list the unregistered clone first, as the likeliest cause")
+    if RECONNECT not in flat or "restart Claude Code" not in flat:
+        problems.append("does not say to reconnect the server once the clone is registered")
+    if NOT_LAUNCHED not in flat:
+        problems.append("does not name a plugin that does not launch the server as a cause")
     return problems
 
 
@@ -111,7 +130,7 @@ class ThePinTest(unittest.TestCase):
         """Breaks if the pin file loses its tag line or its tool list, which every
         check below reads - an empty list would let the skill name anything."""
         text = PIN.read_text(encoding="utf-8")
-        self.assertEqual(pinned_tag(text), "v0.1.0")
+        self.assertRegex(pinned_tag(text), TAG)
         tools = pinned_tools(text)
         self.assertEqual(len(tools), 12, tools)
         self.assertEqual(tools, sorted(set(tools)))
@@ -169,14 +188,35 @@ class TheseChecksCanFailTest(unittest.TestCase):
         self.assertNotIn("no_such_tool", self.tools)
 
     def test_a_file_reading_block_is_noticed(self):
-        forged = self.skill + '\n```bash\ngraphify query "<question>"\n```\n'
-        self.assertEqual(len(file_reading_lines(forged)), 1)
+        for marker in FILE_READING:
+            with self.subTest(marker=marker):
+                forged = self.skill + f"\n```bash\n{marker}<argument>\n```\n"
+                self.assertEqual(len(file_reading_lines(forged)), 1)
+
+    def test_only_the_first_column_names_a_tool(self):
+        # Prose in the description column may mention a field in backticks; only
+        # the first column routes a question to a tool.
+        self.assertEqual(tools_named(["| `node` | Returns its `url`. |"]), ["node"])
+
+    def test_a_message_listing_the_plugin_cause_first_is_noticed(self):
+        message = " ".join(missing_server_message(self.skill).split())
+        self.assertEqual(message_problems(message), [], "precondition: the message is clean")
+        reordered = message.replace(UNREGISTERED, "UNSET").replace(NOT_LAUNCHED, UNREGISTERED)
+        reordered = reordered.replace("UNSET", NOT_LAUNCHED)
+        self.assertIn(
+            "does not list the unregistered clone first, as the likeliest cause",
+            message_problems(reordered),
+        )
 
     def test_a_missing_message_is_noticed(self):
         message = missing_server_message(self.skill)
         self.assertTrue(message, "precondition: the message is found")
         self.assertTrue(message_problems(missing_server_message(self.skill.replace(message, ""))))
-        self.assertTrue(message_problems(message.replace("never read files", "")))
+        for element in ("never read files", UNREGISTERED, MANIFEST, RECONNECT, NOT_LAUNCHED):
+            with self.subTest(removed=element):
+                self.assertIn(element, " ".join(message.split()))
+                forged = " ".join(message.split()).replace(element, "")
+                self.assertTrue(message_problems(forged))
 
 
 if __name__ == "__main__":
