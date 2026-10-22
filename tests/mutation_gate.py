@@ -9900,7 +9900,7 @@ MUTATIONS = (
     Mutation(
         "check-plugin stops refusing a root .mcp.json",
         "check_plugin.py",
-        '(root / ".mcp.json").exists()',
+        "(root / MCP_JSON).exists()",
         "False",
         "#480: a root .mcp.json also loads as project configuration for anyone working in the repository",
         (

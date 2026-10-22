@@ -40,6 +40,7 @@ from pathlib import Path
 from . import config
 
 SERVER = "knowledge-store"
+MCP_JSON = ".mcp.json"
 SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
 DOCUMENTED_TAG = "v0.1.0"
 
@@ -68,7 +69,7 @@ def _read_json(path: Path) -> object:
 
 def declared_servers(plugin: Path) -> tuple[dict, str] | str:
     """(servers, where it was read from), or the reason none could be read."""
-    mcp = plugin / ".mcp.json"
+    mcp = plugin / MCP_JSON
     manifest = plugin / ".claude-plugin" / "plugin.json"
     try:
         if mcp.is_file():
@@ -107,15 +108,51 @@ def manifest_store_id(path: Path) -> tuple[str | None, str | None]:
     return store_id, None
 
 
+def _check_pin(args: list, failures: list[str], warnings: list[str]) -> str:
+    """The pinned tag when `--from` is an exact tag of the server, else ''."""
+    source = _option(args, "--from")
+    prefix = SOURCE + "@"
+    if source is None:
+        failures.append("args carry no --from, so the server is not pinned to a tag")
+        return ""
+    if not (source.startswith(prefix) and _tag_key(source[len(prefix) :])):
+        failures.append(
+            f"--from is {source!r}, not {prefix}<exact tag> such as {prefix}{DOCUMENTED_TAG}: "
+            "a branch, `latest` or no ref launches a server nobody chose"
+        )
+        return ""
+    tag = source[len(prefix) :]
+    if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):  # type: ignore[operator]
+        warnings.append(
+            f"pinned {tag} is older than {DOCUMENTED_TAG}, the tag this library documents"
+        )
+    return tag
+
+
+def _check_store_id(args: list, manifest: Path, failures: list[str]) -> str:
+    """The declared `--store-id` when it equals the manifest's `store.id`, else ''."""
+    declared = _option(args, "--store-id")
+    wanted, why = manifest_store_id(manifest)
+    if declared is None:
+        failures.append("args carry no --store-id, so the server cannot find the store's clone")
+    elif wanted is None:
+        failures.append(f"--store-id is {declared!r} but {why}")
+    elif declared != wanted:
+        failures.append(f"--store-id is {declared!r} but store.id in {manifest.name} is {wanted!r}")
+    else:
+        return declared
+    return ""
+
+
 def check(plugin: Path, root: Path, manifest: Path) -> tuple[list[str], list[str], str, str]:
     """(failures, warnings, tag, store id). Tag and id are empty when not established."""
     failures: list[str] = []
     warnings: list[str] = []
     tag = store_id = ""
 
-    if plugin.resolve() == root.resolve() and (root / ".mcp.json").exists():
+    if plugin.resolve() == root.resolve() and (root / MCP_JSON).exists():
         failures.append(
-            f"the plugin root is the repository root and {root / '.mcp.json'} exists: it also "
+            f"the plugin root is the repository root and {root / MCP_JSON} exists: it also "
             "loads as project configuration for anyone working in this repository. Move the "
             "mcpServers object into .claude-plugin/plugin.json and delete the file"
         )
@@ -135,32 +172,8 @@ def check(plugin: Path, root: Path, manifest: Path) -> tuple[list[str], list[str
     args = server.get("args")
     args = args if isinstance(args, list) else []
 
-    source = _option(args, "--from")
-    prefix = SOURCE + "@"
-    if source is None:
-        failures.append("args carry no --from, so the server is not pinned to a tag")
-    elif not (source.startswith(prefix) and _tag_key(source[len(prefix) :])):
-        failures.append(
-            f"--from is {source!r}, not {prefix}<exact tag> such as {prefix}{DOCUMENTED_TAG}: "
-            "a branch, `latest` or no ref launches a server nobody chose"
-        )
-    else:
-        tag = source[len(prefix) :]
-        if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):  # type: ignore[operator]
-            warnings.append(
-                f"pinned {tag} is older than {DOCUMENTED_TAG}, the tag this library documents"
-            )
-
-    declared = _option(args, "--store-id")
-    wanted, why = manifest_store_id(manifest)
-    if declared is None:
-        failures.append("args carry no --store-id, so the server cannot find the store's clone")
-    elif wanted is None:
-        failures.append(f"--store-id is {declared!r} but {why}")
-    elif declared != wanted:
-        failures.append(f"--store-id is {declared!r} but store.id in {manifest.name} is {wanted!r}")
-    else:
-        store_id = declared
+    tag = _check_pin(args, failures, warnings)
+    store_id = _check_store_id(args, manifest, failures)
     return failures, warnings, tag, store_id
 
 
