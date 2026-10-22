@@ -42,7 +42,7 @@ from . import config
 SERVER = "knowledge-store"
 MCP_JSON = ".mcp.json"
 SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
-DOCUMENTED_TAG = "v0.1.0"
+DOCUMENTED_TAG = "v0.1.1"
 
 _TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 

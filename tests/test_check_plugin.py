@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FROM = "git+https://github.com/hmcts/knowledge-store-mcp@"
 
 
-def server(tag="v0.1.0", store_id="example-store", command="uvx", source=None):
+def server(tag=gate.DOCUMENTED_TAG, store_id="example-store", command="uvx", source=None):
     args = ["--from", source if source is not None else FROM + tag]
     args += ["knowledge-store-mcp"]
     if store_id is not None:
@@ -82,7 +82,7 @@ class PluginGateTest(SettingsIsolated):
             code, out, err = self.run_stage("--plugin", str(plugin))
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(len(out.splitlines()), 1)
-        self.assertIn("v0.1.0", out)
+        self.assertIn(gate.DOCUMENTED_TAG, out)
         self.assertIn("example-store", out)
 
     def test_a_plugin_json_declaration_at_the_repository_root_passes_by_default(self):
@@ -224,7 +224,7 @@ class PluginGateTest(SettingsIsolated):
                 "knowledge-store": {
                     "command": "uvx",
                     "args": [
-                        "--from=" + FROM + "v0.1.0",
+                        "--from=" + FROM + gate.DOCUMENTED_TAG,
                         "knowledge-store-mcp",
                         "--store-id=example-store",
                     ],
