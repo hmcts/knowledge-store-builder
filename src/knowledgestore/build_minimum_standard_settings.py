@@ -51,8 +51,11 @@ def _unread() -> dict:
 def _call(runner, path: str) -> tuple[dict | None, str]:
     """(body, "") on success, (None, what the CLI said) when it refused or failed.
 
-    `gh api` writes the HTTP error's JSON body to stdout and its summary line to
-    stderr; the real runner captures only stdout, so both are returned for matching.
+    Observed against real `gh`: an HTTP error exits 1, with the JSON body
+    (`{"message": "Branch not protected", ...}`) on stdout and `gh: <message> (HTTP
+    404)` on stderr. `run_gh` captures only stdout, which lands on the exception's
+    `.output` and leaves `.stderr` None, so that is what the match must rely on;
+    `.stderr` is read as well for a runner that captures it.
     """
     try:
         text = runner(["api", path])
@@ -87,7 +90,12 @@ def read_repository(runner, org: str, name: str) -> dict:
         record["default_branch"] = branch if isinstance(branch, str) and branch else None
         analysis = body.get("security_and_analysis")
         record["secret_scanning"] = _enabled(analysis, "secret_scanning")
-        record["dependabot_alerts"] = _enabled(analysis, "dependabot_alerts")
+    # Dependabot alerts have their own endpoint: 204 (an empty body) when on. A 404 is
+    # GitHub's answer both for "off" and for "you cannot see this", so any failure is
+    # unreadable and `disabled` is never guessed from it.
+    alerts, _ = _call(runner, f"repos/{org}/{name}/vulnerability-alerts")
+    if alerts is not None:
+        record["dependabot_alerts"] = "enabled"
     branch = record["default_branch"]
     if branch is not None:
         protection, said = _call(

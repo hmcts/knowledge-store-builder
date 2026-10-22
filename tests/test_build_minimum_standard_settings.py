@@ -22,15 +22,16 @@ REPO_BODY = {
     "default_branch": "main",
     "security_and_analysis": {
         "secret_scanning": {"status": "enabled"},
-        "dependabot_alerts": {"status": "disabled"},
     },
 }
 
 
 def refused(message: str, code: int = 1) -> subprocess.CalledProcessError:
-    """What `gh api` raises for an HTTP error: the body on stdout, the line on stderr."""
+    """What `run_gh` raises for an HTTP error. Real `gh api` exits 1 and writes the JSON
+    body to stdout, which `run_gh` captures as `.output`; its `gh: ...` line goes to
+    stderr, which `run_gh` does not capture, so `.stderr` is None."""
     return subprocess.CalledProcessError(
-        code, ["gh", "api"], output=json.dumps({"message": message}), stderr=f"gh: {message}"
+        code, ["gh", "api"], output=json.dumps({"message": message, "status": "404"})
     )
 
 
@@ -47,7 +48,8 @@ class Gh:
         answer = self.answers[path]
         if isinstance(answer, BaseException):
             raise answer
-        return json.dumps(answer)
+        # A string is the raw body: `vulnerability-alerts` answers 204 with none.
+        return answer if isinstance(answer, str) else json.dumps(answer)
 
 
 class TheSettingsSnapshot(SettingsIsolated):
@@ -73,6 +75,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         gh = Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
             }
         )
@@ -85,7 +88,7 @@ class TheSettingsSnapshot(SettingsIsolated):
                     "default_branch": "main",
                     "branch_protection": "present",
                     "secret_scanning": "enabled",
-                    "dependabot_alerts": "disabled",
+                    "dependabot_alerts": "enabled",
                     "unreadable": [],
                 }
             },
@@ -99,6 +102,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         gh = Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/main/protection": refused(
                     "Resource not accessible by integration (HTTP 403)"
                 ),
@@ -116,6 +120,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         gh = Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/main/protection": refused(
                     "Branch not protected (HTTP 404)"
                 ),
@@ -132,6 +137,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         gh = Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/main/protection": refused(
                     "Not Found (HTTP 404)"
                 ),
@@ -149,21 +155,27 @@ class TheSettingsSnapshot(SettingsIsolated):
         gh = Gh(
             {
                 "repos/example-org/repo-a": body,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/trunk/protection": {"url": "x"},
             }
         )
         record = self.run_stage(gh)["repositories"]["repo-a"]
         self.assertIs(record["archived"], True)
         self.assertIsNone(record["secret_scanning"])
-        self.assertIsNone(record["dependabot_alerts"])
-        self.assertEqual(record["unreadable"], ["dependabot_alerts", "secret_scanning"])
+        self.assertEqual(record["dependabot_alerts"], "enabled")
+        self.assertEqual(record["unreadable"], ["secret_scanning"])
         self.assertEqual(record["branch_protection"], "present")
 
     def test_an_unreadable_repository_records_nothing_it_did_not_read(self):
         """Breaks if a failed repository call leaves guessed values, or is followed by
         a protection call for a branch nobody named."""
         self.declare("repo-a")
-        gh = Gh({"repos/example-org/repo-a": refused("Not Found (HTTP 404)")})
+        gh = Gh(
+            {
+                "repos/example-org/repo-a": refused("Not Found (HTTP 404)"),
+                "repos/example-org/repo-a/vulnerability-alerts": refused("Not Found (HTTP 404)"),
+            }
+        )
         record = self.run_stage(gh)["repositories"]["repo-a"]
         self.assertEqual(
             record,
@@ -182,7 +194,10 @@ class TheSettingsSnapshot(SettingsIsolated):
                 ],
             },
         )
-        self.assertEqual(gh.paths, ["repos/example-org/repo-a"])
+        # No branch is known, so no protection call; the alerts call needs only the name.
+        self.assertEqual(
+            gh.paths, ["repos/example-org/repo-a", "repos/example-org/repo-a/vulnerability-alerts"]
+        )
 
     def test_output_is_sorted_and_stamped(self):
         """Breaks if the stamp is missing or the repositories come out in declaration
@@ -191,6 +206,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         answers: dict[str, object] = {}
         for name in ("repo-a", "repo-b"):
             answers[f"repos/example-org/{name}"] = REPO_BODY
+            answers[f"repos/example-org/{name}/vulnerability-alerts"] = ""
             answers[f"repos/example-org/{name}/branches/main/protection"] = {"url": "x"}
         self.run_stage(Gh(answers))
         text = config.MINIMUM_STANDARD_SETTINGS_PATH.read_text(encoding="utf-8")
@@ -211,6 +227,43 @@ class TheSettingsSnapshot(SettingsIsolated):
         evidence stage would read that as 'every repository was checked'."""
         self.assertEqual(stage.main([], runner=Gh({})), 1)
         self.assertFalse(config.MINIMUM_STANDARD_SETTINGS_PATH.exists())
+
+    def test_a_refused_vulnerability_alerts_call_is_unreadable_never_disabled(self):
+        """Breaks if a 404 or 403 on `vulnerability-alerts` reads as `disabled`: GitHub
+        answers 404 both for 'off' and for 'you cannot see this', so only the 204
+        shows the setting, and the layer never guesses the other."""
+        for message in (
+            "Not Found (HTTP 404)",
+            "Resource not accessible by integration (HTTP 403)",
+        ):
+            with self.subTest(message=message):
+                self.declare("repo-a")
+                gh = Gh(
+                    {
+                        "repos/example-org/repo-a": REPO_BODY,
+                        "repos/example-org/repo-a/vulnerability-alerts": refused(message),
+                        "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
+                    }
+                )
+                record = self.run_stage(gh)["repositories"]["repo-a"]
+                self.assertIsNone(record["dependabot_alerts"])
+                self.assertEqual(record["unreadable"], ["dependabot_alerts"])
+                self.assertEqual(record["secret_scanning"], "enabled")
+
+    def test_an_empty_204_from_vulnerability_alerts_is_enabled(self):
+        """Breaks if the empty body of a 204 is read as a failure: `gh` prints nothing
+        for it, and that nothing is the whole of the 'enabled' answer."""
+        self.declare("repo-a")
+        gh = Gh(
+            {
+                "repos/example-org/repo-a": REPO_BODY,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
+                "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
+            }
+        )
+        self.assertEqual(
+            self.run_stage(gh)["repositories"]["repo-a"]["dependabot_alerts"], "enabled"
+        )
 
     def test_the_stage_is_registered(self):
         """Breaks if the stage is not reachable as `knowledgestore minimum-standard-settings`."""

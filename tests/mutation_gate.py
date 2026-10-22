@@ -8215,6 +8215,17 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "minimum standard settings: a refused alerts call reads as disabled",
+        "build_minimum_standard_settings.py",
+        '    if alerts is not None:\n        record["dependabot_alerts"] = "enabled"\n',
+        '    record["dependabot_alerts"] = "enabled" if alerts is not None else "disabled"\n',
+        "GitHub answers 404 for alerts that are off and for a repository the token cannot see, so a 404 read as `disabled` would report a missing control from no access",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_a_refused_vulnerability_alerts_call_is_unreadable_never_disabled",
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_an_unreadable_repository_records_nothing_it_did_not_read",
+        ),
+    ),
+    Mutation(
         "store manifest: the minimum standard stamp is not read",
         "store_manifest.py",
         '        _minimum_standard_recognised(root) if layers["minimum_standard"]["present"] else None\n',
