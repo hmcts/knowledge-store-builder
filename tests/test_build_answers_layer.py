@@ -87,31 +87,33 @@ class _Store(SettingsIsolated):
         _git(self.root, "commit", "-q", "-m", "answers", date=date)
         return _git(self.root, "rev-parse", "HEAD")
 
-    def build(self) -> tuple[int, str, str]:
-        out, err = io.StringIO(), io.StringIO()
-        argv = sys.argv
-        sys.argv = [
-            "knowledgestore answers-layer",
-            "--markdown",
-            str(self.answers),
-            "--out",
-            str(self.out),
-        ]
-        try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = build_answers_layer.main()
-        finally:
-            sys.argv = argv
-        return code, out.getvalue(), err.getvalue()
+
+def _build(case: _Store) -> tuple[int, str, str]:
+    """Run the stage as the CLI does: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    argv = sys.argv
+    sys.argv = [
+        "knowledgestore answers-layer",
+        "--markdown",
+        str(case.answers),
+        "--out",
+        str(case.out),
+    ]
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = build_answers_layer.main()
+    finally:
+        sys.argv = argv
+    return code, out.getvalue(), err.getvalue()
 
 
 def _layer(case: _Store) -> dict:
     """The layer a successful run wrote; a refused run fails the calling test.
 
-    A function rather than a method of `_Store`: a test-case method only its
-    subclasses call reads to Sonar (S5899) as a test that will never be run.
+    It and `_build` are functions rather than methods of `_Store`: Sonar (S5899)
+    reads such a method, called only from subclasses, as a test that never runs.
     """
-    code, _, err = case.build()
+    code, _, err = _build(case)
     case.assertEqual(code, 0, err)
     return json.loads(case.out.read_text(encoding="utf-8"))
 
@@ -145,7 +147,7 @@ class OneEntryPerFile(_Store):
         self.write("apply.md", "# Apply\n")
         self.write("journeys/pay.md", "# Pay\n")
         self.commit(FIRST)
-        code, _, err = self.build()
+        code, _, err = _build(self)
         self.assertEqual(code, 1)
         self.assertIn("journeys/pay", err)
         self.assertFalse(self.out.exists())
@@ -157,7 +159,7 @@ class OneEntryPerFile(_Store):
         outside.mkdir()
         (outside / "apply.md").write_text("---\ndate: 2023-01-15\n---\n# Apply\n")
         self.answers = outside
-        code, _, err = self.build()
+        code, _, err = _build(self)
         self.assertEqual(code, 1)
         self.assertIn("outside the store root", err)
         self.assertFalse(self.out.exists())
@@ -166,7 +168,7 @@ class OneEntryPerFile(_Store):
         """Breaks if an empty or mistyped `--from` writes an empty layer, which the
         manifest would record as present and the server would serve as nothing."""
         self.answers.mkdir(parents=True)
-        code, _, err = self.build()
+        code, _, err = _build(self)
         self.assertEqual(code, 1)
         self.assertIn("no .md files", err)
         self.assertFalse(self.out.exists())
@@ -208,7 +210,7 @@ class WhenEachAnswerWasWritten(_Store):
         """Breaks if an answer with no date is written: served, it would read as
         today's knowledge."""
         self.write("draft.md", "# Draft\n")
-        code, _, err = self.build()
+        code, _, err = _build(self)
         self.assertEqual(code, 1)
         self.assertIn("draft.md", err)
         self.assertFalse(self.out.exists())
@@ -232,10 +234,10 @@ class Determinism(_Store):
         for name in ("b", "a", "c"):
             self.write(f"{name}.md", f"# {name}\n")
         self.commit(FIRST)
-        self.build()
+        _build(self)
         first = self.out.read_bytes()
         self.out.unlink()
-        self.build()
+        _build(self)
         self.assertEqual(self.out.read_bytes(), first)
         self.assertEqual(list(json.loads(first)), ["a", "b", "c"])
 
