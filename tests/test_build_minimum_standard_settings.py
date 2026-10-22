@@ -27,9 +27,8 @@ REPO_BODY = {
 
 
 def refused(message: str, code: int = 1) -> subprocess.CalledProcessError:
-    """What `run_gh` raises for an HTTP error. Real `gh api` exits 1 and writes the JSON
-    body to stdout, which `run_gh` captures as `.output`; its `gh: ...` line goes to
-    stderr, which `run_gh` does not capture, so `.stderr` is None."""
+    """What `run_gh` raises for an HTTP error. Real `gh api` exits 1 with the JSON body
+    on stdout, which `run_gh` captures as `.output`."""
     return subprocess.CalledProcessError(
         code, ["gh", "api"], output=json.dumps({"message": message, "status": "404"})
     )
@@ -76,7 +75,7 @@ class TheSettingsSnapshot(SettingsIsolated):
             {
                 "repos/example-org/repo-a": REPO_BODY,
                 "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
+                "repos/example-org/repo-a/branches/main": {"name": "main", "protected": True},
             }
         )
         body = self.run_stage(gh)
@@ -94,58 +93,64 @@ class TheSettingsSnapshot(SettingsIsolated):
             },
         )
 
-    def test_a_forbidden_protection_call_is_unreadable_not_absent(self):
-        """Breaks if a 403 on branch protection reads as `absent`: a token without
-        admin would then report every repository as unprotected (Review Focus 2).
-        `archived` must still be recorded."""
-        self.declare("repo-a")
-        gh = Gh(
+    def branch(self, *, protected: object = None, omit: bool = False, error=None) -> Gh:
+        """A `gh` for repo-a whose default branch answers as given. The real response
+        (checked against `gh api repos/<org>/<repo>/branches/<branch>`) is the branch
+        object, with `protected` beside `name`, `commit` and `protection`."""
+        answer: object = error or {"name": "main", "commit": {"sha": "0" * 40}}
+        if isinstance(answer, dict) and not omit:
+            answer["protected"] = protected
+        return Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
                 "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/main/protection": refused(
-                    "Resource not accessible by integration (HTTP 403)"
-                ),
+                "repos/example-org/repo-a/branches/main": answer,
             }
         )
-        record = self.run_stage(gh)["repositories"]["repo-a"]
-        self.assertIs(record["archived"], False)
-        self.assertIsNone(record["branch_protection"])
-        self.assertEqual(record["unreadable"], ["branch_protection"])
+
+    def test_a_ruleset_protected_branch_is_present(self):
+        """Breaks if protection is read from anywhere that ignores rulesets: the classic
+        endpoint answers 'Branch not protected' for a ruleset-protected branch, and the
+        layer would report a protected branch as unprotected."""
+        self.declare("repo-a")
+        record = self.run_stage(self.branch(protected=True))["repositories"]["repo-a"]
+        self.assertEqual(record["branch_protection"], "present")
+        self.assertEqual(record["unreadable"], [])
 
     def test_an_unprotected_branch_is_absent(self):
-        """Breaks if GitHub's 'Branch not protected' 404 reads as unreadable: that is
-        the one answer that does show protection is missing."""
+        """Breaks if `protected: false` reads as present or unreadable: it is the one
+        answer that shows protection is missing."""
         self.declare("repo-a")
-        gh = Gh(
-            {
-                "repos/example-org/repo-a": REPO_BODY,
-                "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/main/protection": refused(
-                    "Branch not protected (HTTP 404)"
-                ),
-            }
-        )
-        record = self.run_stage(gh)["repositories"]["repo-a"]
+        record = self.run_stage(self.branch(protected=False))["repositories"]["repo-a"]
         self.assertEqual(record["branch_protection"], "absent")
         self.assertEqual(record["unreadable"], [])
 
-    def test_any_other_404_on_protection_is_unreadable(self):
-        """Breaks if every 404 reads as `absent`: a 404 also answers a token that
-        cannot see the repository at all, and that says nothing about protection."""
+    def test_a_missing_protected_field_is_unreadable_not_absent(self):
+        """Breaks if a branch object with no boolean `protected` (absent, null or a
+        string) reads as `absent`: a missing key is not a negative answer."""
         self.declare("repo-a")
-        gh = Gh(
-            {
-                "repos/example-org/repo-a": REPO_BODY,
-                "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/main/protection": refused(
-                    "Not Found (HTTP 404)"
-                ),
-            }
-        )
-        record = self.run_stage(gh)["repositories"]["repo-a"]
-        self.assertIsNone(record["branch_protection"])
-        self.assertEqual(record["unreadable"], ["branch_protection"])
+        for kwargs in ({"omit": True}, {"protected": None}, {"protected": "false"}):
+            with self.subTest(kwargs=kwargs):
+                record = self.run_stage(self.branch(**kwargs))["repositories"]["repo-a"]
+                self.assertIsNone(record["branch_protection"])
+                self.assertEqual(record["unreadable"], ["branch_protection"])
+
+    def test_a_refused_branch_call_is_unreadable_not_absent(self):
+        """Breaks if a 403 or 404 on the branch call reads as `absent` (Review Focus 2):
+        a token that cannot see the branch would report every repository unprotected.
+        `archived` must still be recorded."""
+        self.declare("repo-a")
+        for message in (
+            "Resource not accessible by integration (HTTP 403)",
+            "Branch not found (HTTP 404)",
+        ):
+            with self.subTest(message=message):
+                record = self.run_stage(self.branch(error=refused(message)))["repositories"][
+                    "repo-a"
+                ]
+                self.assertIs(record["archived"], False)
+                self.assertIsNone(record["branch_protection"])
+                self.assertEqual(record["unreadable"], ["branch_protection"])
 
     def test_secret_scanning_missing_from_security_and_analysis_is_unreadable(self):
         """Breaks if a repository body that omits `security_and_analysis` (which GitHub
@@ -156,7 +161,7 @@ class TheSettingsSnapshot(SettingsIsolated):
             {
                 "repos/example-org/repo-a": body,
                 "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/trunk/protection": {"url": "x"},
+                "repos/example-org/repo-a/branches/trunk": {"name": "trunk", "protected": True},
             }
         )
         record = self.run_stage(gh)["repositories"]["repo-a"]
@@ -207,7 +212,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         for name in ("repo-a", "repo-b"):
             answers[f"repos/example-org/{name}"] = REPO_BODY
             answers[f"repos/example-org/{name}/vulnerability-alerts"] = ""
-            answers[f"repos/example-org/{name}/branches/main/protection"] = {"url": "x"}
+            answers[f"repos/example-org/{name}/branches/main"] = {"name": "main", "protected": True}
         self.run_stage(Gh(answers))
         text = config.MINIMUM_STANDARD_SETTINGS_PATH.read_text(encoding="utf-8")
         body = json.loads(text)
@@ -242,7 +247,10 @@ class TheSettingsSnapshot(SettingsIsolated):
                     {
                         "repos/example-org/repo-a": REPO_BODY,
                         "repos/example-org/repo-a/vulnerability-alerts": refused(message),
-                        "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
+                        "repos/example-org/repo-a/branches/main": {
+                            "name": "main",
+                            "protected": True,
+                        },
                     }
                 )
                 record = self.run_stage(gh)["repositories"]["repo-a"]
@@ -258,7 +266,7 @@ class TheSettingsSnapshot(SettingsIsolated):
             {
                 "repos/example-org/repo-a": REPO_BODY,
                 "repos/example-org/repo-a/vulnerability-alerts": "",
-                "repos/example-org/repo-a/branches/main/protection": {"url": "x"},
+                "repos/example-org/repo-a/branches/main": {"name": "main", "protected": True},
             }
         )
         self.assertEqual(

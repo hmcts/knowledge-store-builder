@@ -39,37 +39,27 @@ FIELDS = (
     "secret_scanning",
 )
 
-# GitHub's own wording for a branch with no protection rule. A 404 also answers a
-# token that cannot see the repository, so the status alone cannot say "absent".
-NOT_PROTECTED = "Branch not protected"
-
 
 def _unread() -> dict:
     return {field: None for field in FIELDS}
 
 
-def _call(runner, path: str) -> tuple[dict | None, str]:
-    """(body, "") on success, (None, what the CLI said) when it refused or failed.
+def _call(runner, path: str) -> dict | None:
+    """The JSON object a `gh api` call returned, `{}` for an empty body (a 204), or
+    None when the CLI failed or answered with something else.
 
-    Observed against real `gh`: an HTTP error exits 1, with the JSON body
-    (`{"message": "Branch not protected", ...}`) on stdout and `gh: <message> (HTTP
-    404)` on stderr. `run_gh` captures only stdout, which lands on the exception's
-    `.output` and leaves `.stderr` None, so that is what the match must rely on;
-    `.stderr` is read as well for a runner that captures it.
+    A failure carries no meaning beyond "not read": GitHub answers 404 for a setting
+    that is off and for one the token cannot see, so no caller reads a status in it.
     """
     try:
         text = runner(["api", path])
-    except (subprocess.CalledProcessError, OSError) as error:
-        said = [
-            str(getattr(error, "stderr", None) or ""),
-            str(getattr(error, "output", None) or ""),
-        ]
-        return None, "\n".join(said)
+    except (subprocess.CalledProcessError, OSError):
+        return None
     try:
         body = json.loads(text) if text.strip() else {}
     except json.JSONDecodeError:
-        return None, ""
-    return (body, "") if isinstance(body, dict) else (None, "")
+        return None
+    return body if isinstance(body, dict) else None
 
 
 def _enabled(analysis: object, key: str) -> str | None:
@@ -82,7 +72,7 @@ def _enabled(analysis: object, key: str) -> str | None:
 def read_repository(runner, org: str, name: str) -> dict:
     """One repository's settings, with what could not be read named in `unreadable`."""
     record = _unread()
-    body, _ = _call(runner, f"repos/{org}/{name}")
+    body = _call(runner, f"repos/{org}/{name}")
     if body is not None:
         archived = body.get("archived")
         record["archived"] = archived if isinstance(archived, bool) else None
@@ -93,18 +83,18 @@ def read_repository(runner, org: str, name: str) -> dict:
     # Dependabot alerts have their own endpoint: 204 (an empty body) when on. A 404 is
     # GitHub's answer both for "off" and for "you cannot see this", so any failure is
     # unreadable and `disabled` is never guessed from it.
-    alerts, _ = _call(runner, f"repos/{org}/{name}/vulnerability-alerts")
+    alerts = _call(runner, f"repos/{org}/{name}/vulnerability-alerts")
     if alerts is not None:
         record["dependabot_alerts"] = "enabled"
+    # The branches API, not the classic protection endpoint: its `protected` field
+    # counts rulesets as well as classic rules, and the classic endpoint answers "not
+    # protected" for a branch a ruleset protects. Anything but a boolean is unread.
     branch = record["default_branch"]
     if branch is not None:
-        protection, said = _call(
-            runner, f"repos/{org}/{name}/branches/{quote(branch, safe='/')}/protection"
-        )
-        if protection is not None:
-            record["branch_protection"] = "present"
-        elif NOT_PROTECTED in said:
-            record["branch_protection"] = "absent"
+        found = _call(runner, f"repos/{org}/{name}/branches/{quote(branch, safe='/')}")
+        protected = found.get("protected") if found is not None else None
+        if isinstance(protected, bool):
+            record["branch_protection"] = "present" if protected else "absent"
     record["unreadable"] = sorted(field for field in FIELDS if record[field] is None)
     return record
 
