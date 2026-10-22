@@ -280,6 +280,8 @@ def usage() -> str:
         "",
         "Settings can also come from the environment: KSB_ROOT, KSB_GITHUB_ORG,",
         "KSB_TICKET_BROWSE_URL, KSB_EXPLORER_TITLE and others - see config.py.",
+        "A store commits its non-secret settings in config/knowledgestore.toml;",
+        "a variable already in the environment wins over the file.",
     ]
     return "\n".join(lines)
 
@@ -294,7 +296,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root")
     known, rest = parser.parse_known_args(argv)
     if known.root:
-        config.configure(root=known.root)
+        try:
+            config.configure(root=known.root)
+        except config.SettingsFileError as error:
+            print(f"knowledgestore: {error}", file=sys.stderr)
+            return 1
 
     if rest[:1] in (["--version"], ["-V"]):
         # Askable, because it was not. The skills are distributed separately from
@@ -325,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"interpreter {sys.executable}")
         print(f"package {Path(__file__).resolve().parent}")
         print(git_version.describe())
+        # Which committed settings were in force, by key: a build log then says
+        # whether the store's own settings reached the run. Never a value.
+        print(f"settings {config.describe_settings_file()}")
         return 0
 
     stage = rest[0] if rest else ""

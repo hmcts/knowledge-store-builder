@@ -76,22 +76,40 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    refuses when it is not a JSON object. See
    [The relationships layer](how-it-works.md#the-relationships-layer).
 
-   **Say how the estate's charts are found.** Set `KSB_UMBRELLA_REPOS` to the
-   repositories that republish other repositories' charts, comma-separated, and
-   `KSB_CHART_REPO_PATTERN` when the estate names chart repositories by a
-   convention such as `chart-{name}`. Without them, a chart defined in several
-   repositories resolves less well. The order they take part in is under
-   [The relationships layer](how-it-works.md#the-relationships-layer).
+   **Say how the estate's charts are found, in a committed file.** Put
+   `KSB_UMBRELLA_REPOS`, the repositories that republish other repositories'
+   charts (comma-separated), and `KSB_CHART_REPO_PATTERN`, when the estate
+   names chart repositories by a convention such as `chart-{name}`, in
+   `config/knowledgestore.toml` and commit it. Set in a shell instead, they are
+   lost by the next shell, and a rebuild without them still exits 0 while
+   leaving every consumer of those charts out of `dependents`. The order they
+   take part in is under
+   [The relationships layer](how-it-works.md#the-relationships-layer), and the
+   file's rules under
+   [Commit the store's settings](configuring-a-store.md#commit-the-stores-settings).
+
+   ```toml
+   # config/knowledgestore.toml
+   [settings]
+   KSB_STORE_ID = "<id>"
+   KSB_UMBRELLA_REPOS = "<wrapper-repo>"
+   KSB_CHART_REPO_PATTERN = "chart-{name}"
+   ```
+
+   Leave out `KSB_STORE_ID` when the clone has an `origin` remote, and either
+   chart setting the estate does not need. Then build:
 
    ```bash
-   export KSB_STORE_ID=<id>   # or give the clone an `origin` remote instead
-   export KSB_UMBRELLA_REPOS=<wrapper-repo>       # if any repository republishes others' charts
-   export KSB_CHART_REPO_PATTERN='chart-{name}'   # only if chart repositories follow a naming rule
-   knowledgestore relationships
+   knowledgestore relationships --strict
    knowledgestore source-urls
    knowledgestore index
    knowledgestore manifest
    ```
+
+   `relationships` ends with `N charts unresolved: declare KSB_UMBRELLA_REPOS
+   or KSB_CHART_REPO_PATTERN` while any chart is left unresolved, and
+   `--strict` makes that exit 1 after the layer is written. The manifest
+   records the count as `unresolved_conflicts` on the relationships layer.
 
    `source-urls` rewrites the committed graph, `graphify-out/graph.json` and
    `graph.json.gz`, adding to every node it can link a `url` pinned to the

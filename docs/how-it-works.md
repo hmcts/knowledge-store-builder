@@ -777,6 +777,9 @@ last by `knowledgestore manifest` and committed with the store.
   not recognised `!` with the reason beside it, and `knowledgestore status` names it
   on a `not recognised:` line, because consumers read it as absent until it is
   rebuilt with this library.
+  Its `unresolved_conflicts` counts the charts the layer left unresolved, across
+  every kind: `0` means every chart resolved, and `null` means the layer cannot
+  say - absent, not recognised, or written before the field existed (format 1.2).
 - **Present means a clone receives it.** Measured when the manifest is
   computed, from files git would commit: a path a `.gitignore` rule ignores does
   not count, and a directory counts when it holds at least one such file. A layer

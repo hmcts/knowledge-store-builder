@@ -9871,6 +9871,190 @@ MUTATIONS = (
             "test_skill_clone_block.RepairBlockTest.test_repair_restores_what_step_six_selects_to_a_cone_mode_clone",
         ),
     ),
+    Mutation(
+        "settings file: the store's file is never read",
+        "config.py",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = _load(SETTINGS_FILE_PATH)",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = {}, False, ()",
+        "#483: chart settings lived only in a shell, and a rebuild without them exited 0 "
+        "with every consumer of the unresolved charts missing from `dependents`",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileIsRefused.test_a_file_toml_cannot_read_is_refused",
+            "test_settings_file.TheFileIsRefused.test_a_key_outside_the_library_fails",
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: --root does not read the new root's file",
+        "config.py",
+        "        _adopt(at_root)\n",
+        "        _adopt(None)\n",
+        "`knowledgestore --root <store> relationships`, the way the guides run a stage, "
+        "would build without the store's committed settings - the #483 layer again",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: a key the last file set survives a new root",
+        "config.py",
+        '    reached = set(module["_FILE_VALUES"]) | set(at_root._FILE_VALUES)',
+        "    reached = set(at_root._FILE_VALUES)",
+        "a caller configuring two stores in one process builds the second with the "
+        "first one's settings",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+        ),
+    ),
+    Mutation(
+        "settings file: the file overrides the environment",
+        "config.py",
+        "    if name in os.environ:\n"
+        "        return os.environ[name]\n"
+        "    return _FILE_VALUES.get(name, default)",
+        "    if name in _FILE_VALUES:\n"
+        "        return _FILE_VALUES[name]\n"
+        "    return os.environ.get(name, default)",
+        "CI and a one-off override could no longer change a setting the store committed",
+        (
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_environment_overrides_the_file",
+        ),
+    ),
+    Mutation(
+        "settings file: an unknown key is accepted",
+        "config.py",
+        "    if key not in settings_keys():\n",
+        "    if False:\n",
+        "a misspelt setting is read and ignored, so the store builds the poorer layer "
+        "with a file that appears to prevent it",
+        ("test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",),
+    ),
+    Mutation(
+        "settings file: a secret-looking key is accepted",
+        "config.py",
+        "    if key.endswith(_SECRET_KEY_ENDINGS):\n",
+        "    if False:\n",
+        "`KSB_TRACKER_TOKEN` is a setting the library reads, so a committed tracker "
+        "token would be accepted and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a secret-shaped value is accepted",
+        "config.py",
+        "\n_check_values(SETTINGS_FILE_PATH, _FILE_VALUES)\n",
+        "\n",
+        "a token pasted under an innocent key is committed and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a value that is not a string is accepted",
+        "config.py",
+        "    if not isinstance(value, str):\n",
+        "    if False:\n",
+        '`KSB_UMBRELLA_REPOS = ["a"]` reaches a setting the environment only ever '
+        "gives a string, and the stage misreads it rather than the file being refused",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: a table outside [settings] is accepted",
+        "config.py",
+        '        if name != "settings":\n',
+        "        if False:\n",
+        "a setting written under the wrong table is read and ignored, so it is as absent "
+        "as one never written - the #483 layer with a file that appears to prevent it",
+        (
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: KSB_ROOT is accepted",
+        "config.py",
+        '    if key == "KSB_ROOT":\n',
+        "    if False:\n",
+        "the file would name a root nothing honours - the root is what says where the "
+        "file is - and the store would build somewhere the operator did not expect",
+        ("test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",),
+    ),
+    Mutation(
+        "settings file: the allowed keys miss annotated settings",
+        "config.py",
+        "        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:\n",
+        "        elif False:\n",
+        "a setting the derivation misses is one the file refuses as unknown although "
+        "the library reads it",
+        (
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
+    ),
+    Mutation(
+        "settings file: --version does not say which file was read",
+        "cli.py",
+        '        print(f"settings {config.describe_settings_file()}")\n',
+        "",
+        "a build log cannot say whether the store's committed settings were in force",
+        (
+            "test_settings_file.TheFileReadIsReported.test_a_store_without_the_file_says_so",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: no summary line",
+        "build_relationships.py",
+        "        lines.append(f\"{_plural(unresolved, 'chart')} unresolved: {DECLARE}\")\n",
+        "        pass\n",
+        "#483: the run exited 0 and nothing above the per-chart lines said the layer "
+        "was incomplete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: --strict cannot fail",
+        "build_relationships.py",
+        "    if arguments.strict and unresolved_charts(layer):\n",
+        "    if False:\n",
+        "a store's gate passes a layer that leaves consumers out of `dependents`",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: the manifest carries no count",
+        "store_manifest.py",
+        '        _relationships_unresolved(root) if layers["relationships"]["present"] else None\n',
+        "        None\n",
+        "#483: the manifest marked the incomplete layer recognised and said nothing "
+        "else, so a reader served partial `dependents` as complete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_a_layer_added_to_a_copy_of_the_shape_needs_a_minor_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_hash_alone_cannot_be_updated_without_a_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_matches_the_format_it_is_recorded_under",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_names_what_a_reader_depends_on",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+        ),
+    ),
 )
 
 

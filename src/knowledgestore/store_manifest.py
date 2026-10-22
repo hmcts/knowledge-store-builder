@@ -44,14 +44,15 @@ from pathlib import Path
 from . import __version__, config, io, provenance, telemetry
 from .git_env import git_env
 
-FORMAT: tuple[int, int] = (1, 1)
+# 1.2 added `layers.relationships.unresolved_conflicts`.
+FORMAT: tuple[int, int] = (1, 2)
 # The hash of the manifest's shape - every key path with its type, never a value -
 # as recorded under FORMAT. Change both together, never one: `tests/
 # test_manifest_format_guard.py` computes the shape and fails when it differs from
 # this, and says which bump it needs (minor for an added layer or field, major for a
 # removal, rename or type change). The shape is then added to
 # `tests/manifest_format_shapes.json` under the new FORMAT, and this is set to its hash.
-FORMAT_SHAPE = "09d8090fcae280045ab736919e80252c70fe3c78e40127f9541d235b8e89b952"
+FORMAT_SHAPE = "e72626e58b25968a9f7c63f451b26451c9416cec5c4b63af81967c15dcd235ed"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.
@@ -131,6 +132,7 @@ NOT_A_LAYER: dict[str, str] = {
     "FILTERS_PATH": "a hand-maintained input: repository filters",
     "QUESTIONS_PATH": "a hand-maintained input: the questions a store is asked",
     "REPOSITORIES_CONFIG": "a hand-maintained input: the repositories to build from",
+    "SETTINGS_FILE_PATH": "a hand-maintained input: the store's committed KSB_* settings",
     "STORE_EXTRA_LAYERS_PATH": "an input the manifest reads to list a store's own layers",
     "TOPICS_CONFIG_PATH": "a hand-maintained input: the topics to write about",
     "REQUIREMENTS_PATH": "a dependency pin, not store content",
@@ -577,6 +579,26 @@ def _relationships_recognised(root: Path) -> bool:
     )
 
 
+def _relationships_unresolved(root: Path) -> int | None:
+    """How many charts the layer left unresolved, across every kind, or None.
+
+    None when the layer cannot say - not recognised, written before the field, or
+    holding it in another shape - because 0 tells a reader the layer is complete,
+    and a reader serving partial `dependents` as complete is what this count is
+    for (#483).
+    """
+    if not _relationships_recognised(root):
+        return None
+    try:
+        body = io.read_json(root / RELATIONSHIPS_STAMP)
+    except (OSError, ValueError):
+        return None
+    conflicts = body.get("unresolved_conflicts") if isinstance(body, dict) else None
+    if not isinstance(conflicts, dict) or not all(isinstance(t, dict) for t in conflicts.values()):
+        return None
+    return sum(len(targets) for targets in conflicts.values())
+
+
 def compute(root: Path, run=run_git) -> dict:
     """The full manifest for the store at `root`."""
     store_id, github_org = store_identity(root, run)
@@ -590,6 +612,9 @@ def compute(root: Path, run=run_git) -> dict:
     # `None` with no layer: nothing was measured, so there is nothing to refuse.
     layers["relationships"]["recognised"] = (
         _relationships_recognised(root) if layers["relationships"]["present"] else None
+    )
+    layers["relationships"]["unresolved_conflicts"] = (
+        _relationships_unresolved(root) if layers["relationships"]["present"] else None
     )
     # Deployments are nodes inside the graph, so no file says whether the stage
     # added any; only the count it recorded can.
