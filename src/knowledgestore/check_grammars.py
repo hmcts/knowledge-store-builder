@@ -154,6 +154,15 @@ def graphify_file_list(interpreter: str, clone: Path, run: "Run | None" = None):
     return [clone / item for item in listed]
 
 
+def _bracket(pattern: str, start: int) -> "tuple[str, int]":
+    """A gitignore character class at `start` as a regex, and the index of its last character."""
+    close = pattern.find("]", start + 2)
+    if close == -1:
+        return re.escape("["), start
+    body = pattern[start + 1 : close]
+    return "[" + ("^" if body.startswith("!") else "") + body.lstrip("!") + "]", close
+
+
 def _glob_regex(pattern: str) -> str:
     """A gitignore glob as a regular expression over a `/`-separated relative path."""
     out = []
@@ -168,20 +177,11 @@ def _glob_regex(pattern: str) -> str:
             out.append(".*")
             i += 2
             continue
-        if char == "*":
-            out.append("[^/]*")
-        elif char == "?":
-            out.append("[^/]")
-        elif char == "[":
-            close = pattern.find("]", i + 2)
-            if close == -1:
-                out.append(re.escape(char))
-            else:
-                body = pattern[i + 1 : close]
-                out.append("[" + ("^" if body.startswith("!") else "") + body.lstrip("!") + "]")
-                i = close
+        if char == "[":
+            piece, i = _bracket(pattern, i)
+            out.append(piece)
         else:
-            out.append(re.escape(char))
+            out.append({"*": "[^/]*", "?": "[^/]"}.get(char) or re.escape(char))
         i += 1
     return "".join(out)
 
@@ -276,42 +276,38 @@ def clone_groups(
     return groups, methods
 
 
+def _identity(path: Path) -> Path:
+    """The file a path names, so two spellings of one file count once."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 def needing(files: "list[Path]") -> "dict[str, list[Path]]":
-    """The files each grammar is needed for, omitting grammars nothing needs."""
+    """The files each grammar is needed for, omitting grammars nothing needs.
+
+    Counted by distinct resolved path, not by entry: a content set can list a path
+    more than once, or reach one file through a symlink, and the count is a claim
+    about files.
+    """
     found: dict[str, list[Path]] = {}
     for grammar, (extensions, _module) in GRAMMARS.items():
-        wanted = [path for path in files if path.suffix.lower() in extensions]
+        matching = [path for path in files if path.suffix.lower() in extensions]
+        wanted = list({_identity(path): path for path in matching}.values())
         if wanted:
             found[grammar] = wanted
     return found
 
 
-def check(
-    groups: "dict[str, list[Path]]",
-    interpreter_for: "Callable[[str], tuple[str, str]]",
-    run: "Run | None" = None,
-    methods: "dict[str, str] | None" = None,
+def _describe(
+    counts: "dict[tuple[str, str, str, str], int]",
+    probed: "dict[tuple[str, str], bool]",
+    methods: "dict[str, str] | None",
 ) -> "tuple[list[str], list[str]]":
-    """(report lines, refusal lines). Refusal lines are empty when nothing is missing.
-
-    A probe is made once per interpreter and grammar, however many repositories
-    share it, and only for grammars some file in the group needs.
-    """
+    """The report and refusal lines for what was counted and what each probe answered."""
     report: list[str] = []
     refusals: list[str] = []
-    probed: dict[tuple[str, str], bool] = {}
-    counts: dict[tuple[str, str, str, str], int] = {}
-    for name, files in sorted(groups.items()):
-        interpreter, source = interpreter_for(name)
-        method = (methods or {}).get(name, "")
-        for grammar, wanted in needing(files).items():
-            key = (interpreter, grammar)
-            if key not in probed:
-                module = GRAMMARS[grammar][1]
-                probed[key] = has_module(interpreter, module, run)
-            counts[(interpreter, source, grammar, method)] = counts.get(
-                (interpreter, source, grammar, method), 0
-            ) + len(wanted)
     if not counts:
         used = sorted(set((methods or {}).values()))
         suffix = f" (file list: {'; '.join(used)})" if used else ""
@@ -332,6 +328,34 @@ def check(
                 f"{interpreter} ({source}){listed}. graphify would read them as nothing, with no "
                 f"error. Fix: {FIX}"
             )
+    return report, refusals
+
+
+def check(
+    groups: "dict[str, list[Path]]",
+    interpreter_for: "Callable[[str], tuple[str, str]]",
+    run: "Run | None" = None,
+    methods: "dict[str, str] | None" = None,
+) -> "tuple[list[str], list[str]]":
+    """(report lines, refusal lines). Refusal lines are empty when nothing is missing.
+
+    A probe is made once per interpreter and grammar, however many repositories
+    share it, and only for grammars some file in the group needs.
+    """
+    probed: dict[tuple[str, str], bool] = {}
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for name, files in sorted(groups.items()):
+        interpreter, source = interpreter_for(name)
+        method = (methods or {}).get(name, "")
+        for grammar, wanted in needing(files).items():
+            key = (interpreter, grammar)
+            if key not in probed:
+                module = GRAMMARS[grammar][1]
+                probed[key] = has_module(interpreter, module, run)
+            counts[(interpreter, source, grammar, method)] = counts.get(
+                (interpreter, source, grammar, method), 0
+            ) + len(wanted)
+    report, refusals = _describe(counts, probed, methods)
     return report, refusals
 
 
