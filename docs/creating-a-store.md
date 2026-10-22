@@ -446,7 +446,7 @@ Write the relationships layer, which records which repositories depend on which:
 
 ```bash
 export KSB_CHART_REPO_PATTERN='chart-{name}'   # optional: where a chart's repository is, by name
-export KSB_UMBRELLA_REPOS=charts-bundle         # optional: repositories that bundle others' charts
+export KSB_UMBRELLA_REPOS=charts-bundle         # optional: repositories that bundle or wrap others' charts
 knowledgestore relationships
 ```
 

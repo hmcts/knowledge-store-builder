@@ -775,8 +775,10 @@ graph. It prints one line per kind: edges, references, unresolved targets and
 skipped declarations. **Read the unresolved count**: those are dependencies the
 store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
 (for example `chart-{name}`) only when the estate names chart repositories by a
-rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle others' charts.
-A conflict (two clones publishing one chart, coordinate or package) is printed
+rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle or wrap others'
+charts. A chart two clones define, with neither setting to choose between them,
+is printed as a conflict and left unresolved, never guessed: name the wrapper or
+set the pattern. A Maven coordinate or npm package two clones publish is printed
 and resolved to the first by name. It exits 1 on a parser failure, an
 unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
 extra), and 2 when it cannot write. A store whose clones declare a

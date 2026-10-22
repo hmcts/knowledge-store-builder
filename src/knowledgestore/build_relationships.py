@@ -12,7 +12,8 @@ not hold is a finding, never an absence. Three outputs, under
 `knowledge/relationships/`:
 
 - `repository-dependencies.json`, every edge with both ends, the unresolved
-  targets by kind, and the conflicts;
+  targets by kind, the conflicts, and the charts several clones define that no
+  rule chooses between (`unresolved_conflicts`);
 - `kinds.json`, the counts per kind, small enough for a manifest to read;
 - `by-repo/<repo>.json`, one per clone: what it depends on and what depends on
   it, plus `extra` copied from `extra/<repo>.json` when the store writes one.
@@ -52,7 +53,7 @@ def _plural(count: int, word: str, plural: str = "") -> str:
 
 def report(layer: relationships.Layer) -> list[str]:
     """One line per kind - edges, references, unresolved and skipped - then the
-    conflicts and unreadable files, each named."""
+    conflicts, the unresolved conflicts and the unreadable files, each named."""
     lines = [
         f"Relationships: {_plural(len(layer.dependencies['edges']), 'edge')} between "
         f"{_plural(len(layer.by_repo), 'repository', 'repositories')}"
@@ -72,6 +73,13 @@ def report(layer: relationships.Layer) -> list[str]:
             lines.append(
                 f"  conflict: {kind} {target} is published by {', '.join(repos)}; "
                 f"resolved to {repos[0]}, the first by name"
+            )
+    for kind, targets in layer.unresolved_conflicts.items():
+        for target, repos in targets.items():
+            lines.append(
+                f"  conflict: {kind} {target} is defined by {', '.join(repos)}; left unresolved - "
+                "declare a wrapper in KSB_UMBRELLA_REPOS or name chart repositories with "
+                "KSB_CHART_REPO_PATTERN"
             )
     lines.extend(f"  unreadable: {path}" for path in layer.unreadable)
     return lines
