@@ -45,6 +45,11 @@ MANIFEST = "knowledge/store-manifest.json"
 RECONNECT = "reconnect the server with /mcp"
 NOT_LAUNCHED = "plugin does not launch the server"
 
+# An asker may hold this skill and a store's own skill at once, and both trigger on
+# a store question. Before stopping, the skill defers to a store skill that works.
+DEFER = "If this store's own plugin provides a skill for it, use that skill instead"
+DESCRIPTION_DEFER = "defer to a store's own skill"
+
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
@@ -99,6 +104,29 @@ def missing_server_message(text: str) -> str:
     """The fenced message the answering section tells the agent to give, or ""."""
     blocks = [b for b in fenced_blocks(section(text, ANSWERING)) if "uv" in b.split()]
     return blocks[0] if len(blocks) == 1 else ""
+
+
+def description(text: str) -> str:
+    """The front matter's `description:` value, or ""."""
+    if not text.startswith("---\n"):
+        return ""
+    front = text.split("---\n", 2)[1]
+    found = [line for line in front.splitlines() if line.startswith("description:")]
+    return found[0] if found else ""
+
+
+def defer_problems(text: str) -> list[str]:
+    """Whether the skill defers to a store's own skill before giving the stop message."""
+    problems = []
+    if DESCRIPTION_DEFER not in description(text):
+        problems.append("the description does not say to defer to a store's own skill")
+    flat = " ".join(section(text, ANSWERING).split())
+    message = " ".join(missing_server_message(text).split())
+    if DEFER not in flat:
+        problems.append("does not defer to a store's own skill before stopping")
+    elif message and flat.index(DEFER) > flat.index(message):
+        problems.append("defers to a store's own skill only after the stop message")
+    return problems
 
 
 def message_problems(message: str) -> list[str]:
@@ -171,8 +199,12 @@ class TheSkillUsesTheServerToolsTest(unittest.TestCase):
     def test_the_skill_says_what_to_do_without_the_server(self):
         """Breaks if the skill stops telling the asker that their store's plugin does
         not launch the server, what the maintainer does about it and that they need
-        `uv` - and so either fails without a word or falls back to reading files."""
+        `uv` - and so either fails without a word or falls back to reading files.
+
+        Also breaks if the skill stops deferring to a store's own skill first, so it
+        shadows a store skill that works with the stop message."""
         problems = message_problems(missing_server_message(self.skill))
+        problems += defer_problems(self.skill)
         self.assertEqual(problems, [], "; ".join(problems))
 
 
@@ -196,6 +228,11 @@ class TheseChecksCanFailTest(unittest.TestCase):
             with self.subTest(marker=marker):
                 forged = self.skill + f"\n```bash\n{marker}<argument>\n```\n"
                 self.assertEqual(len(file_reading_lines(forged)), 1)
+
+    def test_a_skill_that_does_not_defer_is_noticed(self):
+        self.assertEqual(defer_problems(self.skill), [], "precondition: the skill defers")
+        self.assertEqual(len(defer_problems(self.skill.replace(DEFER, "UNSET"))), 1)
+        self.assertEqual(len(defer_problems(self.skill.replace(DESCRIPTION_DEFER, "UNSET"))), 1)
 
     def test_only_the_first_column_names_a_tool(self):
         # Prose in the description column may mention a field in backticks; only

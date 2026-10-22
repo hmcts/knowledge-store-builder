@@ -52,14 +52,37 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    grammar, which would otherwise read those files as nothing with no error. See
    [Check the grammars before any store-owned AST route](creating-a-store.md#check-the-grammars-before-any-store-owned-ast-route).
 
-3. **Build the three layers the server reads**, with `manifest` last:
+3. **Build what the server reads**, in this order, with `manifest` last.
+
+   **Move your own per-repository fields first.** `relationships` rewrites every
+   `knowledge/relationships/by-repo/<repo>.json` whole, from the clones alone,
+   and removes the file of any repository no longer cloned. It never reads the
+   file it replaces, so a field your store wrote there, such as deployed
+   services, is lost without an error. Before the first run, move each
+   repository's own fields into `knowledge/relationships/extra/<repo>.json`, a
+   JSON object named after the clone directory. The stage copies that object,
+   uninterpreted, into the `extra` field of the repository's `by-repo` file, and
+   refuses when it is not a JSON object. See
+   [The relationships layer](how-it-works.md#the-relationships-layer).
 
    ```bash
    export KSB_STORE_ID=<id>   # or give the clone an `origin` remote instead
    knowledgestore relationships
+   knowledgestore source-urls
    knowledgestore index
    knowledgestore manifest
    ```
+
+   `source-urls` rewrites the committed graph, `graphify-out/graph.json` and
+   `graph.json.gz`, adding to every node it can link a `url` pinned to the
+   commit the store was built from. The server returns that `url` as written
+   and never builds one, so without it answers cite store-relative paths. It
+   reads the uncompressed `graph.json` (`gunzip -k graphify-out/graph.json.gz`
+   first if you only have the archive), `knowledge/provenance.json`, which
+   `knowledgestore sync` writes, and `config/repositories.txt`. It refuses,
+   writing nothing, when the provenance file is missing or records no
+   repository, or when the repository list is missing or configures none of the
+   graph's repositories.
 
    `manifest` refuses, writing nothing, when it can name the store from neither
    `KSB_STORE_ID` nor the repository name of the clone's `origin` remote. It
@@ -78,7 +101,7 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    ```bash
    git add .gitignore requirements.txt requirements.lock \
      knowledge/store-manifest.json knowledge/relationships/ \
-     knowledge/index/store.sqlite.gz
+     knowledge/index/store.sqlite.gz graphify-out/graph.json.gz
    ```
 
    GitHub refuses a file over 100 MB, which is why the compressed index is the

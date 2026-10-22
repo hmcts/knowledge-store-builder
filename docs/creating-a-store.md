@@ -879,6 +879,9 @@ repository name of the clone's `origin` remote.
   exits at start-up when it finds no registered clone or no
   `knowledge/store-manifest.json`, so an asker's clone needs the committed
   manifest. Run `knowledgestore manifest` as part of the build.
+- **Run `knowledgestore source-urls` before `index`.** The server returns each
+  node's `url` as the graph holds it and builds none, so a graph without them
+  gives answers that cite store-relative paths instead of pinned links.
 - **Askers need `uv`**, which provides `uvx`. The `knowledge-store` skill names
   it when it is missing.
 - **The server finds the clone** through `~/.config/knowledge-store/locations`,

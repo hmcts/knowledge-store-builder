@@ -1,6 +1,6 @@
 ---
 name: knowledge-store
-description: Answer questions from a committed knowledge store built by knowledge-store-builder — architecture, duplication, dependencies, user journeys, business intent, "which repo does X", "why does this exist" — through the knowledge-store MCP server's tools. Use whenever the working directory contains graphify-out/graph.json or graph.json.gz, or when the user invokes /knowledge-store. Finds or clones the store, checks it is current, and stops with instructions when the store's plugin does not launch the server.
+description: Answer questions from a committed knowledge store built by knowledge-store-builder — architecture, duplication, dependencies, user journeys, business intent, "which repo does X", "why does this exist" — through the knowledge-store MCP server's tools. Use whenever the working directory contains graphify-out/graph.json or graph.json.gz, or when the user invokes /knowledge-store. Finds or clones the store, checks it is current, and stops with instructions when the store's plugin does not launch the server. Where a store's own plugin installs a skill for that store, defer to a store's own skill rather than this one.
 ---
 
 # Querying a knowledge store
@@ -251,7 +251,13 @@ once, when it starts, and exits if the locations file lists none for this store
 or the clone holds no `knowledge/store-manifest.json`. So on first use the tools
 are often missing only because Step 1 had not yet registered the clone.
 
-**When no knowledge-store tools are available, stop.** In Claude Code, `/mcp`
+**When no knowledge-store tools are available, check for a store skill first.**
+If this store's own plugin provides a skill for it, use that skill instead; stop
+only when neither the server nor a store skill is available. An asker can hold
+this skill and a store's own skill at once, and both trigger on a question about
+that store, so stopping here would shadow a store skill that still answers.
+
+**When neither is available, stop.** In Claude Code, `/mcp`
 lists the servers, whether each started, and reconnects one that did not. Give
 the asker this message, and answer nothing from the store until the server runs:
 
