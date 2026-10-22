@@ -247,6 +247,7 @@ class Mutation:
 # Both store-id mutations stop every manifest being computed under the fixed test
 # id, so every manifest test observes them; one list keeps the two entries in step.
 _EVERY_MANIFEST_TEST = (
+    "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
     "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
     "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
     "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
@@ -295,6 +296,10 @@ _EVERY_MANIFEST_TEST = (
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_absent_layer_has_no_count",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
     "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
     "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
     "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -8304,6 +8309,7 @@ MUTATIONS = (
         "a reader that trusts `recognised` would parse a relationships layer written at a major this library cannot read",
         (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
         ),
     ),
     Mutation(
@@ -8639,6 +8645,7 @@ MUTATIONS = (
         "",
         "a store outside any repository has no rules to judge by and is described as it is on disk; refusing it would stop every unversioned build",
         (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
             "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
@@ -8670,6 +8677,9 @@ MUTATIONS = (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
             "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
             "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
             "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -9079,7 +9089,10 @@ MUTATIONS = (
         '_env_int("KSB_INDEX_WARN_MB", 90)',
         "90",
         "an operator's `KSB_INDEX_WARN_MB` is read and dropped, so the warning fires at the wrong size",
-        ("test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",),
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
     ),
     Mutation(
         "store index: a node with no repository is listed as a repository",
@@ -9338,7 +9351,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_a_declared_wrapper_between_two_applications_loses_both_charts",
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
             "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_no_summary_line_when_nothing_is_unresolved",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_0_when_every_chart_resolves",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9362,7 +9379,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_two_umbrellas_and_no_owner_leave_the_chart_unresolved",
             "test_build_relationships.ChartResolutionTest.test_two_definitions_are_left_unresolved_and_listed_not_guessed",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9732,10 +9753,14 @@ MUTATIONS = (
             "test_build_relationships.ChartResolutionTest.test_the_chart_is_part_of_the_aggregation_key",
             "test_build_relationships.MissingPyYamlTest.test_an_estate_with_no_release_builds_without_pyyaml",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
             "test_package_edges.ChartEstateTest.test_a_chart_is_in_the_estate_only_when_the_graph_holds_its_repository",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_chart_resolves_to_the_repository_that_provides_it",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9928,6 +9953,7 @@ MUTATIONS = (
             "test_build_relationships.StatusTest.test_status_reports_the_layer_or_that_it_is_not_built",
             "test_build_relationships.StatusTest.test_status_survives_a_pathologically_nested_kinds_file",
             "test_build_relationships.SvcATest.test_the_flat_edge_list_names_both_ends",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
         ),
     ),
     Mutation(
@@ -9971,6 +9997,8 @@ MUTATIONS = (
         (
             "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
             "test_store_manifest.EveryArtefactIsAccountedFor.test_the_excusal_list_holds_no_stale_or_contradictory_entry",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
             "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
             "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
