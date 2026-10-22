@@ -25,3 +25,4 @@
 --depth :: git
 --comments :: twg
 --store-id :: mcp-server
+--from :: uv

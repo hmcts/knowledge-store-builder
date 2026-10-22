@@ -1,7 +1,8 @@
 # Creating a knowledge store
 
-Build a committed snapshot of a repository estate that people can query with
-Claude Code, `graphify query` or a self-contained browser page. The pipeline
+Build a committed snapshot of a repository estate that people can query through
+the knowledge-store MCP server (which assistants use), `graphify query` or a
+self-contained browser page. The pipeline
 extracts code structure, specifications and commit history; the build skill
 adds evidence-grounded prose where deterministic extraction is not enough.
 
@@ -847,7 +848,48 @@ authored coverage remains and whether grounding checks passed.
 
 ### Add the server to the store plugin
 
-The step that declares the knowledge-store server in the store's plugin follows.
+Assistants answer a store's questions through the knowledge-store MCP server.
+Declare it in the store plugin so an asker's assistant launches it with no setup
+beyond the plugin. Create `<store-plugin>/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "knowledge-store": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.0",
+        "knowledge-store-mcp", "--store-id", "<id>"
+      ]
+    }
+  }
+}
+```
+
+Take `<id>` from the store's manifest, not from the plugin name:
+
+```bash
+jq -r .store.id knowledge/store-manifest.json
+```
+
+`knowledgestore manifest` writes that id, from `KSB_STORE_ID` or else the
+repository name of the clone's `origin` remote.
+
+- **Build and commit the manifest before you publish.** At v0.1.0 the server
+  exits at start-up when it finds no registered clone or no
+  `knowledge/store-manifest.json`, so an asker's clone needs the committed
+  manifest. Run `knowledgestore manifest` as part of the build.
+- **Askers need `uv`**, which provides `uvx`. The `knowledge-store` skill names
+  it when it is missing.
+- **The server finds the clone** through `~/.config/knowledge-store/locations`,
+  which the skill writes, or through the `KNOWLEDGE_STORE_PATH` environment
+  variable.
+- **To upgrade the server**, change the tag in `.mcp.json` and publish the
+  plugin. The tag is the only version a store pins.
+
+Setup for other clients, such as Claude Desktop and GitHub Copilot, is in the
+server's [front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors)
+section.
 
 ## Troubleshooting
 
