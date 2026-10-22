@@ -276,11 +276,25 @@ def clone_groups(
     return groups, methods
 
 
+def _identity(path: Path) -> Path:
+    """The file a path names, so two spellings of one file count once."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 def needing(files: "list[Path]") -> "dict[str, list[Path]]":
-    """The files each grammar is needed for, omitting grammars nothing needs."""
+    """The files each grammar is needed for, omitting grammars nothing needs.
+
+    Counted by distinct resolved path, not by entry: a content set can list a path
+    more than once, or reach one file through a symlink, and the count is a claim
+    about files.
+    """
     found: dict[str, list[Path]] = {}
     for grammar, (extensions, _module) in GRAMMARS.items():
-        wanted = [path for path in files if path.suffix.lower() in extensions]
+        matching = [path for path in files if path.suffix.lower() in extensions]
+        wanted = list({_identity(path): path for path in matching}.values())
         if wanted:
             found[grammar] = wanted
     return found

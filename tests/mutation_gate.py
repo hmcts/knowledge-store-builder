@@ -1872,6 +1872,27 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the grammar count is of entries, not files",
+        "check_grammars.py",
+        "        wanted = list({_identity(path): path for path in matching}.values())",
+        "        wanted = matching",
+        'a consuming store\'s detect file lists every code path twice, so the default mode reported roughly double the files that --clones did for the same store; "present for N file(s)" is a claim about files, and two modes disagreeing with no explanation reads as one of them being wrong',
+        (
+            "test_check_grammars.CheckGrammarsTest.test_a_content_set_listing_a_path_twice_counts_the_file_once",
+            "test_check_grammars.CheckGrammarsTest.test_a_symlinked_spelling_of_the_same_file_counts_once",
+        ),
+    ),
+    Mutation(
+        "the grammar count de-duplicates on spelling, not on the file",
+        "check_grammars.py",
+        "{_identity(path): path for path in matching}",
+        "{path: path for path in matching}",
+        "a symlinked alias reaches one file under two spellings, so keying on the path as written counts it twice while the resolved path counts it once - the corollary of the entry above",
+        (
+            "test_check_grammars.CheckGrammarsTest.test_a_symlinked_spelling_of_the_same_file_counts_once",
+        ),
+    ),
+    Mutation(
         "a repository that shrank is never named",
         "extract_ast.py",
         "    if before:",

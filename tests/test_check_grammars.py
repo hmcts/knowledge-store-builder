@@ -136,6 +136,27 @@ class CheckGrammarsTest(_Fixture, unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertIn(f"probed {python} (--interpreter)", out)
 
+    def test_a_content_set_listing_a_path_twice_counts_the_file_once(self):
+        """Catches counting entries rather than files: a doubled detect file reported 2x."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._content("repo-a", "a.tf")
+        self._content("repo-a", "a.tf")  # appends the same path again
+        code, _, err = run(["check-grammars", "--interpreter", python])
+        self.assertEqual(code, 1)
+        self.assertIn("missing for 1 file(s)", err)
+
+    def test_a_symlinked_spelling_of_the_same_file_counts_once(self):
+        """Catches deduplicating on the spelling of the path rather than the file it names."""
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        self._content("repo-a", "a.tf")
+        real = self.root / "repositories" / "repo-a" / "a.tf"
+        alias = self.root / "repositories" / "repo-a" / "alias.tf"
+        alias.symlink_to(real)
+        self._content("repo-a", "alias.tf")
+        code, _, err = run(["check-grammars", "--interpreter", python])
+        self.assertEqual(code, 1)
+        self.assertIn("missing for 1 file(s)", err)
+
     def test_no_hcl_files_means_no_hcl_probe(self):
         """Catches probing for a grammar nothing needs, which would refuse stores with no HCL."""
         python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
