@@ -7489,6 +7489,15 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "python -m knowledgestore loses the exit code",
+        "__main__.py",
+        "sys.exit(main())\n",
+        "main()\n",
+        "a store runs `<its python> -m knowledgestore` to pin the interpreter, as it "
+        "does for graphify; without the exit every refusal reads as success to its driver",
+        ("test_version.VersionTest.test_python_dash_m_runs_the_cli_and_returns_its_exit_code",),
+    ),
+    Mutation(
         "git floor: --version stops naming git",
         "cli.py",
         "        print(git_version.describe())\n",
