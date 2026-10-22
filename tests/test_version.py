@@ -40,6 +40,38 @@ class VersionTest(SettingsIsolated):
                 self.assertEqual(code, 0)
                 self.assertIn(version("hmcts-knowledge-store-builder"), out.getvalue())
 
+    def test_python_dash_m_runs_the_cli_and_returns_its_exit_code(self):
+        """Break it catches: deleting `__main__.py`, or dropping its `sys.exit`.
+
+        Stores run this library as `<their python> -m knowledgestore` to pin the
+        interpreter, as they do for graphify. Without the module that fails outright;
+        without the exit, every refusal would read as success to the caller.
+        """
+        import subprocess
+
+        src = str(Path(__file__).resolve().parents[1] / "src")
+        env = {**__import__("os").environ, "PYTHONPATH": src}
+        ok = subprocess.run(
+            [sys.executable, "-m", "knowledgestore", "--version"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(
+            ok.stdout.splitlines()[0],
+            f"knowledgestore {version('hmcts-knowledge-store-builder')}",
+        )
+        bad = subprocess.run(
+            [sys.executable, "-m", "knowledgestore", "no-such-stage"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertNotEqual(bad.returncode, 0)
+
     def test_the_first_line_is_the_version_alone_and_unchanged(self):
         """Break it catches: reformatting the line consumers already parse.
 
