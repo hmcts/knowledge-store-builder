@@ -2433,8 +2433,8 @@ MUTATIONS = (
     Mutation(
         "an unlocked unversioned requirement stops failing the stage",
         "check_install_docs.py",
-        "    if not unresolved and not unlocked:",
-        "    if not unresolved:",
+        "    if unresolved or unlocked:",
+        "    if unresolved:",
         "a requirement the lock does not pin is reported on stderr but the exit is 0 if only the pin half gates it, so the text scrolls past in a green run and nothing chains on it",
         (
             "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",

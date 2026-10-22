@@ -544,21 +544,37 @@ def _report_unresolved(requirements: Path, lock: Path) -> int:
         return 1
     unresolved = unresolved_pins(requirements, lock)
     unlocked = unlocked_requirements(requirements, lock)
-    if not unresolved and not unlocked:
-        if pinned:
-            print(
-                f"{lock.name} resolves every one of the {len(pinned)} pin(s) "
-                f"{requirements.name} states"
-            )
-        if unversioned:
-            locked = locked_versions(lock)
-            print(
-                f"{requirements.name} states no version for {len(unversioned)} requirement(s); "
-                f"{lock.name} is their pin:"
-            )
-            for name in unversioned:
-                print(f"  {name}: {lock.name} resolves it to {locked[name]}")
-        return 0
+    if unresolved or unlocked:
+        _print_disagreements(requirements, lock, unresolved, unlocked)
+        return 1
+    if pinned:
+        print(
+            f"{lock.name} resolves every one of the {len(pinned)} pin(s) {requirements.name} states"
+        )
+    _print_unversioned_resolved(requirements, lock, unversioned)
+    return 0
+
+
+def _print_unversioned_resolved(requirements: Path, lock: Path, unversioned: list[str]) -> None:
+    """Which version the lock resolved each unversioned requirement to."""
+    if not unversioned:
+        return
+    locked = locked_versions(lock)
+    print(
+        f"{requirements.name} states no version for {len(unversioned)} requirement(s); "
+        f"{lock.name} is their pin:"
+    )
+    for name in unversioned:
+        print(f"  {name}: {lock.name} resolves it to {locked[name]}")
+
+
+def _print_disagreements(
+    requirements: Path,
+    lock: Path,
+    unresolved: list[tuple[str, str, str | None]],
+    unlocked: list[str],
+) -> None:
+    """Both kinds of failure in one run, so fixing one does not hide the other."""
     if unresolved:
         print(
             f"{lock.name} does not deliver what {requirements.name} pins, and the lock is what"
@@ -589,7 +605,6 @@ def _report_unresolved(requirements: Path, lock: Path) -> int:
             f"{requirements.name} if a specific release is wanted.",
             file=sys.stderr,
         )
-    return 1
 
 
 def main() -> int:
