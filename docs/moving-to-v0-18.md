@@ -153,6 +153,8 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
 5. **Add the server to the store plugin.** Create the plugin's `.mcp.json` as
    [Add the server to the store plugin](creating-a-store.md#add-the-server-to-the-store-plugin)
    shows. Its `--store-id` is the manifest's `store.id`, not the plugin name.
+   Run `knowledgestore check-plugin` to confirm the id, the pinned tag and the
+   `uvx` launch agree before you publish.
 
 6. **Trim the store's own skill to routing and the estate's limits.** The server
    now carries the answering rules, so a store skill that restates how to read

@@ -1675,6 +1675,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1697,6 +1698,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1767,6 +1769,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
         ),
     ),
@@ -1793,10 +1796,101 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_pipeline_output_directory_and_git_are_not_counted",
             "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_graphify_decides_what_is_vendored",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore * crosses a path separator",
+        "check_grammars.py",
+        '"*": "[^/]*"',
+        '"*": ".*"',
+        "`docs/*.tf` names one directory's files; a star that crosses `/` also excludes `docs/deep/x.tf`, so the stage under-counts the .tf graphify will read and certifies an environment without checking them",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches a path separator",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "."',
+        "an anchored `x/a?b.tf` must not exclude `x/a/b.tf`; a question mark that matches `/` hides files in a different directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches more than one character",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "[^/]*"',
+        "`v?.tf` is exactly one character, so `v12.tf` stays counted; a question mark that behaves as a star drops it",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class is read as a positive one",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '""',
+        "`f[!abc].tf` excludes the names a class does not list; reading it as `[abc]` excludes the opposite set, so the count is of the wrong files",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class is always read as negated",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '"^"',
+        "`f[abc].tf` excludes the listed characters; reading every class as negated excludes everything else, the mirror of the defect above",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class keeps its ! as a member",
+        "check_grammars.py",
+        'body.lstrip("!")',
+        "body",
+        "the `!` marks the negation and is not a character of the class: left in, `f[!abc].tf` stops excluding `f!.tf`",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ raises",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'raise ValueError("unterminated class")',
+        "a stray `[` in a hand-written ignore file is an ordinary line, not a reason to abort the whole stage: git matches nothing for it, and so must the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ is read as a literal",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'return re.escape("["), start',
+        "git treats an unterminated `[` as a pattern that matches nothing; reading it as a literal `[` excludes a file git would keep, so the count drops a .tf that graphify reads",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class matches a path separator",
+        "check_grammars.py",
+        '"(?!/)[" +',
+        '"[" +',
+        "a class never matches `/` in git, so `x/f[!a]y.tf` keeps `x/f/y.tf`; a negated class that can match `/` hides files in a deeper directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
@@ -1805,7 +1899,10 @@ MUTATIONS = (
         "    for repository in declared:",
         "    for repository in [type('R', (), {'name': d.name}) for d in sorted(config.REPOSITORIES_DIR.iterdir())]:",
         "a directory under repositories/ that config/repositories.txt does not name is not a repository this store extracts; refusing on a stray clone's .tf teaches operators to ignore the refusal",
-        ("test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",),
+        (
+            "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
     ),
     Mutation(
         "--clones never asks graphify for its file list",
@@ -1855,6 +1952,7 @@ MUTATIONS = (
         "stores write vendor, PnP and symlink patterns into .graphifyignore; counting those files refuses on grammars graphify will never need",
         (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
@@ -2260,8 +2358,8 @@ MUTATIONS = (
     Mutation(
         "an extras-bearing pin silently stops being compared",
         "check_install_docs.py",
-        "(?:\\[[^\\]]*\\])?",
-        "",
+        "(?:\\[[^\\]]*\\])?==",
+        "==",
         "found by review: with the extras group deleted, `alpha[deploy]==1.2.3` matches "
         "nothing and the pin is not compared at all - and the test asserted an empty "
         "result, which is equally what agreement produces. An emptiness assertion "
@@ -2286,6 +2384,9 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2304,6 +2405,7 @@ MUTATIONS = (
         "having opened that input for correctness",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
@@ -2323,6 +2425,7 @@ MUTATIONS = (
         "missing the entry rather than holding a stale one",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
@@ -2343,6 +2446,10 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2353,7 +2460,7 @@ MUTATIONS = (
     Mutation(
         "an empty pin parse reads as a clean comparison",
         "check_install_docs.py",
-        "    if not pinned:",
+        "    if not pinned and not unversioned:",
         "    if False:",
         "#277, and the state that shipped: an empty result has two causes the code could "
         "not tell apart - every pin resolved, or no pin ever parsed - and the second "
@@ -2368,6 +2475,7 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
             "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
         ),
@@ -2386,6 +2494,48 @@ MUTATIONS = (
         "document installing from its lock at all, so naming what it read is the fix",
         (
             "test_check_install_docs.NothingToCompareTest.test_no_documented_install_is_not_reported_as_every_install_passing",
+        ),
+    ),
+    Mutation(
+        "an unversioned requirement the lock does not pin reads as resolved",
+        "check_install_docs.py",
+        "    return [name for name in unversioned_requirements(requirements) if name not in locked]",
+        "    return []",
+        "the reference layout names the library with no version and lets the lock be the pin, so a package the lock has dropped installs whatever the index serves while the input claims nothing is wrong; without this the stage passes for a requirement nothing pins",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+        ),
+    ),
+    Mutation(
+        "a bare package name stops being read as a requirement",
+        "check_install_docs.py",
+        '            found.add(_normalise(match.group("name")))\n    return sorted(found)',
+        "            pass\n    return sorted(found)",
+        "the same shape as an extras group dropped from the pin pattern: the parse stops matching and the result is empty, which reads as a store naming no package, so an unversioned store is refused again or an unlocked one passes",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "a store naming only unversioned packages is refused as comparing nothing",
+        "check_install_docs.py",
+        "    if not pinned and not unversioned:",
+        "    if not pinned:",
+        "the refusal was written for a parse that matched nothing; a named package is something to compare, so a store following the unversioned layout must not be sent to the nothing-to-compare message",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "an unlocked unversioned requirement stops failing the stage",
+        "check_install_docs.py",
+        "    if unresolved or unlocked:",
+        "    if unresolved:",
+        "a requirement the lock does not pin is reported on stderr but the exit is 0 if only the pin half gates it, so the text scrolls past in a green run and nothing chains on it",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
         ),
     ),
     Mutation(
@@ -10054,6 +10204,105 @@ MUTATIONS = (
             "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
             "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
         ),
+    ),
+    Mutation(
+        "check-plugin stops requiring the uvx command",
+        "check_plugin.py",
+        '    if server.get("command") != "uvx":',
+        "    if False:",
+        "#480: a plugin launching through any other command passes, and every asker's assistant fails to start the server",
+        ("test_check_plugin.PluginGateTest.test_a_command_other_than_uvx_fails",),
+    ),
+    Mutation(
+        "check-plugin accepts a floating ref as if it were a tag",
+        "check_plugin.py",
+        "_tag_key(source[len(prefix) :])):",
+        "source[len(prefix) :]):",
+        "#480: `@main` or `@latest` passes the pin check, so askers run a server nobody chose",
+        ("test_check_plugin.PluginGateTest.test_a_floating_or_missing_ref_fails",),
+    ),
+    Mutation(
+        "check-plugin stops comparing --store-id with the manifest",
+        "check_plugin.py",
+        "    elif declared != wanted:",
+        "    elif False:",
+        "#480: the wrong id passes and the failure shows only when an asker's assistant starts, naming a missing clone",
+        (
+            "test_check_plugin.PluginGateTest.test_a_store_id_that_differs_from_the_manifest_fails_naming_both",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops refusing a root .mcp.json",
+        "check_plugin.py",
+        "(root / MCP_JSON).exists()",
+        "False",
+        "#480: a root .mcp.json also loads as project configuration for anyone working in the repository",
+        (
+            "test_check_plugin.PluginGateTest.test_a_root_mcp_json_at_the_repository_root_fails_even_when_correct",
+        ),
+    ),
+    Mutation(
+        "check-plugin never reads the plugin.json declaration",
+        "check_plugin.py",
+        "        if manifest.is_file():",
+        "        if False:",
+        "#480: a store whose plugin root is the repository root declares the server in plugin.json, and is reported as declaring none",
+        (
+            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops warning about an older pinned tag",
+        "check_plugin.py",
+        "if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):",
+        "if False:",
+        "#480: a store pinned behind the documented tag is told nothing",
+        ("test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",),
+    ),
+    Mutation(
+        "check-plugin warns about a newer pinned tag instead of an older one",
+        "check_plugin.py",
+        "if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):",
+        "if _tag_key(tag) > _tag_key(DOCUMENTED_TAG):",
+        "#480: the comparison points the wrong way, so a store ahead of the library is nagged and one behind it is not",
+        (
+            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
+            "test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",
+        ),
+    ),
+    Mutation(
+        "check-plugin reports failures and exits 0",
+        "check_plugin.py",
+        '        return 1\n    print(f"{plugin}: launches',
+        '        return 0\n    print(f"{plugin}: launches',
+        "#480: the reasons scroll past in a green run and nothing chaining on the stage stops",
+        (
+            "test_check_plugin.PluginGateTest.test_a_command_other_than_uvx_fails",
+            "test_check_plugin.PluginGateTest.test_a_floating_or_missing_ref_fails",
+            "test_check_plugin.PluginGateTest.test_a_missing_manifest_fails_rather_than_passing_unchecked",
+            "test_check_plugin.PluginGateTest.test_a_missing_store_id_fails",
+            "test_check_plugin.PluginGateTest.test_a_root_mcp_json_at_the_repository_root_fails_even_when_correct",
+            "test_check_plugin.PluginGateTest.test_a_store_id_that_differs_from_the_manifest_fails_naming_both",
+            "test_check_plugin.PluginGateTest.test_no_declaration_at_all_fails",
+            "test_check_plugin.PluginGateTest.test_no_from_fails",
+            "test_check_plugin.PluginGateTest.test_no_knowledge_store_server_fails",
+        ),
+    ),
+    Mutation(
+        "check-plugin reads --store-id=value as absent",
+        "check_plugin.py",
+        'elif isinstance(argument, str) and argument.startswith(flag + "="):',
+        "elif False:",
+        "#480: a plugin writing the option with an equals sign is refused for omitting it",
+        ("test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",),
+    ),
+    Mutation(
+        "check-plugin accepts a launch with no --store-id",
+        "check_plugin.py",
+        "    if declared is None:",
+        "    if False:",
+        "#480: a server launched without a store id cannot resolve a clone and serves nothing",
+        ("test_check_plugin.PluginGateTest.test_a_missing_store_id_fails",),
     ),
 )
 

@@ -570,10 +570,13 @@ extras instead, and keeps that line until it chooses to move.
 deliberate re-lock and a rebuild, never a side effect of installing. Re-lock,
 commit the lock, then rebuild and review the diff of what the stages emit.
 
-`check-install-docs` compares the lock against the `==` pins in
-`requirements.txt` and refuses an input that states none, because a lock compared
-against nothing reports the same clean result as a lock that resolves
-everything. A store whose lock is not compiled from an input at all declares that
+`check-install-docs` accepts both forms. A requirement with no version passes
+when the lock pins that package, and the stage reports the version the lock
+resolved it to; one the lock does not pin fails, naming the package. An `==` pin
+is compared against the lock exactly, so a lock that resolves another version
+fails. The stage still refuses an input that names no package at all, because a
+lock compared against nothing reports the same clean result as a lock that
+resolves everything. A store whose lock is not compiled from an input at all declares that
 instead — see [A lock you maintain by hand](#a-lock-you-maintain-by-hand).
 
 Install `uv` if it is not already available. On macOS:
