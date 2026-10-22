@@ -544,23 +544,28 @@ Activate the store's environment:
 source .venv/bin/activate
 ```
 
-Do this only when deliberately moving a store to another library release. Find
-the version on the
-[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases),
-then change `X.Y.Z` in the store's pinned requirements file — `requirements.txt`
-in a store that follows the reference layout. Keep the exact `==` pin, so that
-rebuilding the store resolves the same versions it was built with —
-`check-install-docs` refuses rather than passing when the input states no `==`
-pin, because a lock compared against nothing reports the same clean result as a
-lock that resolves everything. A store whose lock is not compiled from an input
-at all declares that instead — see
-[A lock you maintain by hand](#a-lock-you-maintain-by-hand).
+Do this only when deliberately moving a store to another library release. A
+store that follows the reference layout names the library in `requirements.txt`
+with no version, and the lock is the pin: recompiling it, below, moves the store
+to the newest release. To hold a specific release instead, find the version on the
+[knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases)
+and write `==X.Y.Z` on the library line.
+`check-install-docs` accepts either. A requirement with no version passes when
+the lock pins that package, and the stage reports the version the lock resolved
+it to; one the lock does not pin fails, naming the package. An `==` pin is
+compared against the lock exactly, so a lock that resolves another version fails.
+The stage still refuses when the input names no package at all, because a lock
+compared against nothing reports the same clean result as a lock that resolves
+everything. A store whose lock is not compiled from an input at all declares
+that instead — see [A lock you maintain by hand](#a-lock-you-maintain-by-hand).
 
 ```text
 --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/
 --only-binary :all:
-hmcts-knowledge-store-builder==X.Y.Z
+hmcts-knowledge-store-builder[ast]
 ```
+
+With a pin it reads `hmcts-knowledge-store-builder[ast]==X.Y.Z`.
 
 Install `uv` if it is not already available. On macOS:
 
