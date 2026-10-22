@@ -305,14 +305,14 @@ class ClonesTest(_Fixture, unittest.TestCase):
         self.assertIn("missing for 1 file(s)", err)
 
     def test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would(self):
-        """Catches a glob form translated wrongly: `*` crossing `/`, `?` matching `/` or
-        more than one character, a class matching the wrong set, or a bad `[` raising.
+        """Catches a glob form translated wrongly: `*` crossing `/`, `?` or a class matching
+        `/`, `?` matching more than one character, a class matching the wrong set, or a bad
+        `[` raising or reading as a literal.
 
         Each case is its own clone, so the count is that pattern's alone. The expected
         counts are hand-derived from gitignore: a pattern without a `/` matches a name at
-        any depth, one with a `/` is anchored to the clone root. Every case but the last
-        agrees with `git check-ignore`; the unterminated `[` is the one place this
-        library follows graphify's literal reading, where git itself would never match.
+        any depth, one with a `/` is anchored to the clone root. Every case was confirmed
+        against `git check-ignore`.
         """
         python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
         cases = [
@@ -327,8 +327,11 @@ class ClonesTest(_Fixture, unittest.TestCase):
             ("f[abc].tf", ["fa.tf", "fb.tf", "fc.tf", "fd.tf", "fab.tf"], 2),
             # A negated class matches one character that is not listed.
             ("f[!abc].tf", ["fa.tf", "fd.tf", "fe.tf", "f!.tf", "fab.tf"], 2),
-            # An unterminated `[` is a literal `[`, not an error and not a class.
-            ("a[b.tf", ["a[b.tf", "ab.tf", "a.tf"], 2),
+            # A class never matches `/`, negated or not.
+            ("x/f[!a]y.tf", ["x/fby.tf", "x/f/y.tf"], 1),
+            # An unterminated `[` makes the pattern match nothing, as in git: not an error,
+            # not a class, and not a literal `[`.
+            ("a[b.tf", ["a[b.tf", "ab.tf", "a.tf"], 3),
         ]
         for index, (pattern, files, expected) in enumerate(cases):
             with self.subTest(pattern=pattern):

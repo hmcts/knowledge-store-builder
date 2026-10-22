@@ -1866,9 +1866,29 @@ MUTATIONS = (
     Mutation(
         "a graphifyignore unterminated [ raises",
         "check_grammars.py",
-        'return re.escape("["), start',
+        'return "(?!)", len(pattern)',
         'raise ValueError("unterminated class")',
-        "a stray `[` in a hand-written ignore file is an ordinary line, not a reason to abort the whole stage: it is read as a literal `[`",
+        "a stray `[` in a hand-written ignore file is an ordinary line, not a reason to abort the whole stage: git matches nothing for it, and so must the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ is read as a literal",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'return re.escape("["), start',
+        "git treats an unterminated `[` as a pattern that matches nothing; reading it as a literal `[` excludes a file git would keep, so the count drops a .tf that graphify reads",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class matches a path separator",
+        "check_grammars.py",
+        '"(?!/)[" +',
+        '"[" +',
+        "a class never matches `/` in git, so `x/f[!a]y.tf` keeps `x/f/y.tf`; a negated class that can match `/` hides files in a deeper directory from the count",
         (
             "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
