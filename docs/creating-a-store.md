@@ -866,6 +866,11 @@ beyond the plugin. Create `<store-plugin>/.mcp.json`:
 }
 ```
 
+When the plugin root is the store repository's root, put the same
+`mcpServers` object in `.claude-plugin/plugin.json` instead. A `.mcp.json` at a
+repository root also loads as project configuration for anyone working in that
+repository. `claude plugin validate` accepts either form.
+
 Take `<id>` from the store's manifest, not from the plugin name:
 
 ```bash
