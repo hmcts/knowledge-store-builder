@@ -38,6 +38,14 @@ class McpJsonExample(unittest.TestCase):
         for example in examples:
             self.assertEqual(example["mcpServers"]["knowledge-store"]["command"], "uvx")
 
+    def test_the_guide_shows_both_declaration_forms(self):
+        """Catches the guide dropping the plugin.json form, which is the one a
+        repository-rooted plugin needs, leaving only the `.mcp.json` a root plugin
+        must not create."""
+        examples = guide_examples()
+        self.assertTrue(any("name" in e for e in examples), "no plugin.json-shaped example")
+        self.assertTrue(any("name" not in e for e in examples), "no .mcp.json-shaped example")
+
     def test_the_example_pins_the_declared_tag(self):
         """Catches a tag bump in docs/mcp-server.txt that the example did not follow."""
         examples = guide_examples()

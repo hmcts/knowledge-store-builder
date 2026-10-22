@@ -890,7 +890,33 @@ authored coverage remains and whether grounding checks passed.
 
 Assistants answer a store's questions through the knowledge-store MCP server.
 Declare it in the store plugin so an asker's assistant launches it with no setup
-beyond the plugin. Create `<store-plugin>/.mcp.json`:
+beyond the plugin. Where you declare it depends on where the plugin lives.
+
+**The plugin root is the store repository's root (the usual case).** Declare the
+server inline as `mcpServers` in `.claude-plugin/plugin.json`, beside the
+plugin's own keys:
+
+```json
+{
+  "name": "<store-name>",
+  "description": "Questions about <the estate>, answered from the store.",
+  "author": { "name": "<owner>" },
+  "mcpServers": {
+    "knowledge-store": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.1",
+        "knowledge-store-mcp", "--store-id", "<id>"
+      ]
+    }
+  }
+}
+```
+
+Do not create a `.mcp.json` at the repository root: it also loads as project
+configuration for anyone working in the repository, and `check-plugin` refuses it.
+
+**The plugin lives in its own subdirectory.** Create `<store-plugin>/.mcp.json`:
 
 ```json
 {
@@ -906,10 +932,8 @@ beyond the plugin. Create `<store-plugin>/.mcp.json`:
 }
 ```
 
-When the plugin root is the store repository's root, put the same
-`mcpServers` object in `.claude-plugin/plugin.json` instead. A `.mcp.json` at a
-repository root also loads as project configuration for anyone working in that
-repository. `claude plugin validate` accepts either form.
+`claude plugin validate` accepts either form, and `knowledgestore check-plugin`
+reads either, so a store can verify the declaration before publishing.
 
 Take `<id>` from the store's manifest, not from the plugin name:
 
@@ -933,6 +957,13 @@ not an exact `knowledge-store-mcp` tag, `--store-id` is absent or differs from
 the manifest's `store.id`, or the plugin root is the repository root and a root
 `.mcp.json` exists. A pinned tag older than the one this guide documents is a
 warning. When everything agrees it prints the tag and the id and exits 0.
+
+It also reads the committed manifest. It fails when the manifest does not
+record the index and relationships layers as present, or the relationships layer
+as recognised, because the server then answers from a fallback or not at all; a
+layer recorded as `present: null` is a warning. When `KSB_STORE_ID` is set it
+must equal the manifest's `store.id`, or the next manifest build writes an id the
+plugin does not ask for.
 
 - **Build and commit the manifest before you publish.** At v0.1.0 the server
   exits at start-up when it finds no registered clone or no
