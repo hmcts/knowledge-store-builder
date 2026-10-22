@@ -105,8 +105,11 @@ class _Store(SettingsIsolated):
         return code, out.getvalue(), err.getvalue()
 
     def layer(self) -> dict:
+        """The layer a successful run wrote. A refused run fails the calling test,
+        raised rather than asserted so the helper is not read as a test itself."""
         code, _, err = self.build()
-        self.assertEqual(code, 0, err)
+        if code != 0:
+            raise self.failureException(f"answers-layer exited {code}: {err}")
         return json.loads(self.out.read_text(encoding="utf-8"))
 
 
