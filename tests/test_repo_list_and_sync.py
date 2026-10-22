@@ -554,6 +554,9 @@ class CliTest(SettingsIsolated):
                 # reads clones and provenance, never the graph; beside the stages
                 # whose module and chart edges it must agree with (#455)
                 "relationships",
+                # reads GitHub, not the clones; the evidence stage takes this
+                # snapshot rather than asking the network itself
+                "minimum-standard-settings",
                 # after every stage that adds nodes, so they are linked too, and
                 # before clustering, because it rewrites both graph files
                 "source-urls",

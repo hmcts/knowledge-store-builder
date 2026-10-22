@@ -8194,6 +8194,27 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "minimum standard settings: a refused protection call reads as absent",
+        "build_minimum_standard_settings.py",
+        "        elif NOT_PROTECTED in said:\n",
+        "        else:\n",
+        "a token without admin (403, or a 404 for a repository it cannot see) would report every branch as unprotected, turning no access into a finding against the team",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_a_forbidden_protection_call_is_unreadable_not_absent",
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_any_other_404_on_protection_is_unreadable",
+        ),
+    ),
+    Mutation(
+        "minimum standard settings: an unprotected branch reads as unreadable",
+        "build_minimum_standard_settings.py",
+        "        elif NOT_PROTECTED in said:\n",
+        "        elif False:\n",
+        "GitHub's 'Branch not protected' answer, the one that does show protection missing, would be recorded as unknowable and the point could never be `absent`",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_an_unprotected_branch_is_absent",
+        ),
+    ),
+    Mutation(
         "store manifest: the minimum standard stamp is not read",
         "store_manifest.py",
         '        _minimum_standard_recognised(root) if layers["minimum_standard"]["present"] else None\n',

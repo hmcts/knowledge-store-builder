@@ -461,6 +461,16 @@ without it the stage exits 1 and names the file. The
 [relationships layer](how-it-works.md#the-relationships-layer) lists the files it
 writes and the resolution order.
 
+To record the GitHub settings the build's token can read (archived, default branch,
+branch protection, secret scanning) for the minimum-standard layer, run:
+
+```bash
+knowledgestore minimum-standard-settings
+```
+
+It writes `knowledge/minimum-standard/github-settings.json` with the time it was
+read. A setting the token cannot read is recorded as unreadable, never as off.
+
 Then link every node to its file at the commit the store was built from:
 
 ```bash

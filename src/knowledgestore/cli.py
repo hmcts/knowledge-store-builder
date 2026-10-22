@@ -181,6 +181,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_relationships",
         "write which repositories reference which (modules, charts, artifacts, packages)",
     ),
+    "minimum-standard-settings": (
+        "build_minimum_standard_settings",
+        "snapshot the GitHub settings the build's token can read, for minimum-standard",
+    ),
     "source-urls": (
         "build_source_urls",
         "give each graph node a `url` to its file at the commit the store was built from",
