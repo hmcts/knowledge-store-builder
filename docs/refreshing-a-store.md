@@ -633,9 +633,12 @@ refresh:
 Compare node and edge counts before and after with the `extract-ast` summary,
 and run the extraction on one repository with Terraform first.
 
-A store pins a library release and installs graphify itself, so it can stay on
-its current graphify until it plans this. Nothing in the library checks the
-installed graphify version at runtime.
+A store takes graphify from the library's `[ast]` extra and does not pin it
+separately, so its compiled lock records the graphify it resolved. It stays on
+that graphify until the lock is recompiled, so plan this before you recompile.
+Nothing in the library checks the installed graphify version at runtime:
+`knowledgestore check-grammars` checks that the HCL and SQL grammars are
+present, not which graphify version is installed.
 
 ### A lock you maintain by hand
 

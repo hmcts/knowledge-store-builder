@@ -4,7 +4,7 @@ Two separate installs live here. Pick your row.
 
 | You want to | You need | Go to |
 |---|---|---|
-| Ask questions of a store someone else built | the plugin | [Use a store](#use-a-store) |
+| Ask questions of a store someone else built | the plugin, the store's own plugin and `uv` | [Use a store](#use-a-store) |
 | Build or refresh a store | the plugin **and** the library | [Build a store](#build-a-store) |
 
 For setup and explanation, see [Asking questions](docs/asking-questions.md),
@@ -21,11 +21,20 @@ For setup and explanation, see [Asking questions](docs/asking-questions.md),
 /reload-plugins
 ```
 
-Then ask in plain words. No Python, no `pip`: the one tool the query skill needs
-is the `graphify` CLI, and it installs that itself.
-
 `/reload-plugins` is not optional — without it the plugin is installed but
 inactive in the session you are in, which looks like a broken install.
+
+Install the store's own plugin too, as its README describes. It launches the
+knowledge-store server, and every answer comes from the server's tools. The
+server runs with `uv`:
+
+```bash
+uv --version             # if this fails: brew install uv (macOS)
+```
+
+Other platforms: [Installing uv](https://docs.astral.sh/uv/getting-started/installation/).
+Restart Claude Code, then ask in plain words. `/mcp` shows whether
+`knowledge-store` started.
 
 ### VS Code or JetBrains extension
 
@@ -50,8 +59,10 @@ available in the CLI, and the reverse.
 
 ### Cloud sessions and WSL
 
-- **WSL:** plugins are not available. Work inside a clone of the store instead —
-  a store ships its own skill, so it is picked up with nothing installed.
+- **WSL:** plugins are not available, so no plugin launches the server. Add the
+  knowledge-store server to Claude Code by hand, as the server's
+  [Claude Code and Claude Desktop](https://github.com/hmcts/knowledge-store-mcp#claude-code-and-claude-desktop)
+  section shows.
 - **Cloud sessions:** the plugin browser does not exist, and plugins installed on
   desktop do not carry over. Declare it in the repository's
   `.claude/settings.json`, which installs at session start:
@@ -73,7 +84,7 @@ Nothing to install, no network access.
 
 ```bash
 pip install graphifyy                    # or: uv tool install graphifyy
-gunzip -k graphify-out/graph.json.gz     # stores commit the graph compressed
+gunzip -kf graphify-out/graph.json.gz    # stores commit the graph compressed
 graphify query "<your question>"
 ```
 
@@ -88,8 +99,7 @@ instructions for a pipeline that has to exist on the machine:
 ```bash
 pip install --extra-index-url \
   https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
-  hmcts-knowledge-store-builder
-pip install graphifyy      # graph extraction
+  'hmcts-knowledge-store-builder[ast]'   # [ast] brings graphify
 gh auth status             # discovery needs an authenticated gh
 knowledgestore             # lists every stage in run order
 ```
@@ -147,6 +157,18 @@ clustered: graphify uses Leiden where `graspologic` is installed and Louvain whe
 it is not, and that choice re-keys every community — so `status` needs the record
 to tell an operator whose environment cannot reproduce the committed clustering.
 
+### Then the layers the server reads
+
+```bash
+export KSB_STORE_ID=<id>           # or give the store an `origin` remote
+knowledgestore relationships
+knowledgestore index
+knowledgestore manifest            # last: it measures what the others wrote
+```
+
+Then declare the server in the store plugin: see
+[Add the server to the store plugin](docs/creating-a-store.md#add-the-server-to-the-store-plugin).
+
 ### The AST layer, one repository at a time
 
 ```bash
@@ -203,11 +225,12 @@ build.
 | `marketplace add` says it already exists | `/plugin marketplace update knowledge-store-builder`, then reinstall |
 | A skill change you merged is not there | `add` does not re-fetch; run `marketplace update` |
 | `No matching distribution found` for the library | a lock compiled without `--emit-index-url` does not name the feed — pass `--extra-index-url`, or recompile (see [Refreshing a store](docs/refreshing-a-store.md#update-the-library-version)) |
+| `/mcp` lists no `knowledge-store`, or it failed | ask `/knowledge-store:knowledge-store`: it names whether `uv`, the store's plugin or the clone's registration is missing |
 | Terminal query fails on a missing file | you skipped the `gunzip` |
 | Graph operations refuse outright | raise `GRAPHIFY_MAX_GRAPH_BYTES` |
 | `remap` drops almost every summary | the graph is unclustered — check community coverage before remapping |
 
 Confirm a plugin install: `claude plugin details knowledge-store` lists
-**Skills (3)** by name, alongside the token cost it adds to each session. That
+**Skills (4)** by name, alongside the token cost it adds to each session. That
 needs the standalone CLI on your `PATH` — an IDE extension does not put it there,
 so in the extension use **Manage plugins** (`/plugins`) instead.
