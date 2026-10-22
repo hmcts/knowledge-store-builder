@@ -65,8 +65,17 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    refuses when it is not a JSON object. See
    [The relationships layer](how-it-works.md#the-relationships-layer).
 
+   **Say how the estate's charts are found.** Set `KSB_UMBRELLA_REPOS` to the
+   repositories that republish other repositories' charts, comma-separated, and
+   `KSB_CHART_REPO_PATTERN` when the estate names chart repositories by a
+   convention such as `chart-{name}`. Without them, a chart defined in several
+   repositories resolves less well. The order they take part in is under
+   [The relationships layer](how-it-works.md#the-relationships-layer).
+
    ```bash
    export KSB_STORE_ID=<id>   # or give the clone an `origin` remote instead
+   export KSB_UMBRELLA_REPOS=<wrapper-repo>       # if any repository republishes others' charts
+   export KSB_CHART_REPO_PATTERN='chart-{name}'   # only if chart repositories follow a naming rule
    knowledgestore relationships
    knowledgestore source-urls
    knowledgestore index
