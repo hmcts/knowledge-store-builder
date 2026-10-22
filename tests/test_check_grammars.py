@@ -304,6 +304,45 @@ class ClonesTest(_Fixture, unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("missing for 1 file(s)", err)
 
+    def test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would(self):
+        """Catches a glob form translated wrongly: `*` crossing `/`, `?` matching `/` or
+        more than one character, a class matching the wrong set, or a bad `[` raising.
+
+        Each case is its own clone, so the count is that pattern's alone. The expected
+        counts are hand-derived from gitignore: a pattern without a `/` matches a name at
+        any depth, one with a `/` is anchored to the clone root. Every case but the last
+        agrees with `git check-ignore`; the unterminated `[` is the one place this
+        library follows graphify's literal reading, where git itself would never match.
+        """
+        python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
+        cases = [
+            # `*` stays inside one path segment.
+            ("docs/*.tf", ["docs/x.tf", "docs/deep/x.tf", "other/x.tf"], 2),
+            # `*` may match nothing and applies at any depth when unanchored.
+            ("a*.tf", ["a.tf", "ab.tf", "sub/ax.tf", "b.tf", "a/b.tf"], 2),
+            # `?` is exactly one character, and never `/`.
+            ("v?.tf", ["v1.tf", "sub/vx.tf", "v.tf", "v12.tf"], 2),
+            ("x/a?b.tf", ["x/aXb.tf", "x/a/b.tf", "x/ab.tf"], 2),
+            # A class matches one listed character.
+            ("f[abc].tf", ["fa.tf", "fb.tf", "fc.tf", "fd.tf", "fab.tf"], 2),
+            # A negated class matches one character that is not listed.
+            ("f[!abc].tf", ["fa.tf", "fd.tf", "fe.tf", "f!.tf", "fab.tf"], 2),
+            # An unterminated `[` is a literal `[`, not an error and not a class.
+            ("a[b.tf", ["a[b.tf", "ab.tf", "a.tf"], 2),
+        ]
+        for index, (pattern, files, expected) in enumerate(cases):
+            with self.subTest(pattern=pattern):
+                repo = f"repo-{index}"
+                self._declare(repo)
+                for name in files:
+                    self._clone_file(repo, name)
+                (self.root / "repositories" / repo / ".graphifyignore").write_text(
+                    pattern + "\n", encoding="utf-8"
+                )
+                code, out, err = run(["check-grammars", "--clones", "--interpreter", python])
+                self.assertEqual(code, 1, out + err)
+                self.assertIn(f"missing for {expected} file(s)", err)
+
     def test_a_pipeline_output_directory_and_git_are_not_counted(self):
         """Catches the fallback counting .tf inside .git or the pipeline's own output."""
         python = self._interpreter("py-no-hcl", missing=("tree_sitter_hcl",))
