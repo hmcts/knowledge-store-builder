@@ -2260,8 +2260,8 @@ MUTATIONS = (
     Mutation(
         "an extras-bearing pin silently stops being compared",
         "check_install_docs.py",
-        "(?:\\[[^\\]]*\\])?",
-        "",
+        "(?:\\[[^\\]]*\\])?==",
+        "==",
         "found by review: with the extras group deleted, `alpha[deploy]==1.2.3` matches "
         "nothing and the pin is not compared at all - and the test asserted an empty "
         "result, which is equally what agreement produces. An emptiness assertion "
@@ -2286,6 +2286,9 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2304,6 +2307,7 @@ MUTATIONS = (
         "having opened that input for correctness",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
@@ -2323,6 +2327,7 @@ MUTATIONS = (
         "missing the entry rather than holding a stale one",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
@@ -2343,6 +2348,10 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2353,7 +2362,7 @@ MUTATIONS = (
     Mutation(
         "an empty pin parse reads as a clean comparison",
         "check_install_docs.py",
-        "    if not pinned:",
+        "    if not pinned and not unversioned:",
         "    if False:",
         "#277, and the state that shipped: an empty result has two causes the code could "
         "not tell apart - every pin resolved, or no pin ever parsed - and the second "
@@ -2368,6 +2377,7 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
             "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
         ),
@@ -2386,6 +2396,48 @@ MUTATIONS = (
         "document installing from its lock at all, so naming what it read is the fix",
         (
             "test_check_install_docs.NothingToCompareTest.test_no_documented_install_is_not_reported_as_every_install_passing",
+        ),
+    ),
+    Mutation(
+        "an unversioned requirement the lock does not pin reads as resolved",
+        "check_install_docs.py",
+        "    return [name for name in unversioned_requirements(requirements) if name not in locked]",
+        "    return []",
+        "the reference layout names the library with no version and lets the lock be the pin, so a package the lock has dropped installs whatever the index serves while the input claims nothing is wrong; without this the stage passes for a requirement nothing pins",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+        ),
+    ),
+    Mutation(
+        "a bare package name stops being read as a requirement",
+        "check_install_docs.py",
+        '            found.add(_normalise(match.group("name")))\n    return sorted(found)',
+        "            pass\n    return sorted(found)",
+        "the same shape as an extras group dropped from the pin pattern: the parse stops matching and the result is empty, which reads as a store naming no package, so an unversioned store is refused again or an unlocked one passes",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "a store naming only unversioned packages is refused as comparing nothing",
+        "check_install_docs.py",
+        "    if not pinned and not unversioned:",
+        "    if not pinned:",
+        "the refusal was written for a parse that matched nothing; a named package is something to compare, so a store following the unversioned layout must not be sent to the nothing-to-compare message",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "an unlocked unversioned requirement stops failing the stage",
+        "check_install_docs.py",
+        "    if unresolved or unlocked:",
+        "    if unresolved:",
+        "a requirement the lock does not pin is reported on stderr but the exit is 0 if only the pin half gates it, so the text scrolls past in a green run and nothing chains on it",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
         ),
     ),
     Mutation(

@@ -1680,7 +1680,7 @@ library declares:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.1",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }
