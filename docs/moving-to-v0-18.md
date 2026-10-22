@@ -93,6 +93,10 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    repository, or when the repository list is missing or configures none of the
    graph's repositories.
 
+   Until `relationships` has run, a relationships layer the store wrote itself
+   carries no format stamp. The manifest marks it present but not recognised,
+   and the server treats it as absent, so its dependency tools return nothing.
+
    `manifest` refuses, writing nothing, when it can name the store from neither
    `KSB_STORE_ID` nor the repository name of the clone's `origin` remote. It
    measures the files the other stages wrote, so run it after every stage that
