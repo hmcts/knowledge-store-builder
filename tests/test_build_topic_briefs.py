@@ -233,6 +233,45 @@ class MarkdownTest(SettingsIsolated):
         self.assertIn("&lt;script&gt;", html)
         self.assertNotIn("<script>", html)
 
+    def test_a_fence_with_a_language_keeps_its_lines_and_names_the_language(self):
+        """Breaks if a fenced block collapses into one paragraph, loses its blank
+        lines or indentation, or drops the language a highlighter keys on."""
+        html = briefs.markdown_to_html("```python\nx = 1\n\n    y = 2\n```\n")
+        self.assertEqual(html, '<pre><code class="language-python">x = 1\n\n    y = 2</code></pre>')
+
+    def test_a_fence_without_a_language_has_no_class(self):
+        """Breaks if a bare fence is given an empty or invented language class."""
+        self.assertEqual(briefs.markdown_to_html("```\na\n```"), "<pre><code>a</code></pre>")
+
+    def test_a_fence_escapes_its_content_and_renders_nothing_inside_it(self):
+        """Breaks if markup inside a fence reaches the page as markup - a `<script>`
+        in a code excerpt would run - or if bold, a heading or a list inside a
+        fence is rendered rather than shown as written."""
+        html = briefs.markdown_to_html(
+            "```\n<script>alert(1)</script>\n**bold** & `tick`\n# not a heading\n- not a list\n```\n"
+        )
+        self.assertEqual(
+            html,
+            "<pre><code>&lt;script&gt;alert(1)&lt;/script&gt;\n**bold** &amp; `tick`\n"
+            "# not a heading\n- not a list</code></pre>",
+        )
+
+    def test_a_language_that_is_not_a_plain_word_gets_no_class(self):
+        """Breaks if the text after the opening fence is written into an attribute,
+        where a quote would end it and let the rest become markup."""
+        html = briefs.markdown_to_html('```x" onmouseover="alert(1)\ncode\n```')
+        self.assertEqual(html, "<pre><code>code</code></pre>")
+
+    def test_an_unterminated_fence_runs_to_the_end_and_stays_escaped(self):
+        """Breaks if a fence with no closing line renders what follows it as
+        markup: everything after the opening fence is code to the end of input,
+        as CommonMark has it, and a paragraph before it closes at the fence."""
+        html = briefs.markdown_to_html("para\n```mermaid\ngraph TD\n# x <b>\n")
+        self.assertEqual(
+            html,
+            '<p>para</p><pre><code class="language-mermaid">graph TD\n# x &lt;b&gt;</code></pre>',
+        )
+
     def test_heading_depth_capped(self):
         html = briefs.markdown_to_html("##### Deep\n")
         self.assertIn("<h5>Deep</h5>", html)

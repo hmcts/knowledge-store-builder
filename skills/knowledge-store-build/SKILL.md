@@ -1491,8 +1491,8 @@ Brief structure that works:
 6. `**Sources:**` — the evidence basis and the graph-build-time caveat.
 
 Only a constrained markdown subset renders: headings, paragraphs, bold, inline
-code, flat bullet lists, pipe tables. No links, blockquotes, code fences or
-raw HTML.
+code, flat bullet lists, pipe tables and fenced code blocks (shown as written,
+nothing inside them rendered). No links, blockquotes or raw HTML.
 
 **Audit what you wrote.** Every ticket id, repository name and file path in a
 brief must appear in that topic's dossier. Check it mechanically — extract the
@@ -1530,7 +1530,7 @@ Write `docs/deep-dives/<repo>.md` from the bundle. Structure that works:
 7. `**Sources:**` — the bundle path and the graph-build caveat.
 
 Only the constrained markdown subset renders (headings, bold, inline code,
-flat bullets, pipe tables). Base every number on the bundle — never re-derive
+flat bullets, pipe tables, fenced code blocks). Base every number on the bundle — never re-derive
 figures by hand, and never soften them either.
 
 Then:

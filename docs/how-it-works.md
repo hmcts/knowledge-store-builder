@@ -793,7 +793,12 @@ last by `knowledgestore manifest` and committed with the store.
   with a path below the store root, a description and optionally
   `"kind": "answers"` for written answers a reader can serve alongside the
   library's. A path that is absolute or leaves the store is refused, as is a link
-  inside a layer that resolves outside it.
+  inside a layer that resolves outside it. An answers layer is one JSON file of
+  `{id: {title, html, source, as_of, commit}}`, which the server reads; a
+  directory is reported `not_read`. `knowledgestore answers-layer` writes that
+  file from a directory of Markdown. Written answers are point-in-time, so each
+  entry carries `as_of` - the front matter's `date:`, else the date of the last
+  commit to the file - and that commit's SHA, and a file with neither is refused.
 - **Freshness is the digest**, never a modification time: a clone and an
   identical rebuild move every mtime, so nothing here reads one. The top-level
   `digest` covers every layer, and `sources_as_of` is the newest commit date

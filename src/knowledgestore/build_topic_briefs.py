@@ -318,10 +318,33 @@ def _list_block(lines: list[str], i: int) -> tuple[str, int]:
     return "<ul>" + "".join(items) + "</ul>", i
 
 
+# A fence's language becomes a class attribute, so only a plain word is kept:
+# anything else could close the attribute and turn the rest into markup.
+_FENCE_LANGUAGE = re.compile(r"[A-Za-z0-9_+#.-]+")
+
+
+def _fence_block(lines: list[str], i: int) -> tuple[str, int]:
+    """A fenced code block, content escaped and nothing inside it rendered.
+
+    With no closing fence the block runs to the end of the input, as CommonMark
+    has it: the content is still escaped, so an unclosed fence cannot let what
+    follows it become markup.
+    """
+    language = lines[i].strip()[3:].strip()
+    i += 1
+    code = []
+    while i < len(lines) and not lines[i].strip().startswith("```"):
+        code.append(lines[i])
+        i += 1
+    attribute = f' class="language-{language}"' if _FENCE_LANGUAGE.fullmatch(language) else ""
+    body = html.escape("\n".join(code), quote=False)
+    return f"<pre><code{attribute}>{body}</code></pre>", i + 1
+
+
 def _paragraph_block(lines: list[str], i: int) -> tuple[str, int]:
     paragraph = [lines[i].strip()]
     i += 1
-    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||- )", lines[i].strip()):
+    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||- |```)", lines[i].strip()):
         paragraph.append(lines[i].strip())
         i += 1
     return f"<p>{_inline(' '.join(paragraph))}</p>", i
@@ -331,7 +354,7 @@ def markdown_to_html(markdown: str) -> str:
     """Render the constrained markdown subset briefs are written in.
 
     One block consumer per shape, each returning its html and the line it stopped
-    at, so this stays a dispatch loop rather than four interleaved scanners.
+    at, so this stays a dispatch loop rather than five interleaved scanners.
     """
     blocks: list[str] = []
     lines = markdown.splitlines()
@@ -341,7 +364,9 @@ def markdown_to_html(markdown: str) -> str:
         if not stripped:
             i += 1
             continue
-        if stripped.startswith("#"):
+        if stripped.startswith("```"):
+            html, i = _fence_block(lines, i)
+        elif stripped.startswith("#"):
             html, i = _heading_block(lines, i)
         elif stripped.startswith("|"):
             html, i = _table_block(lines, i)
