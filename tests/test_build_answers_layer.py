@@ -164,6 +164,20 @@ class OneEntryPerFile(_Store):
         self.assertIn("outside the store root", err)
         self.assertFalse(self.out.exists())
 
+    def test_files_that_are_not_markdown_are_named_as_skipped(self):
+        """Breaks if a store's other files are passed over in silence: a store
+        holding `.html` or `.json` answers would assume they were served."""
+        self.write("apply.md", "# Apply\n")
+        self.commit(FIRST)
+        code, out, _ = _build(self)
+        self.assertEqual(code, 0)
+        self.assertNotIn("skipped", out)
+        self.write("b.json", "{}")
+        self.write("a.html", "<p>x</p>")
+        code, out, _ = _build(self)
+        self.assertEqual(code, 0)
+        self.assertIn("skipped 2 non-Markdown file(s): a.html, b.json", out)
+
     def test_a_directory_with_no_markdown_is_refused(self):
         """Breaks if an empty or mistyped `--from` writes an empty layer, which the
         manifest would record as present and the server would serve as nothing."""

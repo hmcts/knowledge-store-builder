@@ -702,7 +702,10 @@ never the Markdown directory: the server reports a directory as `not_read`.
 
 Each `.md` file becomes one entry, keyed by its name without `.md`: its first
 heading as `title` (else the file name), the body rendered as `html` with the
-topic briefs' Markdown subset, and its store-relative path as `source`.
+topic briefs' Markdown subset, and its store-relative path as `source`. A
+fenced code block, such as a Mermaid diagram, is kept as written and escaped.
+The stage names any file in the directory that is not `.md`, because it is not
+served.
 
 Written answers are point-in-time, so every entry carries `as_of` and `commit`.
 `as_of` is the front matter's `date:` when the file has one, otherwise the date

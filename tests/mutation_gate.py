@@ -10245,6 +10245,83 @@ MUTATIONS = (
         "#480: a server launched without a store id cannot resolve a clone and serves nothing",
         ("test_check_plugin.PluginGateTest.test_a_missing_store_id_fails",),
     ),
+    Mutation(
+        "renderer: a fenced block is read as a paragraph",
+        "build_topic_briefs.py",
+        '        if stripped.startswith("```"):\n',
+        "        if False:\n",
+        "nine of fifteen findings in one store's answers used fences - Mermaid diagrams and code excerpts - and each collapsed into one paragraph",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_with_a_language_keeps_its_lines_and_names_the_language",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_without_a_language_has_no_class",
+            "test_build_topic_briefs.MarkdownTest.test_a_language_that_is_not_a_plain_word_gets_no_class",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: a fenced block's content is not escaped",
+        "build_topic_briefs.py",
+        '    body = html.escape("\\n".join(code), quote=False)\n',
+        '    body = "\\n".join(code)\n',
+        "a `<script>` in a code excerpt would reach a served answer and the explorer page as markup",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: a fenced block loses its newlines",
+        "build_topic_briefs.py",
+        '    body = html.escape("\\n".join(code), quote=False)\n',
+        '    body = html.escape(" ".join(code), quote=False)\n',
+        "a diagram or code excerpt would be served as one line, which neither a reader nor Mermaid can use",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_with_a_language_keeps_its_lines_and_names_the_language",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: any text after the fence becomes the language class",
+        "build_topic_briefs.py",
+        '    attribute = f\' class="language-{language}"\' if _FENCE_LANGUAGE.fullmatch(language) else ""\n',
+        '    attribute = f\' class="language-{language}"\' if language else ""\n',
+        "a quote after the opening fence would close the attribute and turn the rest of the line into markup",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_language_that_is_not_a_plain_word_gets_no_class",
+        ),
+    ),
+    Mutation(
+        "renderer: a paragraph runs on over a fence",
+        "build_topic_briefs.py",
+        '    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\\||- |```)", lines[i].strip()):\n',
+        '    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\\||- )", lines[i].strip()):\n',
+        "a fence written straight after a paragraph line, with no blank line, would be folded into the paragraph and rendered as prose",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "answers-layer: other files in the directory are skipped in silence",
+        "build_answers_layer.py",
+        "    if others:\n",
+        "    if False:\n",
+        "a store holding .html or .json answers beside its Markdown would assume they were served",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_files_that_are_not_markdown_are_named_as_skipped",
+        ),
+    ),
+    Mutation(
+        "answers-layer: Markdown files are reported as skipped",
+        "build_answers_layer.py",
+        ' and path.suffix != ".md"',
+        "",
+        "every run would report the answers it served as skipped, and the line would stop meaning anything",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_files_that_are_not_markdown_are_named_as_skipped",
+        ),
+    ),
 )
 
 

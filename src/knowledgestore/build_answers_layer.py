@@ -167,6 +167,16 @@ def build(source_dir: Path, run=run_git) -> tuple[dict[str, dict], list[str]]:
     return layer, problems
 
 
+def skipped(source_dir: Path) -> list[str]:
+    """The files under `source_dir` this stage does not read, relative to it."""
+    root = source_dir.resolve()
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix != ".md"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="knowledgestore answers-layer",
@@ -179,6 +189,11 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
     layer, problems = build(arguments.markdown)
+    others = skipped(arguments.markdown)
+    if others:
+        # Said, so a store holding `.html` or `.json` answers does not assume
+        # they are served.
+        print(f"skipped {len(others)} non-Markdown file(s): {', '.join(others)}")
     if problems:
         for problem in problems:
             print(f"refused - {problem}", file=sys.stderr)
