@@ -1675,6 +1675,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1697,6 +1698,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1767,6 +1769,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
         ),
     ),
@@ -1793,10 +1796,101 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_pipeline_output_directory_and_git_are_not_counted",
             "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_graphify_decides_what_is_vendored",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore * crosses a path separator",
+        "check_grammars.py",
+        '"*": "[^/]*"',
+        '"*": ".*"',
+        "`docs/*.tf` names one directory's files; a star that crosses `/` also excludes `docs/deep/x.tf`, so the stage under-counts the .tf graphify will read and certifies an environment without checking them",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches a path separator",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "."',
+        "an anchored `x/a?b.tf` must not exclude `x/a/b.tf`; a question mark that matches `/` hides files in a different directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches more than one character",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "[^/]*"',
+        "`v?.tf` is exactly one character, so `v12.tf` stays counted; a question mark that behaves as a star drops it",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class is read as a positive one",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '""',
+        "`f[!abc].tf` excludes the names a class does not list; reading it as `[abc]` excludes the opposite set, so the count is of the wrong files",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class is always read as negated",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '"^"',
+        "`f[abc].tf` excludes the listed characters; reading every class as negated excludes everything else, the mirror of the defect above",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class keeps its ! as a member",
+        "check_grammars.py",
+        'body.lstrip("!")',
+        "body",
+        "the `!` marks the negation and is not a character of the class: left in, `f[!abc].tf` stops excluding `f!.tf`",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ raises",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'raise ValueError("unterminated class")',
+        "a stray `[` in a hand-written ignore file is an ordinary line, not a reason to abort the whole stage: git matches nothing for it, and so must the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ is read as a literal",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'return re.escape("["), start',
+        "git treats an unterminated `[` as a pattern that matches nothing; reading it as a literal `[` excludes a file git would keep, so the count drops a .tf that graphify reads",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class matches a path separator",
+        "check_grammars.py",
+        '"(?!/)[" +',
+        '"[" +',
+        "a class never matches `/` in git, so `x/f[!a]y.tf` keeps `x/f/y.tf`; a negated class that can match `/` hides files in a deeper directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
@@ -1805,7 +1899,10 @@ MUTATIONS = (
         "    for repository in declared:",
         "    for repository in [type('R', (), {'name': d.name}) for d in sorted(config.REPOSITORIES_DIR.iterdir())]:",
         "a directory under repositories/ that config/repositories.txt does not name is not a repository this store extracts; refusing on a stray clone's .tf teaches operators to ignore the refusal",
-        ("test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",),
+        (
+            "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
     ),
     Mutation(
         "--clones never asks graphify for its file list",
@@ -1855,6 +1952,7 @@ MUTATIONS = (
         "stores write vendor, PnP and symlink patterns into .graphifyignore; counting those files refuses on grammars graphify will never need",
         (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
