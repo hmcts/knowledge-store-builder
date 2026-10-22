@@ -241,7 +241,7 @@ class SvcATest(_Store):
             [("svc-a", "tf-network", 1), ("svc-a", "tf-storage", 1), ("svc-c", "svc-a", 2)],
         )
         self.assertEqual(
-            layer.dependencies["format"], {"layer": "relationships", "major": 1, "minor": 0}
+            layer.dependencies["format"], {"layer": "relationships", "major": 1, "minor": 1}
         )
 
     def test_references_are_never_capped_by_the_example_limit(self):
@@ -430,9 +430,13 @@ class ChartResolutionTest(_HelmStore):
         )
         self.assertEqual(self.provider(layer, "app", "db"), "bundle")
 
-    def test_two_definitions_are_a_conflict_resolved_first_by_name(self):
-        """Break caught: a conflict silently picked, or picked by walk order rather
-        than by name so a rename elsewhere moves it."""
+    def test_two_definitions_are_left_unresolved_and_listed_not_guessed(self):
+        """Break caught (#475): a chart two non-umbrella clones define resolved to
+        the first by name, so a rename elsewhere moves every consumer of it and
+        nothing in the output marks the answer as a guess. It stays unresolved, is
+        listed under `unresolved_conflicts` with every candidate, and its reference
+        is counted as skipped `ambiguous` - not as a target outside the estate,
+        which it is not."""
         layer = self.helm(
             {
                 "app": {"Chart.yaml": _chart("app", "shared")},
@@ -440,9 +444,14 @@ class ChartResolutionTest(_HelmStore):
                 "a-charts": {"Chart.yaml": _chart("shared")},
             }
         )
-        self.assertEqual(self.provider(layer, "app", "shared"), "a-charts")
-        self.assertEqual(layer.conflicts, {"helm_chart": {"shared": ["a-charts", "b-charts"]}})
-        self.assertEqual(layer.dependencies["conflicts"], layer.conflicts)
+        self.assertIsNone(self.provider(layer, "app", "shared"))
+        self.assertEqual(
+            layer.unresolved_conflicts, {"helm_chart": {"shared": ["a-charts", "b-charts"]}}
+        )
+        self.assertEqual(layer.dependencies["unresolved_conflicts"], layer.unresolved_conflicts)
+        self.assertEqual(layer.conflicts, {})
+        self.assertEqual(layer.skipped["helm_chart"], {"ambiguous": 1})
+        self.assertEqual(layer.dependencies["unresolved_targets_outside_estate"]["helm_chart"], {})
 
     def test_an_undefined_chart_is_unresolved(self):
         """Break caught: step 5 dropped, so a chart from an outside repository
@@ -580,6 +589,193 @@ class SelfRuleTest(_HelmStore):
             layer.conflicts, {"maven_artifact": {"com.example:shared": ["a-shared", "multi"]}}
         )
         self.assertEqual(layer.skipped["maven_artifact"], {})
+
+
+# A wrapper repository republishing two applications' charts, each wrapper chart
+# depending on the application chart it wraps. `app-m` sorts between `app-a` and
+# `app-z`, so a name-order rule resolves `a` to the application and `z` to the
+# wrapper - the split #475 reports.
+WRAPPED_ESTATE = {
+    "app-a": {"Chart.yaml": _chart("a")},
+    "app-m": {"a/Chart.yaml": _chart("a", "a"), "z/Chart.yaml": _chart("z", "z")},
+    "app-z": {"Chart.yaml": _chart("z")},
+    "consumer": {"Chart.yaml": _chart("consumer", "a", "z")},
+}
+
+
+def _helm_edges(layer) -> list[tuple[str, str, str]]:
+    return [(e["consumer"], e["provider"], e["chart"]) for e in layer.dependencies["edges"]]
+
+
+class ChartPrecedenceTest(_HelmStore):
+    """#475: a chart several clones define resolves by a rule a store can predict -
+    the naming pattern, then the one clone that is not an umbrella, then an
+    umbrella - and otherwise stays unresolved rather than going to the first by
+    name. Steps 1-3 are the settings `KSB_CHART_REPO_PATTERN` and
+    `KSB_UMBRELLA_REPOS`; step 4 is what changed."""
+
+    def test_a_declared_wrapper_between_two_applications_loses_both_charts(self):
+        """Break caught: the umbrella step ignored, so `z` resolves to the wrapper
+        that sorts before its application, every consumer of `z` points at the
+        wrapper, and the wrapper's own dependency on `app-z` is dropped as a
+        self-reference."""
+        layer = self.helm(WRAPPED_ESTATE, umbrellas={"app-m"})
+        self.assertEqual(
+            _helm_edges(layer),
+            [
+                ("app-m", "app-a", "a"),
+                ("app-m", "app-z", "z"),
+                ("consumer", "app-a", "a"),
+                ("consumer", "app-z", "z"),
+            ],
+        )
+        self.assertEqual(layer.skipped["helm_chart"], {})
+        self.assertEqual(layer.unresolved_conflicts, {})
+
+    def test_an_undeclared_wrapper_leaves_both_charts_unresolved(self):
+        """Break caught: with nothing declared, the name order guessing - `a` to
+        `app-a` and `z` to the wrapper `app-m` - so half the applications' consumers
+        silently point at the wrapper. Every reference to either chart is counted
+        as `ambiguous` and both are listed."""
+        layer = self.helm(WRAPPED_ESTATE)
+        self.assertEqual(_helm_edges(layer), [])
+        self.assertEqual(
+            layer.unresolved_conflicts,
+            {"helm_chart": {"a": ["app-a", "app-m"], "z": ["app-m", "app-z"]}},
+        )
+        self.assertEqual(layer.skipped["helm_chart"], {"ambiguous": 4})
+
+    def test_the_chart_repository_the_pattern_names_wins_and_is_no_conflict(self):
+        """Break caught: step 1 skipped, so `chart-foo` and `foo-service` both
+        defining `foo` is a conflict nobody is asked to settle although the store's
+        naming rule settles it; or a chart the rule settles still listed as
+        unresolved."""
+        estate = {
+            "app": {"Chart.yaml": _chart("app", "foo")},
+            "chart-foo": {"Chart.yaml": _chart("foo")},
+            "foo-service": {"Chart.yaml": _chart("foo")},
+        }
+        layer = self.helm(estate, pattern="chart-{name}")
+        self.assertEqual(self.provider(layer, "app", "foo"), "chart-foo")
+        self.assertEqual(layer.unresolved_conflicts, {})
+        self.assertEqual(layer.conflicts, {})
+
+    def test_two_umbrellas_and_no_owner_leave_the_chart_unresolved(self):
+        """Break caught: step 3 taking the first of several umbrellas by name, the
+        same guess one level down."""
+        layer = self.helm(
+            {
+                "app": {"Chart.yaml": _chart("app", "db")},
+                "bundle-b": {"Chart.yaml": _chart("db")},
+                "bundle-a": {"Chart.yaml": _chart("db")},
+            },
+            umbrellas={"bundle-a", "bundle-b"},
+        )
+        self.assertIsNone(self.provider(layer, "app", "db"))
+        self.assertEqual(
+            layer.unresolved_conflicts, {"helm_chart": {"db": ["bundle-a", "bundle-b"]}}
+        )
+
+    def test_a_coordinate_two_clones_publish_still_resolves_first_by_name(self):
+        """Break caught: the chart rule applied to every kind, so a Maven
+        coordinate two clones publish - out of #475's scope - stops resolving."""
+        self.repos.mkdir()
+        _write(self.repos / "b-lib", {"pom.xml": _pom("lib", "")})
+        _write(self.repos / "a-lib", {"pom.xml": _pom("lib", "")})
+        _write(self.repos / "user", {"pom.xml": _pom("user", "lib")})
+        layer = self.build(kinds=(_kind("maven_artifact"),))
+        self.assertEqual([e["repository"] for e in layer.by_repo["user"]["depends_on"]], ["a-lib"])
+        self.assertEqual(
+            layer.conflicts, {"maven_artifact": {"com.example:lib": ["a-lib", "b-lib"]}}
+        )
+        self.assertEqual(layer.unresolved_conflicts, {})
+
+    def test_the_run_names_an_unresolved_chart_and_does_not_claim_a_choice(self):
+        """Break caught: the report line still saying the chart was resolved to
+        the first by name, when nothing was chosen."""
+        self.repos.mkdir()
+        for name, files in WRAPPED_ESTATE.items():
+            _write(self.repos / name, files)
+        code, out, err = self.run_stage()
+        self.assertEqual(code, 0, err)
+        self.assertIn(
+            "  conflict: helm_chart z is defined by app-m, app-z; left unresolved",
+            out,
+        )
+        self.assertNotIn("first by name", out)
+
+
+class NameOrderTest(_HelmStore):
+    """CLAUDE.md 1.3 and #475: with nothing declared, renaming a repository so it
+    sorts on the other side of another must not move a chart's resolution."""
+
+    def layer_files(self, names: dict[str, str]) -> dict[str, bytes]:
+        """The written layer for the wrapped estate with clones renamed by `names`,
+        with each new name mapped back to the old one, so two estates differing
+        only in names compare byte for byte."""
+        self.repos.mkdir(exist_ok=True)
+        for clone in list(self.repos.iterdir()):
+            shutil.rmtree(clone)
+        for name, files in WRAPPED_ESTATE.items():
+            _write(self.repos / names.get(name, name), files)
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 0, err)
+        found = {}
+        for rel, data in snapshot(self.root).items():
+            for old, new in names.items():
+                rel, data = rel.replace(new, old), data.replace(new.encode(), old.encode())
+            found[rel] = data
+        return found
+
+    def test_renaming_the_wrapper_past_an_application_changes_nothing(self):
+        """Break caught: a conflict resolved by name order. `app-m` and `zz-wrap`
+        sort on opposite sides of `app-z`, so a name-order rule sends `z` to the
+        wrapper in one estate and to the application in the other."""
+        before = self.layer_files({})
+        after = self.layer_files({"app-m": "zz-wrap"})
+        dependencies = "repository-dependencies.json"
+        for files in (before, after):
+            body = json.loads(files[dependencies])
+            # The candidate list is sorted by name, so a rename reorders it; the
+            # set of candidates is what must not move.
+            for targets in body["unresolved_conflicts"].values():
+                for target, repos in targets.items():
+                    targets[target] = sorted(repos)
+            files[dependencies] = relationships.dumps(body).encode()
+        self.assertEqual(before, after)
+        self.assertEqual(
+            json.loads(before[dependencies])["unresolved_conflicts"],
+            {"helm_chart": {"a": ["app-a", "app-m"], "z": ["app-m", "app-z"]}},
+        )
+
+
+class SshModuleSourceTest(_Store):
+    def test_the_bare_ssh_form_gives_the_same_edge_and_ref_as_the_https_form(self):
+        """Coverage for #475's comment, not a fix: `git@github.com:<org>/<repo>?ref=`
+        with no `git::` and no `.git` already resolved, and this pins it through the
+        layer - the edge, and the pin on it - beside the documented form."""
+        self.repos.mkdir()
+        _write(
+            self.repos / "consumer",
+            {
+                "ssh.tf": 'module "a" {\n  source = "git@github.com:org/mod-repo?ref=feature-x"\n}\n',
+                "https.tf": (
+                    'module "b" {\n'
+                    '  source = "git::https://github.com/org/mod-repo.git?ref=feature-x"\n'
+                    "}\n"
+                ),
+            },
+        )
+        _write(self.repos / "mod-repo", {"main.tf": 'variable "x" {}\n'})
+        layer = self.build(kinds=(_kind("terraform_module"),))
+        [edge] = layer.dependencies["edges"]
+        self.assertEqual(
+            (edge["consumer"], edge["provider"], edge["references"], edge["refs_pinned"]),
+            ("consumer", "mod-repo", 2, {"feature-x": 2}),
+        )
+        self.assertEqual(
+            layer.dependencies["unresolved_targets_outside_estate"]["terraform_module"], {}
+        )
 
 
 class OrgCheckTest(_Store):
@@ -1152,7 +1348,7 @@ class StageTest(_Store):
         written = self.root / "knowledge" / "relationships" / "repository-dependencies.json"
         first = written.read_bytes()
         self.assertEqual(
-            json.loads(first)["format"], {"layer": "relationships", "major": 1, "minor": 0}
+            json.loads(first)["format"], {"layer": "relationships", "major": 1, "minor": 1}
         )
         self.run_stage()
         self.assertEqual(written.read_bytes(), first)
