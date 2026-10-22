@@ -409,7 +409,7 @@ class TheSkillCarriesTheCitationRule(unittest.TestCase):
         alone, which in a single-root store is a `repositories/...` corpus path."""
         text = " ".join(self.SKILL.read_text(encoding="utf-8").split())
         self.assertIn("In an answer or an exported finding, cite a node's `url`", text)
-        self.assertIn("Build the form yourself only for a file no node names", text)
+        self.assertIn("never build one yourself", text)
         self.assertIn("https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>", text)
         self.assertIn("**Never cite `repositories/<repo>/...`**", text)
         self.assertNotIn("Cite `source_file` / `source_location` for specific claims", text)

@@ -1,21 +1,25 @@
 ---
 name: knowledge-store
-description: Query a committed knowledge store built by knowledge-store-builder — architecture, duplication, dependencies, user journeys, business intent, "which repo does X", "why does this exist". Use whenever the working directory contains graphify-out/graph.json or graph.json.gz, or when the user invokes /knowledge-store. Handles setup (decompressing the graph, installing the graphify CLI) automatically.
+description: Answer questions from a committed knowledge store built by knowledge-store-builder — architecture, duplication, dependencies, user journeys, business intent, "which repo does X", "why does this exist" — through the knowledge-store MCP server's tools. Use whenever the working directory contains graphify-out/graph.json or graph.json.gz, or when the user invokes /knowledge-store. Finds or clones the store, checks it is current, and stops with instructions when the store's plugin does not launch the server. Where a store's own plugin installs a skill for that store, defer to a store's own skill rather than this one.
 ---
 
 # Querying a knowledge store
 
 A knowledge store is a committed graph of a repository estate plus retrieval
 layers: business features from Gherkin, a file-to-ticket intent index,
-community summaries, and pre-written topic briefs. Everything needed is in the
-clone. **Never rebuild the store to answer a question** — the committed store
-is the product.
+community summaries, and pre-written topic briefs. The knowledge-store MCP
+server reads a local clone and answers through its tools; this skill finds the
+clone, keeps it current, and says how to read what the tools return. **Never
+rebuild the store to answer a question** — the committed store is the product.
 
 ## Step 1 — Locate the store
 
 A store is a repository: the graph and its retrieval layers are committed
 files, so they must be on disk. Work through this in order, and stay quiet
-about steps that were already satisfied.
+about steps that were already satisfied. Whichever step settles on the clone,
+finish with step 7: the knowledge-store server finds a clone through the file
+step 7 writes (or `KNOWLEDGE_STORE_PATH`), so a clone that is not listed there
+cannot be served unless that variable names it.
 
 **1. Is it here?** If the working directory contains `graphify-out/`, use it.
 
@@ -75,8 +79,10 @@ On a large estate this is the difference between tens and hundreds of
 megabytes. Someone who wants `explorer.html` in a browser needs a plain
 `git clone` instead — offer that if they mention the browser page.
 
-**7. Remember it, so this is asked once.** Append rather than overwrite: the
-file is a list, because a user may query more than one estate.
+**7. Register it, so this is asked once.** Do this for whichever clone steps 1
+to 6 settled on, not only a fresh one, and run it from inside that clone (`cd`
+there first). Append rather than overwrite: the file is a list, because a user
+may query more than one estate.
 
 ```bash
 mkdir -p ~/.config/knowledge-store
@@ -84,8 +90,10 @@ grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
   || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
 ```
 
-Mention that `KNOWLEDGE_STORE` in their shell profile pins a default, which is
-worth doing if they mostly query one estate.
+Mention that `KNOWLEDGE_STORE` in their shell profile pins a default for this
+skill, which is worth doing if they mostly query one estate. The server does not
+read `KNOWLEDGE_STORE`: it finds the clone through this file, by the store's id,
+or through `KNOWLEDGE_STORE_PATH` when that is set in its environment.
 
 ## Repair a clone with no graph
 
@@ -115,9 +123,7 @@ graph is on disk afterwards. On `REPAIR: failed`, show the asker the output and
 offer a fresh clone with step 6 into a new directory. Do not delete the old one:
 it may hold their work.
 
-## Step 2 — Prepare the store (run silently, only what is stale or missing)
-
-### Check freshness, once per session
+## Check freshness, once per session
 
 A clone goes stale silently, so check it once per session, after the store is
 found and before the first answer:
@@ -156,7 +162,7 @@ only then assumes `main`. It prints one line. Act on it:
 | `FRESHNESS: current` | Nothing, and say nothing. A clone ahead of its remote, such as a maintainer's, reports this too. |
 | `FRESHNESS: BEHIND <n>` | Say the store is `n` commits behind and offer the update below. Answering without updating is fine, but say the answer comes from a stale store. |
 | `FRESHNESS: DIVERGED` | The store's history was rewritten, for example squashed. Run the reset check below, and offer the reset only when it prints `safe`. |
-| `FRESHNESS: UNKNOWN <reason>` | Say freshness could not be checked, give the reason, and answer from disk. |
+| `FRESHNESS: UNKNOWN <reason>` | Say freshness could not be checked, give the reason, and answer from the clone as it is. |
 
 **Update**, when the asker agrees. It fast-forwards only, so it cannot discard
 anything:
@@ -175,7 +181,8 @@ BRANCH=${BRANCH:-main}
 git -C "$STORE" merge --ff-only --quiet "origin/$BRANCH"
 ```
 
-Then run the prepare block below, which decompresses the newer graph.
+The server reloads the store when its manifest changes, so the next tool call
+reads the update.
 
 **Check before offering a reset.** A hard reset to the remote discards
 uncommitted changes and local commits, so never offer it on `DIVERGED` alone.
@@ -211,9 +218,9 @@ fi
 ```
 
 - `RESET-CHECK: safe` — offer the reset below, and run it only when the asker
-  says yes. Then run the prepare block.
+  says yes.
 - `RESET-CHECK: refuse <reason>` — do not offer the reset. Give the asker the
-  reason, leave the clone as it is, and answer from disk, saying the store has
+  reason, leave the clone as it is, and answer from it, saying the store has
   diverged from its remote.
 
 ```bash
@@ -230,249 +237,167 @@ BRANCH=${BRANCH:-main}
 git -C "$STORE" reset --hard --quiet "origin/$BRANCH"
 ```
 
-### Decompress the graph and install the CLI
 
-```bash
-[ -f graphify-out/graph.json.gz ] \
-  && [ ! graphify-out/graph.json -nt graphify-out/graph.json.gz ] \
-  && gunzip -kf graphify-out/graph.json.gz
-command -v graphify >/dev/null 2>&1 \
-  || uv tool install graphifyy -q 2>/dev/null \
-  || pip install graphifyy -q
+## Step 2 — Answer through the knowledge-store tools
+
+**Answer only through the knowledge-store server's tools.** The server reads the
+clone Step 1 found and answers every assistant through the same tools under the
+same rules. Never read the store's files, decompress its graph, run `graphify`
+or search its corpus to answer: that is a second answering path with rules of
+its own.
+
+**Run Step 1 before checking for the tools.** The server looks for its clone
+once, when it starts, and exits if the locations file lists none for this store
+or the clone holds no `knowledge/store-manifest.json`. So on first use the tools
+are often missing only because Step 1 had not yet registered the clone.
+
+**When no knowledge-store tools are available, check for a store skill first.**
+If this store's own plugin provides a skill for it, use that skill instead; stop
+only when neither the server nor a store skill is available. An asker can hold
+this skill and a store's own skill at once, and both trigger on a question about
+that store, so stopping here would shadow a store skill that still answers.
+
+**When neither is available, stop.** In Claude Code, `/mcp`
+lists the servers, whether each started, and reconnects one that did not. Give
+the asker this message, and answer nothing from the store until the server runs:
+
+```text
+I cannot answer from this store: the knowledge-store server is not running
+here, and I never read files to answer instead. One of three things is wrong.
+
+1. The clone is not registered yet, or has no manifest. The server starts only
+   when ~/.config/knowledge-store/locations lists the clone and the clone holds
+   knowledge/store-manifest.json. Once the clone is registered, reconnect the
+   server with /mcp, or restart Claude Code. A clone with no manifest needs its
+   store's maintainer to publish one.
+2. The store's plugin does not launch the server yet. The store's maintainer
+   adds it:
+   https://github.com/hmcts/knowledge-store-builder/blob/main/docs/creating-a-store.md#add-the-server-to-the-store-plugin
+3. uv is not installed. The server runs with uv on your machine. If
+   `uv --version` fails in a terminal, install uv from
+   https://docs.astral.sh/uv/getting-started/installation/
+   and restart Claude Code.
 ```
 
-**Decompress when the archive is newer, not when the plain file is absent.**
-`graph.json` is gitignored and the `.gz` is committed, so `[ -f … ] ||` would
-decompress once and leave every later ask querying that first copy however old it
-had become. A `git pull` made it worse: it moves the `.gz` and leaves the stale
-plain file, so the step taken to get current data guaranteed stale data. `-f` is
-required, because without it `gunzip` refuses to overwrite.
+The maintainer's step is
+[Add the server to the store plugin](../../docs/creating-a-store.md#add-the-server-to-the-store-plugin).
 
-`graphify-out/GRAPH_REPORT.md` records the commit the graph was built from.
+Call `store_info` once per session, before the first answer: it confirms the
+server is serving this store, and says how current it is. Then pick the tool by
+the question:
 
-Querying needs no particular library version - a store is committed static files.
-If you do run a stage and it reports `unknown stage`, check
-`knowledgestore --version`: these skills ship separately from the library, so the
-two drift.
+| Tool | What it answers |
+|---|---|
+| `store_info` | How current the store is, which layers are present, and the commit each repository was built from. |
+| `find_repo` | Whether a repository is in the estate. A near miss is a different repository, offered as one and never answered about. |
+| `answers` | Answers the store has already written that match the query: topic briefs, deep dives and declared answer layers, each cited by its layer, id and source. Ask it first for an estate-level question. |
+| `search` | Graph nodes whose name matches the words, with repository, kind and pinned URL. Narrow by repository, or by kind for features and scenarios. |
+| `node` | One graph node by id, with its pinned URL. |
+| `neighbours` | What a node connects to, one or two hops either way, optionally along one relation. |
+| `community` | One community of the graph: its label, its written summary and its members. |
+| `repo_answer` | A repository's whole relationships file: what it depends on and what depends on it. |
+| `dependencies` | What a repository depends on, with pinned refs and example lines, then the targets outside the estate it references. |
+| `dependents` | What depends on a repository, with pinned refs and example lines. Walks dependents of dependents on request, and reports cycles. |
+| `tickets` | The tickets whose commits touched a repository or one file in it, landed and proposed kept apart. |
+| `ticket` | One ticket: whether it landed, its branches, its descriptions and commit text, and the files it touched. |
 
-**`graphify-out/GRAPH_REPORT.md` is only authoritative when it is current.** It
-is regenerated by a separate step from the graph, so a refresh can leave it
-describing the previous build, with node counts that disagree with the graph
-beside it. Quoting figures from a stale report is worse than quoting
-none, because the indirection makes a reader believe they checked the source.
-`knowledgestore status` says when it predates the graph (and `--verify-graph`
-compares the counts exactly, at the cost of loading the graph). If the pipeline
-is not installed, derive counts from `graph.json` rather than from the report.
+A list too long for one answer comes back paged: pass its `next_page` as
+`cursor` to read on.
 
-## Step 3 — Read the written answers first
+### Reading what the tools return
 
-Before traversing, check whether the question is already answered:
-
-- `docs/topics/` — topic briefs: analyst-grade answers to estate-level
-  questions, written from graph evidence and reviewed. If one covers the
-  question, answer from it and cite it.
-- `docs/deep-dives/` — evidence-grounded dossiers on individual repositories; if the question is about one repository's health, answer from its dive and cite it.
-- `docs/journeys/`, `docs/findings/` — narrative write-ups, where the estate
-  keeps them.
-- `knowledge_context.md` — how this particular estate should be interpreted.
-- `knowledge/relationships/by-repo/<repo>.json` — for a dependency question
-  about one repository ("what uses X", "what does X depend on", "which pin a
-  branch"). Read the file whole: `depends_on` and `depended_on_by` are complete
-  for every kind in `knowledge/relationships/kinds.json`, a store's own kinds
-  included. Each edge carries its pins (`refs_pinned`, with the floating ones
-  counted in `refs_unpinned`; `kinds.json`'s `pins` says what a pin is for each
-  kind) and cited example lines. A dependency
-  the store does not hold is listed in
-  `knowledge/relationships/repository-dependencies.json` under
-  `unresolved_targets_outside_estate`; say so rather than report no dependency.
-
-## Step 4 — Query the graph
-
-```bash
-graphify query "<the user's question>"     # breadth-first context
-graphify query "<question>" --dfs          # trace one path instead
-graphify path "ConceptA" "ConceptB"        # shortest path between two nodes
-graphify explain "NodeName"                # a node and its connections
-graphify affected "NodeName"               # reverse impact analysis
-graphify god-nodes --top 20                # most connected abstractions
-```
-
-`graphify-out/graph.json` is NetworkX node-link JSON (`nodes` + `links`), so
-Python one-liners are the right tool for aggregate questions — counts per
-repository, degree ranking, community sizes.
-
-### Interpretation rules
-
-- **Always say which repository a finding is in.** Usually that is the node's
-  `repo` attribute — but check rather than assume it is there. A store whose
-  graph was built by concatenating per-repository extractions instead of going
-  through `merge-graphs` may carry the repository under another name, or not at
-  all, and every consumer that reads `repo` then silently attributes findings to
-  nothing. A store may carry it under another field name, or not at all. Confirm with `graphify-out/graph.json` before relying on it.
-  **Do not re-derive the repository from `source_file`.** The two build routes
-  encode it differently and neither leading path component is a repository name:
-  the per-repository route makes `source_file` repo-relative, so it begins with a
-  source directory; the single-root route prefixes `repositories/<name>/`, so it
-  begins with the literal `repositories`.
-
-  When `repo` is missing, recover in this order and stop at the first that
-  applies:
-
-  1. **The id prefix**, if the id contains `::`. A merged graph relabels every
-     node `<tag>::<local_id>` and keeps the original in `local_id`, so this is
-     present exactly where `source_file` cannot help. But that prefix is a
-     **tag, not a repository name**: it comes from the input directory, and
-     colliding tags are widened with their parent (`frontend_src`) and then
-     index-suffixed to guarantee uniqueness. So it reliably **groups** nodes by
-     input graph, and cannot be trusted as the repository's name — labelling the
-     group with the tag turns a correct grouping into a wrong name. On a store
-     where no two inputs collide it equals `repo` for every node.
-  2. **The path**, if `source_file` begins `repositories/` — take the next
-     component.
-  3. **Otherwise refuse.** On a repo-relative graph with no `repo` attribute the
-     repository is not recoverable, and the honest answer is that the finding
-     cannot be attributed, not a guess.
+- **Cite exactly what a tool returned**: the pinned `url`, or the store-relative
+  path of a file committed in the store, as the result gives it.
+- In an answer or an exported finding, cite a node's `url` for specific claims.
+  It links the file at the commit the store was built from,
+  `https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>`. A node
+  without one was refused a link for a reason - another host, no recorded commit,
+  a path outside its repository - so cite its repository and repo-relative
+  `source_file` and say no link is available; never build one yourself.
+  **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
+  commits, so no reader can open it.
+- **Always say which repository a finding is in**, as the result gives it. Where
+  a result carries no repository, say the finding cannot be attributed; do not
+  derive one from a path or an id.
 - Same-named nodes in different repositories are **independent
   implementations** unless an edge connects them. This is the store's most
   valuable finding and the easiest to get wrong.
-- In an answer or an exported finding, cite a node's `url` for specific claims.
-  It links the file at the commit the store was built from,
-  `https://github.com/<org>/<repo>/blob/<provenance sha>/<path>#L<line>`, anchored
-  at the line `source_location` gives. In a store where nodes carry `url`, a node
-  without one was refused a link for a reason - another host, no recorded commit,
-  a path outside its repository - so cite its repository and repo-relative
-  `source_file` and say no link is available; do not build one. Build the form
-  yourself only for a file no node names (a corpus-search match), or in a store
-  where no node carries `url`, from the repository's github.com clone URL in
-  `config/repositories.txt` and its sha in `knowledge/provenance.json`.
-  `knowledgestore check-citations` fails a published link whose path that
-  repository's nodes do not hold, or whose sha is not that provenance sha - a
-  branch name or an abbreviated sha included - so a hand-built link is checked
-  like a copied one. A link to a corpus-search match, a path no node holds, is
-  checked in the repository's clone under `repositories/<name>/` at that sha: it
-  passes if the file is there and fails as `unknown file` if not. Where no clone is
-  present it is listed as unchecked, not failed. With no answer to read, the
-  stage exits 2, having asserted nothing; a gate chain that runs before the store
-  has published answers passes `--allow-none` to exit 0 with the same message.
-  **Never cite `repositories/<repo>/...`**: that is the build corpus, which no store
-  commits, so no reader can open it. Authored topic briefs and deep dives are not
-  answers: they keep file paths in backticks, which the page renderer links.
-- Answer only from what the graph returns. If the graph lacks it, say so.
+- A dependency on something the store does not hold comes back from
+  `dependencies` as a target outside the estate. Say so rather than report no
+  dependency.
+- Answer only from what the tools return. If they lack it, say so.
 - Absence of evidence is itself a finding — report it as one, **and say what was
-  searched**. A store is built from repositories discovered in one organisation on
-  one code host, so "there is no evidence of X" always means "no evidence of X in
-  what this store holds". The two are not the same, and conflating them
-  publishes false findings: a reference that does not resolve within the store
-  may resolve against something outside it. `knowledge/repository-manifest.md`
-  records the scope; cite it when reporting an absence, and say plainly that a
+  searched**, as an empty result's `searched` gives it. A store is built from
+  repositories discovered in one organisation on one code host, so "there is no
+  evidence of X" always means "no evidence of X in what this store holds", and a
   thing outside that scope would look identical.
-
-## Step 5 — Falling back to grepping the corpus
-
-The graph does not hold everything, so this fallback is legitimate. **Searching the
-raw tree is not.** Search the content set the pipeline computed:
-
-```bash
-tr '\n' '\0' < knowledge/corpus/content-files.txt \
-  | xargs -0 grep -nIs -- '<term>'
-```
-
-**`grep -r repositories/` is the wrong command.** The pipeline writes into the tree
-it reads, so `repositories/` holds each clone's own extraction cache and graph, its
-VCS pack files and any vendored dependency bundles, alongside the corpus. A naive
-recursive search sees many times as many files as the store considers content,
-and returns many matches inside caches, pack files and vendored bundles that
-nobody in the estate wrote.
-
-Three conditions, and each has a different correct response:
-
-- **The list is absent.** Say so and stop; do not substitute the tree. An operator
-  fixes it with `knowledgestore content-set`, and `knowledgestore status` reports
-  it either way.
-- **`repositories/` is absent.** Expected — the sparse clone in Step 1 does not
-  fetch the corpus, only the artefacts. The list still answers *what the store
-  considers content*, which is often the actual question ("is there any content
-  about X at all"). Say that no corpus is present rather than reporting no matches.
-- **The list is stale.** `status` says when it was built from a different detect
-  result than the one on disk. Report the finding and the staleness together.
-
-**A corpus grep is the weakest layer in the store, so name it.** It is raw text
-with no repository attribution and no relationship to any node — cite the file
-as a link (drop the `repositories/<repo>/` prefix and build the form in Step 4),
-say the match came from a text search rather than from the graph, and apply
-the same rule as everywhere else: absence in the content set means absence from
-what this store holds, not from the world.
+- **An absent layer is not an empty one.** When a result says a layer is absent,
+  or present in a format the server does not read, say the question cannot be
+  answered from it; do not answer "none".
 
 ## Business intent: "why does this code exist?"
 
 Two layers connect code to intent:
 
 1. **Gherkin features as nodes** (`metadata.kind: feature`, with
-   `metadata.format` naming the parser that read them), wired to their
-   scenarios, ticket nodes and the step definitions they exercise. Walk from a
-   component up to the behaviours it implements. A store built before kinds
-   became format-agnostic carries the older alias `gherkin_feature` on the same
-   nodes, so match either: a filter on one form alone returns a clean zero, and
-   a clean zero reads as an estate with no Gherkin in it.
-2. **The intent index** — which tickets' commits touched each file:
-
-   ```python
-   import gzip, json
-   index = json.load(gzip.open('knowledge/intent/file-tickets.json.gz', 'rt'))
-   entry = index['<repo>']['<source file>']
-   entry['tickets']             # work that landed on the default branch or a tag
-   entry.get('proposed', {})    # found on a branch, not confirmed on the default branch
-   ```
+   `metadata.format` naming the parser that read them). `search` with kind
+   `feature` or `scenario` finds them, and `neighbours` walks from a component up to the behaviours it
+   implements, through the scenarios, tickets and step definitions they are
+   wired to.
+2. **The intent index**: which tickets' commits touched each file. `tickets`
+   answers it for a repository or one file, as two lists kept apart: `landed`,
+   work that landed on the default branch or a tag, and `proposed`, found only
+   on a branch. When the result's `reach` is not `true`, its `reach_note` says
+   the landed list may hold branch work; say so with the answer.
 
    A ticket under `proposed` was found on a branch, and its work is not
    confirmed on the default branch. Say "proposed on branch X", using the
-   ticket's `branches` from `ticket-descriptions.json.gz`, and check the
-   checked-out code before saying what the code does or does not do: a squash
-   merge can land a branch's work without its commits. A ticket record carrying
-   `"proposed": true` has no confirmed landing anywhere in the estate. A file
-   touched only on a branch has an empty `tickets` and a filled `proposed`, and
-   a file's `first` and `last` span both its landed and its proposed commits.
+   ticket's `branches`, and check the graph with `search` or `node` before
+   saying what the code does or does not do: a squash merge can land a branch's
+   work without its commits. A ticket whose record says `proposed` is `true`
+   has no confirmed landing anywhere in the estate.
 
-   `ticket-descriptions.json.gz` holds, per ticket, three text views of what its
-   commits said (`d`, `s`, `b`), two more for a landed ticket's branch-only
-   commits (`ps`, `pb`), and two flags about where they were found:
+   `ticket` returns what the store's `ticket-descriptions.json.gz` holds for one
+   ticket - three text views of what its commits said, two more for a landed
+   ticket's branch-only commits, and two flags about where they were found -
+   under the server's own names:
 
-   | Field | What it is |
-   |---|---|
-   | `d` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
-   | `s` | up to three commit subjects as written, including the terse ones `d` filters out |
-   | `b` | up to two body-prose extracts, kept even where the subject was serviceable |
-   | `ps` | up to three subjects from a landed ticket's branch-only commits, kept out of `d` and `s` |
-   | `pb` | up to two body-prose extracts from a landed ticket's branch-only commits, kept out of `b` |
-   | `proposed` | `true` when no landed work names the ticket; omitted otherwise |
-   | `branches` | up to five branches the ticket's branch-only commits were found on, across every repository in `repos`, so check the branch exists in the file's repository; omitted when there are none |
+   | Record field | Returned as | What it is |
+   |---|---|---|
+   | `d` | `description` | up to two curated descriptions, most repeated first: the subject where it says something, otherwise the body's opening prose |
+   | `s` | `text.subjects` | up to three commit subjects as written, including the terse ones `d` filters out |
+   | `b` | `text.bodies` | up to two body-prose extracts, kept even where the subject was serviceable |
+   | `ps` | `text.branch_only_subjects` | up to three subjects from a landed ticket's branch-only commits, kept out of `d` and `s` |
+   | `pb` | `text.branch_only_bodies` | up to two body-prose extracts from a landed ticket's branch-only commits, kept out of `b` |
+   | `proposed` | `proposed` | `true` when no landed work names the ticket |
+   | `branches` | `branches` | up to five branches the ticket's branch-only commits were found on, across every repository in `repos`, so check the branch exists in the file's repository |
 
-   Every one of the five is a **list of strings**. Quote an element, never the
-   field: `record['d']` is a list, and printing it puts brackets and quotes into
-   an answer. `d` is always present and is `[]` on a ticket whose landed
-   commits offered nothing usable - such a ticket can still carry `ps` or `pb`,
-   so look there before saying its commits said nothing; `s` and `b` are each **omitted** when their own pool
-   is empty, so read those two with `.get(..., [])`. `ps` and `pb` are
-   **omitted** on a ticket with no branch-only text, and on a `proposed` ticket,
-   whose branch text is in `d`, `s` and `b` because it has no other. Text in
-   `ps` or `pb` is not confirmed on the default branch: say it came from a
-   branch-only commit, never quote it as what the ticket changed. Real tracker
-   titles, if imported, are in `ticket-titles.json.gz`.
+   Every one of the five text views is a **list of strings**. Quote an element,
+   never the list: printing the list puts brackets and quotes into an answer.
+   `d` is always present and is `[]` on a ticket whose landed commits offered
+   nothing usable - such a ticket can still carry `ps` or `pb`, so look there
+   before saying its commits said nothing; `s` and `b` are each **omitted**
+   from `text` when their own pool is empty. `ps` and `pb` are **omitted** on a
+   ticket with no branch-only text, and on a `proposed` ticket, whose branch
+   text is in `d`, `s` and `b` because it has no other. Text in `ps` or `pb` is
+   not confirmed on the default branch: say it came from a branch-only commit,
+   never quote it as what the ticket changed. The tools do not return tracker
+   titles, so say when no tracker title is available.
 
-Recipe: graph neighbourhood of X → linked features (business language) →
-intent-index tickets for X's source files → what their commits said. Read `d`
-first; go to `s` and `b` when it is empty or thin, because a ticket with no
-description can still have the author's own words. Quote the commit text you are
-using and say whether it was a subject or a body, and say so when no tracker
-title exists. **Never guess what a ticket was about.**
+Recipe: `search` for X → `neighbours` for its linked features (business
+language) → `tickets` for X's source files → `ticket` for what their commits
+said. Read the description first; go to the subjects and bodies when it is
+empty or thin, because a ticket with no description can still have the
+author's own words. Quote the commit text you are using and say whether it was
+a subject or a body. **Never guess what a ticket was about.**
 
 ## User journeys
 
 If an estate has E2E suites, its page objects and step definitions *are*
 scripted user journeys — their methods are the user's actions, in order.
-Anchor journey questions there (`graphify explain "<PageObjectName>"`), then
-map the owning feature module: routes and guards reveal preconditions,
-per-outcome containers reveal decision branches.
+Anchor journey questions there (`search` for the page object, then
+`neighbours`), then map the owning feature module: routes and guards reveal
+preconditions, per-outcome containers reveal decision branches.
 
 Write it up as: screens in order → decision branches → side journeys → E2E
 corroboration → what it connects onward to. State explicitly when screen order
@@ -482,19 +407,13 @@ worth keeping, offer to save it under `docs/journeys/`.
 ## Questions the graph cannot answer
 
 - **Per-commit history** ("when did this change, who changed it") is
-  deliberately outside the graph. Regenerate the datasets and query them:
-
-  ```bash
-  knowledgestore sync && knowledgestore export-history
-  jq -r 'select(.subject|test("<term>";"i")) | [.repository,.author_date,.subject] | @tsv' \
-    knowledge/git-history/*/commits.ndjson
-  ```
-
+  deliberately outside the store, and no tool answers it. Say so; the store's
+  maintainer can regenerate the history datasets from the build corpus.
 - **Runtime behaviour.** Edges are static relationships from source. The graph
   knows nothing about deployment, configuration or production.
-- **Recency.** When the question concerns recent changes, run `knowledgestore status --drift`
-  (if the pipeline is installed) and report concretely — "the store predates
-  9 commits to <repository>" — rather than a vague staleness caveat.
+- **Recency.** When the question concerns recent changes, report how current the
+  store is concretely, from `store_info`'s `stale_days` or any result's
+  `sources_as_of`, rather than as a vague staleness caveat.
 
 ## Honesty rules
 
@@ -511,16 +430,18 @@ worth keeping, offer to save it under `docs/journeys/`.
   acquires authority by claiming to have it.
 - **Say which layer answered**, because they differ in reliability: a committed
   brief or summary was LLM-authored against a specific build and goes stale
-  silently; nodes and edges are mechanical. When prose and graph disagree, the
-  graph wins and the prose is stale — say so rather than reconciling them.
+  silently; nodes and edges are mechanical. Every result names its layers in
+  `layers_used`. When prose and graph disagree, the graph wins and the prose is
+  stale — say so rather than reconciling them.
 - **Absence of evidence is a fact about the store's membership, not about the
   estate.** "No evidence of X" means "no evidence of X in the repositories this
-  store holds". Before reporting one, read the **Declared boundary** section of
-  `knowledge/repository-manifest.md` — it says which hosts were consulted, which
-  repositories the estate has ruled active, not used or decommissioned, and which
-  names are aliases of one another. Say which of the two claims you are making. A
-  store with no declared boundary makes every absence unexplained rather than a
-  decision, and the manifest says that too.
+  store holds". Say which of the two claims you are making. The store's declared
+  boundary - which hosts were consulted, which repositories the estate has ruled
+  active, not used or decommissioned, and which names are aliases of one
+  another - is in the **Declared boundary** section of
+  `knowledge/repository-manifest.md`; the tools do not return it, so point the
+  asker there when an absence turns on it. A store with no declared boundary
+  makes every absence unexplained rather than a decision.
 - Never invent nodes, edges or tickets.
 - Distinguish what the graph shows from what you infer from it, in the answer.
 - Say when evidence is thin rather than filling the gap from general knowledge

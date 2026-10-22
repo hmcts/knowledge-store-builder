@@ -10,7 +10,7 @@ answer from sources that were not included in the store.
 
 | Route | What you need | What it provides |
 |---|---|---|
-| Claude Code | The Knowledge Store plugin | Evidence-backed answers in ordinary language, including questions that need several store layers |
+| Claude Code | The Knowledge Store plugin, the store's own plugin and `uv` | Evidence-backed answers in ordinary language, including questions that need several store layers. The store's plugin launches the knowledge-store server and every answer comes from the server's tools |
 | `graphify-out/explorer.html` | A browser | Search and basic answers from a self-contained page |
 | `graphify query` | A terminal and the `graphify` CLI | Graph results for a question written in ordinary language |
 | GitHub Copilot or another MCP client | The knowledge-store MCP server | The same cited answers, in the assistant you already use; see [Use another assistant](#use-another-assistant-github-copilot-a-hosted-agent) |
@@ -19,10 +19,19 @@ For a command-only reference, see [CHEATSHEET.md](../CHEATSHEET.md).
 
 ## Ask with Claude Code
 
+Three parts work together. The store's own plugin launches the knowledge-store
+MCP server, the `knowledge-store` skill finds your clone of the store and keeps
+it current, and every answer comes from the server's tools. The skill never
+reads the store's files to answer, so a store whose plugin does not launch the
+server yet gives no answers, and the skill says what is missing. Moving from
+v0.17: see [For askers](moving-to-v0-18.md#for-askers).
+
 ### Install the plugin
 
-This route needs no Python or `pip`. The query skill installs the `graphify` CLI
-on first use if it is not already available.
+This route needs `uv`, which runs the server on your machine. If `uv --version`
+fails, install it from
+[Installing uv](https://docs.astral.sh/uv/getting-started/installation/)
+(`brew install uv` on macOS).
 
 Run these commands in Claude Code in a terminal:
 
@@ -47,6 +56,13 @@ on the **Marketplaces** tab, then install `knowledge-store` from the **Plugins**
 tab. The extension exposes only a subset of Claude Code's commands, so the three
 commands above are not all available there. What you configure either way is
 shared: plugins added in the extension are available in the CLI, and the reverse.
+
+Install the store's own plugin as well, as the store's README describes.
+It is the plugin that launches the server for that store. Restart Claude Code
+after installing it: `/mcp` then lists `knowledge-store` and whether it started.
+The server starts only once the skill has registered your clone, so on first use
+ask a question, let the skill find or clone the store, then reconnect the server
+from `/mcp`.
 
 Check the installation:
 
@@ -94,8 +110,15 @@ contract:
 - **Format:** UTF-8 text, one absolute path per line, each the root of a store
   clone. There are no comments and no other fields.
 - **Writing:** append only, and only when that exact line is absent. The
-  `knowledge-store` skill does this on first clone:
-  `grep -qxF "$(pwd)" ~/.config/knowledge-store/locations || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations`.
+  `knowledge-store` skill does this whenever it settles on a clone, running
+  this from inside the clone:
+
+  ```bash
+  mkdir -p ~/.config/knowledge-store
+  grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
+    || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
+  ```
+
   A user may query several stores, so the file is a list and is never
   overwritten.
 - **Reading:** a reader skips blank lines and lines whose path no longer exists.
