@@ -611,6 +611,69 @@ class NothingToCompareTest(SettingsIsolated):
         self.assertIn("all 1 documented install(s) from it pass", shown)
 
 
+class AnUnversionedRequirementIsPinnedByTheLockTest(SettingsIsolated):
+    """The reference layout names the library with no version and lets the lock pin it.
+
+    The break this catches: the stage refused a `requirements.txt` stating no `==`
+    pin, so a store following that layout - `hmcts-knowledge-store-builder[ast]` in
+    the input, the hash-pinned resolution in the lock - could not pass. The refusal
+    was protecting against comparing a lock with nothing; a named package is
+    something to compare, so what it needs is a lock that pins it.
+    """
+
+    def store(self, tmp: str, requirements: str, lock: str) -> Path:
+        root = Path(tmp)
+        (root / "requirements.lock").write_text(lock, encoding="utf-8")
+        (root / "requirements.txt").write_text(requirements, encoding="utf-8")
+        config.configure(root=str(root))
+        return root
+
+    def drive(self) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gate.main()
+        return code, out.getvalue() + err.getvalue()
+
+    LOCK = (
+        f"--extra-index-url {FEED}\n--only-binary :all:\n\nthing==1.4.2 \\\n    --hash=sha256:abc\n"
+    )
+
+    def test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, f"--extra-index-url {FEED}\nthing[ast]\n", self.LOCK)
+            code, shown = self.drive()
+        self.assertEqual(code, 0, shown)
+        self.assertIn("thing: requirements.lock resolves it to 1.4.2", shown)
+
+    def test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, f"--extra-index-url {FEED}\nother_pkg\n", self.LOCK)
+            code, shown = self.drive()
+        self.assertEqual(code, 1)
+        self.assertIn("other-pkg: no version in requirements.txt", shown)
+
+    def test_an_equals_pin_beside_an_unversioned_line_is_still_compared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, "thing\nbeta==2.0\n", self.LOCK + "beta==2.1 \\\n")
+            code, shown = self.drive()
+        self.assertEqual(code, 1)
+        self.assertIn("beta: pinned 2.0, lock has 2.1", shown)
+
+    def test_a_url_or_option_line_is_not_a_package_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.store(
+                tmp, "https://example.com/x.whl\n--only-binary :all:\n# thing\n", self.LOCK
+            )
+            self.assertEqual(gate.unversioned_requirements(root / "requirements.txt"), [])
+
+    def test_an_empty_input_is_still_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, "# nothing named here\n--only-binary :all:\n", self.LOCK)
+            code, shown = self.drive()
+        self.assertEqual(code, 1)
+        self.assertIn("states 0 `==` pins", shown)
+
+
 class AHandAuthoredLockDeclaresItselfTest(SettingsIsolated):
     """The third state a lock may be in, and the remedy #277's refusal left out.
 
