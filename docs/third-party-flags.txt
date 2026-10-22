@@ -26,3 +26,4 @@
 --comments :: twg
 --store-id :: mcp-server
 --from :: uv
+--upgrade-package :: uv

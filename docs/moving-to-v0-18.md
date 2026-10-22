@@ -18,28 +18,39 @@ server gets no answers until its maintainer adds it.
 
 Do these in order, then tell your askers to follow [For askers](#for-askers).
 
-1. **Pin the release with the `ast` extra, and drop any separate `graphifyy`
-   pin.** The extra installs graphify with the grammars the library needs, so a
-   second pin can only disagree with it. In the store's `requirements.txt`:
+1. **Name the library with the `ast` extra and no version, re-lock, and drop any
+   separate `graphifyy` pin.** The extra installs graphify with the grammars the
+   library needs, so a second pin can only disagree with it. In the store's
+   `requirements.txt`:
 
    ```text
-   hmcts-knowledge-store-builder[ast]==0.18.0
+   hmcts-knowledge-store-builder[ast]
    ```
 
-   Add `deploy` to the extras (`[ast,deploy]`) when a clone holds a Flux
-   `HelmRelease`, because `relationships` exits 1 without it. Recompile and
-   install the lock as
-   [Update the library version](refreshing-a-store.md#update-the-library-version)
-   describes, then check what you installed:
+   The unversioned line means "the latest"; `requirements.lock` is the pin the
+   build installs from. Add `deploy` to the extras (`[ast,deploy]`) when a clone
+   holds a Flux `HelmRelease`, because `relationships` exits 1 without it. Then
+   re-lock, commit the lock and install it:
 
    ```bash
+   uv pip compile requirements.txt --generate-hashes \
+     --extra-index-url https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ \
+     --emit-index-url --emit-build-options \
+     --upgrade-package hmcts-knowledge-store-builder \
+     --output-file requirements.lock
+   pip install -r requirements.lock
    knowledgestore --version
    ```
+
+   A release can change what a store commits, so upgrading is a deliberate
+   re-lock and rebuild, never a side effect. A store that needs one release
+   writes `==X.Y.Z` in `requirements.txt` instead. See
+   [Update the library version](refreshing-a-store.md#update-the-library-version).
 
    A store moving from an older graphify re-extracts every repository and
    re-clusters, because Terraform node ids change. Plan it as
    [Moving to a newer graphify](refreshing-a-store.md#moving-to-a-newer-graphify)
-   describes before you raise the pin.
+   describes before you re-lock.
 
 2. **If the store drives graphify itself**, rather than through `extract-ast`,
    run the grammar check first in its driver:
