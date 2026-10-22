@@ -8753,6 +8753,7 @@ MUTATIONS = (
         '            connection, "SELECT count(*) FROM stg_tickets"\n',
         "the report says that many files carry tickets while counting rows, or entries that carry none",
         (
+            "test_store_index.WhatTheIndexHolds.test_the_report_and_row_counts_are_the_fixtures",
             "test_store_index.WhatTheIndexHolds.test_ticket_files_counts_only_the_files_that_carry_a_ticket",
         ),
     ),
