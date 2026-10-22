@@ -104,13 +104,16 @@ class _Store(SettingsIsolated):
             sys.argv = argv
         return code, out.getvalue(), err.getvalue()
 
-    def layer(self) -> dict:
-        """The layer a successful run wrote. A refused run fails the calling test,
-        raised rather than asserted so the helper is not read as a test itself."""
-        code, _, err = self.build()
-        if code != 0:
-            raise self.failureException(f"answers-layer exited {code}: {err}")
-        return json.loads(self.out.read_text(encoding="utf-8"))
+
+def _layer(case: _Store) -> dict:
+    """The layer a successful run wrote; a refused run fails the calling test.
+
+    A function rather than a method of `_Store`: a test-case method only its
+    subclasses call reads to Sonar (S5899) as a test that will never be run.
+    """
+    code, _, err = case.build()
+    case.assertEqual(code, 0, err)
+    return json.loads(case.out.read_text(encoding="utf-8"))
 
 
 class OneEntryPerFile(_Store):
@@ -120,7 +123,7 @@ class OneEntryPerFile(_Store):
         self.write("apply.md", "Intro line.\n\n# Applying for a licence\n\n## Later\n")
         self.write("pay.md", "# Paying the fee\n\nBy card.\n")
         self.commit(FIRST)
-        layer = self.layer()
+        layer = _layer(self)
         self.assertEqual(sorted(layer), ["apply", "pay"])
         self.assertEqual(layer["apply"]["title"], "Applying for a licence")
         self.assertEqual(layer["pay"]["title"], "Paying the fee")
@@ -133,7 +136,7 @@ class OneEntryPerFile(_Store):
         would serve as an answer with nothing to name it."""
         self.write("refunds.md", "Refunds take five days.\n")
         self.commit(FIRST)
-        self.assertEqual(self.layer()["refunds"]["title"], "refunds")
+        self.assertEqual(_layer(self)["refunds"]["title"], "refunds")
 
     def test_an_id_the_server_would_skip_is_refused_and_nothing_is_written(self):
         """Breaks if a file in a subdirectory, whose id carries a `/`, is written:
@@ -175,7 +178,7 @@ class WhenEachAnswerWasWritten(_Store):
         the front matter leaks into the served html."""
         self.write("apply.md", "---\ntitle: ignored\ndate: 2023-01-15\n---\n# Apply\n\nText.\n")
         sha = self.commit(FIRST)
-        entry = self.layer()["apply"]
+        entry = _layer(self)["apply"]
         self.assertEqual(entry["as_of"], "2023-01-15")
         self.assertEqual(entry["commit"], sha)
         self.assertEqual(entry["html"], "<h2>Apply</h2><p>Text.</p>")
@@ -187,7 +190,7 @@ class WhenEachAnswerWasWritten(_Store):
         self.commit(FIRST)
         self.write("apply.md", "# Apply\n\nRevised.\n")
         sha = self.commit(SECOND)
-        entry = self.layer()["apply"]
+        entry = _layer(self)["apply"]
         self.assertEqual(entry["as_of"], SECOND)
         self.assertEqual(entry["commit"], sha)
 
@@ -197,7 +200,7 @@ class WhenEachAnswerWasWritten(_Store):
         self.write("apply.md", "# Apply\n")
         self.commit(FIRST)
         self.write("draft.md", "---\ndate: '2023-03-04'\n---\n# Draft\n")
-        entry = self.layer()["draft"]
+        entry = _layer(self)["draft"]
         self.assertEqual(entry["as_of"], "2023-03-04")
         self.assertIsNone(entry["commit"])
 
@@ -245,7 +248,7 @@ class TheServerReadsIt(_Store):
         self.write("apply.md", "# Apply\n")
         self.write("no-heading.md", "Text.\n")
         self.commit(FIRST)
-        layer = self.layer()
+        layer = _layer(self)
         self.assertTrue(layer)
         for entry_id, entry in layer.items():
             self.assertTrue(_server_plain_segment(entry_id), entry_id)
@@ -260,7 +263,7 @@ class TheServerReadsIt(_Store):
         what the server's `nameable_layers` requires before it reads one."""
         self.write("apply.md", "# Apply\n")
         self.commit(FIRST)
-        self.layer()
+        _layer(self)
         declaration = self.root / "config" / "store-extra-layers.json"
         declaration.parent.mkdir(parents=True)
         declaration.write_text(
