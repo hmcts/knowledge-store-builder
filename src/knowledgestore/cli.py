@@ -33,6 +33,7 @@ SELF_PARSING = frozenset(
         "check-answers",
         "check-citations",
         "check-corpus",
+        "check-plugin",
         "chunk-plan",
         "chunk-status",
         "check-chunk",
@@ -258,6 +259,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "check-citations": (
         "check_citations",
         "fail if a published answer cites code the graph does not hold",
+    ),
+    "check-plugin": (
+        "check_plugin",
+        "fail if the store plugin would not launch the knowledge-store server for this store",
     ),
 }
 

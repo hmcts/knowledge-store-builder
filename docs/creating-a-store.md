@@ -917,6 +917,20 @@ jq -r .store.id knowledge/store-manifest.json
 `knowledgestore manifest` writes that id, from `KSB_STORE_ID` or else the
 repository name of the clone's `origin` remote.
 
+Check the plugin before you publish it, and in CI beside `check-install-docs`:
+
+```bash
+knowledgestore check-plugin [--plugin <store-plugin>]
+```
+
+`--plugin` defaults to the store root. The stage reads `.mcp.json`, or
+`mcpServers` in `.claude-plugin/plugin.json`, and exits 1 naming each reason when
+the `knowledge-store` server is missing, the command is not `uvx`, `--from` is
+not an exact `knowledge-store-mcp` tag, `--store-id` is absent or differs from
+the manifest's `store.id`, or the plugin root is the repository root and a root
+`.mcp.json` exists. A pinned tag older than the one this guide documents is a
+warning. When everything agrees it prints the tag and the id and exits 0.
+
 - **Build and commit the manifest before you publish.** At v0.1.0 the server
   exits at start-up when it finds no registered clone or no
   `knowledge/store-manifest.json`, so an asker's clone needs the committed

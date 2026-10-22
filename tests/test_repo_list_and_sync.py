@@ -593,6 +593,7 @@ class CliTest(SettingsIsolated):
                 "check-evidence",
                 "check-answers",
                 "check-citations",
+                "check-plugin",
             ],
         )
 
