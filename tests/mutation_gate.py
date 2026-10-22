@@ -4493,6 +4493,8 @@ MUTATIONS = (
         "committed credential and matches none of the value shapes, so without the "
         "key-name rule it reaches the worker whole",
         (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_planted_secret_is_reported_by_location_and_its_value_appears_nowhere",
+            "test_build_minimum_standard.TheEvidenceStage.test_two_runs_write_identical_bytes",
             "test_headless_workers.ExtractTests.test_a_path_with_a_space_is_masked_granted_and_mapped",
             "test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",
             "test_headless_workers.ExtractTests.test_a_worker_reads_a_masked_copy_and_cites_the_real_path",
@@ -8223,6 +8225,74 @@ MUTATIONS = (
         (
             "test_build_minimum_standard_settings.TheSettingsSnapshot.test_a_refused_vulnerability_alerts_call_is_unreadable_never_disabled",
             "test_build_minimum_standard_settings.TheSettingsSnapshot.test_an_unreadable_repository_records_nothing_it_did_not_read",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a clean secret scan reads as present",
+        "build_minimum_standard.py",
+        '        return minimum_standard.point("no_secrets", "not_determinable", reason=CLEAN_SCAN)\n',
+        '        return minimum_standard.point("no_secrets", "present", reason=CLEAN_SCAN)\n',
+        "a pattern scan that found nothing would be recorded as 'no secrets committed', which no scan can show",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_clean_scan_is_not_determinable_never_present",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_codeowners_naming_no_owner_is_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_live_repository_is_present_with_its_last_commit_and_dated",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_repository_no_longer_held_loses_its_record",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_security_md_without_a_contact_is_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_threat_model_is_present_and_its_absence_is_not_determinable",
+            "test_build_minimum_standard.TheEvidenceStage.test_alerts_enabled_without_a_config_make_dependency_updates_present",
+            "test_build_minimum_standard.TheEvidenceStage.test_archived_in_snapshot_is_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_codeowners_and_security_md_with_a_contact_are_present",
+            "test_build_minimum_standard.TheEvidenceStage.test_declared_products_are_published_in_the_summary",
+            "test_build_minimum_standard.TheEvidenceStage.test_every_hygiene_item_present_makes_the_point_present",
+            "test_build_minimum_standard.TheEvidenceStage.test_missing_files_are_absent_and_name_the_paths_checked",
+            "test_build_minimum_standard.TheEvidenceStage.test_no_snapshot_makes_github_items_not_determinable",
+            "test_build_minimum_standard.TheEvidenceStage.test_one_absent_hygiene_item_makes_the_point_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_patching_is_always_not_determinable",
+            "test_build_minimum_standard.TheEvidenceStage.test_the_summary_says_archived_repositories_are_not_in_the_store",
+            "test_build_minimum_standard.TheEvidenceStage.test_two_runs_write_identical_bytes",
+            "test_build_minimum_standard.TheEvidenceStage.test_unreadable_settings_are_not_determinable_with_no_access",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: an unreadable setting reads as absent",
+        "build_minimum_standard.py",
+        '    state, reason = readings.get(settings.get(field), ("not_determinable", NO_ACCESS))\n',
+        '    state, reason = readings.get(settings.get(field), ("absent", NO_ACCESS))\n',
+        "a setting the token could not read would become a missing control, a finding against the team made from no access",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_unreadable_settings_are_not_determinable_with_no_access",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: no settings snapshot reads as absent",
+        "build_minimum_standard.py",
+        '        return {**entry, "reason": NO_SNAPSHOT, "state": "not_determinable"}\n',
+        '        return {**entry, "reason": NO_SNAPSHOT, "state": "absent"}\n',
+        "a repository added after the settings stage ran, or a store with no snapshot, would read as unprotected and unscanned when nothing was read for it",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_no_snapshot_makes_github_items_not_determinable",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a product naming an unknown repository is accepted",
+        "build_minimum_standard.py",
+        "    if unknown:\n",
+        "    if False:\n",
+        "a product declaring a repository the store does not hold would be published, and a product-scoped answer would silently omit it",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_products_naming_an_unknown_repository_exit_1_and_write_nothing",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: patching reads as absent",
+        "build_minimum_standard.py",
+        '        "patching": minimum_standard.point("patching", "not_determinable", reason=PATCHING),\n',
+        '        "patching": minimum_standard.point("patching", "absent", reason=PATCHING),\n',
+        "every repository would be reported as missing agreed patching timelines, which a repository cannot record either way",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_patching_is_always_not_determinable",
+            "test_build_minimum_standard.TheEvidenceStage.test_the_summary_says_archived_repositories_are_not_in_the_store",
         ),
     ),
     Mutation(

@@ -471,6 +471,15 @@ knowledgestore minimum-standard-settings
 It writes `knowledge/minimum-standard/github-settings.json` with the time it was
 read. A setting the token cannot read is recorded as unreadable, never as off.
 
+Then record the evidence for each repository against the standard's seven points:
+
+```bash
+knowledgestore minimum-standard
+```
+
+It reads the clones, the content-file list and that snapshot, and writes
+`knowledge/minimum-standard/by-repo/<repo>.json` and `summary.json`.
+
 Then link every node to its file at the commit the store was built from:
 
 ```bash

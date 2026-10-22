@@ -185,6 +185,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_minimum_standard_settings",
         "snapshot the GitHub settings the build's token can read, for minimum-standard",
     ),
+    "minimum-standard": (
+        "build_minimum_standard",
+        "record evidence against the GOV.UK minimum standard for each repository",
+    ),
     "source-urls": (
         "build_source_urls",
         "give each graph node a `url` to its file at the commit the store was built from",
