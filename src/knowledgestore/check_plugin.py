@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -43,6 +44,8 @@ SERVER = "knowledge-store"
 MCP_JSON = ".mcp.json"
 SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
 DOCUMENTED_TAG = "v0.1.1"
+# The layers the server answers from; without either it falls back or does not answer.
+READ_LAYERS = ("index", "relationships")
 
 _TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
@@ -144,6 +147,57 @@ def _check_store_id(args: list, manifest: Path, failures: list[str]) -> str:
     return ""
 
 
+def _manifest_data(path: Path) -> dict:
+    """The parsed manifest, or {} when it cannot be read (the id check reports that)."""
+    try:
+        data = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _check_layers(manifest: Path, failures: list[str], warnings: list[str]) -> None:
+    """The layers the server reads must be recorded as present, and recognised."""
+    data = _manifest_data(manifest)
+    if not data:
+        return
+    layers = data.get("layers")
+    if not isinstance(layers, dict):
+        layers = {}
+    for name in READ_LAYERS:
+        layer = layers.get(name)
+        layer = layer if isinstance(layer, dict) else {}
+        present = layer.get("present", False)
+        if present is None:
+            warnings.append(
+                f"{manifest.name} does not record whether the {name} layer is present "
+                "(present: null), so this cannot say the server can read it"
+            )
+        elif not present:
+            failures.append(
+                f"{manifest.name} records the {name} layer as missing, so the server "
+                "answers from a fallback or not at all"
+            )
+        elif name == "relationships" and layer.get("recognised") is not True:
+            failures.append(
+                f"{manifest.name} records the relationships layer as not recognised: "
+                "the server cannot read it"
+            )
+
+
+def _check_build_id(manifest: Path, failures: list[str]) -> None:
+    """KSB_STORE_ID, when set, is what the next `manifest` run writes."""
+    building = os.environ.get("KSB_STORE_ID", "").strip()
+    if not building:
+        return
+    wanted, _why = manifest_store_id(manifest)
+    if wanted is not None and building != wanted:
+        failures.append(
+            f"KSB_STORE_ID is {building!r} but store.id in {manifest.name} is {wanted!r}, so "
+            "the next `knowledgestore manifest` writes an id the plugin does not ask for"
+        )
+
+
 def check(plugin: Path, root: Path, manifest: Path) -> tuple[list[str], list[str], str, str]:
     """(failures, warnings, tag, store id). Tag and id are empty when not established."""
     failures: list[str] = []
@@ -156,6 +210,9 @@ def check(plugin: Path, root: Path, manifest: Path) -> tuple[list[str], list[str
             "loads as project configuration for anyone working in this repository. Move the "
             "mcpServers object into .claude-plugin/plugin.json and delete the file"
         )
+
+    _check_layers(manifest, failures, warnings)
+    _check_build_id(manifest, failures)
 
     found = declared_servers(plugin)
     if isinstance(found, str):
