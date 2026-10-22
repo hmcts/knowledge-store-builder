@@ -86,7 +86,7 @@ def refuses_arguments(stage: str, arguments: Sequence[str]) -> bool:
 # `git_version.FLOOR`, because a clone `sync` has converted to reftable refs cannot
 # be read by an older git (#437). `status` runs git too and is deliberately absent:
 # it reports the same finding and never fails (CLAUDE.md 6.7).
-GIT_STAGES = frozenset({"sync", "drift", "export-history", "check-citations"})
+GIT_STAGES = frozenset({"sync", "drift", "export-history", "check-citations", "minimum-standard"})
 
 # name -> (module attribute, one-line help). Order is the pipeline run order.
 STAGES: dict[str, tuple[str, str]] = {

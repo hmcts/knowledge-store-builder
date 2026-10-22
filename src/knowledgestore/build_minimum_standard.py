@@ -51,6 +51,7 @@ DEPENDENCY_CONFIGS = (
     "renovate.json",
     ".github/renovate.json",
 )
+WORKFLOWS = ".github/workflows/"
 CODE_SCANNERS = ("codeql-action", "github/codeql")
 SECRET_SCANNERS = ("gitleaks", "trufflehog", "detect-secrets")
 
@@ -132,6 +133,45 @@ def _security_contact(clone: Path) -> dict:
     )
 
 
+def _hits(text: str, counts: Counter[str] | None = None) -> tuple[str, Counter[str]]:
+    """`text` masked, and the rules that masked something in it.
+
+    `mask` leaves a rule it tried at zero, so only a positive count is a hit.
+    """
+    tally: Counter[str] = Counter()
+    masked = secret_mask.mask(text, tally)
+    return masked, Counter({rule: hits for rule, hits in tally.items() if hits > 0})
+
+
+def _findings(text: str) -> set[tuple[int, str]]:
+    """(line number, rule) for every line masking changes. No line is kept.
+
+    The whole file is masked, not each line, because the structural rules need the
+    lines around a value: a private-key block, a Kubernetes Secret's `data:`, a
+    `password: |` block scalar. Masking keeps every line's number, so a line that
+    differs after masking is a line that held a value. Its rule is the one a pass
+    over that line alone names; where the line alone is not enough, it is the rules
+    the file pass counted beyond what the single lines explain.
+    """
+    masked, counted = _hits(text)
+    if masked == text:
+        return set()
+    lines = zip(text.split("\n"), masked.split("\n"))
+    changed = {
+        number: _hits(before)[1]
+        for number, (before, after) in enumerate(lines, start=1)
+        if before != after
+    }
+    explained: Counter[str] = Counter()
+    for rules in changed.values():
+        explained.update(rules)
+    structural = sorted(rule for rule in counted if counted[rule] > explained[rule])
+    fallback = structural or sorted(counted)
+    return {
+        (number, rule) for number, rules in changed.items() for rule in (sorted(rules) or fallback)
+    }
+
+
 def _no_secrets(clone: Path, files: list[str]) -> dict:
     if not files:
         return minimum_standard.point("no_secrets", "not_determinable", reason=NO_CONTENT)
@@ -140,13 +180,7 @@ def _no_secrets(clone: Path, files: list[str]) -> dict:
         text = _read(clone / path)
         if text is None:
             continue
-        for number, line in enumerate(text.splitlines(), start=1):
-            counts: Counter[str] = Counter()
-            secret_mask.mask(line, counts)
-            # `mask` leaves a rule it tried at zero, so only a positive count is a hit.
-            for rule, hits in counts.items():
-                if hits > 0:
-                    findings.add((path, number, rule))
+        findings.update((path, number, rule) for number, rule in _findings(text))
     if not findings:
         return minimum_standard.point("no_secrets", "not_determinable", reason=CLEAN_SCAN)
     evidence = [
@@ -176,7 +210,7 @@ def _secure_by_design(tracked: list[str]) -> dict:
 def _workflows_naming(clone: Path, tracked: list[str], needles: tuple[str, ...]) -> list[str]:
     found = []
     for path in tracked:
-        if not path.startswith(".github/workflows/") or not path.endswith((".yml", ".yaml")):
+        if not path.startswith(WORKFLOWS) or not path.endswith((".yml", ".yaml")):
             continue
         text = (_read(clone / path) or "").lower()
         if any(needle in text for needle in needles):
@@ -184,10 +218,11 @@ def _workflows_naming(clone: Path, tracked: list[str], needles: tuple[str, ...])
     return sorted(found)
 
 
-def _file_item(item: str, paths: list[str], found: str, missing: str) -> dict:
+def _file_item(item: str, paths: list[str], checked: list[str], found: str, missing: str) -> dict:
+    entry: dict = {"checked": checked, "item": item, "paths": paths}
     if paths:
-        return {"item": item, "paths": paths, "reason": found, "state": "present"}
-    return {"item": item, "paths": [], "reason": missing, "state": "absent"}
+        return {**entry, "reason": found, "state": "present"}
+    return {**entry, "reason": missing, "state": "absent"}
 
 
 def _setting_item(item: str, field: str, settings: dict | None, readings: dict) -> dict:
@@ -196,26 +231,19 @@ def _setting_item(item: str, field: str, settings: dict | None, readings: dict) 
     entry: dict = {"item": item, "setting": field}
     if settings is None:
         return {**entry, "reason": NO_SNAPSHOT, "state": "not_determinable"}
-    state, reason = readings.get(settings.get(field), ("not_determinable", NO_ACCESS))
+    value = settings.get(field)
+    # A value of the wrong type was not read either; it must not be looked up.
+    value = value if isinstance(value, str) else None
+    state, reason = readings.get(value, ("not_determinable", NO_ACCESS))
     return {**entry, "reason": reason, "state": state}
 
 
-def _dependency_updates(tracked: list[str], settings: dict | None) -> dict:
-    configs = sorted(
+def _dependency_configs(tracked: list[str]) -> list[str]:
+    return sorted(
         path
         for path in tracked
         if path in DEPENDENCY_CONFIGS or ("/" not in path and path.startswith(".renovaterc"))
     )
-    entry: dict = {"item": "dependency_updates", "paths": configs, "setting": "dependabot_alerts"}
-    alerts = settings.get("dependabot_alerts") if settings is not None else None
-    if configs:
-        return {**entry, "reason": "dependency update config found", "state": "present"}
-    if alerts == "enabled":
-        return {**entry, "reason": "Dependabot alerts are enabled", "state": "present"}
-    # The snapshot never records alerts as disabled - GitHub answers "off" and "cannot
-    # see" alike - so with no config in the clone this item cannot be shown absent.
-    reason = NO_SNAPSHOT if settings is None else NO_ACCESS
-    return {**entry, "reason": reason, "state": "not_determinable"}
 
 
 def _hygiene(clone: Path, tracked: list[str], settings: dict | None) -> dict:
@@ -232,10 +260,17 @@ def _hygiene(clone: Path, tracked: list[str], settings: dict | None) -> dict:
         _file_item(
             "code_scanning",
             _workflows_naming(clone, tracked, CODE_SCANNERS),
+            [WORKFLOWS],
             "code-scanning workflow found",
             "no code-scanning workflow",
         ),
-        _dependency_updates(tracked, settings),
+        _file_item(
+            "dependency_updates",
+            _dependency_configs(tracked),
+            sorted((*DEPENDENCY_CONFIGS, ".renovaterc*")),
+            "dependency update config found",
+            "no dependency update config",
+        ),
         _setting_item(
             "secret_scanning_setting",
             "secret_scanning",
@@ -248,8 +283,18 @@ def _hygiene(clone: Path, tracked: list[str], settings: dict | None) -> dict:
         _file_item(
             "secret_scanning_workflow",
             _workflows_naming(clone, tracked, SECRET_SCANNERS),
+            [WORKFLOWS],
             "secret-scanning workflow found",
             "no secret-scanning workflow",
+        ),
+        # Dependabot alerts are vulnerability scanning, not update tooling, so they
+        # are their own item. The snapshot records them only as enabled or unread:
+        # GitHub answers "off" and "cannot see" alike, so absent is never guessed.
+        _setting_item(
+            "vulnerability_alerts",
+            "dependabot_alerts",
+            settings,
+            {"enabled": ("present", "Dependabot alerts are enabled")},
         ),
     ]
     states = {item["state"] for item in items}
@@ -328,8 +373,10 @@ def _content_by_repository() -> dict[str, list[str]]:
 
 def _snapshot() -> dict | None:
     path = config.MINIMUM_STANDARD_SETTINGS_PATH
-    if not path.is_file():
+    if not path.exists():
         return None
+    if not path.is_file():
+        raise Refusal(f"{path} is not a file; remove it or run `minimum-standard-settings`")
     try:
         body = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -359,6 +406,13 @@ def _products(held: set[str]) -> dict[str, list[str]] | None:
     return {product: sorted(set(repos)) for product, repos in sorted(body.items())}
 
 
+def _record(clone: Path, files: list[str], snapshot: dict | None, run) -> dict:
+    try:
+        return evidence_for(clone, files, snapshot, run)
+    except subprocess.CalledProcessError as error:
+        raise Refusal(f"git could not read the clone {clone.name} ({clone})") from error
+
+
 def _dump(body: dict) -> str:
     return json.dumps(body, indent=2, sort_keys=True) + "\n"
 
@@ -375,14 +429,9 @@ def main(argv: list[str] | None = None, run=run_git) -> int:
         content = _content_by_repository()
         snapshot = _snapshot()
         products = _products({clone.name for clone in clones})
-        records = [
-            evidence_for(clone, content.get(clone.name, []), snapshot, run) for clone in clones
-        ]
+        records = [_record(clone, content.get(clone.name, []), snapshot, run) for clone in clones]
     except Refusal as error:
         print(f"Nothing written: {error}", file=sys.stderr)
-        return 1
-    except subprocess.CalledProcessError:
-        print("Nothing written: git could not read a clone.", file=sys.stderr)
         return 1
 
     held = {record["repository"] for record in records}

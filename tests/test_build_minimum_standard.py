@@ -28,6 +28,11 @@ COMMIT_DATE = "2026-01-02T03:04:05+01:00"
 PLANTED_KEY = "AKIAIOSFODNN7EXAMPLE"
 PLANTED_PASSWORD = "s3cr3t-value-123"
 
+PLANTED_PEM_FIRST = "MIIEpAIBAAKCAQEAplantedPemFirstLineQWERTY1234"
+PLANTED_PEM_SECOND = "ZZZZplantedPemSecondLineABCDEF987654"
+PLANTED_K8S = "cGxhbnRlZC1rOHMtdmFsdWU="
+PLANTED_BLOCK = "plantedBlockValue123456"
+
 FULL_ACCESS = {
     "archived": False,
     "default_branch": "main",
@@ -51,6 +56,14 @@ NO_ACCESS = {
         "secret_scanning",
     ],
 }
+
+DEPENDENCY_CONFIGS_CHECKED = [
+    ".github/dependabot.yaml",
+    ".github/dependabot.yml",
+    ".github/renovate.json",
+    ".renovaterc*",
+    "renovate.json",
+]
 
 CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
 SECURITY_PATHS = [".github/SECURITY.md", "SECURITY.md", "docs/SECURITY.md"]
@@ -114,8 +127,9 @@ class TheEvidenceStage(SettingsIsolated):
             "".join(f"{path}\n" for path in reversed(self.content)), encoding="utf-8"
         )
 
-    def run_stage(self, expect: int = 0) -> tuple[int, str, str]:
-        self.write_content()
+    def run_stage(self, expect: int = 0, *, content: bool = True) -> tuple[int, str, str]:
+        if content:
+            self.write_content()
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = stage.main([])
@@ -128,6 +142,10 @@ class TheEvidenceStage(SettingsIsolated):
 
     def summary(self) -> dict:
         return json.loads(config.MINIMUM_STANDARD_SUMMARY_PATH.read_text(encoding="utf-8"))
+
+    def assert_nothing_written(self) -> None:
+        self.assertFalse(config.MINIMUM_STANDARD_BY_REPO_DIR.exists())
+        self.assertFalse(config.MINIMUM_STANDARD_SUMMARY_PATH.exists())
 
     def hygiene_item(self, record: dict, item: str) -> dict:
         found = [e for e in record["points"]["hygiene"]["evidence"] if e["item"] == item]
@@ -241,6 +259,47 @@ class TheEvidenceStage(SettingsIsolated):
         for planted in (PLANTED_KEY, PLANTED_PASSWORD):
             self.assertNotIn(planted, out + err)
 
+    def test_multi_line_secrets_are_found_by_location_and_their_values_appear_nowhere(self):
+        """Breaks if the scan reads one line at a time, which cannot see a private-key
+        block, a Kubernetes Secret's `data:` or a `password: |` block scalar; or if any
+        of their values reaches a file the stage writes."""
+        self.clone(
+            "repo-a",
+            {
+                "deploy/key.pem": (
+                    "# deploy key\n-----BEGIN RSA PRIVATE KEY-----\n"
+                    f"{PLANTED_PEM_FIRST}\n{PLANTED_PEM_SECOND}\n"
+                    "-----END RSA PRIVATE KEY-----\n"
+                ),
+                "k8s/secret.yaml": (
+                    "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\ndata:\n"
+                    f"  anything: {PLANTED_K8S}\n"
+                ),
+                "values.yaml": f"db:\n  password: |\n    {PLANTED_BLOCK}\n",
+            },
+        )
+        self.snapshot({"repo-a": FULL_ACCESS})
+        _, out, err = self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "absent")
+        self.assertEqual(
+            no_secrets["evidence"],
+            [
+                {"line": 3, "path": "deploy/key.pem", "rule": "pem-private-key"},
+                {"line": 4, "path": "deploy/key.pem", "rule": "pem-private-key"},
+                {"line": 6, "path": "k8s/secret.yaml", "rule": "key-name"},
+                {"line": 3, "path": "values.yaml", "rule": "key-name"},
+            ],
+        )
+        planted = (PLANTED_PEM_FIRST, PLANTED_PEM_SECOND, PLANTED_K8S, PLANTED_BLOCK)
+        for path in (p for p in (self.root / "knowledge").rglob("*") if p.is_file()):
+            body = path.read_bytes()
+            for value in planted:
+                with self.subTest(path=path.name, planted=value):
+                    self.assertNotIn(value.encode(), body)
+        for value in planted:
+            self.assertNotIn(value, out + err)
+
     def test_a_clean_scan_is_not_determinable_never_present(self):
         """Breaks if a scan that finds nothing reads as present or absent: a pattern
         scan cannot show that nothing is committed."""
@@ -337,16 +396,17 @@ class TheEvidenceStage(SettingsIsolated):
                     "state": "present",
                 },
                 {
+                    "checked": [".github/workflows/"],
                     "item": "code_scanning",
                     "paths": [".github/workflows/codeql.yml"],
                     "reason": "code-scanning workflow found",
                     "state": "present",
                 },
                 {
+                    "checked": DEPENDENCY_CONFIGS_CHECKED,
                     "item": "dependency_updates",
                     "paths": [".github/dependabot.yml"],
                     "reason": "dependency update config found",
-                    "setting": "dependabot_alerts",
                     "state": "present",
                 },
                 {
@@ -356,9 +416,16 @@ class TheEvidenceStage(SettingsIsolated):
                     "state": "present",
                 },
                 {
+                    "checked": [".github/workflows/"],
                     "item": "secret_scanning_workflow",
                     "paths": [".github/workflows/secrets.yaml"],
                     "reason": "secret-scanning workflow found",
+                    "state": "present",
+                },
+                {
+                    "item": "vulnerability_alerts",
+                    "reason": "Dependabot alerts are enabled",
+                    "setting": "dependabot_alerts",
                     "state": "present",
                 },
             ],
@@ -387,16 +454,35 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(dependency["state"], "present")
         self.assertEqual(dependency["paths"], ["renovate.json"])
 
-    def test_alerts_enabled_without_a_config_make_dependency_updates_present(self):
-        """Breaks if Dependabot alerts read from the snapshot do not count when the clone
-        holds no update config."""
+    def test_no_update_config_is_absent_whatever_the_alerts_say(self):
+        """Breaks if Dependabot alerts stand in for update tooling: alerts are
+        vulnerability scanning, a separate item, and a clone with no Dependabot or
+        Renovate config has no dependency updates evidenced. Also breaks if the paths
+        checked are not listed."""
         self.clone("repo-a", {"README.md": "# repo-a\n"})
         self.snapshot({"repo-a": FULL_ACCESS})
         self.run_stage()
-        dependency = self.hygiene_item(self.record("repo-a"), "dependency_updates")
-        self.assertEqual(dependency["state"], "present")
+        record = self.record("repo-a")
+        dependency = self.hygiene_item(record, "dependency_updates")
+        self.assertEqual(dependency["state"], "absent")
         self.assertEqual(dependency["paths"], [])
-        self.assertEqual(dependency["reason"], "Dependabot alerts are enabled")
+        self.assertEqual(dependency["checked"], DEPENDENCY_CONFIGS_CHECKED)
+        self.assertEqual(self.hygiene_item(record, "vulnerability_alerts")["state"], "present")
+
+    def test_a_snapshot_value_of_the_wrong_type_is_not_determinable(self):
+        """Breaks if a list or object where the snapshot holds a string crashes the
+        stage or is read as a setting: it was not read, so it is no access."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        odd = {**FULL_ACCESS, "branch_protection": ["present"], "secret_scanning": {"a": 1}}
+        odd["dependabot_alerts"] = 1
+        self.snapshot({"repo-a": odd})
+        self.run_stage()
+        record = self.record("repo-a")
+        for item in ("branch_protection", "secret_scanning_setting", "vulnerability_alerts"):
+            with self.subTest(item=item):
+                entry = self.hygiene_item(record, item)
+                self.assertEqual(entry["state"], "not_determinable")
+                self.assertEqual(entry["reason"], "no access")
 
     def test_unreadable_settings_are_not_determinable_with_no_access(self):
         """Breaks if a setting the token could not read becomes absent: no access is not
@@ -408,7 +494,7 @@ class TheEvidenceStage(SettingsIsolated):
         self.snapshot({"repo-a": NO_ACCESS, "repo-b": partial})
         self.run_stage()
         record = self.record("repo-a")
-        for item in ("branch_protection", "secret_scanning_setting", "dependency_updates"):
+        for item in ("branch_protection", "secret_scanning_setting", "vulnerability_alerts"):
             with self.subTest(item=item):
                 entry = self.hygiene_item(record, item)
                 self.assertEqual(entry["state"], "not_determinable")
@@ -436,7 +522,11 @@ class TheEvidenceStage(SettingsIsolated):
                     self.snapshot({"repo-a": FULL_ACCESS})
                 self.run_stage()
                 record = self.record("repo-b")
-                for item in ("branch_protection", "secret_scanning_setting", "dependency_updates"):
+                for item in (
+                    "branch_protection",
+                    "secret_scanning_setting",
+                    "vulnerability_alerts",
+                ):
                     entry = self.hygiene_item(record, item)
                     self.assertEqual(entry["state"], "not_determinable", item)
                     self.assertEqual(entry["reason"], "no settings snapshot", item)
@@ -486,6 +576,69 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertIn("repo-z", err)
         self.assertFalse(config.MINIMUM_STANDARD_BY_REPO_DIR.exists())
         self.assertFalse(config.MINIMUM_STANDARD_SUMMARY_PATH.exists())
+
+    def test_a_malformed_products_declaration_exits_1_and_writes_nothing(self):
+        """Breaks if a products file that is not JSON, or not a map of names to lists
+        of names, is published or half-read."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        for body in ("{not json", json.dumps(["repo-a"]), json.dumps({"product-x": "repo-a"})):
+            with self.subTest(body=body):
+                config.PRODUCTS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+                config.PRODUCTS_CONFIG.write_text(body, encoding="utf-8")
+                _, _, err = self.run_stage(expect=1)
+                self.assertIn("products.json", err)
+                self.assert_nothing_written()
+
+    def test_a_missing_content_file_list_exits_1_and_writes_nothing(self):
+        """Breaks if a store that never ran `content-set` gets a layer whose secret
+        scan read no files, which would read as every repository scanned."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        _, _, err = self.run_stage(expect=1, content=False)
+        self.assertIn("content-set", err)
+        self.assert_nothing_written()
+
+    def test_an_unstamped_or_foreign_snapshot_exits_1_and_writes_nothing(self):
+        """Breaks if a snapshot without this layer's stamp, or with another major, is
+        read as settings: a store's own file of another shape would be taken for one."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        cases = {
+            "no stamp": {"read_at": "x", "repositories": {"repo-a": FULL_ACCESS}},
+            "another major": {
+                "format": {"layer": "minimum_standard", "major": 2, "minor": 0},
+                "read_at": "x",
+                "repositories": {"repo-a": FULL_ACCESS},
+            },
+        }
+        for case, body in cases.items():
+            with self.subTest(case=case):
+                config.MINIMUM_STANDARD_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+                config.MINIMUM_STANDARD_SETTINGS_PATH.write_text(json.dumps(body), encoding="utf-8")
+                _, _, err = self.run_stage(expect=1)
+                self.assertIn("github-settings.json", err)
+                self.assert_nothing_written()
+
+    def test_a_directory_at_the_snapshot_path_exits_1_and_writes_nothing(self):
+        """Breaks if something other than a file where the snapshot belongs is read as
+        no snapshot: that would quietly mark every GitHub item unread."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        config.MINIMUM_STANDARD_SETTINGS_PATH.mkdir(parents=True)
+        _, _, err = self.run_stage(expect=1)
+        self.assertIn("is not a file", err)
+        self.assert_nothing_written()
+
+    def test_a_clone_git_cannot_read_exits_1_naming_it_and_writes_nothing(self):
+        """Breaks if a clone with no commit - which `git log` refuses - crashes the stage,
+        is skipped silently, or is refused without saying which clone it was."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        empty = config.REPOSITORIES_DIR / "repo-empty"
+        empty.mkdir()
+        _git(empty, "init", "-q")
+        self.snapshot({"repo-a": FULL_ACCESS})
+        _, _, err = self.run_stage(expect=1)
+        self.assertIn("could not read the clone repo-empty", err)
+        self.assert_nothing_written()
 
     def test_declared_products_are_published_in_the_summary(self):
         """Breaks if a valid product declaration is dropped from the layer."""
@@ -557,13 +710,15 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertTrue((config.MINIMUM_STANDARD_BY_REPO_DIR / "repo-a.json").is_file())
 
     def test_the_stage_is_registered_after_relationships_and_before_index(self):
-        """Breaks if the stage is not reachable as `knowledgestore minimum-standard`, or
-        runs before the clones' layers or after the index that reads them."""
+        """Breaks if the stage is not reachable as `knowledgestore minimum-standard`,
+        runs before the clones' layers or after the index that reads them, or escapes
+        the git floor check although it runs git on the clones."""
         module, help_ = cli.STAGES["minimum-standard"]
         self.assertEqual(module, "build_minimum_standard")
         self.assertEqual(
             help_, "record evidence against the GOV.UK minimum standard for each repository"
         )
+        self.assertIn("minimum-standard", cli.GIT_STAGES)
         order = list(cli.STAGES)
         self.assertLess(order.index("relationships"), order.index("minimum-standard"))
         self.assertLess(order.index("minimum-standard"), order.index("index"))
