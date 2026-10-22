@@ -13,6 +13,7 @@ To build a store for the first time, see
 | Work out which repository to add next | [Decide what to ingest next](#decide-what-to-ingest-next) |
 | Take repositories out of the estate | [Remove repositories](#remove-repositories) |
 | Change the library release used by the store | [Update the library version](#update-the-library-version) |
+| Move a store from v0.17 to v0.18 | [Moving to v0.18](moving-to-v0-18.md) |
 
 ## Refresh the store
 
@@ -544,8 +545,10 @@ Activate the store's environment:
 source .venv/bin/activate
 ```
 
-Do this only when deliberately moving a store to another library release. Find
-the version on the
+Do this only when deliberately moving a store to another library release. A
+store moving from v0.17 to v0.18 also follows
+[Moving to v0.18](moving-to-v0-18.md), which adds the layers and the plugin
+step the MCP server needs. Find the version on the
 [knowledge-store-builder releases page](https://github.com/hmcts/knowledge-store-builder/releases),
 then change `X.Y.Z` in the store's pinned requirements file — `requirements.txt`
 in a store that follows the reference layout. Keep the exact `==` pin, so that

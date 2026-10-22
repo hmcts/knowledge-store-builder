@@ -36,3 +36,9 @@ docs/refreshing-a-store.md#update-the-library-version
 docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent
 docs/grounding-and-verification.md#how-to-read-an-answer
 docs/creating-a-store.md#add-the-server-to-the-store-plugin
+
+# The v0.18 transition page. A consuming store's README sends its maintainers and
+# its askers to their own section rather than restating the steps.
+docs/moving-to-v0-18.md
+docs/moving-to-v0-18.md#for-store-maintainers
+docs/moving-to-v0-18.md#for-askers

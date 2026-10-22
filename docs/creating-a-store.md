@@ -907,6 +907,8 @@ section.
 
 - [Refreshing a knowledge store](refreshing-a-store.md) covers source updates,
   summary remapping, drift checks and library upgrades.
+- [Moving to v0.18](moving-to-v0-18.md) takes an existing store, and its
+  askers, onto answering through the knowledge-store MCP server.
 - [Configuring a knowledge store](configuring-a-store.md) lists pipeline
   settings, BDD support and stage outputs.
 - `/knowledge-store:knowledge-store-build` is the operative build workflow,
