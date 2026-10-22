@@ -845,6 +845,10 @@ The browser page can be large, but committing it is what lets people without a
 Claude licence or network access use the store. Report which stages ran, what
 authored coverage remains and whether grounding checks passed.
 
+### Add the server to the store plugin
+
+The step that declares the knowledge-store server in the store's plugin follows.
+
 ## Troubleshooting
 
 | Symptom | Action |
