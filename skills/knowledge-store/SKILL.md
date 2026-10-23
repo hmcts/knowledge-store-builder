@@ -282,6 +282,14 @@ here, and I never read files to answer instead. One of three things is wrong.
 The maintainer's step is
 [Add the server to the store plugin](../../docs/creating-a-store.md#add-the-server-to-the-store-plugin).
 
+**When a tool returns `store_unavailable`, the server is running and has no
+store.** Servers from v0.2.1 stay up and list their tools, and answer every call
+with that error. Tell the asker, in plain words, its `cause` (`no_registered_clone`,
+`no_manifest` or `other`) and relay its `fix`; do not guess at another cause, retry
+the call, or read files. For `no_registered_clone`, run Step 1 (locate, clone,
+register), then ask the asker to reconnect with `/mcp`. The stop message above is
+for servers older than v0.2.1, which exit instead.
+
 Call `store_info` once per session, before the first answer: it confirms the
 server is serving this store, and says how current it is. Then pick the tool by
 the question:
