@@ -10369,19 +10369,10 @@ MUTATIONS = (
     Mutation(
         "check-plugin compares an undeclared build id as an empty id",
         "check_plugin.py",
-        "    if not building:\n        return\n",
-        "    if False:\n        return\n",
+        "    if not building:\n",
+        "    if False:\n",
         "a store that declares no build id is failed against an empty string",
-        (
-            "test_check_plugin.PluginGateTest.test_a_layer_not_recorded_warns_and_never_passes_silently",
-            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
-            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
-            "test_check_plugin.PluginGateTest.test_a_subdirectory_plugin_may_carry_an_mcp_json_beside_a_root_without_one",
-            "test_check_plugin.PluginGateTest.test_an_mcp_json_declaration_that_agrees_passes_and_names_tag_and_id",
-            "test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",
-            "test_check_plugin.PluginGateTest.test_an_unset_or_blank_build_id_is_skipped_silently",
-            "test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",
-        ),
+        ("test_check_plugin.PluginGateTest.test_an_unresolved_build_id_is_said_and_still_passes",),
     ),
     Mutation(
         "check-plugin reads the build id from the environment instead of config",
@@ -10390,8 +10381,23 @@ MUTATIONS = (
         '    building = __import__("os").environ.get("KSB_STORE_ID", "").strip()',
         "a CI step that does not source the environment, or a build id config resolves from elsewhere, is invisible to the check although the build would use it",
         (
+            "test_check_plugin.PluginGateTest.test_a_build_id_that_agrees_passes",
             "test_check_plugin.PluginGateTest.test_a_build_id_that_differs_from_the_manifest_fails_naming_both",
+            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
+            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
+            "test_check_plugin.PluginGateTest.test_a_resolved_build_id_does_not_print_the_skip_line",
+            "test_check_plugin.PluginGateTest.test_a_subdirectory_plugin_may_carry_an_mcp_json_beside_a_root_without_one",
+            "test_check_plugin.PluginGateTest.test_an_mcp_json_declaration_that_agrees_passes_and_names_tag_and_id",
+            "test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",
         ),
+    ),
+    Mutation(
+        "check-plugin skips an unresolved build id in silence",
+        "check_plugin.py",
+        "        warnings.append(UNRESOLVED_BUILD_ID)\n        return\n",
+        "        return\n",
+        "a CI step that loads no settings has no build id to compare, and the check printed nothing, so the run read as covered by a check that never ran",
+        ("test_check_plugin.PluginGateTest.test_an_unresolved_build_id_is_said_and_still_passes",),
     ),
 )
 
