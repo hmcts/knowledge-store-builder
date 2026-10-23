@@ -150,6 +150,10 @@ def _touch(root: Path, rel: str, text: str = "{}") -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def layer_path(name: str) -> str:
+    return next(layer.paths[0] for layer in store_manifest.LAYERS if layer.name == name)
+
+
 def representative_manifest(root: Path) -> dict:
     """`compute` over a real git store holding every layer and every optional field."""
     subprocess.run(["git", "init", "-q", str(root)], check=True, env=git_env())
@@ -189,6 +193,11 @@ def representative_manifest(root: Path) -> dict:
         "knowledge/relationships/repository-dependencies.json",
         json.dumps({"format": {"layer": "relationships", "major": 1}, "unresolved_conflicts": {}}),
     )
+    # A written layer with one dated entry, so its `authored_as_of` range is an
+    # object rather than null.
+    dated = {"_metadata": {"authored": {"1": {"authored_as_of": "2026-01-01T00:00:00+00:00"}}}}
+    for layer in store_manifest.AUTHORED_LAYERS:
+        _touch(root, layer_path(layer), json.dumps(dated))
     _touch(root, "docs/journeys/apply.md", "# Apply")
     _touch(root, "scratch/note.md", "n")
     _touch(root, ".gitignore", "scratch/\n")
@@ -239,6 +248,8 @@ class TheManifestShapeIsGuarded(SettingsIsolated):
             "layer-kind.history: dir",
             "layer-kind.graph: file",
             "sources_as_of: str",
+            "layers.summaries.authored_as_of.newest: str",
+            "layers.topics.authored_as_of.oldest: str",
         ):
             self.assertIn(expected, self.lines)
 

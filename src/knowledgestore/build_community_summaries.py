@@ -56,7 +56,9 @@ Claude Code (maintainers have a licence; consumers never need one):
        digest: a run that changed no prose rewrites nothing. The block
        also records one digest per summary, and `merge` and `remap` both
        report - without refusing - any committed summary whose prose no
-       longer matches the one recorded beside it.
+       longer matches the one recorded beside it. It records when each
+       summary was authored, and `remap` carries that date with the prose
+       (see `authored`).
 
 The explorer embeds the merged summaries; Ask answers then include
 pre-written prose selected deterministically - no query-time AI.
@@ -75,11 +77,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 
+from . import authored
 from . import config
 from . import graph_files
 from . import graph_stream
 from . import io
 from . import kinds
+from . import store_manifest
 
 
 TOP_NODES = 12
@@ -274,8 +278,11 @@ def content_digest(body: dict[str, str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
-    """The reserved block: the digest the write is gated on, and the evidence base.
+def _merged_metadata(
+    body: dict[str, str], coverage: dict[str, dict], dated: dict[str, dict]
+) -> dict:
+    """The reserved block: the digest the write is gated on, the evidence base, and
+    when each summary was authored.
 
     Every key is placed explicitly - here, in `COVERAGE_FIELDS` and by sorting the
     community ids - because two runs on the same inputs must be byte-identical and
@@ -299,6 +306,10 @@ def _merged_metadata(body: dict[str, str], coverage: dict[str, dict]) -> dict:
         # not an edit.
         io.PROSE_DIGESTS_KEY: io.prose_digests(body.values()),
         "coverage": covered,
+        # Ordered by community id like the body, whatever order they were dated in.
+        **authored.block(
+            {cid: dated[cid] for cid in sorted(body, key=lambda k: int(k)) if cid in dated}
+        ),
     }
 
 
@@ -318,7 +329,7 @@ def _recorded_content_digest(document: dict) -> str | None:
 
 
 def _write_merged_summaries(
-    document: dict, body: dict[str, str], coverage: dict[str, dict]
+    document: dict, body: dict[str, str], coverage: dict[str, dict], dated: dict[str, dict]
 ) -> bool:
     """Write the merged summaries artefact unless the prose in it is already this.
 
@@ -327,7 +338,8 @@ def _write_merged_summaries(
     (#313): `remap` rewrote every line of a file whose prose it had not changed,
     and escaped non-ASCII characters `merge` wrote literally, so alternating the
     two stages churned a committed artefact on its own. `document` is the file as
-    it stands, which is where the digest to compare against is recorded.
+    it stands, which is where the digest to compare against is recorded, and
+    `dated` is when each summary in `body` was authored (see `authored`).
 
     Returns whether the write was skipped - the only part of this either caller
     reports, and each reports it in its own words.
@@ -344,7 +356,7 @@ def _write_merged_summaries(
     """
     for line in io.prose_drift(config.SUMMARIES_PATH, document, io.summaries_body(document)):
         print(line)
-    metadata = _merged_metadata(body, coverage)
+    metadata = _merged_metadata(body, coverage, dated)
     recorded = _recorded_content_digest(document)
     unchanged = recorded == metadata["content_digest"]
     if not unchanged:
@@ -450,7 +462,16 @@ def merge(paths: list[str]) -> int:
         return _refuse_merge(rejected, misdirected)
 
     body = dict(sorted(merged.items(), key=lambda kv: int(kv[0])))
-    unchanged = _write_merged_summaries(document, body, coverage)
+    # A summary merged with the text it already had keeps the date it was written;
+    # new or rewritten text is dated by this build. The write stays gated on the
+    # prose alone: a record changes only where text does, so the gate loses nothing.
+    dated = authored.dated(
+        body,
+        io.summaries_body(document),
+        authored.recorded(document),
+        store_manifest.build_commit(config.ROOT),
+    )
+    unchanged = _write_merged_summaries(document, body, coverage, dated)
     for r in rejected:
         print(f"rejected - {r}")
     if unchanged:
@@ -1800,7 +1821,14 @@ def remap(
     # figure about a community nobody sampled. `merge` records it again the next
     # time prose is merged, and nothing is lost that survived before: this write
     # dropped the metadata block whole.
-    unchanged = _write_merged_summaries(document, body, {})
+    #
+    # The date each summary was authored moves with it: a carry rewrites no text,
+    # so the prose is as old as it was, whatever build carried it.
+    dated = authored.carried(
+        ((target, entry["from"]) for target, entry in carried.items()),
+        authored.recorded(document),
+    )
+    unchanged = _write_merged_summaries(document, body, {}, dated)
     # Withdrawn rather than dropped: the prose is a written artefact, so it goes
     # to a file shaped like the one it left and can be revised and merged back.
     # Rewritten on every run, including when it is empty - a file left behind by

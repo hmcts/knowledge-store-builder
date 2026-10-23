@@ -19,7 +19,7 @@ import sys
 from collections import Counter, defaultdict
 from itertools import combinations
 
-from . import config, graph_files, io, kinds, provenance
+from . import authored, config, graph_files, io, kinds, provenance, store_manifest
 from .build_topic_briefs import markdown_to_html
 
 
@@ -245,6 +245,8 @@ def merge() -> int:
     build it measured.
     """
     dives_out: dict[str, dict] = {}
+    # The digest of each entry's Markdown, which is what decides it was rewritten.
+    sources: dict[str, str] = {}
     problems: list[str] = []
     bundles = sorted(config.DEEPDIVES_INPUT_DIR.glob("*-input.json"))
     if not bundles:
@@ -276,6 +278,7 @@ def merge() -> int:
                 f"(expected the short sha `{sha}`)"
             )
             continue
+        sources[repo] = authored.source_digest(markdown)
         dives_out[repo] = {
             "title": f"Deep dive: {repo}",
             "html": markdown_to_html(markdown),
@@ -286,9 +289,18 @@ def merge() -> int:
         config.DEEPDIVES_PATH,
         {
             **dict(sorted(dives_out.items())),
-            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
-                dive["html"] for dive in dives_out.values()
-            ),
+            io.SUMMARIES_METADATA_KEY: {
+                **io.prose_metadata(dive["html"] for dive in dives_out.values()),
+                **authored.block(
+                    authored.rendered_dated(
+                        sources,
+                        {name: dive["html"] for name, dive in dives_out.items()},
+                        io.rendered_prose(committed),
+                        authored.recorded(committed),
+                        store_manifest.build_commit(config.ROOT),
+                    )
+                ),
+            },
         },
         indent=1,
     )

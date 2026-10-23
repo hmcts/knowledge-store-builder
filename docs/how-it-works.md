@@ -473,6 +473,22 @@ that in both directions
   or paraphrase, and both warrant a human read — the
   [grounding contract](grounding-and-verification.md) explains why findings
   are a starting point rather than a defect count.
+- **Every written entry says when it was authored.** Summaries, topic briefs
+  and deep dives record, per entry, `authored_as_of` and `authored_commit` under
+  `_metadata.authored`, keyed by entry id. They are the date and SHA of the
+  build that last wrote that entry's text, read from `knowledge/provenance.json`:
+  the newest repository commit, which is also the manifest's `sources_as_of` for
+  that build. Prose carried forward keeps its date: a `remap` carry, exact or
+  overlap, moves the record with the summary, and a merge that leaves an entry's
+  text unchanged keeps its record. New or rewritten text takes the current
+  build's date. An entry written before this record existed has none, and nothing
+  adds one: a reader dates it by `sources_as_of`, which may be later than when it
+  was written. A build with no provenance writes no date. Briefs and dives are
+  re-rendered from Markdown on every run, so their records also carry
+  `source_sha256`, the digest of that Markdown, and an entry counts as rewritten
+  only when the digest changes: a renderer release that changes the HTML of
+  entries nobody rewrote does not re-date them. An entry with no recorded digest
+  gets one on its next run, and is dated then only if its HTML changed too.
 
 ## The semantic bridge
 
@@ -804,7 +820,12 @@ last by `knowledgestore manifest` and committed with the store.
   `digest` covers every layer, and `sources_as_of` is the newest commit date
   provenance records. The MCP server compares the `digest` to decide whether the
   store it holds has changed and reports `sources_as_of` as how recent the
-  sources are; a store with no manifest yet has neither. `status` also lists the files under `knowledge/` that no layer, declared
+  sources are; a store with no manifest yet has neither. The `summaries`,
+  `topics` and `deep_dives` layers also carry `authored_as_of`, the oldest and
+  newest date their entries record (`{"oldest": ..., "newest": ...}`), so a
+  reader can tell how old the written prose is without opening it (format 1.3).
+  It is `null` for an absent layer and for one with no dated entry. Dates are compared as
+  instants and written as recorded. `status` also lists the files under `knowledge/` that no layer, declared
   extra layer or library-excused path covers, so a file a reader would never be told
   about is visible.
 - **The format version** is `format.major` and `format.minor`. The major number
