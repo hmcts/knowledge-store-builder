@@ -45,6 +45,12 @@ MANIFEST = "knowledge/store-manifest.json"
 RECONNECT = "reconnect the server with /mcp"
 NOT_LAUNCHED = "plugin does not launch the server"
 
+# The server's refusal when it runs with no store (knowledge-store-mcp v0.2.1): its
+# `cause` is one of these three, and the skill relays the server's own `fix`.
+UNAVAILABLE_CAUSES = ("no_registered_clone", "no_manifest", "other")
+RELAY_FIX = "relay its `fix`"
+RECONNECT_AFTER = "ask the asker to reconnect with `/mcp`"
+
 # An asker may hold this skill and a store's own skill at once, and both trigger on
 # a store question. Before stopping, the skill defers to a store skill that works.
 DEFER = "If this store's own plugin provides a skill for it, use that skill instead"
@@ -195,6 +201,18 @@ class TheSkillUsesTheServerToolsTest(unittest.TestCase):
         (CLAUDE.md 2.10)."""
         found = file_reading_lines(self.skill)
         self.assertEqual(found, [], "; ".join(found))
+
+    def test_the_skill_relays_a_store_unavailable_result(self):
+        """Breaks if the skill stops saying what to do when the tools exist but every
+        call returns `store_unavailable` - the agent then guesses a cause, retries,
+        or falls back to reading files. Each phrase is one the instruction needs: the
+        error's name, its three causes, relaying the server's own fix, and
+        reconnecting once the clone is registered."""
+        flat = " ".join(section(self.skill, ANSWERING).split())
+        causes = [f"`{cause}`" for cause in UNAVAILABLE_CAUSES]
+        for phrase in ("store_unavailable", *causes, RELAY_FIX, RECONNECT_AFTER):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, flat)
 
     def test_the_skill_says_what_to_do_without_the_server(self):
         """Breaks if the skill stops telling the asker that their store's plugin does
