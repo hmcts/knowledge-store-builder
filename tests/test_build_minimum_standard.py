@@ -132,7 +132,7 @@ class TheEvidenceStage(SettingsIsolated):
             self.write_content()
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = stage.main([])
+            code = stage.main()
         self.assertEqual(code, expect, err.getvalue())
         return code, out.getvalue(), err.getvalue()
 
@@ -253,6 +253,10 @@ class TheEvidenceStage(SettingsIsolated):
             "a disclosure URL": ("Disclose issues via https://example.com/form\n", "present"),
             "a mailto": ("Write to <mailto:team@example.com>\n", "present"),
             "a bare address": ("Contact: team@example.com\n", "present"),
+            "an address in a Markdown link": ("Email [the team](team@example.com).\n", "present"),
+            "a handle": ("Follow @example-team for news.\n", "absent"),
+            "a domain with no local part": ("Find us at @example.org.\n", "absent"),
+            "a host with no domain": ("Contact: team@localhost\n", "absent"),
         }
         for name in cases:
             self.clone(name.replace(" ", "-"), {"SECURITY.md": cases[name][0]})

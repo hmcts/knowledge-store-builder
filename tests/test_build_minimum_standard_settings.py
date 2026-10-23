@@ -64,7 +64,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         config.REPOSITORIES_CONFIG.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def run_stage(self, gh: Gh) -> dict:
-        self.assertEqual(stage.main([], runner=gh), 0)
+        self.assertEqual(stage.main(runner=gh), 0)
         return json.loads(config.MINIMUM_STANDARD_SETTINGS_PATH.read_text(encoding="utf-8"))
 
     def test_full_access_records_every_setting(self):
@@ -251,7 +251,7 @@ class TheSettingsSnapshot(SettingsIsolated):
     def test_a_missing_repository_list_exits_1_and_writes_nothing(self):
         """Breaks if the stage writes an empty snapshot for a store with no list: the
         evidence stage would read that as 'every repository was checked'."""
-        self.assertEqual(stage.main([], runner=Gh({})), 1)
+        self.assertEqual(stage.main(runner=Gh({})), 1)
         self.assertFalse(config.MINIMUM_STANDARD_SETTINGS_PATH.exists())
 
     def test_a_refused_vulnerability_alerts_call_is_unreadable_never_disabled(self):

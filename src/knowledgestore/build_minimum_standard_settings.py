@@ -41,7 +41,7 @@ FIELDS = (
 
 
 def _unread() -> dict:
-    return {field: None for field in FIELDS}
+    return dict.fromkeys(FIELDS)
 
 
 def _call(runner, path: str) -> dict | None:
@@ -99,7 +99,7 @@ def read_repository(runner, org: str, name: str) -> dict:
     return record
 
 
-def main(argv: list[str] | None = None, runner=run_gh) -> int:
+def main(runner=run_gh) -> int:
     if not config.REPOSITORIES_CONFIG.is_file():
         print(
             f"{config.REPOSITORIES_CONFIG} does not exist; run `knowledgestore discover` first.",

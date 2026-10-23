@@ -8771,8 +8771,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: secret scanning needs both the setting and a workflow",
         "build_minimum_standard.py",
-        '    if "present" in states:\n        return "present"\n',
-        '    if states == {"present"}:\n        return "present"\n',
+        '    if "present" in halves:\n        return "present"\n',
+        '    if halves == ("present", "present"):\n        return "present"\n',
         "a repository whose secret scanning is on in GitHub would be reported as missing it for want of a scanning workflow as well",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow",
@@ -8781,8 +8781,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: an unread secret-scanning setting reads as absent",
         "build_minimum_standard.py",
-        '    if states == {"absent"}:\n        return "absent"\n',
-        '    if "absent" in states:\n        return "absent"\n',
+        '    if halves == ("absent", "absent"):\n        return "absent"\n',
+        '    if "absent" in halves:\n        return "absent"\n',
         "a token that could not read the secret-scanning setting, in a repository with no scanning workflow, would produce a finding against the team from no access",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow",

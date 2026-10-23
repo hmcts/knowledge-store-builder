@@ -46,7 +46,10 @@ SECURITY_PATHS = (".github/SECURITY.md", "SECURITY.md", "docs/SECURITY.md")
 # A mailbox counts wherever it is. A URL counts only on a line about reporting, judged
 # with the URLs taken out, so a build badge, or a link that merely spells "security",
 # is not taken for an intake route.
-MAILBOX = re.compile(r"mailto:\S+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# Text is split into words on whitespace and the brackets, quotes and punctuation that
+# wrap an address in prose or Markdown, and each word is judged on its own: a single
+# pass, where a pattern for an address searched across the text can backtrack.
+WORD_BREAKS = re.compile(r"[\s<>()\[\]{},;\"'`*]+")
 URL = re.compile(r"https?://\S+")
 REPORTING = re.compile(r"report|security|vulnerab|disclos", re.IGNORECASE)
 THREAT_MODEL_NAMES = ("threat-model", "threat_model", "threatmodel")
@@ -119,8 +122,24 @@ def _owner(clone: Path) -> dict:
     )
 
 
+def _is_mailbox(word: str) -> bool:
+    """A `mailto:` link, or `local@domain.tld`: a local part, then two or more domain
+    labels of letters, digits, `-` or `_`. A handle such as `@team` has no local part."""
+    if "mailto:" in word.lower():
+        return True
+    local, at, domain = word.partition("@")
+    labels = domain.rstrip(".:").split(".")
+    return (
+        bool(at)
+        and bool(local)
+        and all(c.isalnum() or c in "._+-" for c in local)
+        and len(labels) > 1
+        and all(label and all(c.isalnum() or c in "-_" for c in label) for label in labels)
+    )
+
+
 def _carries_a_contact(text: str) -> bool:
-    if MAILBOX.search(text):
+    if any(_is_mailbox(word) for word in WORD_BREAKS.split(text)):
         return True
     return any(
         URL.search(line) and REPORTING.search(URL.sub("", line)) for line in text.splitlines()
@@ -151,7 +170,7 @@ def _security_contact(clone: Path) -> dict:
     )
 
 
-def _hits(text: str, counts: Counter[str] | None = None) -> tuple[str, Counter[str]]:
+def _hits(text: str) -> tuple[str, Counter[str]]:
     """`text` masked, and the rules that masked something in it.
 
     `mask` leaves a rule it tried at zero, so only a positive count is a hit.
@@ -284,10 +303,10 @@ def _dependency_configs(tracked: list[str]) -> list[str]:
 def _either(setting: dict, workflow: dict) -> str:
     """The state of a requirement two items can each meet: present if either is,
     absent only if both definitely are not, otherwise not determinable."""
-    states = {setting["state"], workflow["state"]}
-    if "present" in states:
+    halves = (setting["state"], workflow["state"])
+    if "present" in halves:
         return "present"
-    if states == {"absent"}:
+    if halves == ("absent", "absent"):
         return "absent"
     return "not_determinable"
 
@@ -475,7 +494,7 @@ def _dump(body: dict) -> str:
     return json.dumps(body, indent=2, sort_keys=True) + "\n"
 
 
-def main(argv: list[str] | None = None, run=run_git) -> int:
+def main(run=run_git) -> int:
     if not config.REPOSITORIES_DIR.is_dir():
         print(
             f"No clones under {config.REPOSITORIES_DIR} - run `knowledgestore sync` first",
