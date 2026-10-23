@@ -334,18 +334,21 @@ say a repository meets the standard.
 
 | Point | Reads | Notes |
 |---|---|---|
-| `owner` | `CODEOWNERS` at `.github/`, the root or `docs/`; the first found is judged | `present` when a rule names an owner (`@user`, `@org/team` or an email) |
-| `security_contact` | `SECURITY.md` at the same three places | `present` when it carries an email address or URL; whether the mailbox is monitored is not recorded |
+| `owner` | `CODEOWNERS` at `.github/`, the root or `docs/`; the first found is judged | `present` when the last rule for `*` or `/`, the repository root, names an owner (`@user`, `@org/team` or an email); rules for subdirectories alone are `absent` |
+| `security_contact` | `SECURITY.md` at the same three places | `present` when it carries a `mailto:` or email address, or a URL on a line that mentions reporting, security, a vulnerability or disclosure (a badge is not a contact); whether the mailbox is monitored is not recorded |
 | `no_secrets` | the content-file list, whole files, current tree | never `present`, below |
-| `secure_by_design` | a tracked path naming a threat model, or under `docs/security/` | `present` or `not_determinable`, never `absent`: code does not show that design was not considered |
-| `hygiene` | six sub-items, below | `present` only when all six are; `absent` when any is; otherwise `not_determinable` |
+| `secure_by_design` | a tracked file named `threat-model`, `threat_model` or `threatmodel` (any case, any extension), or any file under `docs/threat-model*/` | `present` or `not_determinable`, never `absent`: code does not show that design was not considered |
+| `hygiene` | six sub-items making five requirements, below | `present` only when every requirement is; `absent` when any is definitely absent; otherwise `not_determinable` |
 | `patching` | nothing | always `not_determinable`: timelines are not recorded in a repository |
-| `unmaintained` | the date of the last commit, and `archived` from the snapshot | `present` when not archived, `absent` when archived; cites the commit either way |
+| `unmaintained` | the date of the last commit, and `archived` from the snapshot | `present` when archived, the safe posture; `not_determinable` when not archived, because an owner and a patching route are not judged from the repository; cites the commit either way |
 
 **Hygiene is six items, each reported on its own** under `evidence`:
 
 - `dependency_updates`: a Dependabot or Renovate config in the clone.
-- `code_scanning`: a workflow under `.github/workflows/` naming CodeQL.
+- `code_scanning_workflow`: a workflow under `.github/workflows/` naming CodeQL.
+  Without one it is `not_determinable`, "no code-scanning workflow; default setup is
+  not visible": GitHub's default setup scans without a workflow, and the build
+  cannot see it.
 - `secret_scanning_workflow`: a workflow naming gitleaks, trufflehog or detect-secrets.
 - `secret_scanning_setting`: GitHub's secret scanning, from the snapshot.
 - `vulnerability_alerts`: Dependabot alerts, from the snapshot. Only `enabled`
@@ -353,6 +356,11 @@ say a repository meets the standard.
   cannot see, so the snapshot never guesses "off".
 - `branch_protection`: whether the default branch is protected, from the snapshot.
   It is read from the branches API, which counts rulesets as well as classic rules.
+
+The two secret-scanning items are one requirement, because either scans for
+secrets: it is `present` when either is, `absent` only when the setting is
+disabled and no workflow exists, and otherwise `not_determinable`. The other four
+items are a requirement each.
 
 **Why `no_secrets` is never `present`.** A pattern scan finding nothing cannot show
 that nothing is committed. A clean scan is therefore `not_determinable`, with the
@@ -369,14 +377,18 @@ detail such as hostnames is not looked for.
 already uses can read, and asks for nothing broader. A setting it cannot read is
 recorded as `null` and listed under `unreadable`; the evidence stage reports it as
 `not_determinable` with the reason `no access`, never as `absent`. Branch
-protection and security settings often need admin rights, so expect `no access`
-there unless the store supplies such a token. With no snapshot at all, the settings
-items read `not_determinable` with the reason `no settings snapshot`.
+protection comes from the branches API's `protected` field, which needs only read
+access. Secret scanning comes from the repository's `security_and_analysis` fields,
+which GitHub returns only to a repository admin, an organisation owner or a
+security manager, so expect `no access` there unless the store supplies such a
+token. With no snapshot at all, the settings items read `not_determinable` with the
+reason `no settings snapshot`.
 
 **Archived repositories are not in the store.** The repository list excludes them,
 so they are never cloned. The summary says so in its `notes`. The layer therefore
 cannot show an archived repository that is still deployed. Its `unmaintained` point
-covers the repositories the store holds.
+covers the repositories the store holds, so it reads `present` only for one archived
+after it was cloned.
 
 **Outputs**, under `knowledge/minimum-standard/`:
 

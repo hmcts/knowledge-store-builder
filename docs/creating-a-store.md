@@ -462,7 +462,8 @@ without it the stage exits 1 and names the file. The
 writes and the resolution order.
 
 To record the GitHub settings the build's token can read (archived, default branch,
-branch protection, secret scanning) for the minimum-standard layer, run:
+branch protection, secret scanning, Dependabot alerts) for the minimum-standard
+layer, run:
 
 ```bash
 knowledgestore minimum-standard-settings

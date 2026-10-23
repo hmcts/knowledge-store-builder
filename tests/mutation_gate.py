@@ -8247,14 +8247,16 @@ MUTATIONS = (
         "a setting the token could not read would become a missing control, a finding against the team made from no access",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_snapshot_value_of_the_wrong_type_is_not_determinable",
+            "test_build_minimum_standard.TheEvidenceStage.test_an_absent_requirement_outranks_an_undetermined_one",
+            "test_build_minimum_standard.TheEvidenceStage.test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow",
             "test_build_minimum_standard.TheEvidenceStage.test_unreadable_settings_are_not_determinable_with_no_access",
         ),
     ),
     Mutation(
         "minimum standard evidence: unread Dependabot alerts read as absent",
         "build_minimum_standard.py",
-        '            {"enabled": ("present", "Dependabot alerts are enabled")},\n',
-        '            {"enabled": ("present", "Dependabot alerts are enabled"), None: ("absent", "off")},\n',
+        '        {"enabled": ("present", "Dependabot alerts are enabled")},\n',
+        '        {"enabled": ("present", "Dependabot alerts are enabled"), None: ("absent", "off")},\n',
         "GitHub answers 404 for alerts that are off and for a token that cannot see them, so reading an unread value as absent reports a missing control from no access",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_snapshot_value_of_the_wrong_type_is_not_determinable",
@@ -8291,6 +8293,86 @@ MUTATIONS = (
             "test_build_minimum_standard.TheEvidenceStage.test_patching_is_always_not_determinable",
             "test_build_minimum_standard.TheEvidenceStage.test_the_summary_says_archived_repositories_are_not_in_the_store",
         ),
+    ),
+    Mutation(
+        "minimum standard evidence: a live repository reads as safely maintained",
+        "build_minimum_standard.py",
+        '        return minimum_standard.point("unmaintained", "not_determinable", evidence, NOT_ARCHIVED)\n',
+        '        return minimum_standard.point("unmaintained", "present", evidence)\n',
+        "every repository not archived would be recorded as meeting the unmaintained-code point, which asks for an owner and a patching route that nothing in a repository shows",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_live_repository_is_not_determinable_with_its_last_commit_and_dated",
+            "test_build_minimum_standard.TheEvidenceStage.test_unreadable_settings_are_not_determinable_with_no_access",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: no code-scanning workflow reads as absent",
+        "build_minimum_standard.py",
+        '        when_missing="not_determinable",\n',
+        '        when_missing="absent",\n',
+        "a repository using GitHub's default code-scanning setup, which needs no workflow, would be reported as not scanning its code",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_no_code_scanning_workflow_is_not_determinable_never_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_one_absent_hygiene_item_makes_the_point_absent",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: secret scanning needs both the setting and a workflow",
+        "build_minimum_standard.py",
+        '    if "present" in states:\n        return "present"\n',
+        '    if states == {"present"}:\n        return "present"\n',
+        "a repository whose secret scanning is on in GitHub would be reported as missing it for want of a scanning workflow as well",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: an unread secret-scanning setting reads as absent",
+        "build_minimum_standard.py",
+        '    if states == {"absent"}:\n        return "absent"\n',
+        '    if "absent" in states:\n        return "absent"\n',
+        "a token that could not read the secret-scanning setting, in a repository with no scanning workflow, would produce a finding against the team from no access",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a subdirectory rule names the repository owner",
+        "build_minimum_standard.py",
+        "        if tokens and tokens[0] in ROOT_PATTERNS:\n",
+        "        if tokens:\n",
+        "a CODEOWNERS naming an owner only for `docs/` would read as an owner for the whole system",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_codeowners_with_only_subdirectory_rules_is_absent",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: any URL in SECURITY.md is a contact",
+        "build_minimum_standard.py",
+        '        URL.search(line) and REPORTING.search(URL.sub("", line)) for line in text.splitlines()\n',
+        "        URL.search(line) for line in text.splitlines()\n",
+        "a build badge in SECURITY.md would be recorded as a security contact and intake route",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_contact_counts_only_as_a_mailbox_or_a_reporting_url",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a path containing threat-model words is a threat model",
+        "build_minimum_standard.py",
+        '    if parts[-1].split(".", 1)[0] in THREAT_MODEL_NAMES:\n',
+        "    if any(name in path.lower() for name in THREAT_MODEL_NAMES):\n",
+        "a source file such as a threat-model parser would be cited as evidence of secure-by-design",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_threat_model_is_known_by_its_file_name_or_its_docs_directory",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: the summary carries a verdict",
+        "build_minimum_standard.py",
+        '        "notes": sorted(NOTES),\n',
+        '        "compliant": False,\n        "notes": sorted(NOTES),\n',
+        "a field summarising the evidence as a pass or a score would publish the judgement the layer exists not to make",
+        ("test_build_minimum_standard.TheEvidenceStage.test_the_summary_carries_no_verdict_field",),
     ),
     Mutation(
         "store manifest: the minimum standard stamp is not read",

@@ -43,8 +43,15 @@ NO_SNAPSHOT = "no settings snapshot"
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 SECURITY_PATHS = (".github/SECURITY.md", "SECURITY.md", "docs/SECURITY.md")
 
-CONTACT = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+|https?://\S+")
+# A mailbox counts wherever it is. A URL counts only on a line about reporting, judged
+# with the URLs taken out, so a build badge, or a link that merely spells "security",
+# is not taken for an intake route.
+MAILBOX = re.compile(r"mailto:\S+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+URL = re.compile(r"https?://\S+")
+REPORTING = re.compile(r"report|security|vulnerab|disclos", re.IGNORECASE)
 THREAT_MODEL_NAMES = ("threat-model", "threat_model", "threatmodel")
+ROOT_PATTERNS = ("*", "/")
+NO_ROOT_OWNER = "no rule names an owner for the repository root"
 DEPENDENCY_CONFIGS = (
     ".github/dependabot.yml",
     ".github/dependabot.yaml",
@@ -63,6 +70,7 @@ FOUND_SECRETS = (
 )
 NO_THREAT_MODEL = "no threat model found; secure-by-design is not judged from code"
 PATCHING = "patching timelines are not recorded in a repository"
+NOT_ARCHIVED = "not archived; maintenance and a patching route are not judged from the repository"
 
 
 class Refusal(Exception):
@@ -76,14 +84,20 @@ def _read(path: Path) -> str | None:
         return None
 
 
-def _names_an_owner(text: str) -> bool:
-    """A rule line is a pattern then owners; an owner is `@user`, `@org/team` or an
-    email, so any token after the pattern holding `@` names one."""
+def _names_a_root_owner(text: str) -> bool:
+    """Whether the rule GitHub applies to the repository root names an owner.
+
+    A rule line is a pattern then owners; an owner is `@user`, `@org/team` or an
+    email, so a token after the pattern holding `@` names one. Only a `*` or `/`
+    pattern covers the root, and the last such rule wins, as it does on GitHub: a
+    later root rule with no owner unassigns the root.
+    """
+    owned = False
     for line in text.splitlines():
         tokens = line.split("#", 1)[0].split()
-        if len(tokens) > 1 and any("@" in token for token in tokens[1:]):
-            return True
-    return False
+        if tokens and tokens[0] in ROOT_PATTERNS:
+            owned = any("@" in token for token in tokens[1:])
+    return owned
 
 
 def _owner(clone: Path) -> dict:
@@ -91,15 +105,11 @@ def _owner(clone: Path) -> dict:
         text = _read(clone / path)
         if text is None:
             continue
-        if _names_an_owner(text):
-            return minimum_standard.point(
-                "owner", "present", [{"path": path, "reason": "names an owner"}]
-            )
+        if _names_a_root_owner(text):
+            reason = "names an owner for the repository root"
+            return minimum_standard.point("owner", "present", [{"path": path, "reason": reason}])
         return minimum_standard.point(
-            "owner",
-            "absent",
-            [{"path": path, "reason": "no rule names an owner"}],
-            "no CODEOWNERS file names an owner",
+            "owner", "absent", [{"path": path, "reason": NO_ROOT_OWNER}], NO_ROOT_OWNER
         )
     return minimum_standard.point(
         "owner",
@@ -109,12 +119,20 @@ def _owner(clone: Path) -> dict:
     )
 
 
+def _carries_a_contact(text: str) -> bool:
+    if MAILBOX.search(text):
+        return True
+    return any(
+        URL.search(line) and REPORTING.search(URL.sub("", line)) for line in text.splitlines()
+    )
+
+
 def _security_contact(clone: Path) -> dict:
     for path in SECURITY_PATHS:
         text = _read(clone / path)
         if text is None:
             continue
-        if CONTACT.search(text):
+        if _carries_a_contact(text):
             reason = "carries a contact; whether it is monitored is not recorded"
             return minimum_standard.point(
                 "security_contact", "present", [{"path": path, "reason": reason}]
@@ -191,13 +209,18 @@ def _no_secrets(clone: Path, files: list[str]) -> dict:
     return minimum_standard.point("no_secrets", "absent", evidence, FOUND_SECRETS)
 
 
+def _is_threat_model(path: str) -> bool:
+    """A file named for a threat model, in any case and with any extension, or any
+    file under `docs/threat-model*/`. A name that merely contains the words, such as
+    a parser for threat models, is code rather than a threat model."""
+    parts = path.lower().split("/")
+    if parts[-1].split(".", 1)[0] in THREAT_MODEL_NAMES:
+        return True
+    return len(parts) > 2 and parts[0] == "docs" and parts[1].startswith("threat-model")
+
+
 def _secure_by_design(tracked: list[str]) -> dict:
-    found = [
-        path
-        for path in tracked
-        if any(name in path.lower() for name in THREAT_MODEL_NAMES)
-        or path.startswith("docs/security/")
-    ]
+    found = [path for path in tracked if _is_threat_model(path)]
     if not found:
         return minimum_standard.point(
             "secure_by_design", "not_determinable", reason=NO_THREAT_MODEL
@@ -220,11 +243,21 @@ def _workflows_naming(clone: Path, tracked: list[str], needles: tuple[str, ...])
     return sorted(found)
 
 
-def _file_item(item: str, paths: list[str], checked: list[str], found: str, missing: str) -> dict:
+def _file_item(
+    item: str,
+    paths: list[str],
+    checked: list[str],
+    found: str,
+    missing: str,
+    when_missing: str = "absent",
+) -> dict:
+    """A sub-item read from the clone. `when_missing` is the state when no file is
+    found: `absent` where the file is the only way to have the control, and
+    `not_determinable` where GitHub can provide it without one."""
     entry: dict = {"checked": checked, "item": item, "paths": paths}
     if paths:
         return {**entry, "reason": found, "state": "present"}
-    return {**entry, "reason": missing, "state": "absent"}
+    return {**entry, "reason": missing, "state": when_missing}
 
 
 def _setting_item(item: str, field: str, settings: dict | None, readings: dict) -> dict:
@@ -248,64 +281,85 @@ def _dependency_configs(tracked: list[str]) -> list[str]:
     )
 
 
+def _either(setting: dict, workflow: dict) -> str:
+    """The state of a requirement two items can each meet: present if either is,
+    absent only if both definitely are not, otherwise not determinable."""
+    states = {setting["state"], workflow["state"]}
+    if "present" in states:
+        return "present"
+    if states == {"absent"}:
+        return "absent"
+    return "not_determinable"
+
+
 def _hygiene(clone: Path, tracked: list[str], settings: dict | None) -> dict:
-    items = [
-        _setting_item(
-            "branch_protection",
-            "branch_protection",
-            settings,
-            {
-                "present": ("present", "the default branch is protected"),
-                "absent": ("absent", "the default branch is not protected"),
-            },
-        ),
-        _file_item(
-            "code_scanning",
-            _workflows_naming(clone, tracked, CODE_SCANNERS),
-            [WORKFLOWS],
-            "code-scanning workflow found",
-            "no code-scanning workflow",
-        ),
-        _file_item(
-            "dependency_updates",
-            _dependency_configs(tracked),
-            sorted((*DEPENDENCY_CONFIGS, ".renovaterc*")),
-            "dependency update config found",
-            "no dependency update config",
-        ),
-        _setting_item(
-            "secret_scanning_setting",
-            "secret_scanning",
-            settings,
-            {
-                "enabled": ("present", "secret scanning is enabled"),
-                "disabled": ("absent", "secret scanning is disabled"),
-            },
-        ),
-        _file_item(
-            "secret_scanning_workflow",
-            _workflows_naming(clone, tracked, SECRET_SCANNERS),
-            [WORKFLOWS],
-            "secret-scanning workflow found",
-            "no secret-scanning workflow",
-        ),
-        # Dependabot alerts are vulnerability scanning, not update tooling, so they
-        # are their own item. The snapshot records them only as enabled or unread:
-        # GitHub answers "off" and "cannot see" alike, so absent is never guessed.
-        _setting_item(
-            "vulnerability_alerts",
-            "dependabot_alerts",
-            settings,
-            {"enabled": ("present", "Dependabot alerts are enabled")},
-        ),
-    ]
-    states = {item["state"] for item in items}
-    if states == {"present"}:
+    protection = _setting_item(
+        "branch_protection",
+        "branch_protection",
+        settings,
+        {
+            "present": ("present", "the default branch is protected"),
+            "absent": ("absent", "the default branch is not protected"),
+        },
+    )
+    # GitHub's default code-scanning setup runs without a workflow and the build cannot
+    # see it, so a missing workflow does not show that code scanning is off.
+    code_scanning = _file_item(
+        "code_scanning_workflow",
+        _workflows_naming(clone, tracked, CODE_SCANNERS),
+        [WORKFLOWS],
+        "code-scanning workflow found",
+        "no code-scanning workflow; default setup is not visible",
+        when_missing="not_determinable",
+    )
+    updates = _file_item(
+        "dependency_updates",
+        _dependency_configs(tracked),
+        sorted((*DEPENDENCY_CONFIGS, ".renovaterc*")),
+        "dependency update config found",
+        "no dependency update config",
+    )
+    secret_setting = _setting_item(
+        "secret_scanning_setting",
+        "secret_scanning",
+        settings,
+        {
+            "enabled": ("present", "secret scanning is enabled"),
+            "disabled": ("absent", "secret scanning is disabled"),
+        },
+    )
+    secret_workflow = _file_item(
+        "secret_scanning_workflow",
+        _workflows_naming(clone, tracked, SECRET_SCANNERS),
+        [WORKFLOWS],
+        "secret-scanning workflow found",
+        "no secret-scanning workflow",
+    )
+    # Dependabot alerts are vulnerability scanning, not update tooling, so they are
+    # their own item. The snapshot records them only as enabled or unread: GitHub
+    # answers "off" and "cannot see" alike, so absent is never guessed.
+    alerts = _setting_item(
+        "vulnerability_alerts",
+        "dependabot_alerts",
+        settings,
+        {"enabled": ("present", "Dependabot alerts are enabled")},
+    )
+    items = [protection, code_scanning, updates, secret_setting, secret_workflow, alerts]
+    # Each item is reported on its own, but the setting and the workflow both scan for
+    # secrets, so either one meets that requirement.
+    requirements = {
+        protection["state"],
+        code_scanning["state"],
+        updates["state"],
+        _either(secret_setting, secret_workflow),
+        alerts["state"],
+    }
+    if requirements == {"present"}:
         return minimum_standard.point("hygiene", "present", items)
-    if "absent" in states:
+    if "absent" in requirements:
         return minimum_standard.point("hygiene", "absent", items)
     return minimum_standard.point(
-        "hygiene", "not_determinable", items, "an item could not be determined"
+        "hygiene", "not_determinable", items, "a requirement could not be determined"
     )
 
 
@@ -314,12 +368,14 @@ def _unmaintained(as_of: dict, settings: dict | None) -> dict:
     if settings is None:
         return minimum_standard.point("unmaintained", "not_determinable", [last], NO_SNAPSHOT)
     archived = settings.get("archived")
+    # Archived is the safe posture the point asks for. A live repository needs an owner
+    # and a patching route, which nothing in a repository shows, so it is not judged.
     if archived is True:
         evidence = [last, {"reason": "archived", "setting": "archived"}]
-        return minimum_standard.point("unmaintained", "absent", evidence, "archived")
+        return minimum_standard.point("unmaintained", "present", evidence)
     if archived is False:
         evidence = [last, {"reason": "not archived", "setting": "archived"}]
-        return minimum_standard.point("unmaintained", "present", evidence)
+        return minimum_standard.point("unmaintained", "not_determinable", evidence, NOT_ARCHIVED)
     return minimum_standard.point("unmaintained", "not_determinable", [last], NO_ACCESS)
 
 

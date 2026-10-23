@@ -170,7 +170,7 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(points["owner"]["state"], "present")
         self.assertEqual(
             points["owner"]["evidence"],
-            [{"path": ".github/CODEOWNERS", "reason": "names an owner"}],
+            [{"path": ".github/CODEOWNERS", "reason": "names an owner for the repository root"}],
         )
         self.assertEqual(points["security_contact"]["state"], "present")
         self.assertEqual(
@@ -210,8 +210,58 @@ class TheEvidenceStage(SettingsIsolated):
         owner = self.record("repo-a")["points"]["owner"]
         self.assertEqual(owner["state"], "absent")
         self.assertEqual(
-            owner["evidence"], [{"path": "CODEOWNERS", "reason": "no rule names an owner"}]
+            owner["evidence"],
+            [{"path": "CODEOWNERS", "reason": "no rule names an owner for the repository root"}],
         )
+
+    def test_a_codeowners_with_only_subdirectory_rules_is_absent(self):
+        """Breaks if a rule for `docs/` is taken as an owner for the repository: the
+        standard asks for a named owner of the system, which is the root rule."""
+        self.clone("repo-a", {"CODEOWNERS": "docs/ @example-org/docs-team\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        owner = self.record("repo-a")["points"]["owner"]
+        self.assertEqual(owner["state"], "absent")
+        self.assertEqual(owner["reason"], "no rule names an owner for the repository root")
+
+    def test_a_root_rule_spelled_slash_names_an_owner(self):
+        """Breaks if only `*` is read as the repository root: `/` names it too."""
+        self.clone("repo-a", {"CODEOWNERS": "docs/ @example-org/docs-team\n/ @example-org/a\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        self.assertEqual(self.record("repo-a")["points"]["owner"]["state"], "present")
+
+    def test_a_contact_counts_only_as_a_mailbox_or_a_reporting_url(self):
+        """Breaks if any URL in SECURITY.md reads as a contact - a build badge is not
+        an intake route - or if a mailto, a bare address or a URL on a line about
+        reporting stops counting."""
+        cases = {
+            "a badge": (
+                "# Security policy\n"
+                "[![Build](https://img.shields.io/badge/build-passing-green)]"
+                "(https://github.com/example/repo/actions)\n",
+                "absent",
+            ),
+            "a URL that only spells security": (
+                "See https://example.com/security for more.\n",
+                "absent",
+            ),
+            "a reporting URL": (
+                "Report a vulnerability at https://example.com/intake\n",
+                "present",
+            ),
+            "a disclosure URL": ("Disclose issues via https://example.com/form\n", "present"),
+            "a mailto": ("Write to <mailto:team@example.com>\n", "present"),
+            "a bare address": ("Contact: team@example.com\n", "present"),
+        }
+        for name in cases:
+            self.clone(name.replace(" ", "-"), {"SECURITY.md": cases[name][0]})
+        self.snapshot({})
+        self.run_stage()
+        for name, (_, expected) in cases.items():
+            with self.subTest(case=name):
+                contact = self.record(name.replace(" ", "-"))["points"]["security_contact"]
+                self.assertEqual(contact["state"], expected)
 
     def test_a_security_md_without_a_contact_is_absent(self):
         """Breaks if a SECURITY.md with no email or URL reads as a security contact."""
@@ -345,6 +395,40 @@ class TheEvidenceStage(SettingsIsolated):
             missing["reason"], "no threat model found; secure-by-design is not judged from code"
         )
 
+    def test_a_threat_model_is_known_by_its_file_name_or_its_docs_directory(self):
+        """Breaks if a path merely containing the words counts - a parser named for
+        threat models is code, not a threat model - or if anything under
+        `docs/security/` stands in for one; or if a file named for one, in any case
+        and with any extension, or a file under `docs/threat-model*/`, is missed."""
+        self.clone(
+            "repo-a",
+            {
+                "src/threat_model_parser.py": "def parse():\n    return 0\n",
+                "docs/security/policy.md": "# Policy\n",
+                "threat-models-notes/readme.md": "# Notes\n",
+            },
+        )
+        self.clone(
+            "repo-b",
+            {
+                "THREATMODEL": "# Threats\n",
+                "design/threat-model.v2.pdf": "%PDF\n",
+                "docs/threat-models/overview.md": "# Overview\n",
+                "src/app.py": "x = 1\n",
+            },
+        )
+        self.snapshot({})
+        self.run_stage()
+        unrelated = self.record("repo-a")["points"]["secure_by_design"]
+        self.assertEqual(unrelated["state"], "not_determinable")
+        self.assertEqual(unrelated["evidence"], [])
+        found = self.record("repo-b")["points"]["secure_by_design"]
+        self.assertEqual(found["state"], "present")
+        self.assertEqual(
+            [entry["path"] for entry in found["evidence"]],
+            ["THREATMODEL", "design/threat-model.v2.pdf", "docs/threat-models/overview.md"],
+        )
+
     def test_patching_is_always_not_determinable(self):
         """Breaks if patching is ever judged: timelines are not recorded in a repository,
         however much else the repository evidences."""
@@ -397,7 +481,7 @@ class TheEvidenceStage(SettingsIsolated):
                 },
                 {
                     "checked": [".github/workflows/"],
-                    "item": "code_scanning",
+                    "item": "code_scanning_workflow",
                     "paths": [".github/workflows/codeql.yml"],
                     "reason": "code-scanning workflow found",
                     "state": "present",
@@ -449,10 +533,75 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(record["points"]["hygiene"]["state"], "absent")
         self.assertEqual(self.hygiene_item(record, "branch_protection")["state"], "absent")
         self.assertEqual(self.hygiene_item(record, "secret_scanning_setting")["state"], "absent")
-        self.assertEqual(self.hygiene_item(record, "code_scanning")["state"], "absent")
+        code = self.hygiene_item(record, "code_scanning_workflow")
+        self.assertEqual(code["state"], "not_determinable")
         dependency = self.hygiene_item(record, "dependency_updates")
         self.assertEqual(dependency["state"], "present")
         self.assertEqual(dependency["paths"], ["renovate.json"])
+
+    def test_no_code_scanning_workflow_is_not_determinable_never_absent(self):
+        """Breaks if a clone without a CodeQL workflow reads as having no code scanning:
+        GitHub's default setup runs without a workflow and the build cannot see it.
+        With every other requirement met, the point is then not determinable."""
+        self.clone(
+            "repo-a",
+            {
+                ".github/dependabot.yml": "version: 2\n",
+                ".github/workflows/secrets.yaml": "steps:\n  - run: gitleaks detect\n",
+            },
+        )
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        record = self.record("repo-a")
+        code = self.hygiene_item(record, "code_scanning_workflow")
+        self.assertEqual(code["state"], "not_determinable")
+        self.assertEqual(code["reason"], "no code-scanning workflow; default setup is not visible")
+        self.assertEqual(record["points"]["hygiene"]["state"], "not_determinable")
+
+    def test_secret_scanning_is_one_requirement_met_by_either_the_setting_or_a_workflow(self):
+        """Breaks if the setting and the workflow are each required: either one scans
+        for secrets. Also breaks if the pair reads absent while the setting was not
+        read, or present when neither half is. Every other requirement is met, so the
+        point's state is the pair's."""
+        workflow = {".github/workflows/secrets.yaml": "steps:\n  - run: gitleaks detect\n"}
+        cases = {
+            "enabled, no workflow": ("enabled", {}, "present"),
+            "disabled, a workflow": ("disabled", workflow, "present"),
+            "unread, a workflow": (None, workflow, "present"),
+            "disabled, no workflow": ("disabled", {}, "absent"),
+            "unread, no workflow": (None, {}, "not_determinable"),
+        }
+        settings = {}
+        for name, (setting, files, _) in cases.items():
+            repo = name.replace(", ", "-").replace(" ", "-")
+            self.clone(
+                repo,
+                {
+                    ".github/dependabot.yml": "version: 2\n",
+                    ".github/workflows/codeql.yml": "uses: github/codeql-action/init@v3\n",
+                    **files,
+                },
+            )
+            settings[repo] = {**FULL_ACCESS, "secret_scanning": setting}
+        self.snapshot(settings)
+        self.run_stage()
+        for name, (_, _, expected) in cases.items():
+            with self.subTest(case=name):
+                record = self.record(name.replace(", ", "-").replace(" ", "-"))
+                self.assertEqual(record["points"]["hygiene"]["state"], expected)
+
+    def test_an_absent_requirement_outranks_an_undetermined_one(self):
+        """Breaks if a point with one requirement definitely missing reads as merely
+        not determinable because another could not be read."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": {**FULL_ACCESS, "branch_protection": None}})
+        self.run_stage()
+        record = self.record("repo-a")
+        self.assertEqual(
+            self.hygiene_item(record, "branch_protection")["state"], "not_determinable"
+        )
+        self.assertEqual(self.hygiene_item(record, "dependency_updates")["state"], "absent")
+        self.assertEqual(record["points"]["hygiene"]["state"], "absent")
 
     def test_no_update_config_is_absent_whatever_the_alerts_say(self):
         """Breaks if Dependabot alerts stand in for update tooling: alerts are
@@ -504,7 +653,7 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(unmaintained["reason"], "no access")
 
         other = self.record("repo-b")
-        self.assertEqual(other["points"]["unmaintained"]["state"], "present")
+        self.assertEqual(other["points"]["unmaintained"]["state"], "not_determinable")
         protection = self.hygiene_item(other, "branch_protection")
         self.assertEqual(protection["state"], "not_determinable")
         self.assertEqual(protection["reason"], "no access")
@@ -537,18 +686,29 @@ class TheEvidenceStage(SettingsIsolated):
 
     # -- unmaintained -------------------------------------------------------------
 
-    def test_archived_in_snapshot_is_absent(self):
-        """Breaks if an archived repository reads as maintained."""
-        self.clone("repo-a", {"README.md": "# repo-a\n"})
+    def test_archived_in_snapshot_is_present(self):
+        """Breaks if an archived repository is not read as the safe posture the point
+        asks for: archived code is marked as unmaintained."""
+        sha = self.clone("repo-a", {"README.md": "# repo-a\n"})
         self.snapshot({"repo-a": {**FULL_ACCESS, "archived": True}})
         self.run_stage()
         unmaintained = self.record("repo-a")["points"]["unmaintained"]
-        self.assertEqual(unmaintained["state"], "absent")
-        self.assertEqual(unmaintained["reason"], "archived")
+        self.assertEqual(
+            unmaintained,
+            {
+                "state": "present",
+                "evidence": [
+                    {"commit": sha, "date": COMMIT_DATE, "reason": "last commit"},
+                    {"reason": "archived", "setting": "archived"},
+                ],
+            },
+        )
 
-    def test_a_live_repository_is_present_with_its_last_commit_and_dated(self):
-        """Breaks if the last-commit date or the clone's `as_of` is dropped or misread,
-        or if the snapshot's read time is not carried onto the record."""
+    def test_a_live_repository_is_not_determinable_with_its_last_commit_and_dated(self):
+        """Breaks if a repository that is not archived reads as safely maintained: the
+        point asks for an owner and a patching route, which a repository cannot show.
+        Also breaks if the last-commit date or the clone's `as_of` is dropped or
+        misread, or if the snapshot's read time is not carried onto the record."""
         sha = self.clone("repo-a", {"README.md": "# repo-a\n"})
         self.snapshot({"repo-a": FULL_ACCESS}, read_at="2026-10-22T10:00:00+00:00")
         self.run_stage()
@@ -559,9 +719,19 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(record["settings_read_at"], "2026-10-22T10:00:00+00:00")
         self.assertEqual(list(record["points"]), sorted(minimum_standard.POINTS))
         unmaintained = record["points"]["unmaintained"]
-        self.assertEqual(unmaintained["state"], "present")
-        self.assertIn(
-            {"commit": sha, "date": COMMIT_DATE, "reason": "last commit"}, unmaintained["evidence"]
+        self.assertEqual(
+            unmaintained,
+            {
+                "state": "not_determinable",
+                "evidence": [
+                    {"commit": sha, "date": COMMIT_DATE, "reason": "last commit"},
+                    {"reason": "not archived", "setting": "archived"},
+                ],
+                "reason": (
+                    "not archived; maintenance and a patching route are not judged "
+                    "from the repository"
+                ),
+            },
         )
 
     # -- products, the summary and the run --------------------------------------
@@ -663,6 +833,24 @@ class TheEvidenceStage(SettingsIsolated):
         )
         self.assertEqual(summary["repositories"]["repo-a"]["points"]["owner"], "absent")
         self.assertNotIn("products", summary)
+
+    def test_the_summary_carries_no_verdict_field(self):
+        """Breaks if the summary grows a field beyond its evidence - a `compliant`, a
+        `score`, a pass - at the top level or in a repository's row. The layer reports
+        evidence; people make judgements. Products appear only when declared."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        top = {"format", "notes", "repositories", "settings_read_at"}
+        for declared in (False, True):
+            with self.subTest(products=declared):
+                if declared:
+                    self.products({"product-x": ["repo-a"]})
+                self.run_stage()
+                summary = self.summary()
+                self.assertEqual(set(summary), top | ({"products"} if declared else set()))
+                for name, row in summary["repositories"].items():
+                    self.assertEqual(set(row), {"as_of", "points"}, name)
+                    self.assertEqual(set(row["points"]), set(minimum_standard.POINTS), name)
 
     def test_two_runs_write_identical_bytes(self):
         """Breaks if any list or key in the layer follows input order or iteration
