@@ -32,6 +32,7 @@ import json
 import tempfile
 import types
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -276,18 +277,21 @@ class _RenderedLayer(_Store):
 
     ENTRY = ""
     RENDERER: types.ModuleType
+    # The config setting naming the layer's file, and the stage that writes it.
+    LAYER_SETTING = ""
+    STAGE: Callable[[], int]
 
     def source_path(self) -> Path:
         raise NotImplementedError
 
     def layer_path(self) -> Path:
-        raise NotImplementedError
+        return getattr(config, self.LAYER_SETTING)
 
     def write_source(self, text: str) -> None:
         raise NotImplementedError
 
     def run_stage(self) -> int:
-        raise NotImplementedError
+        return type(self).STAGE()
 
     def build(self, build: dict | None) -> None:
         _record_build(build)
@@ -392,6 +396,8 @@ class _RenderedLayer(_Store):
 class BriefsAreDated(_RenderedLayer):
     ENTRY = "payments"
     RENDERER = briefs
+    LAYER_SETTING = "TOPICS_BRIEFS_PATH"
+    STAGE = staticmethod(briefs.merge)
 
     def source_path(self) -> Path:
         return config.TOPICS_DOCS_DIR / "payments.md"
@@ -402,20 +408,16 @@ class BriefsAreDated(_RenderedLayer):
         config.TOPICS_CONFIG_PATH.write_text("payments | Payments | pay\n", encoding="utf-8")
         config.TOPICS_DOCS_DIR.mkdir(parents=True)
 
-    def layer_path(self) -> Path:
-        return config.TOPICS_BRIEFS_PATH
-
     def write_source(self, text: str) -> None:
         self.source_path().write_text(f"# Payments\n\n{text}", encoding="utf-8")
-
-    def run_stage(self) -> int:
-        return briefs.merge()
 
 
 class DivesAreDated(_RenderedLayer):
     ENTRY = "repo-one"
     SHA = "d" * 40
     RENDERER = dives
+    LAYER_SETTING = "DEEPDIVES_PATH"
+    STAGE = staticmethod(dives.merge)
 
     def source_path(self) -> Path:
         return config.DEEPDIVES_DOCS_DIR / f"{self.ENTRY}.md"
@@ -429,16 +431,10 @@ class DivesAreDated(_RenderedLayer):
             {"repo": self.ENTRY, "provenance": {"sha": self.SHA}},
         )
 
-    def layer_path(self) -> Path:
-        return config.DEEPDIVES_PATH
-
     def write_source(self, text: str) -> None:
         self.source_path().write_text(
             f"# Deep dive\n\nMeasured at `{self.SHA[:8]}`.\n\n{text}", encoding="utf-8"
         )
-
-    def run_stage(self) -> int:
-        return dives.merge()
 
 
 del _RenderedLayer  # a base, not a test case of its own
