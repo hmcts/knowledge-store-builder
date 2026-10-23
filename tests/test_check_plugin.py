@@ -46,7 +46,7 @@ class PluginGateTest(SettingsIsolated):
             (root / "knowledge" / "store-manifest.json").write_text(
                 json.dumps({"store": {"id": manifest_id}, "layers": layers}), encoding="utf-8"
             )
-        config.configure(root=str(root))
+        config.configure(root=str(root), STORE_ID=manifest_id or "")
         return root
 
     def plugin(self, tmp, body, form=".mcp.json", name="plugin"):
@@ -292,12 +292,23 @@ class PluginGateTest(SettingsIsolated):
         code, _out, err = self.run_with_build_id("example-store")
         self.assertEqual((code, err), (0, ""))
 
-    def test_an_unset_or_blank_build_id_is_skipped_silently(self):
-        """Catches an undeclared build id (the default) being compared as an empty id."""
+    def test_an_unresolved_build_id_is_said_and_still_passes(self):
+        """Catches the build-id check skipping in silence, so that a CI step which
+        loads no settings reads as covered by a check that never ran."""
         for value in ("", "  "):
             with self.subTest(value=value):
                 code, _out, err = self.run_with_build_id(value)
-                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(code, 0, err)
+                self.assertIn(
+                    "warning: build id not resolved (KSB_STORE_ID unset); its check was skipped",
+                    err,
+                )
+
+    def test_a_resolved_build_id_does_not_print_the_skip_line(self):
+        """Catches the skip line printed whether or not the id resolved."""
+        code, _out, err = self.run_with_build_id("example-store")
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("not resolved", err)
 
 
 if __name__ == "__main__":
