@@ -37,9 +37,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import authored
 from . import config
 from . import io
 from . import kinds
+from . import store_manifest
 
 
 MAX_NODES_PER_REPO = 12
@@ -414,9 +416,17 @@ def merge() -> int:
         config.TOPICS_BRIEFS_PATH,
         {
             **briefs,
-            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
-                brief["html"] for brief in briefs.values()
-            ),
+            io.SUMMARIES_METADATA_KEY: {
+                **io.prose_metadata(brief["html"] for brief in briefs.values()),
+                **authored.block(
+                    authored.dated(
+                        {name: brief["html"] for name, brief in briefs.items()},
+                        io.rendered_prose(committed),
+                        authored.recorded(committed),
+                        store_manifest.build_commit(config.ROOT),
+                    )
+                ),
+            },
         },
         indent=1,
     )

@@ -111,7 +111,7 @@ class AnEmptyStore(_Store):
 
         config.configure(GITHUB_ORG="example-org")
         manifest = compute(self)
-        self.assertEqual(manifest["format"], {"major": 1, "minor": 1})
+        self.assertEqual(manifest["format"], {"major": 1, "minor": 2})
         self.assertEqual(manifest["store"], {"id": "example-store", "github_org": "example-org"})
         self.assertEqual(manifest["library_version"], __version__)
 

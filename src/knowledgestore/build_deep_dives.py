@@ -19,7 +19,7 @@ import sys
 from collections import Counter, defaultdict
 from itertools import combinations
 
-from . import config, graph_files, io, kinds, provenance
+from . import authored, config, graph_files, io, kinds, provenance, store_manifest
 from .build_topic_briefs import markdown_to_html
 
 
@@ -286,9 +286,17 @@ def merge() -> int:
         config.DEEPDIVES_PATH,
         {
             **dict(sorted(dives_out.items())),
-            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
-                dive["html"] for dive in dives_out.values()
-            ),
+            io.SUMMARIES_METADATA_KEY: {
+                **io.prose_metadata(dive["html"] for dive in dives_out.values()),
+                **authored.block(
+                    authored.dated(
+                        {name: dive["html"] for name, dive in dives_out.items()},
+                        io.rendered_prose(committed),
+                        authored.recorded(committed),
+                        store_manifest.build_commit(config.ROOT),
+                    )
+                ),
+            },
         },
         indent=1,
     )

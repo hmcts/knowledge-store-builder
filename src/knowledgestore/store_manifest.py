@@ -41,17 +41,18 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, config, io, provenance, telemetry
+from . import __version__, authored, config, io, provenance, telemetry
 from .git_env import git_env
 
-FORMAT: tuple[int, int] = (1, 1)
+# 1.2 added `authored_as_of` to the summaries, topics and deep-dives layers.
+FORMAT: tuple[int, int] = (1, 2)
 # The hash of the manifest's shape - every key path with its type, never a value -
 # as recorded under FORMAT. Change both together, never one: `tests/
 # test_manifest_format_guard.py` computes the shape and fails when it differs from
 # this, and says which bump it needs (minor for an added layer or field, major for a
 # removal, rename or type change). The shape is then added to
 # `tests/manifest_format_shapes.json` under the new FORMAT, and this is set to its hash.
-FORMAT_SHAPE = "09d8090fcae280045ab736919e80252c70fe3c78e40127f9541d235b8e89b952"
+FORMAT_SHAPE = "f208ecbb998c28f3e8cdb3f168e8134a67bcd0c0935a1dbda7b95cfe0ee7f66d"
 
 # The one kind an extra layer may declare: written answers a reader can serve
 # alongside the library's own topic briefs and deep dives.
@@ -535,6 +536,53 @@ def sources_as_of(root: Path) -> str | None:
     return max(dated)[1] if dated else None
 
 
+def build_commit(root: Path) -> dict[str, str] | None:
+    """The build's commit, as the record a written-layer entry authored now carries.
+
+    `authored_as_of` is `sources_as_of` - the same instant, spelled as recorded -
+    and `authored_commit` is the SHA of the repository commit that sets it, the
+    first by repository name when two share it. None when provenance records no
+    date, so an entry written then stays undated rather than taking a guess.
+    """
+    as_of = sources_as_of(root)
+    if as_of is None:
+        return None
+    recorded = provenance.read(root / _rel(config.PROVENANCE_PATH))
+    sha = next(
+        str(recorded[name].get("sha") or "")
+        for name in sorted(recorded)
+        if isinstance(recorded[name], dict) and recorded[name].get("committed") == as_of
+    )
+    return {authored.AS_OF: as_of, authored.COMMIT: sha}
+
+
+# The library layers whose entries record when they were authored (see `authored`).
+AUTHORED_LAYERS = ("summaries", "topics", "deep_dives")
+
+
+def authored_range(path: Path) -> dict[str, str] | None:
+    """The oldest and newest `authored_as_of` a written layer records, or None.
+
+    Compared as instants, as `sources_as_of` is, and returned as recorded. None
+    for a layer whose entries are all undated - written before the record existed
+    - and for a file that cannot be read: a range is never invented.
+    """
+    try:
+        document = io.read_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    dates = sorted(
+        (moment, record[authored.AS_OF])
+        for record in authored.recorded(document).values()
+        if (moment := _commit_moment(record.get(authored.AS_OF))) is not None
+    )
+    if not dates:
+        return None
+    return {"oldest": dates[0][1], "newest": dates[-1][1]}
+
+
 def store_digest(layers: dict, extra: dict) -> str:
     """One digest over every layer's, extra layers included.
 
@@ -591,6 +639,11 @@ def compute(root: Path, run=run_git) -> dict:
     layers["relationships"]["recognised"] = (
         _relationships_recognised(root) if layers["relationships"]["present"] else None
     )
+    for name in AUTHORED_LAYERS:
+        layer = layers[name]
+        layer["authored_as_of"] = (
+            authored_range(root / layer["paths"][0]) if layer["present"] else None
+        )
     # Deployments are nodes inside the graph, so no file says whether the stage
     # added any; only the count it recorded can.
     layers["deployments"] = {
