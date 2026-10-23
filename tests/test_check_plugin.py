@@ -19,6 +19,10 @@ from knowledgestore import check_plugin as gate  # noqa: E402
 from knowledgestore import cli, config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+GOOD_LAYERS = {
+    "index": {"present": True},
+    "relationships": {"present": True, "recognised": True},
+}
 FROM = "git+https://github.com/hmcts/knowledge-store-mcp@"
 
 
@@ -35,12 +39,12 @@ def declaration(**kwargs):
 
 
 class PluginGateTest(SettingsIsolated):
-    def store(self, tmp, manifest_id="example-store"):
+    def store(self, tmp, manifest_id="example-store", layers=GOOD_LAYERS):
         root = Path(tmp)
         (root / "knowledge").mkdir()
         if manifest_id is not None:
             (root / "knowledge" / "store-manifest.json").write_text(
-                json.dumps({"store": {"id": manifest_id}}), encoding="utf-8"
+                json.dumps({"store": {"id": manifest_id}, "layers": layers}), encoding="utf-8"
             )
         config.configure(root=str(root))
         return root
@@ -236,6 +240,64 @@ class PluginGateTest(SettingsIsolated):
             plugin = self.plugin(tmp, body)
             code, _out, err = self.run_stage("--plugin", str(plugin))
         self.assertEqual((code, err), (0, ""))
+
+    def run_layers(self, layers):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, layers=layers)
+            plugin = self.plugin(tmp, declaration())
+            return self.run_stage("--plugin", str(plugin))
+
+    def test_a_missing_or_absent_layer_fails_naming_it(self):
+        """Catches a plugin passing over a store whose server would answer from a
+        fallback or not at all, and a message that does not name the layer."""
+        cases = {
+            "index": {**GOOD_LAYERS, "index": {"present": False}},
+            "relationships": {**GOOD_LAYERS, "relationships": {"present": False}},
+        }
+        for name, layers in cases.items():
+            with self.subTest(layer=name):
+                code, _out, err = self.run_layers(layers)
+                self.assertRefused(code, err, f"{name} layer")
+        code, _out, err = self.run_layers({})
+        self.assertRefused(code, err, "index layer", "relationships layer")
+
+    def test_a_relationships_layer_that_is_not_recognised_fails(self):
+        """Catches `present` alone being read as readable."""
+        layers = {**GOOD_LAYERS, "relationships": {"present": True, "recognised": False}}
+        code, _out, err = self.run_layers(layers)
+        self.assertRefused(code, err, "relationships layer", "not recognised")
+
+    def test_a_layer_not_recorded_warns_and_never_passes_silently(self):
+        """Catches present: null being treated as present, or as a failure."""
+        layers = {**GOOD_LAYERS, "index": {"present": None}}
+        code, _out, err = self.run_layers(layers)
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning", err)
+        self.assertIn("index layer", err)
+
+    def run_with_build_id(self, build_id, manifest_id="example-store"):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp, manifest_id=manifest_id)
+            plugin = self.plugin(tmp, declaration(store_id=manifest_id))
+            config.configure(STORE_ID=build_id)
+            return self.run_stage("--plugin", str(plugin))
+
+    def test_a_build_id_that_differs_from_the_manifest_fails_naming_both(self):
+        """Catches the next `manifest` run writing an id the plugin does not ask for."""
+        code, _out, err = self.run_with_build_id("another-id")
+        self.assertRefused(code, err, "KSB_STORE_ID", "'another-id'", "'example-store'")
+
+    def test_a_build_id_that_agrees_passes(self):
+        """Catches the build id check failing a store whose id agrees."""
+        code, _out, err = self.run_with_build_id("example-store")
+        self.assertEqual((code, err), (0, ""))
+
+    def test_an_unset_or_blank_build_id_is_skipped_silently(self):
+        """Catches an undeclared build id (the default) being compared as an empty id."""
+        for value in ("", "  "):
+            with self.subTest(value=value):
+                code, _out, err = self.run_with_build_id(value)
+                self.assertEqual((code, err), (0, ""))
 
 
 if __name__ == "__main__":
