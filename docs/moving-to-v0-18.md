@@ -132,11 +132,14 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    one committed. See [Build the query index](creating-a-store.md#build-the-query-index)
    when the archive itself is too large.
 
-5. **Add the server to the store plugin.** Create the plugin's `.mcp.json` as
-   [Add the server to the store plugin](creating-a-store.md#add-the-server-to-the-store-plugin)
-   shows. Its `--store-id` is the manifest's `store.id`, not the plugin name.
-   Run `knowledgestore check-plugin` to confirm the id, the pinned tag and the
-   `uvx` launch agree before you publish.
+5. **Add the server to the store plugin.** When the plugin root is the store
+   repository's root, which is the usual case, declare the server inline as
+   `mcpServers` in `.claude-plugin/plugin.json`; only a plugin kept in its own
+   subdirectory takes a `.mcp.json`. The full forms are in
+   [Add the server to the store plugin](creating-a-store.md#add-the-server-to-the-store-plugin).
+   Its `--store-id` is the manifest's `store.id`, not the plugin name. Run
+   `knowledgestore check-plugin`, which reads either form, to confirm the id, the
+   pinned tag and the `uvx` launch agree before you publish.
 
 6. **Trim the store's own skill to routing and the estate's limits.** The server
    now carries the answering rules, so a store skill that restates how to read
