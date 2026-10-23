@@ -8,7 +8,7 @@ on:
   # against the whole suite, which is the cost the mapping exists to avoid paying
   # per run. It runs nightly, on a merge that lands the known way an observer set
   # goes stale, and on demand - and `mapping-decision` decides which of those
-  # actually needs the four legs. Weekly was the previous setting and too coarse:
+  # actually needs the legs. Weekly was the previous setting and too coarse:
   # by the time a disagreement surfaced, the change that caused it was a week of
   # commits back and nobody could say which one it was (#285).
   schedule:
@@ -98,7 +98,7 @@ jobs:
       # the whole suite and refuses a set that disagrees with what actually
       # failed, in both directions. That costs what this gate cost before the
       # mapping existed - 1683 seconds measured here - so it runs on the schedule
-      # and on `workflow_dispatch`, in the `mapping` job below, over four runners
+      # and on `workflow_dispatch`, in the `mapping` job below, over sixteen runners
       # at a time (#285).
       #
       # A condition rather than a shell branch: interpolating an expression into
@@ -280,8 +280,8 @@ jobs:
   # costs a second job, and this is what keeps it from also costing a second
   # environment. A prefix rather than a hand-picked subset, because a prefix is
   # something a check can compare.
-  # Whether the four legs below are worth running, and why. Its own job rather
-  # than a step of theirs, because four legs would each decide separately and
+  # Whether the legs below are worth running, and why. Its own job rather
+  # than a step of theirs, because the legs would each decide separately and
   # could each decide differently, and because a matrix cannot be conditional on
   # something computed inside itself.
   #
@@ -333,7 +333,11 @@ jobs:
       # findings rather than one and a cancellation.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Sixteen legs: with ~700 entries at ~2 minutes of whole-suite run each,
+        # four legs took about six hours per merge to main, so every merge sat
+        # unverified for most of a working day. Public-repository runners are free;
+        # the wall clock is the cost that mattered.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@v7
         with:

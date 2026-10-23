@@ -128,9 +128,6 @@ STALE = "STALE"
 # read from a loader because the suite runs under the default.
 TEST_PREFIX = "test"
 
-# What `--verify-mapping` costs, named here because the remedy this prints has to
-# be honest about the price of taking it.
-LEG_MINUTES = 7
 
 # What settling may spend on the mutated runs, in minutes. Ten, for two reasons. The
 # one real night it was measured against - 71 arrivals over five modules, which had
@@ -742,7 +739,7 @@ def remedies(report: Report) -> tuple[str, ...]:
     if report.unattributed or report.unjudged or report.unsettled or report.verdict == CANNOT_TELL:
         commands.append(
             "python3 tests/mutation_gate.py --verify-mapping"
-            f"  # the whole table, about {LEG_MINUTES} minutes over the four legs"
+            "  # the whole table: one whole-suite run per entry, hours on one machine"
         )
     return tuple(commands)
 
