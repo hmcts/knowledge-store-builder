@@ -37,6 +37,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_CHART_REPO_PATTERN` | none | Where a Helm chart's repository is, by name: `chart-{name}` makes chart `web` the clone `chart-web`. Checked first when the `relationships` layer and the `deployments` graph resolve a chart. Set it when the estate keeps each chart in a repository named after it — see [the relationships layer](how-it-works.md#the-relationships-layer) |
 | `KSB_UMBRELLA_REPOS` | none | Comma-separated repositories that bundle or republish other repositories' charts, wrapper repositories included. A chart they define resolves to them only when no other clone defines it. A chart two repositories define, with neither listed here nor named by `KSB_CHART_REPO_PATTERN`, is left unresolved under `unresolved_conflicts` rather than given to the first by name |
 | `KSB_PROPOSED_LINKS` | `write` | Whether the intent index publishes links from commits found only on a branch, under `proposed`. `omit` leaves proposals out; branch work whose content landed on the default branch is still indexed. Changing this setting needs no re-export, but separating proposed links in the first place does: history exported before `reach` was recorded reads as all landed until `export-history` is re-run (`intent` reports how many repositories are in that state) |
+| `config/products.json` (a file, not a variable) | none | Optional map of product name to repository names, `{"payments": ["repo-a", "repo-b"]}`, copied into the `minimum-standard` summary so a reader can scope by product. A malformed file, or a repository the store does not hold, stops the stage before it writes anything. Nothing is inferred from names or teams — see [the minimum-standard layer](how-it-works.md#the-minimum-standard-layer) |
 
 The full set, including tuning thresholds, is defined in
 [`src/knowledgestore/config.py`](../src/knowledgestore/config.py).
@@ -317,6 +318,8 @@ estate uses another language or layout.
 | `deepdive` | `docs/deep-dives/`, `knowledge/deep-dives/` | Add a provenance-stamped repository dossier |
 | `explorer` | `graphify-out/explorer.html`, `knowledge/telemetry.json` | Build the self-contained search and Q&A page |
 | `status` | report only | Report provenance, coverage, citations, freshness, recorded telemetry and optional drift |
+| `minimum-standard-settings` | `knowledge/minimum-standard/github-settings.json` | Snapshot the GitHub settings the build's token can read: archived, default branch, branch protection, secret scanning, Dependabot alerts |
+| `minimum-standard` | `knowledge/minimum-standard/` | Record dated, cited evidence for each repository against the GOV.UK minimum standard's seven points; reads `config/products.json` when present |
 | `check-install-docs` | report only | Check the documented install commands against what the lock declares |
 | `check-evidence` | report only | Fail if a committed ticket-descriptions artefact holds mined text matching a withholding rule |
 | `check-citations` | report only | Fail if a published answer cites code the graph does not hold, or a source link whose file its repository does not hold or whose sha is not the build's; name the nearest real identifier and list database columns and links outside the estate apart |

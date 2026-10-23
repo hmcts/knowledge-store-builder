@@ -772,6 +772,8 @@ knowledgestore gherkin         # features, scenarios, ticket links into the grap
 knowledgestore packages        # cross-repository package nodes and import edges
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore relationships   # knowledge/relationships/: which repositories reference which
+knowledgestore minimum-standard-settings  # knowledge/minimum-standard/github-settings.json: the settings the token can read
+knowledgestore minimum-standard           # per-repository evidence against the GOV.UK minimum standard
 knowledgestore source-urls     # a `url` on each node: its file at the build commit
 knowledgestore manifest        # the relationships are a layer: re-run it
 ```
@@ -800,6 +802,22 @@ dependency the four built-in kinds do not read registers its own kind in
 `config/relationship-kinds.json`, and `KSB_RELATIONSHIP_EXAMPLES` caps the
 example lines per edge; see
 [docs/how-it-works.md](../../docs/how-it-works.md#a-stores-own-kinds).
+
+`minimum-standard-settings` then `minimum-standard` run after `relationships`
+and before `index`. The first snapshots the GitHub settings the build's token can
+read, with the time it was read; a setting it cannot read is recorded as unread,
+never as off. The second reads the clones, `knowledge/corpus/content-files.txt` and that
+snapshot, never the network, and writes `knowledge/minimum-standard/`. It exits 1
+and writes nothing when the content-file list is missing (run `content-set` first),
+the snapshot is unreadable or carries another stamp, `config/products.json` is
+malformed or names a repository the store does not hold, or git cannot read a
+clone. **Read what the states mean before reporting them.** `absent` means the
+practice is not evidenced in the repository, never that the team does not do it.
+`no_secrets` is never `present`: a clean scan is `not_determinable`, and findings
+are `absent` with a rule, a path and a line, never the value. A setting the token
+could not read gives `not_determinable`, "no access". Archived repositories are not
+in the store. Never summarise the layer as a pass or a score; see
+[the layer](../../docs/how-it-works.md#the-minimum-standard-layer).
 
 `source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
 they add are linked too. It reads `config/repositories.txt` and
@@ -1694,7 +1712,7 @@ library declares:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.1",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }

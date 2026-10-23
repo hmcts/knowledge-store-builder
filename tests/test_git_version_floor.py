@@ -25,7 +25,7 @@ from knowledgestore import config  # noqa: E402
 from knowledgestore import git_version  # noqa: E402
 from knowledgestore import status  # noqa: E402
 
-GIT_STAGES = ("sync", "drift", "export-history", "check-citations")
+GIT_STAGES = ("sync", "drift", "export-history", "check-citations", "minimum-standard")
 
 
 def saying(output: str):

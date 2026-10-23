@@ -193,6 +193,11 @@ def representative_manifest(root: Path) -> dict:
         "knowledge/relationships/repository-dependencies.json",
         json.dumps({"format": {"layer": "relationships", "major": 1}, "unresolved_conflicts": {}}),
     )
+    _touch(
+        root,
+        "knowledge/minimum-standard/summary.json",
+        json.dumps({"format": {"layer": "minimum_standard", "major": 1}}),
+    )
     # A written layer with one dated entry, so its `authored_as_of` range is an
     # object rather than null.
     dated = {"_metadata": {"authored": {"1": {"authored_as_of": "2026-01-01T00:00:00+00:00"}}}}
@@ -242,6 +247,7 @@ class TheManifestShapeIsGuarded(SettingsIsolated):
             "layers.graph.source_urls: bool",
             "layers.relationships.recognised: bool",
             "layers.relationships.unresolved_conflicts: int",
+            "layers.minimum_standard.recognised: bool",
             "layers.deployments.present: bool",
             "extra_layers.*.local_only: bool",
             "extra_layers.*.kind: str",

@@ -461,6 +461,41 @@ without it the stage exits 1 and names the file. The
 [relationships layer](how-it-works.md#the-relationships-layer) lists the files it
 writes and the resolution order.
 
+To record the GitHub settings the build's token can read (archived, default branch,
+branch protection, secret scanning, Dependabot alerts) for the minimum-standard
+layer, run:
+
+```bash
+knowledgestore minimum-standard-settings
+```
+
+It writes `knowledge/minimum-standard/github-settings.json` with the time it was
+read. A setting the token cannot read is recorded as unreadable, never as off.
+
+Then record the evidence for each repository against the standard's seven points.
+Both stages run after `relationships` and before `index`:
+
+```bash
+knowledgestore minimum-standard
+```
+
+It reads the clones, the content-file list and that snapshot, and writes
+`knowledge/minimum-standard/by-repo/<repo>.json` and `summary.json`. It prints the
+repositories recorded and the count of points in each state. Run `content-set`
+first: with no content-file list the stage exits 1 and writes nothing, because an
+empty list would read every secret scan as clean. A missing snapshot is not a
+refusal; the settings items read `not_determinable`, "no settings snapshot".
+
+To scope questions by product, declare them in `config/products.json`, a map from a
+product name to repository names (`{"payments": ["repo-a", "repo-b"]}`). A malformed
+file, or a name the store does not hold, stops the stage before it writes anything.
+
+A repository's `absent` means the practice is not evidenced in it, not that the team
+does not do it, and a clean secret scan reads `not_determinable`, never `present`.
+Archived repositories are not in the store, so the layer says nothing about them.
+[The minimum-standard layer](how-it-works.md#the-minimum-standard-layer) explains
+what each point reads and why.
+
 Then link every node to its file at the commit the store was built from:
 
 ```bash
@@ -905,7 +940,7 @@ plugin's own keys:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.1",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }
@@ -924,7 +959,7 @@ configuration for anyone working in the repository, and `check-plugin` refuses i
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.1",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }

@@ -1,0 +1,7 @@
+# Gitleaks findings retired individually, by fingerprint: <commit>:<path>:<rule>:<line>.
+# Only add an entry you have confirmed is not a credential. Fix the file as well;
+# an entry here exists because history cannot be changed.
+#
+# A planted, fake RSA key header in a test fixture. The file now builds the marker
+# by concatenation, as the other secret tests do; this commit still holds it whole.
+be0aa7167778b0dcc826a2c296f19cd5d2c9fe71:tests/test_build_minimum_standard.py:private-key:270

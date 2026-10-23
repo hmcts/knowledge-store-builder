@@ -307,6 +307,123 @@ hangs hangs the stage, as any operator code would. A module cannot import a
 sibling with `import x`, because the store directory is not on `sys.path`; load it
 through `__file__`. Register code you would run from the same checkout by hand.
 
+## The minimum-standard layer
+
+Whether a repository shows evidence of the practices the GOV.UK minimum standard
+asks of publicly accessible systems is answered from the clones and from a dated
+snapshot of GitHub settings (`src/knowledgestore/build_minimum_standard.py` and
+`build_minimum_standard_settings.py`, written by `knowledgestore
+minimum-standard-settings` and then `knowledgestore minimum-standard`). The
+standard is *AI, open code and vulnerability risk in the public sector*, published
+by GDS and DSIT on 14 May 2026, section "Minimum standard for publicly accessible
+systems":
+<https://www.gov.uk/guidance/ai-open-code-and-vulnerability-risk-in-the-public-sector#minimum-standard-for-publicly-accessible-systems>.
+The layer records evidence. It gives no score and no overall pass, and it does not
+say a repository meets the standard.
+
+**Three states, and what they mean.** Each of the seven points is one of:
+
+- `present`: evidence found, with the path or setting cited.
+- `absent`: the practice is **not evidenced in the repository**, having looked where
+  it would be. It does not mean the team does not do it; a control held outside the
+  repository, such as a monitored mailbox, is invisible here.
+- `not_determinable`: what the build can see cannot settle the point, with a
+  `reason`.
+
+**What each point reads**, in the standard's order:
+
+| Point | Reads | Notes |
+|---|---|---|
+| `owner` | `CODEOWNERS` at `.github/`, the root or `docs/`; the first found is judged | `present` when the last rule for `*` or `/`, the repository root, names an owner (`@user`, `@org/team` or an email); rules for subdirectories alone are `absent` |
+| `security_contact` | `SECURITY.md` at the same three places | `present` when it carries a `mailto:` or email address, or a URL on a line that mentions reporting, security, a vulnerability or disclosure (a badge is not a contact); whether the mailbox is monitored is not recorded |
+| `no_secrets` | the content-file list, whole files, current tree | never `present`, below |
+| `secure_by_design` | a tracked file named `threat-model`, `threat_model` or `threatmodel` (any case, any extension), or any file under `docs/threat-model*/` | `present` or `not_determinable`, never `absent`: code does not show that design was not considered |
+| `hygiene` | six sub-items making five requirements, below | `present` only when every requirement is; `absent` when any is definitely absent; otherwise `not_determinable` |
+| `patching` | nothing | always `not_determinable`: timelines are not recorded in a repository |
+| `unmaintained` | the date of the last commit, and `archived` from the snapshot | `present` when archived, the safe posture; `not_determinable` when not archived, because an owner and a patching route are not judged from the repository; cites the commit either way |
+
+**Hygiene is six items, each reported on its own** under `evidence`:
+
+- `dependency_updates`: a Dependabot or Renovate config in the clone.
+- `code_scanning_workflow`: a workflow under `.github/workflows/` naming CodeQL.
+  Without one it is `not_determinable`, "no code-scanning workflow; default setup is
+  not visible": GitHub's default setup scans without a workflow, and the build
+  cannot see it.
+- `secret_scanning_workflow`: a workflow naming gitleaks, trufflehog or detect-secrets.
+- `secret_scanning_setting`: GitHub's secret scanning, from the snapshot.
+- `vulnerability_alerts`: Dependabot alerts, from the snapshot. Only `enabled`
+  counts. GitHub answers 404 for an alert setting that is off and for one the token
+  cannot see, so the snapshot never guesses "off".
+- `branch_protection`: whether the default branch is protected, from the snapshot.
+  It is read from the branches API, which counts rulesets as well as classic rules.
+
+The two secret-scanning items are one requirement, because either scans for
+secrets: it is `present` when either is, `absent` only when the setting is
+disabled and no workflow exists, and otherwise `not_determinable`. The other four
+items are a requirement each.
+
+**Why `no_secrets` is never `present`.** A pattern scan finding nothing cannot show
+that nothing is committed. A clean scan is therefore `not_determinable`, with the
+reason "pattern scan found nothing; a scan cannot show absence". Findings make the
+point `absent`, with `{rule, path, line}` for each and **never the value or the
+line**, so nothing the scan finds can reach the layer. The scan masks whole files,
+so a secret that spans lines, such as a private-key block, is found; every line
+masking changed is reported. A finding's `rule` is a rule that masked that file, not
+necessarily the only one that matches the line. The scan covers the current tree of
+the store's content set. Git history is not scanned, and sensitive operational
+detail such as hostnames is not looked for.
+
+**Access, and `no access`.** The settings stage reads only what the token the build
+already uses can read, and asks for nothing broader. A setting it cannot read is
+recorded as `null` and listed under `unreadable`; the evidence stage reports it as
+`not_determinable` with the reason `no access`, never as `absent`. Branch
+protection comes from the branches API's `protected` field, which needs only read
+access. Secret scanning comes from the repository's `security_and_analysis` fields,
+which GitHub returns only to a repository admin, an organisation owner or a
+security manager, so expect `no access` there unless the store supplies such a
+token. With no snapshot at all, the settings items read `not_determinable` with the
+reason `no settings snapshot`.
+
+**Archived repositories are not in the store.** The repository list excludes them,
+so they are never cloned. The summary says so in its `notes`. The layer therefore
+cannot show an archived repository that is still deployed. Its `unmaintained` point
+covers the repositories the store holds, so it reads `present` only for one archived
+after it was cloned.
+
+**Outputs**, under `knowledge/minimum-standard/`:
+
+- `github-settings.json`: the snapshot, with the time it was read. Written by
+  `minimum-standard-settings` only.
+- `by-repo/<repo>.json`: the seven points with their evidence, `as_of` (the commit
+  and its date) and `settings_read_at`.
+- `summary.json`: one row of states and `as_of` per repository, `notes`,
+  `settings_read_at`, and `products` when the store declares them.
+
+Every file opens with `"format": {"layer": "minimum_standard", "major": 1, "minor": 0}`,
+the stamp that says whose layer this is. A reader refuses a file with no stamp or
+another major. The same inputs give identical bytes: keys and lists are sorted, and
+the read time lives in the snapshot and is copied, not taken again.
+
+**Products** are optional. `config/products.json` maps a product name to its
+repository names, and the stage copies the map into the summary so a reader can
+scope by product. Nothing is inferred from names or teams.
+
+```json
+{"payments": ["repo-a", "repo-b"]}
+```
+
+**When the stage refuses.** `minimum-standard` exits 1 and writes nothing when the
+content-file list is missing (an empty list would read every scan as clean), when
+the snapshot is unreadable or carries another stamp, when `config/products.json` is
+malformed or names a repository the store does not hold, or when git cannot read a
+clone. It is a git stage, so it also stops on a git older than the library's floor.
+Run `content-set` first; a missing snapshot is not a refusal, it reads as
+`no settings snapshot`.
+
+**Stamp it and expect it to go stale.** A record is true of one commit and one read
+time. Answers from the layer carry both and rank as point-in-time, like the other
+written layers.
+
 ## The history layers
 
 Commit history is exported in **one `git log` pass per repository**
