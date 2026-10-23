@@ -128,8 +128,15 @@ ENTRIES = (entry("first"), entry("second"), entry("third"))
 # in the settings file, with the table and the workspace that file gives it.
 HARNESS = """
 import json
+import signal
 import sys
 from pathlib import Path
+
+# A terminal's Ctrl-C reaches a process with Python's own handler installed. A
+# suite launched in the background of a non-interactive shell starts with SIGINT
+# ignored, and that disposition is inherited - so without this the SIGINT case
+# would measure how the suite was launched rather than how the gate is stopped.
+signal.signal(signal.SIGINT, signal.default_int_handler)
 
 settings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 sys.path.insert(0, settings["tests"])
@@ -148,6 +155,14 @@ raise SystemExit(gate.main(["--derive-mapping", "--jobs", "2"]))
 
 
 def git(root: Path, *arguments: str) -> None:
+    """Run git in the fixture with automatic maintenance off.
+
+    A commit otherwise starts `git maintenance run --auto` detached in the
+    background, which writes `objects/maintenance.lock` into the fixture's `.git`
+    whenever it gets round to it. The checks below fingerprint that directory to
+    show the gate wrote nothing there, so a lock written later by the fixture's own
+    commit would read as the gate's write - one run in a few hundred did, under load.
+    """
     subprocess.run(
         [
             "git",
@@ -157,6 +172,10 @@ def git(root: Path, *arguments: str) -> None:
             "user.email=gate@example.invalid",
             "-c",
             "commit.gpgsign=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
             *arguments,
         ],
         cwd=root,

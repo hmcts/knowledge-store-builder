@@ -3458,6 +3458,7 @@ MUTATIONS = (
         "CI step send, which makes it the interrupt that actually happens. The comment on "
         "that `finally` claimed to cover it, which is why nobody looked",
         (
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_a_termination_signal_leaves_the_source_file_byte_identical",
             "test_mutation_gate_recovery.MutationGateRecoveryTest.test_the_signal_handlers_are_removed_once_the_loop_is_over",
         ),
@@ -3537,6 +3538,9 @@ MUTATIONS = (
         "worktree's wrapper. The root and the pid are what let a caller ask about the tree "
         "it cares about and signal the one process that holds it",
         (
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
         ),
     ),
@@ -3639,6 +3643,7 @@ MUTATIONS = (
         "class this gate exists for, a check present and doing nothing",
         (
             "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_is_told_not_to_write_bytecode",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
         ),
     ),
     Mutation(
@@ -3652,6 +3657,14 @@ MUTATIONS = (
         "package, which is a worse version of the same defect",
         (
             "test_mutation_gate_bytecode.SuiteSubprocessBytecodeTest.test_the_suite_subprocess_keeps_the_environment_it_inherits",
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_parallel_run_never_mutates_the_checkout",
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
+            "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_an_entry_with_no_observers_can_still_be_derived",
         ),
