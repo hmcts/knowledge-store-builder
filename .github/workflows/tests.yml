@@ -72,7 +72,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.93'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and
@@ -255,7 +255,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.93'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
 
       - name: Settle which observer sets this branch's merges have staled
         env:
@@ -371,7 +371,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.93'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
 
       # The divisor is the number of legs rather than a literal four, so adding
       # or removing one cannot leave a quarter of the table unchecked with every

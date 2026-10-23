@@ -247,7 +247,7 @@ wheels = [
 
 [[package]]
 name = "graphifyy"
-version = "0.9.93"
+version = "0.9.94"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -286,9 +286,9 @@ dependencies = [
     { name = "tree-sitter-verilog" },
     { name = "tree-sitter-zig" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/81/29c097991b81f600ee3716fe303c4d943d6e814ad807137fefb0fc3f619c/graphifyy-0.9.93.tar.gz", hash = "sha256:666c8e59f59d1ff832c7357fada26a9722b6b3084b713f39777da550f91b99dd", size = 2902989, upload-time = "2026-10-20T16:30:23.996Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/ac/55ecfead7a749d76304fbfcabd8a495dd07b7d3d105336862274c820d779/graphifyy-0.9.94.tar.gz", hash = "sha256:08708a9b8fe9516e84e1fb23a5103da226a1e66107e3e41c72ea29fa2614a7a6", size = 2924085, upload-time = "2026-10-22T16:20:27.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/64/53d760ff045465698b37894441b4182a6f820a281cf0efa2bde3d8b90fa7/graphifyy-0.9.93-py3-none-any.whl", hash = "sha256:85a27eab4e06d6efa66fc146159d74bba46668aacb37b6afa520df1658ff4f55", size = 1726062, upload-time = "2026-10-20T16:30:21.621Z" },
+    { url = "https://files.pythonhosted.org/packages/af/d6/7f8f6a9864774ae917d4515f6cc94639da2207a22aafefaa61923fad4f78/graphifyy-0.9.94-py3-none-any.whl", hash = "sha256:833322bb79ef720eb812dff0cb80f50b0b38f9cbbaa0446d546394a5dae75f27", size = 1734978, upload-time = "2026-10-22T16:20:25.072Z" },
 ]
 
 [package.optional-dependencies]
@@ -363,7 +363,7 @@ semantic = [
 [package.metadata]
 requires-dist = [
     { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.9" },
-    { name = "graphifyy", extras = ["sql", "terraform"], marker = "extra == 'ast'", specifier = ">=0.9.93" },
+    { name = "graphifyy", extras = ["sql", "terraform"], marker = "extra == 'ast'", specifier = ">=0.9.94" },
     { name = "markitdown", marker = "extra == 'documents'", specifier = ">=0.1.8" },
     { name = "numpy", marker = "extra == 'semantic'", specifier = ">=2.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.414" },
