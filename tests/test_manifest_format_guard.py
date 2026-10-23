@@ -191,7 +191,7 @@ def representative_manifest(root: Path) -> dict:
     _touch(
         root,
         "knowledge/relationships/repository-dependencies.json",
-        json.dumps({"format": {"layer": "relationships", "major": 1}}),
+        json.dumps({"format": {"layer": "relationships", "major": 1}, "unresolved_conflicts": {}}),
     )
     # A written layer with one dated entry, so its `authored_as_of` range is an
     # object rather than null.
@@ -241,6 +241,7 @@ class TheManifestShapeIsGuarded(SettingsIsolated):
             "layers.graph.digest: str",
             "layers.graph.source_urls: bool",
             "layers.relationships.recognised: bool",
+            "layers.relationships.unresolved_conflicts: int",
             "layers.deployments.present: bool",
             "extra_layers.*.local_only: bool",
             "extra_layers.*.kind: str",

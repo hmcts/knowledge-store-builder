@@ -15,28 +15,192 @@ module-level name at import. A copy freezes the value before any caller has had
 the chance to configure anything, which made `configure()` a silent no-op for
 that setting - accepted, since it raises only for an unknown name, and then
 ignored. `tests/test_config_and_io.py` fails if a copy reappears.
+
+**A store commits its settings in `config/knowledgestore.toml`**, as string
+values in a `[settings]` table, read when this module loads and again whenever
+`configure(root=...)` moves the root. A variable already in the environment
+wins, so CI and a one-off override still work. A setting that lives only in a
+shell is lost by the next shell, and a rebuild without it succeeds and writes a
+poorer layer (#483); the file is how the layer is reproduced from the repository.
+TOML rather than a `.env` file, because secret guards, scanners and common
+`.gitignore` templates all treat `*.env` as a secret - so a store's own agent
+could not read it, and a store could silently not commit it. It refuses rather
+than guesses: an unknown key, a key or value that looks like a secret,
+`KSB_ROOT` (which decides where the file is), any other table and any value that
+is not a string all stop the start-up, naming the key and never printing a value.
 """
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import json
 import os
 import re
+import sys
 from collections.abc import Iterable
 from pathlib import Path
+from types import ModuleType
+from typing import overload
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the backport is a dependency below 3.11 only
+    import tomli as tomllib
+
+
+class SettingsFileError(ValueError):
+    """The store's settings file holds something the library will not start with."""
+
+
+# Where a store commits its settings, relative to the root.
+# A string, not a Path: every Path constant here is one `configure(root=...)` repoints.
+_SETTINGS_FILE = "config/knowledgestore.toml"
+# A committed file is the wrong place for a credential, whatever the library reads.
+_SECRET_KEY_ENDINGS = ("_TOKEN", "_KEY", "_SECRET", "_PASSWORD")
+_SETTING_KEY = re.compile(r"KSB_[A-Z0-9_]+\Z")
+
+
+def _setting_readers(source: str) -> dict[str, frozenset[str]]:
+    """Each module-level setting assigned in `source`, with the `KSB_*` keys it reads.
+
+    Derived from the code rather than listed by hand, so a setting added here is a
+    key the file accepts without anyone remembering a second list. A key is read
+    when it is the first argument of a call inside the assignment - `_env_int(...)`
+    or `_lookup(...)` alike.
+    """
+    readers: dict[str, frozenset[str]] = {}
+    for statement in ast.parse(source).body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            target, value = statement.target, statement.value
+        else:
+            continue
+        if not isinstance(target, ast.Name):
+            continue
+        keys = frozenset(
+            node.args[0].value
+            for node in ast.walk(value)
+            if isinstance(node, ast.Call)
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and _SETTING_KEY.match(node.args[0].value)
+        )
+        if keys:
+            readers[target.id] = keys
+    return readers
+
+
+_READERS = _setting_readers(Path(__file__).read_text(encoding="utf-8"))
+
+
+def settings_keys() -> frozenset[str]:
+    """Every `KSB_*` key this module reads, which is every key the file may name."""
+    return frozenset().union(*_READERS.values())
+
+
+def _refusal(path: Path, key: str, value: object) -> str | None:
+    """Why one `[settings]` entry cannot be used, or None.
+
+    Never quotes the value: a refused value may be the credential it is refused for.
+    """
+    if not key.startswith("KSB_"):
+        return f"{path}: {key} is not a setting this library reads; only KSB_* settings belong here"
+    if key.endswith(_SECRET_KEY_ENDINGS):
+        return f"{path}: {key} looks like a secret; keep it in the environment, never in a committed file"
+    if key == "KSB_ROOT":
+        return f"{path}: KSB_ROOT decides where this file is read from, so it cannot be set here; use KSB_ROOT or --root"
+    if key not in settings_keys():
+        return f"{path}: {key} is not a setting this library reads"
+    if not isinstance(value, str):
+        return f"{path}: {key} must be a string, not a TOML {type(value).__name__}; quote it"
+    return None
+
+
+def _read_settings_file(path: Path) -> dict[str, str] | None:
+    """The `[settings]` table `path` declares, or None when there is no file.
+
+    Raises SettingsFileError for anything it refuses: a file TOML cannot read, any
+    table or key outside `[settings]`, and any entry `_refusal` names. Values are
+    the strings TOML reads, used as they are, so `chart-{name}` needs no escaping.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as error:
+        raise SettingsFileError(f"{path}: cannot be read: {error}") from error
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SettingsFileError(f"{path}: not valid TOML: {error}") from error
+    for name in sorted(document):
+        if name != "settings":
+            raise SettingsFileError(
+                f"{path}: {name} is outside [settings], the only table this file holds"
+            )
+    table = document.get("settings", {})
+    if not isinstance(table, dict):
+        raise SettingsFileError(f"{path}: settings must be the [settings] table")
+    for key in sorted(table):
+        problem = _refusal(path, key, table[key])
+        if problem:
+            raise SettingsFileError(problem)
+    return dict(table)
+
+
+def _check_values(path: Path, values: dict[str, str]) -> None:
+    """Refuse a value the worker masking would mask: a credential under an
+    innocent key is still a credential in a committed file.
+
+    Imported here, not at the top, because `secret_mask` reads this module, and
+    only when a file holds values, so a store without one pays nothing.
+    """
+    if not values:
+        return
+    from . import secret_mask
+
+    for key in sorted(values):
+        if secret_mask.mask(values[key]) != values[key]:
+            raise SettingsFileError(
+                f"{path}: {key} holds a value shaped like a secret; keep it in the "
+                "environment, never in a committed file"
+            )
+
+
+# What the file supplied: every value it holds, whether one was read, and which of
+# its keys the environment overrode. Upper-case so test isolation restores them.
+_FILE_VALUES: dict[str, str] = {}
+_FILE_READ = False
+_FILE_OVERRIDDEN: tuple[str, ...] = ()
+
+
+@overload
+def _lookup(name: str) -> str | None: ...
+@overload
+def _lookup(name: str, default: str) -> str: ...
+def _lookup(name: str, default: str | None = None) -> str | None:
+    """A setting's raw value: the environment, then the store's file, then `default`."""
+    if name in os.environ:
+        return os.environ[name]
+    return _FILE_VALUES.get(name, default)
 
 
 def _env_path(name: str, default: Path) -> Path:
-    value = os.environ.get(name)
+    value = _lookup(name)
     return Path(value).expanduser().resolve() if value else default
 
 
 def _env_int(name: str, default: int) -> int:
-    return int(os.environ.get(name, default))
+    value = _lookup(name)
+    return default if value is None else int(value)
 
 
 def _env_float(name: str, default: float) -> float:
-    return float(os.environ.get(name, default))
+    value = _lookup(name)
+    return default if value is None else float(value)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -46,14 +210,14 @@ def _env_bool(name: str, default: bool) -> bool:
     empty value: a setting that opts into fetching narrative text must not be
     enabled by `KSB_...=` left over in a shell.
     """
-    value = os.environ.get(name)
+    value = _lookup(name)
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_set(name: str, default: set[str]) -> set[str]:
-    value = os.environ.get(name)
+    value = _lookup(name)
     return {v.strip() for v in value.split(",") if v.strip()} if value else default
 
 
@@ -69,7 +233,7 @@ def _env_pattern_map(name: str, default: dict[str, str]) -> dict[str, str]:
     character looks exactly like an estate with nothing to withhold, and the
     whole point of these rules is that nobody discovers the loss later.
     """
-    raw = os.environ.get(name)
+    raw = _lookup(name)
     if not raw:
         return dict(default)
     try:
@@ -86,18 +250,35 @@ def _env_pattern_map(name: str, default: dict[str, str]) -> dict[str, str]:
 
 # --- where the knowledge store lives -------------------------------------
 # Default: the current working directory, i.e. the store repository you run in.
-ROOT = _env_path("KSB_ROOT", Path.cwd())
+# `_GIVEN_ROOT` is set only on the copy `configure(root=...)` loads to read another
+# store's file; see `_settings_at`.
+ROOT: Path = globals().get("_GIVEN_ROOT") or _env_path("KSB_ROOT", Path.cwd())
+
+# The store's committed settings, read before any setting below so each can come
+# from it. Only KSB_ROOT is read before this, which is why the file cannot set it.
+SETTINGS_FILE_PATH = ROOT / _SETTINGS_FILE
+
+
+def _load(path: Path) -> tuple[dict[str, str], bool, tuple[str, ...]]:
+    """The file's values, whether there was a file, and which keys the environment overrides."""
+    values = _read_settings_file(path)
+    if values is None:
+        return {}, False, ()
+    return values, True, tuple(sorted(key for key in values if key in os.environ))
+
+
+_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = _load(SETTINGS_FILE_PATH)
 
 # --- the estate being described ------------------------------------------
 # The GitHub organisation repositories are discovered from. Required: set
 # KSB_GITHUB_ORG or pass GITHUB_ORG to configure(). There is no sensible
 # default - a library cannot guess whose estate you mean.
-GITHUB_ORG = os.environ.get("KSB_GITHUB_ORG", "")
+GITHUB_ORG = _lookup("KSB_GITHUB_ORG", "")
 
 # The store's name in its manifest, which a reader holding several stores uses to
 # tell them apart. Optional: when unset, the manifest takes the repository name
 # of the store's `origin` remote.
-STORE_ID = os.environ.get("KSB_STORE_ID", "").strip()
+STORE_ID = _lookup("KSB_STORE_ID", "").strip()
 
 # --- inputs you maintain by hand -----------------------------------------
 FILTERS_PATH = ROOT / "config" / "repository-filters.txt"
@@ -242,9 +423,7 @@ LOCK_PATH = ROOT / "requirements.lock"
 
 # --- issue tracker -------------------------------------------------------
 # Ticket references mined from commit subjects, e.g. "PROJ-123".
-TICKET_PATTERN = re.compile(
-    os.environ.get("KSB_TICKET_PATTERN", r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
-)
+TICKET_PATTERN = re.compile(_lookup("KSB_TICKET_PATTERN", r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b"))
 
 
 def _prefix_list(given: str | Iterable[str]) -> list[str]:
@@ -258,7 +437,7 @@ def _prefix_list(given: str | Iterable[str]) -> list[str]:
 # dependency-bump messages. A match whose prefix is listed is not a ticket.
 # Comma-separated; empty restores every match, for a store whose tracker
 # genuinely uses one of these keys.
-TICKET_PREFIX_DENY = _prefix_list(os.environ.get("KSB_TICKET_PREFIX_DENY", "CVE,GHSA"))
+TICKET_PREFIX_DENY = _prefix_list(_lookup("KSB_TICKET_PREFIX_DENY", "CVE,GHSA"))
 
 
 def ticket_ids(text: str) -> list[str]:
@@ -291,7 +470,7 @@ def ticket_ids(text: str) -> list[str]:
 # leaves only the `[bot]` rule.
 AUTOMATION_IDENTITIES = [
     name.strip()
-    for name in os.environ.get(
+    for name in _lookup(
         "KSB_AUTOMATION_IDENTITIES",
         "jenkins,renovate,snyk,greenkeeper,devops-team,embedded_devops_sa",
     ).split(",")
@@ -302,7 +481,7 @@ AUTOMATION_IDENTITIES = [
 # as `proposed`. `omit` leaves proposals out, for a store that wants none; branch
 # work whose content landed on the default branch is still indexed. History keeps
 # it either way, so changing this setting needs no re-export.
-PROPOSED_LINKS = os.environ.get("KSB_PROPOSED_LINKS", "write").strip().lower() or "write"
+PROPOSED_LINKS = _lookup("KSB_PROPOSED_LINKS", "write").strip().lower() or "write"
 
 
 def _browse_url(value: str) -> str:
@@ -323,7 +502,7 @@ def _browse_url(value: str) -> str:
     return value + "/" if value and value[-1] not in "/=?&#" else value
 
 
-TICKET_BROWSE_URL = _browse_url(os.environ.get("KSB_TICKET_BROWSE_URL", ""))
+TICKET_BROWSE_URL = _browse_url(_lookup("KSB_TICKET_BROWSE_URL", ""))
 
 # Settings whose value is normalised however it arrives.
 _NORMALISERS = {
@@ -343,13 +522,13 @@ _NORMALISERS = {
 # Atlassian TWG CLI, which holds its own sign-in, so neither setting is needed.
 # Only the transport changes: every decision about what to ask and what to keep
 # is the same on both. See twg_transport.py.
-TRACKER_TRANSPORT = os.environ.get("KSB_TRACKER_TRANSPORT", "rest").strip().lower()
+TRACKER_TRANSPORT = _lookup("KSB_TRACKER_TRANSPORT", "rest").strip().lower()
 # The tracker's API root, e.g. https://tracker.example/jira - the part before
 # /rest/api/2. Empty means the stage is not configured and does nothing.
-TRACKER_BASE_URL = os.environ.get("KSB_TRACKER_BASE_URL", "")
+TRACKER_BASE_URL = _lookup("KSB_TRACKER_BASE_URL", "")
 # A personal access token, sent as `Authorization: Bearer <token>`. Never
 # written to an artefact, a log line or an error message - see fetch_tickets.py.
-TRACKER_TOKEN = os.environ.get("KSB_TRACKER_TOKEN", "")
+TRACKER_TOKEN = _lookup("KSB_TRACKER_TOKEN", "")
 # The ticket prefixes this store may read, comma-separated (`AAA,BBB`). Empty
 # means none, which is not the same as "all": prefixes that are in neither list
 # are reported for a person to decide about, and never requested.
@@ -381,7 +560,7 @@ TRACKER_COMMENT_CHARS = _env_int("KSB_TRACKER_COMMENT_CHARS", 2000)
 # it covers common Java/Scala roots, but an estate with other vendor or in-house
 # roots inherits a filter with a hole in it, and a miss here is silent - the
 # frame just reads as narrative. Extend the list for your estate.
-TRACKER_COMMENT_NOISE = os.environ.get(
+TRACKER_COMMENT_NOISE = _lookup(
     "KSB_TRACKER_COMMENT_NOISE",
     r"(?i)\b(jenkins|build (succeeded|failed|#)|pipeline|bitbucket|pull request"
     r"|auto-?generated|sonarqube|renovate|stack ?trace|caused by:|at (uk|com|net|io|java|org)\.)",
@@ -498,9 +677,9 @@ DEFAULT_SECRET_PATTERNS: dict[str, str] = {
 SECRET_PATTERNS = _env_pattern_map("KSB_SECRET_PATTERNS", DEFAULT_SECRET_PATTERNS)
 
 # --- explorer page -------------------------------------------------------
-EXPLORER_TITLE = os.environ.get("KSB_EXPLORER_TITLE", "Estate Explorer")
+EXPLORER_TITLE = _lookup("KSB_EXPLORER_TITLE", "Estate Explorer")
 # Where "request a topic brief" links point. Empty disables the link.
-BRIEF_REQUEST_URL = os.environ.get("KSB_BRIEF_REQUEST_URL", "")
+BRIEF_REQUEST_URL = _lookup("KSB_BRIEF_REQUEST_URL", "")
 # Minimum connection count for a code entry to be indexed in the explorer.
 # Business entries (features, scenarios, tickets) are always indexed.
 # How much of a tracker description the page carries, in characters. The page is
@@ -541,10 +720,8 @@ EXPLORER_MAX_BYTES = _env_int("KSB_EXPLORER_MAX_BYTES", 100 * 1_048_576)
 # `ansible/group_vars/prd/foo_values.yaml.j2` is service `foo` in `prd`, and a
 # file directly under `group_vars/` is the environment-independent base layer.
 DEPLOY_REPOS = _env_set("KSB_DEPLOY_REPOS", set())
-DEPLOY_VALUES_GLOB = os.environ.get(
-    "KSB_DEPLOY_VALUES_GLOB", "ansible/group_vars/**/*_values.yaml.j2"
-)
-DEPLOY_BASE_ENV = os.environ.get("KSB_DEPLOY_BASE_ENV", "_base")
+DEPLOY_VALUES_GLOB = _lookup("KSB_DEPLOY_VALUES_GLOB", "ansible/group_vars/**/*_values.yaml.j2")
+DEPLOY_BASE_ENV = _lookup("KSB_DEPLOY_BASE_ENV", "_base")
 # A values file runs to hundreds of keys; the page and the prose want the shape,
 # not the whole file, which stays readable in the clone.
 DEPLOY_MAX_KEYS = _env_int("KSB_DEPLOY_MAX_KEYS", 60)
@@ -568,7 +745,7 @@ RELATIONSHIP_KINDS_CONFIG_PATH = ROOT / "config" / "relationship-kinds.json"
 # chart `web` the clone `chart-web`. Empty by default, because a convention is an
 # estate's and not this library's; resolution then starts at the clone whose
 # `Chart.yaml` names the chart.
-CHART_REPO_PATTERN = os.environ.get("KSB_CHART_REPO_PATTERN", "")
+CHART_REPO_PATTERN = _lookup("KSB_CHART_REPO_PATTERN", "")
 # Repositories that bundle other repositories' charts. A chart they define resolves
 # to them only when no other clone defines it.
 UMBRELLA_REPOS = _env_set("KSB_UMBRELLA_REPOS", set())
@@ -580,7 +757,7 @@ RELATIONSHIP_EXAMPLES = _env_int("KSB_RELATIONSHIP_EXAMPLES", 3)
 # is the directory whose next path segment names the feature's area, used to
 # group features into business communities: "features/" makes
 # features/payments/refund.feature belong to the "payments" area.
-FEATURES_DIR = os.environ.get("KSB_FEATURES_DIR", "features/")
+FEATURES_DIR = _lookup("KSB_FEATURES_DIR", "features/")
 
 # Step definitions bind a Gherkin step to the code implementing it. Each entry
 # is a language: where to look, and how a step pattern is declared there.
@@ -664,25 +841,29 @@ INDEX_WARN_MB = _env_int("KSB_INDEX_WARN_MB", 90)
 INDEX_PATH = ROOT / "knowledge" / "index" / "store.sqlite"
 
 # --- semantic index ------------------------------------------------------
-EMBEDDING_MODEL = os.environ.get("KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+EMBEDDING_MODEL = _lookup("KSB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 
 def configure(root: Path | str | None = None, **overrides) -> None:
     """Point the pipeline at a different root, or override any setting.
 
-    `configure(root=...)` recomputes every derived path; other keyword
-    arguments set module names directly:
+    `configure(root=...)` recomputes every derived path and reads the new root's
+    settings file, then other keyword arguments set module names directly:
 
         configure(root="/tmp/store", GITHUB_ORG="myorg")
 
     Import order does not matter: stages read these names where they use them,
     so a call after a stage module is imported still reaches it. Unknown names
-    raise KeyError rather than being accepted and quietly doing nothing.
+    raise KeyError rather than being accepted and quietly doing nothing. A
+    settings file the new root holds and the library refuses raises
+    SettingsFileError before anything changes.
     """
     module = globals()
     if root is not None:
+        at_root = _settings_at(Path(root).expanduser().resolve())
         module["ROOT"] = Path(root).expanduser().resolve()
         _recompute_paths()
+        _adopt(at_root)
     for name, value in overrides.items():
         if name not in module:
             raise KeyError(f"unknown setting: {name}")
@@ -692,6 +873,63 @@ def configure(root: Path | str | None = None, **overrides) -> None:
         # a consumer configuring the library programmatically - the harder case
         # to notice, because it fails silently in whatever the caller builds.
         module[name] = _NORMALISERS.get(name, lambda given: given)(value)
+
+
+def _settings_at(root: Path) -> ModuleType | None:
+    """This module as it would load at `root`, or None when no file is involved.
+
+    The settings the file reaches are computed by the same lines that compute them
+    at import, by loading a second copy of this module pointed at `root` - so there
+    is one definition of every setting, not a second one kept for re-rooting. None
+    when neither the current root nor the new one has a file: then nothing the file
+    could reach changes, and every caller that never writes one pays nothing.
+    """
+    if not _FILE_READ and not (root / _SETTINGS_FILE).exists():
+        return None
+    spec = importlib.util.spec_from_file_location(f"{__name__}_at_root", __file__)
+    if spec is None or spec.loader is None:  # pragma: no cover - this file exists
+        raise SettingsFileError(f"cannot load the settings for {root}")
+    at_root = importlib.util.module_from_spec(spec)
+    at_root.__dict__["_GIVEN_ROOT"] = root
+    try:
+        spec.loader.exec_module(at_root)
+    except ValueError as error:
+        # The copy raises its own class; callers catch this module's.
+        raise SettingsFileError(str(error)) from error
+    return at_root
+
+
+def _adopt(at_root: ModuleType | None) -> None:
+    """Take every setting the old file or the new one reaches from `at_root`.
+
+    Only those: a setting neither file names keeps whatever a caller configured.
+    A key the old file set and the new one does not falls back to the environment
+    or its default, so one store's settings never carry into the next.
+    """
+    module = globals()
+    if at_root is None:
+        module.update(_FILE_VALUES={}, _FILE_READ=False, _FILE_OVERRIDDEN=())
+        return
+    reached = set(module["_FILE_VALUES"]) | set(at_root._FILE_VALUES)
+    for name, keys in _READERS.items():
+        if keys & reached:
+            module[name] = getattr(at_root, name)
+    module.update(
+        _FILE_VALUES=at_root._FILE_VALUES,
+        _FILE_READ=at_root._FILE_READ,
+        _FILE_OVERRIDDEN=at_root._FILE_OVERRIDDEN,
+    )
+
+
+def describe_settings_file() -> str:
+    """Which settings file was read and which keys it set - never a value."""
+    if not _FILE_READ:
+        return f"none ({SETTINGS_FILE_PATH} does not exist)"
+    applied = [key for key in sorted(_FILE_VALUES) if key not in _FILE_OVERRIDDEN]
+    text = f"{SETTINGS_FILE_PATH} set {', '.join(applied) or 'nothing'}"
+    if _FILE_OVERRIDDEN:
+        text += f"; the environment overrides {', '.join(_FILE_OVERRIDDEN)}"
+    return text
 
 
 def _recompute_paths() -> None:
@@ -759,4 +997,9 @@ def _recompute_paths() -> None:
         # the library directly has neither, and check-install-docs says so.
         REQUIREMENTS_PATH=root / "requirements.txt",
         LOCK_PATH=root / "requirements.lock",
+        SETTINGS_FILE_PATH=root / _SETTINGS_FILE,
     )
+
+
+# Last, because the check imports a module that reads this one.
+_check_values(SETTINGS_FILE_PATH, _FILE_VALUES)

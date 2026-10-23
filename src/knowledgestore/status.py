@@ -1596,6 +1596,7 @@ def main(argv=None) -> int:
     _report_duplicates(arguments.duplicates)
     # Reported, never refused: the stages that run git refuse below the floor.
     print(f"Git: {git_version.describe()}")
+    print(f"Settings: {config.describe_settings_file()}")
     recorded = provenance.read()
     print(
         f"Provenance: {len(recorded)} repositories recorded"

@@ -251,6 +251,7 @@ _EVERY_MANIFEST_TEST = (
     "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
     "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_the_oldest_and_newest_authored_date",
     "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
+    "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
     "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
     "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
     "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
@@ -299,6 +300,10 @@ _EVERY_MANIFEST_TEST = (
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_absent_layer_has_no_count",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
     "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
     "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
     "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -8600,6 +8605,7 @@ MUTATIONS = (
         "a reader that trusts `recognised` would parse a relationships layer written at a major this library cannot read",
         (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
         ),
     ),
     Mutation(
@@ -8939,6 +8945,7 @@ MUTATIONS = (
             "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
             "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_the_oldest_and_newest_authored_date",
             "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
             "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
@@ -8970,6 +8977,9 @@ MUTATIONS = (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
             "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
             "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
             "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -9379,7 +9389,10 @@ MUTATIONS = (
         '_env_int("KSB_INDEX_WARN_MB", 90)',
         "90",
         "an operator's `KSB_INDEX_WARN_MB` is read and dropped, so the warning fires at the wrong size",
-        ("test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",),
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
     ),
     Mutation(
         "store index: a node with no repository is listed as a repository",
@@ -9638,7 +9651,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_a_declared_wrapper_between_two_applications_loses_both_charts",
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
             "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_no_summary_line_when_nothing_is_unresolved",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_0_when_every_chart_resolves",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9662,7 +9679,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_two_umbrellas_and_no_owner_leave_the_chart_unresolved",
             "test_build_relationships.ChartResolutionTest.test_two_definitions_are_left_unresolved_and_listed_not_guessed",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -10032,10 +10053,14 @@ MUTATIONS = (
             "test_build_relationships.ChartResolutionTest.test_the_chart_is_part_of_the_aggregation_key",
             "test_build_relationships.MissingPyYamlTest.test_an_estate_with_no_release_builds_without_pyyaml",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
             "test_package_edges.ChartEstateTest.test_a_chart_is_in_the_estate_only_when_the_graph_holds_its_repository",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_chart_resolves_to_the_repository_that_provides_it",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -10228,6 +10253,7 @@ MUTATIONS = (
             "test_build_relationships.StatusTest.test_status_reports_the_layer_or_that_it_is_not_built",
             "test_build_relationships.StatusTest.test_status_survives_a_pathologically_nested_kinds_file",
             "test_build_relationships.SvcATest.test_the_flat_edge_list_names_both_ends",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
         ),
     ),
     Mutation(
@@ -10271,6 +10297,8 @@ MUTATIONS = (
         (
             "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
             "test_store_manifest.EveryArtefactIsAccountedFor.test_the_excusal_list_holds_no_stale_or_contradictory_entry",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
             "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
             "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
@@ -10319,6 +10347,190 @@ MUTATIONS = (
         "mode it fails the same way, and the clone it was run on stays without a graph",
         (
             "test_skill_clone_block.RepairBlockTest.test_repair_restores_what_step_six_selects_to_a_cone_mode_clone",
+        ),
+    ),
+    Mutation(
+        "settings file: the store's file is never read",
+        "config.py",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = _load(SETTINGS_FILE_PATH)",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = {}, False, ()",
+        "#483: chart settings lived only in a shell, and a rebuild without them exited 0 "
+        "with every consumer of the unresolved charts missing from `dependents`",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileIsRefused.test_a_file_toml_cannot_read_is_refused",
+            "test_settings_file.TheFileIsRefused.test_a_key_outside_the_library_fails",
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: --root does not read the new root's file",
+        "config.py",
+        "        _adopt(at_root)\n",
+        "        _adopt(None)\n",
+        "`knowledgestore --root <store> relationships`, the way the guides run a stage, "
+        "would build without the store's committed settings - the #483 layer again",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: a key the last file set survives a new root",
+        "config.py",
+        '    reached = set(module["_FILE_VALUES"]) | set(at_root._FILE_VALUES)',
+        "    reached = set(at_root._FILE_VALUES)",
+        "a caller configuring two stores in one process builds the second with the "
+        "first one's settings",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+        ),
+    ),
+    Mutation(
+        "settings file: the file overrides the environment",
+        "config.py",
+        "    if name in os.environ:\n"
+        "        return os.environ[name]\n"
+        "    return _FILE_VALUES.get(name, default)",
+        "    if name in _FILE_VALUES:\n"
+        "        return _FILE_VALUES[name]\n"
+        "    return os.environ.get(name, default)",
+        "CI and a one-off override could no longer change a setting the store committed",
+        (
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_environment_overrides_the_file",
+        ),
+    ),
+    Mutation(
+        "settings file: an unknown key is accepted",
+        "config.py",
+        "    if key not in settings_keys():\n",
+        "    if False:\n",
+        "a misspelt setting is read and ignored, so the store builds the poorer layer "
+        "with a file that appears to prevent it",
+        ("test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",),
+    ),
+    Mutation(
+        "settings file: a secret-looking key is accepted",
+        "config.py",
+        "    if key.endswith(_SECRET_KEY_ENDINGS):\n",
+        "    if False:\n",
+        "`KSB_TRACKER_TOKEN` is a setting the library reads, so a committed tracker "
+        "token would be accepted and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a secret-shaped value is accepted",
+        "config.py",
+        "\n_check_values(SETTINGS_FILE_PATH, _FILE_VALUES)\n",
+        "\n",
+        "a token pasted under an innocent key is committed and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a value that is not a string is accepted",
+        "config.py",
+        "    if not isinstance(value, str):\n",
+        "    if False:\n",
+        '`KSB_UMBRELLA_REPOS = ["a"]` reaches a setting the environment only ever '
+        "gives a string, and the stage misreads it rather than the file being refused",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: a table outside [settings] is accepted",
+        "config.py",
+        '        if name != "settings":\n',
+        "        if False:\n",
+        "a setting written under the wrong table is read and ignored, so it is as absent "
+        "as one never written - the #483 layer with a file that appears to prevent it",
+        (
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: KSB_ROOT is accepted",
+        "config.py",
+        '    if key == "KSB_ROOT":\n',
+        "    if False:\n",
+        "the file would name a root nothing honours - the root is what says where the "
+        "file is - and the store would build somewhere the operator did not expect",
+        ("test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",),
+    ),
+    Mutation(
+        "settings file: the allowed keys miss annotated settings",
+        "config.py",
+        "        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:\n",
+        "        elif False:\n",
+        "a setting the derivation misses is one the file refuses as unknown although "
+        "the library reads it",
+        (
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
+    ),
+    Mutation(
+        "settings file: --version does not say which file was read",
+        "cli.py",
+        '        print(f"settings {config.describe_settings_file()}")\n',
+        "",
+        "a build log cannot say whether the store's committed settings were in force",
+        (
+            "test_settings_file.TheFileReadIsReported.test_a_store_without_the_file_says_so",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: no summary line",
+        "build_relationships.py",
+        "        lines.append(f\"{_plural(unresolved, 'chart')} unresolved: {DECLARE}\")\n",
+        "        pass\n",
+        "#483: the run exited 0 and nothing above the per-chart lines said the layer "
+        "was incomplete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: --strict cannot fail",
+        "build_relationships.py",
+        "    if arguments.strict and unresolved_charts(layer):\n",
+        "    if False:\n",
+        "a store's gate passes a layer that leaves consumers out of `dependents`",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: the manifest carries no count",
+        "store_manifest.py",
+        '        _relationships_unresolved(root) if layers["relationships"]["present"] else None\n',
+        "        None\n",
+        "#483: the manifest marked the incomplete layer recognised and said nothing "
+        "else, so a reader served partial `dependents` as complete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_a_layer_added_to_a_copy_of_the_shape_needs_a_minor_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_hash_alone_cannot_be_updated_without_a_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_matches_the_format_it_is_recorded_under",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_names_what_a_reader_depends_on",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
         ),
     ),
     Mutation(
@@ -10666,19 +10878,10 @@ MUTATIONS = (
     Mutation(
         "check-plugin compares an undeclared build id as an empty id",
         "check_plugin.py",
-        "    if not building:\n        return\n",
-        "    if False:\n        return\n",
+        "    if not building:\n",
+        "    if False:\n",
         "a store that declares no build id is failed against an empty string",
-        (
-            "test_check_plugin.PluginGateTest.test_a_layer_not_recorded_warns_and_never_passes_silently",
-            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
-            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
-            "test_check_plugin.PluginGateTest.test_a_subdirectory_plugin_may_carry_an_mcp_json_beside_a_root_without_one",
-            "test_check_plugin.PluginGateTest.test_an_mcp_json_declaration_that_agrees_passes_and_names_tag_and_id",
-            "test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",
-            "test_check_plugin.PluginGateTest.test_an_unset_or_blank_build_id_is_skipped_silently",
-            "test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",
-        ),
+        ("test_check_plugin.PluginGateTest.test_an_unresolved_build_id_is_said_and_still_passes",),
     ),
     Mutation(
         "check-plugin reads the build id from the environment instead of config",
@@ -10687,8 +10890,23 @@ MUTATIONS = (
         '    building = __import__("os").environ.get("KSB_STORE_ID", "").strip()',
         "a CI step that does not source the environment, or a build id config resolves from elsewhere, is invisible to the check although the build would use it",
         (
+            "test_check_plugin.PluginGateTest.test_a_build_id_that_agrees_passes",
             "test_check_plugin.PluginGateTest.test_a_build_id_that_differs_from_the_manifest_fails_naming_both",
+            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
+            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
+            "test_check_plugin.PluginGateTest.test_a_resolved_build_id_does_not_print_the_skip_line",
+            "test_check_plugin.PluginGateTest.test_a_subdirectory_plugin_may_carry_an_mcp_json_beside_a_root_without_one",
+            "test_check_plugin.PluginGateTest.test_an_mcp_json_declaration_that_agrees_passes_and_names_tag_and_id",
+            "test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",
         ),
+    ),
+    Mutation(
+        "check-plugin skips an unresolved build id in silence",
+        "check_plugin.py",
+        "        warnings.append(UNRESOLVED_BUILD_ID)\n        return\n",
+        "        return\n",
+        "a CI step that loads no settings has no build id to compare, and the check printed nothing, so the run read as covered by a check that never ran",
+        ("test_check_plugin.PluginGateTest.test_an_unresolved_build_id_is_said_and_still_passes",),
     ),
 )
 

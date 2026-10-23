@@ -114,7 +114,7 @@ class WritingTheManifest(_Run):
         self.assertIn("✗ graph", out)
         # Nothing recorded whether the deployments stage added any: unknown, not absent.
         self.assertIn("? deployments", out)
-        self.assertEqual(lines[-1].split()[:4], ["Store", "manifest:", "format", "1.2,"])
+        self.assertEqual(lines[-1].split()[:4], ["Store", "manifest:", "format", "1.3,"])
         self.assertIn("id example-store", lines[-1])
 
 
@@ -243,7 +243,7 @@ class StatusReadsTheManifest(_Run):
         self.run_stage()
         document = json.loads(self.path.read_text(encoding="utf-8"))
         out = self.status_output()
-        self.assertIn("Store manifest: format 1.2", out)
+        self.assertIn("Store manifest: format 1.3", out)
         self.assertIn(f"digest {document['digest']}", out)
         self.assertIn("sources as of 2026-01-01T00:00:00+00:00", out)
         self.assertIn("absent: ", out)

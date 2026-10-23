@@ -963,7 +963,10 @@ record the index and relationships layers as present, or the relationships layer
 as recognised, because the server then answers from a fallback or not at all; a
 layer recorded as `present: null` is a warning. When `KSB_STORE_ID` is set it
 must equal the manifest's `store.id`, or the next manifest build writes an id the
-plugin does not ask for.
+plugin does not ask for. When it is unset the check
+is skipped and says so on stderr (`build id not resolved (KSB_STORE_ID unset); its
+check was skipped`), still exiting 0, so a CI step that loads no settings is not
+mistaken for one that was checked.
 
 - **Build and commit the manifest before you publish.** At v0.1.0 the server
   exits at start-up when it finds no registered clone or no

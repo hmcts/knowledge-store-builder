@@ -793,6 +793,9 @@ last by `knowledgestore manifest` and committed with the store.
   not recognised `!` with the reason beside it, and `knowledgestore status` names it
   on a `not recognised:` line, because consumers read it as absent until it is
   rebuilt with this library.
+  Its `unresolved_conflicts` counts the charts the layer left unresolved, across
+  every kind: `0` means every chart resolved, and `null` means the layer cannot
+  say - absent, not recognised, or written before the field existed (format 1.2).
 - **Present means a clone receives it.** Measured when the manifest is
   computed, from files git would commit: a path a `.gitignore` rule ignores does
   not count, and a directory counts when it holds at least one such file. A layer
@@ -820,8 +823,8 @@ last by `knowledgestore manifest` and committed with the store.
   sources are; a store with no manifest yet has neither. The `summaries`,
   `topics` and `deep_dives` layers also carry `authored_as_of`, the oldest and
   newest date their entries record (`{"oldest": ..., "newest": ...}`), so a
-  reader can tell how old the written prose is without opening it. It is `null`
-  for an absent layer and for one with no dated entry. Dates are compared as
+  reader can tell how old the written prose is without opening it (format 1.3).
+  It is `null` for an absent layer and for one with no dated entry. Dates are compared as
   instants and written as recorded. `status` also lists the files under `knowledge/` that no layer, declared
   extra layer or library-excused path covers, so a file a reader would never be told
   about is visible.
