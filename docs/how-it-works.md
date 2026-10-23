@@ -483,9 +483,12 @@ that in both directions
   text unchanged keeps its record. New or rewritten text takes the current
   build's date. An entry written before this record existed has none, and nothing
   adds one: a reader dates it by `sources_as_of`, which may be later than when it
-  was written. A build with no provenance writes no date. For briefs and dives,
-  "rewritten" means the rendered HTML changed, so a renderer change that alters
-  an entry's HTML dates it as rewritten.
+  was written. A build with no provenance writes no date. Briefs and dives are
+  re-rendered from Markdown on every run, so their records also carry
+  `source_sha256`, the digest of that Markdown, and an entry counts as rewritten
+  only when the digest changes: a renderer release that changes the HTML of
+  entries nobody rewrote does not re-date them. An entry with no recorded digest
+  gets one on its next run, and is dated then only if its HTML changed too.
 
 ## The semantic bridge
 

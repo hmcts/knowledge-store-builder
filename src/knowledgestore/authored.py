@@ -30,10 +30,20 @@ The rules, in the order they are applied:
 The block sits in the metadata rather than on the entries, because summaries are
 plain strings and the three layers should be read one way, and because every
 reader of the entries already strips the metadata (`io.read_prose_layer`).
+
+**Briefs and dives are judged on their source, not their HTML.** Their stages
+re-render every entry from Markdown on every run, so a renderer change alters the
+HTML of entries nobody rewrote, and dating those would make old analysis look new.
+Each of their records therefore also carries `source_sha256`, the digest of the
+Markdown, and an entry counts as rewritten only when that digest changes. An entry
+with no recorded digest - written before it existed - gets one on its next run,
+and is dated only if its HTML changed too: after that run, no renderer change can
+date it.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 
 from . import io
@@ -42,6 +52,8 @@ from . import io
 AUTHORED_KEY = "authored"
 AS_OF = "authored_as_of"
 COMMIT = "authored_commit"
+# Briefs and dives only: the sha256 of the Markdown an entry was rendered from.
+SOURCE = "source_sha256"
 
 
 def recorded(document: dict) -> dict[str, dict]:
@@ -77,6 +89,42 @@ def dated(
                 result[key] = records[key]
         elif stamp is not None:
             result[key] = dict(stamp)
+    return result
+
+
+def source_digest(markdown: str) -> str:
+    """The digest a brief or dossier records of the Markdown it was rendered from."""
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+
+
+def rendered_dated(
+    sources: dict[str, str],
+    html: dict[str, str],
+    before: dict[str, str],
+    records: dict[str, dict],
+    stamp: dict[str, str] | None,
+) -> dict[str, dict]:
+    """`dated`, for a layer rendered from Markdown: each entry's record, in order.
+
+    `sources` is each entry's `source_digest`, `html` what it renders to now and
+    `before` the committed HTML. Rewritten means the source digest changed; where
+    no digest is recorded, that the HTML changed (a new entry has no HTML before).
+    A rewritten entry takes `stamp`, or no date; any other keeps the date it had,
+    or none. Every entry records its digest, so the next run can judge it.
+    """
+    result: dict[str, dict] = {}
+    for key, digest in sources.items():
+        record = records.get(key, {})
+        recorded_source = record.get(SOURCE)
+        if recorded_source is not None:
+            rewritten = recorded_source != digest
+        else:
+            rewritten = before.get(key) != html[key]
+        if rewritten:
+            dates = dict(stamp) if stamp is not None else {}
+        else:
+            dates = {field: record[field] for field in (AS_OF, COMMIT) if field in record}
+        result[key] = {**dates, SOURCE: digest}
     return result
 
 

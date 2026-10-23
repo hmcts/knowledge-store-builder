@@ -26,11 +26,14 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import hashlib
 import io as stdio
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from settings_isolation import SettingsIsolated  # noqa: E402
 from knowledgestore import build_community_summaries as summaries  # noqa: E402
@@ -268,9 +271,14 @@ class CarriedSummariesKeepTheirDate(_Store):
 
 class _RenderedLayer(_Store):
     """The briefs and dives stages re-render every entry from Markdown on each run,
-    so 'authored' means the rendered text changed, and only then."""
+    so 'authored' means the Markdown changed, and only then: each record carries
+    the digest of the Markdown it was rendered from."""
 
     ENTRY = ""
+    RENDERER: types.ModuleType
+
+    def source_path(self) -> Path:
+        raise NotImplementedError
 
     def layer_path(self) -> Path:
         raise NotImplementedError
@@ -285,11 +293,35 @@ class _RenderedLayer(_Store):
         _record_build(build)
         self.assertEqual(_quiet(self.run_stage), 0, "the stage refused the fixture")
 
+    def expected(self, stamp: dict | None) -> dict:
+        """The record for the Markdown on disk, its digest derived here by hand."""
+        digest = hashlib.sha256(self.source_path().read_bytes()).hexdigest()
+        return {self.ENTRY: {**(stamp or {}), "source_sha256": digest}}
+
+    def html(self) -> str:
+        return json.loads(self.layer_path().read_text(encoding="utf-8"))[self.ENTRY]["html"]
+
+    def make_legacy(self) -> None:
+        """The layer as a release before this change wrote it: no authored block."""
+        self.build(None)
+        document = json.loads(self.layer_path().read_text(encoding="utf-8"))
+        del document[io.SUMMARIES_METADATA_KEY]["authored"]
+        self.layer_path().write_text(json.dumps(document, indent=1), encoding="utf-8")
+
+    @contextlib.contextmanager
+    def changed_renderer(self):
+        """A new release of the renderer: the same Markdown renders differently."""
+        original = self.RENDERER.markdown_to_html
+        with mock.patch.object(
+            self.RENDERER, "markdown_to_html", lambda text: original(text) + "<p>v2</p>"
+        ):
+            yield
+
     def test_a_fresh_entry_takes_the_build_date(self):
         self.write_source(EVIDENCE)
         self.build(FIRST_BUILD)
 
-        self.assertEqual(_authored(self.layer_path()), {self.ENTRY: FIRST_STAMP})
+        self.assertEqual(_authored(self.layer_path()), self.expected(FIRST_STAMP))
 
     def test_an_unchanged_entry_keeps_its_date(self):
         """The break: the stage rewrites every entry on every run, so dating what it
@@ -299,7 +331,7 @@ class _RenderedLayer(_Store):
 
         self.build(SECOND_BUILD)
 
-        self.assertEqual(_authored(self.layer_path()), {self.ENTRY: FIRST_STAMP})
+        self.assertEqual(_authored(self.layer_path()), self.expected(FIRST_STAMP))
 
     def test_a_rewritten_entry_takes_the_new_build_date(self):
         self.write_source(EVIDENCE)
@@ -308,22 +340,61 @@ class _RenderedLayer(_Store):
 
         self.build(SECOND_BUILD)
 
-        self.assertEqual(_authored(self.layer_path()), {self.ENTRY: SECOND_STAMP})
+        self.assertEqual(_authored(self.layer_path()), self.expected(SECOND_STAMP))
 
-    def test_a_legacy_entry_stays_undated(self):
-        """The break: an entry from before this change, re-rendered unchanged,
-        dated by the build that happened to re-render it."""
+    def test_a_one_word_source_edit_takes_the_new_build_date(self):
+        """The break: a source edit missed because only the length, the HTML shape
+        or nothing at all is compared. One word is the smallest rewrite there is."""
         self.write_source(EVIDENCE)
-        self.build(None)
-        self.assertIsNone(_authored(self.layer_path()))
+        self.build(FIRST_BUILD)
+        self.write_source(EVIDENCE.replace("invented", "imagined", 1))
 
         self.build(SECOND_BUILD)
 
-        self.assertIsNone(_authored(self.layer_path()))
+        self.assertEqual(_authored(self.layer_path()), self.expected(SECOND_STAMP))
+
+    def test_a_renderer_only_change_keeps_the_date(self):
+        """The break: judging a rewrite on the rendered HTML. A renderer release
+        changes the HTML of entries nobody rewrote, and dating them would make old
+        analysis look new - the over-freshness this record exists to prevent."""
+        self.write_source(EVIDENCE)
+        self.build(FIRST_BUILD)
+        before = self.html()
+
+        with self.changed_renderer():
+            self.build(SECOND_BUILD)
+
+        self.assertNotEqual(self.html(), before, "the stub did not reach the stage")
+        self.assertEqual(_authored(self.layer_path()), self.expected(FIRST_STAMP))
+
+    def test_a_legacy_entry_gets_its_digest_and_no_date(self):
+        """The break: an entry from before this change, re-rendered unchanged,
+        dated by the build that happened to re-render it - or left without the
+        digest, so the next renderer change would date it after all."""
+        self.write_source(EVIDENCE)
+        self.make_legacy()
+
+        self.build(SECOND_BUILD)
+        self.assertEqual(_authored(self.layer_path()), self.expected(None))
+
+        with self.changed_renderer():
+            self.build(SECOND_BUILD)
+        self.assertEqual(_authored(self.layer_path()), self.expected(None))
+
+    def test_without_provenance_a_fresh_entry_records_its_digest_and_no_date(self):
+        self.write_source(EVIDENCE)
+
+        self.build(None)
+
+        self.assertEqual(_authored(self.layer_path()), self.expected(None))
 
 
 class BriefsAreDated(_RenderedLayer):
     ENTRY = "payments"
+    RENDERER = briefs
+
+    def source_path(self) -> Path:
+        return config.TOPICS_DOCS_DIR / "payments.md"
 
     def setUp(self):
         super().setUp()
@@ -335,9 +406,7 @@ class BriefsAreDated(_RenderedLayer):
         return config.TOPICS_BRIEFS_PATH
 
     def write_source(self, text: str) -> None:
-        (config.TOPICS_DOCS_DIR / "payments.md").write_text(
-            f"# Payments\n\n{text}", encoding="utf-8"
-        )
+        self.source_path().write_text(f"# Payments\n\n{text}", encoding="utf-8")
 
     def run_stage(self) -> int:
         return briefs.merge()
@@ -346,6 +415,10 @@ class BriefsAreDated(_RenderedLayer):
 class DivesAreDated(_RenderedLayer):
     ENTRY = "repo-one"
     SHA = "d" * 40
+    RENDERER = dives
+
+    def source_path(self) -> Path:
+        return config.DEEPDIVES_DOCS_DIR / f"{self.ENTRY}.md"
 
     def setUp(self):
         super().setUp()
@@ -360,7 +433,7 @@ class DivesAreDated(_RenderedLayer):
         return config.DEEPDIVES_PATH
 
     def write_source(self, text: str) -> None:
-        (config.DEEPDIVES_DOCS_DIR / f"{self.ENTRY}.md").write_text(
+        self.source_path().write_text(
             f"# Deep dive\n\nMeasured at `{self.SHA[:8]}`.\n\n{text}", encoding="utf-8"
         )
 

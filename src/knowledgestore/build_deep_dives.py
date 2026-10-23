@@ -245,6 +245,8 @@ def merge() -> int:
     build it measured.
     """
     dives_out: dict[str, dict] = {}
+    # The digest of each entry's Markdown, which is what decides it was rewritten.
+    sources: dict[str, str] = {}
     problems: list[str] = []
     bundles = sorted(config.DEEPDIVES_INPUT_DIR.glob("*-input.json"))
     if not bundles:
@@ -276,6 +278,7 @@ def merge() -> int:
                 f"(expected the short sha `{sha}`)"
             )
             continue
+        sources[repo] = authored.source_digest(markdown)
         dives_out[repo] = {
             "title": f"Deep dive: {repo}",
             "html": markdown_to_html(markdown),
@@ -289,7 +292,8 @@ def merge() -> int:
             io.SUMMARIES_METADATA_KEY: {
                 **io.prose_metadata(dive["html"] for dive in dives_out.values()),
                 **authored.block(
-                    authored.dated(
+                    authored.rendered_dated(
+                        sources,
                         {name: dive["html"] for name, dive in dives_out.items()},
                         io.rendered_prose(committed),
                         authored.recorded(committed),
