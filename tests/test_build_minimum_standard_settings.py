@@ -171,6 +171,27 @@ class TheSettingsSnapshot(SettingsIsolated):
         self.assertEqual(record["unreadable"], ["secret_scanning"])
         self.assertEqual(record["branch_protection"], "present")
 
+    def test_secret_scanning_disabled_is_recorded_as_disabled(self):
+        """Breaks if GitHub's explicit `disabled` is dropped to None or mapped to `enabled`:
+        the snapshot would then report a repository with scanning off as unread, and the
+        evidence stage could never call the setting absent."""
+        self.declare("repo-a")
+        body = {
+            "archived": False,
+            "default_branch": "main",
+            "security_and_analysis": {"secret_scanning": {"status": "disabled"}},
+        }
+        gh = Gh(
+            {
+                "repos/example-org/repo-a": body,
+                "repos/example-org/repo-a/vulnerability-alerts": "",
+                "repos/example-org/repo-a/branches/main": {"name": "main", "protected": True},
+            }
+        )
+        record = self.run_stage(gh)["repositories"]["repo-a"]
+        self.assertEqual(record["secret_scanning"], "disabled")
+        self.assertEqual(record["unreadable"], [])
+
     def test_an_unreadable_repository_records_nothing_it_did_not_read(self):
         """Breaks if a failed repository call leaves guessed values, or is followed by
         a protection call for a branch nobody named."""

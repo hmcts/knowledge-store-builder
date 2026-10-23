@@ -74,6 +74,18 @@ silently refuse: explain that locations plus shapes plus a regeneration command
 serve the purpose better, and that copying the data would widen the exposure the
 document exists to close.
 
+## Turning a minimum-standard summary into tickets
+
+A `knowledge/minimum-standard/summary.json` row is a worklist, not a verdict. One
+ticket per repository and point, naming the point, the state and the `as_of` commit
+and date. For `no_secrets` findings give **locations and rule names only**: the
+path, the line number and the rule, never a value, a line of the file or a masked
+copy of one, and say in the ticket that the layer holds none. Say what `absent`
+means, that the practice is not evidenced in the repository, and do not turn
+`not_determinable` into a ticket as if it were a failure: it records that the build
+could not see. Do not report an overall pass or score. Re-derive a location from the
+clone before publishing it, as for any finding.
+
 ## Anything a subagent found, verify before publishing it
 
 An export is quoted in tickets and read by people making decisions, so a

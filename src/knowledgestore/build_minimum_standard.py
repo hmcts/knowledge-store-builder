@@ -167,6 +167,8 @@ def _findings(text: str) -> set[tuple[int, str]]:
         explained.update(rules)
     structural = sorted(rule for rule in counted if counted[rule] > explained[rule])
     fallback = structural or sorted(counted)
+    # A line masked only by a structural rule (its neighbours made it a value) takes the
+    # file's counted rules: a rule that masked this file, not necessarily the one on this line.
     return {
         (number, rule) for number, rules in changed.items() for rule in (sorted(rules) or fallback)
     }
