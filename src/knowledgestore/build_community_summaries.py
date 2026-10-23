@@ -393,6 +393,8 @@ def _write_merged_summaries(
 #     validated by checked_write_target
 #   S8707 policy site: build_relationships.py - _compare, citing merge; --compare
 #     only reads, and the layer's own writes are validated by checked_write_target
+#   S8707 policy site: apply_ignores.py - read_declarations, _present and apply,
+#     citing merge; its one write is validated by checked_write_target
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]
 ) -> tuple[int, list[str], list[str]]:

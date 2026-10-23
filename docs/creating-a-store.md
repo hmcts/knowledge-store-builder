@@ -220,6 +220,7 @@ should run and the checkpoints you should expect.
 
 ```bash
 knowledgestore sync
+knowledgestore apply-ignores
 knowledgestore convert
 knowledgestore check-corpus
 knowledgestore export-history
@@ -232,6 +233,23 @@ the estate and build the file-to-ticket index. Stages are independent and
 idempotent, so a failed stage can be rerun. If `sync` reports any failed
 repositories, fix them before continuing: it records successful repositories
 and exits non-zero, leaving the estate incomplete.
+
+**`apply-ignores` runs straight after `sync`.** `sync` ends in
+`git clean -fd -e graphify-out`, which deletes every clone's `.graphifyignore`.
+Declare the exclusions your store relies on in `config/graphify-ignore.txt`, one
+`.graphifyignore` line each, and this stage writes them back into every clone:
+
+```text
+# every clone
+node_modules/
+# one repository: name | pattern
+service-a | src/main/resources/static/vendor/
+```
+
+It appends only the lines a clone lacks and keeps the lines a repository commits
+in its own ignore file, so running it twice changes nothing. `extract-ast` reads
+the same file and refuses a clone that lacks a declared line. A store with no
+`config/graphify-ignore.txt` gets no change from either.
 
 **`convert` runs after `sync` and before any extraction.** Extraction reads PDF
 and a wide spread of code and markup, and is blind to Office formats, so a
@@ -384,8 +402,9 @@ excluded only through its own `.gitignore` becomes content unless the store's
 `.graphifyignore` re-excludes it — and that file is one forgotten reinstall away
 from absent, because `sync` ends in `git clean -fd -e graphify-out`. It trades an
 exclusion list each repository maintains for its own reasons for one this
-pipeline has to remember to reinstall. Two measured facts go with it, and a
-reader tends to assume the opposite of both:
+pipeline has to remember to reinstall — which `apply-ignores` does from
+`config/graphify-ignore.txt`, so write the detect result after it. Two measured
+facts go with it, and a reader tends to assume the opposite of both:
 
 - **`gitignore=False` does not disable `.graphifyignore`.** Measured in two
   independent sessions: with the parameter set, a `.graphifyignore` still
@@ -493,6 +512,34 @@ reads. The `[ast]` extra installs the third-party parser; the stage refuses to
 run without it. It reads the content set from
 `graphify-out/.graphify_detect.json`, so write that first, as above.
 
+Run the AST route in this order, because each step reads what the one before it
+left in the clones:
+
+```bash
+knowledgestore sync             # deletes every clone's .graphifyignore
+knowledgestore apply-ignores    # writes config/graphify-ignore.txt back into each
+# write the detect result and run content-set, as above
+knowledgestore check-grammars
+knowledgestore extract-ast
+```
+
+**It reconciles against `config/repositories.txt` before extracting**, on a first
+run as on any other. A declared repository with no clone under `repositories/`
+fails the run with exit 1, naming each one, and nothing is written. A declared
+repository whose content set holds no parseable code is named on a warning line
+and does not fail the run. A store with no `config/repositories.txt` is not
+reconciled.
+
+This is a behaviour change: a store that declares a repository it has not cloned
+used to get a layer without it and exit 0, and now fails `extract-ast`. Run
+`knowledgestore sync`, or remove the repository from the declaration.
+
+**It refuses a clone missing a declared exclusion.** When
+`config/graphify-ignore.txt` exists, every clone's `.graphifyignore` must hold
+each line declared for it; otherwise the run exits 1 naming the repository and
+the line, and nothing is extracted. Run `knowledgestore apply-ignores`, then
+write the detect result again.
+
 It is the supported route to the AST layer. A hand-written per-repository loop
 reaches the same extractor and lacks four properties this stage carries, each
 from a defect that reached a real estate:
@@ -513,7 +560,10 @@ from a defect that reached a real estate:
 
 A run also compares each repository's node count with the last run and reports
 decreases, absences and new repositories. It reports and does not refuse, because
-deleted code is a legitimate reason for a smaller layer.
+deleted code is a legitimate reason for a smaller layer. The counts are written to
+`graphify-out/.graphify_ast_counts.json` as each repository finishes, so an
+interrupted run keeps every count it measured, and a repository that went
+backwards says `down from N` on its own progress line.
 
 **It refuses before extracting when graphify cannot parse a file type the content
 set holds.** graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` files as nothing

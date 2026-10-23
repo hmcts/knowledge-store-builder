@@ -302,6 +302,10 @@ QUESTIONS_PATH = ROOT / "config" / "questions.txt"
 # Candidate content cuts for `size-cuts` to measure. Not a cut the pipeline
 # applies: a statement of what a store is for, sized before anyone commits to it.
 CONTENT_CUTS_PATH = ROOT / "config" / "content-cuts.txt"
+# Exclusions every clone's `.graphifyignore` must carry. `sync` deletes those files,
+# so `apply-ignores` writes these back and `extract-ast` refuses a clone missing one.
+# Hand-maintained and optional: absent means nothing is declared and nothing changes.
+GRAPHIFY_IGNORE_PATH = ROOT / "config" / "graphify-ignore.txt"
 # graphify's semantic fan-out reads and writes these. The chunk plan is the only
 # map from chunk number to file list, so without it the committed chunk archive
 # cannot be read back; it was ad-hoc and machine-specific until the library owned
@@ -945,6 +949,7 @@ def _recompute_paths() -> None:
         CONTENT_SET_ALLOWED_PATH=root / "config" / "content-set-allowed.txt",
         QUESTIONS_PATH=root / "config" / "questions.txt",
         CONTENT_CUTS_PATH=root / "config" / "content-cuts.txt",
+        GRAPHIFY_IGNORE_PATH=root / "config" / "graphify-ignore.txt",
         DETECT_PATH=root / "graphify-out" / ".graphify_detect.json",
         CHUNK_PLAN_PATH=root / "graphify-out" / ".graphify_chunk_plan.json",
         UNCACHED_PATH=root / "graphify-out" / ".graphify_uncached.txt",

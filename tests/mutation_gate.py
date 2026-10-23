@@ -1670,6 +1670,87 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a declared repository with no clone extracts",
+        "extract_ast.py",
+        "    if missing:\n        named =",
+        "    if False:\n        named =",
+        "the stage compared only with its own last run, so on a first run a repository "
+        "sync never cloned was absent from the content set and from everything the "
+        "stage printed - a layer missing a whole repository read as the whole estate. "
+        "A store's own driver failed on it; this did not (#492)",
+        (
+            "test_extract_ast_declared.DeclaredRepositoriesTest.test_a_declared_repository_with_no_clone_fails_on_a_first_run_and_writes_nothing",
+        ),
+    ),
+    Mutation(
+        "a declared repository with no code is unnamed",
+        "extract_ast.py",
+        "    return [name for name in declared if not groups.get(name)]",
+        "    return []",
+        "a clone whose content set holds no parseable file drops out of the layer, and "
+        "with no last run to compare against nothing named it (#492)",
+        (
+            "test_extract_ast_declared.DeclaredRepositoriesTest.test_a_declared_repository_with_nothing_parseable_is_warned_about_and_does_not_fail",
+        ),
+    ),
+    Mutation(
+        "the counts sidecar is written only at the end",
+        "extract_ast.py",
+        "        write_counts(sidecar, carry_forward(before, counts, failures, pending))",
+        "        pass",
+        "the sidecar was written after the loop, so a Ctrl-C lost every count the run "
+        "had measured - including the one showing a repository went backwards (#492)",
+        (
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_first_run_keeps_the_counts_of_the_repositories_it_finished",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
+        ),
+    ),
+    Mutation(
+        "a checkpoint drops the repositories not yet reached",
+        "extract_ast.py",
+        "    kept = {label for label, _ in failures} | set(pending)",
+        "    kept = {label for label, _ in failures}",
+        "a mid-run checkpoint holding only what the run measured erases the baseline of "
+        "every repository after an interrupt, so the next run reports them as new and "
+        "cannot show a decrease against the count it no longer has",
+        (
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
+        ),
+    ),
+    Mutation(
+        "a missing declared exclusion is not refused",
+        "extract_ast.py",
+        "    if unapplied:",
+        "    if False:",
+        "sync's clean deletes every clone's .graphifyignore, and nothing failed when a "
+        "store forgot to re-apply its exclusions: the vendored or symlinked tree was "
+        "parsed as source and the run reported healthy counts (#492)",
+        (
+            "test_extract_ast_declared.DeclaredExclusionsTest.test_a_declared_exclusion_absent_from_a_clone_refuses_and_names_it",
+        ),
+    ),
+    Mutation(
+        "apply-ignores replaces a repository's own ignore file",
+        "apply_ignores.py",
+        '    text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""',
+        '    text = ""',
+        "a repository may commit its own .graphifyignore, which sync restores; writing "
+        "the declared lines over it silently drops the repository's own exclusions",
+        ("test_apply_ignores.ApplyIgnoresTest.test_a_repositorys_own_ignore_lines_are_kept",),
+    ),
+    Mutation(
+        "apply-ignores appends on every run",
+        "apply_ignores.py",
+        "    present = set(_present(clone))",
+        "    present = set()",
+        "the stage runs after every sync, so one that re-appends lines already present "
+        "grows each ignore file without bound and is not safe to re-run",
+        (
+            "test_apply_ignores.ApplyIgnoresTest.test_after_syncs_clean_it_writes_every_declared_exclusion_and_is_idempotent",
+            "test_extract_ast_declared.DeclaredExclusionsTest.test_once_applied_the_same_store_extracts",
+        ),
+    ),
+    Mutation(
         "a lost grammar is certified present",
         "check_grammars.py",
         "    return done.returncode == 0",

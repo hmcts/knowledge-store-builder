@@ -510,6 +510,9 @@ files in every clone and exempts only `graphify-out/`. So the per-repository
 placement above is a build step to re-apply after every sync, never the source
 of truth for what an estate excludes. Nothing announces its disappearance; the
 symptom is `status` reverting to reporting symlinks it had called excluded.
+Declare the exclusions in `config/graphify-ignore.txt` and run
+`knowledgestore apply-ignores` after each sync; `extract-ast` refuses a clone
+that lacks one.
 
 One further trap, and it is narrow: `collect_files()`
 called directly with a **relative** path silently does not apply
