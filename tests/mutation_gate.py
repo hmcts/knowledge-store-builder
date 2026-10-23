@@ -10460,6 +10460,7 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
             "test_mutation_gate_parallel.ParallelGateTest.test_results_print_in_table_order_whatever_order_they_finish_in",
             "test_mutation_gate_parallel.ParallelGateTest.test_two_workers_derive_the_mapping_one_worker_derives",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_an_entry_no_worker_answered_for_stops_the_settle",
             "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
@@ -10480,6 +10481,7 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_that_cannot_be_applied_is_reported_and_the_rest_still_run",
             "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_whose_suite_dies_is_reported_against_that_entry",
             "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_an_entry_no_worker_answered_for_stops_the_settle",
         ),
     ),
     Mutation(
@@ -10495,6 +10497,7 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelGateTest.test_a_parallel_run_never_mutates_the_checkout",
             "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
             "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_an_entry_no_worker_answered_for_stops_the_settle",
             "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",

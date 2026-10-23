@@ -705,6 +705,24 @@ class ParallelSettleTest(ParallelTree):
         self.assertEqual(fingerprint(self.root), before)
         self.assertEqual(self._left_behind(), [])
 
+    def test_an_entry_no_worker_answered_for_stops_the_settle(self):
+        """Catches settling past an entry it never asked about. An entry missing from
+        what the workers reported reads as observed by nothing, so a settle that went
+        on would print CLEAN over it. Here the second entry's `find` is absent, so its
+        worker answers with a refusal: the settle has to stop, naming it, rather than
+        return a verdict."""
+        absent = entry("second", find="NOT IN THE FILE")
+        table = (entry("first"), absent, entry("third"))
+        arrived = {"test_second": ("Observe.test_the_target_is_unmutated",)}
+        reported = io.StringIO()
+
+        with contextlib.redirect_stderr(reported), self.assertRaises(SystemExit) as raised:
+            staleness.settle(table, arrived, "the base", 600.0, jobs=2)
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn(f"NOT RUN: {absent.name}", reported.getvalue())
+        self.assertEqual(self._left_behind(), [])
+
 
 class BudgetIsWallTimeTest(unittest.TestCase):
     def test_workers_divide_the_entries_a_module_is_run_under(self):
