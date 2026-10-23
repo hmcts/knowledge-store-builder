@@ -90,6 +90,11 @@ a base this clone does not hold, a module that will not parse - ends at
     python3 tests/observer_staleness.py --json            # the same, for a caller
     python3 tests/observer_staleness.py --settle          # run the arrivals under every entry
     python3 tests/observer_staleness.py --settle --budget 20   # allow twenty minutes of it
+    python3 tests/observer_staleness.py --settle --jobs auto   # over half the cores
+
+With `--jobs`, each entry's mutated run goes to a worker holding its own copy of the
+tree, as `mutation_gate.py --jobs` does, and `--budget` stays wall time: a module's
+projection is its unmutated time times the entries each worker runs in turn.
 """
 
 from __future__ import annotations
@@ -227,8 +232,10 @@ class Report:
     unjudged: tuple[str, ...] = ()
     unsettled: tuple[Unsettled, ...] = ()
     # The budget a settle run was given, in seconds, so the remedy for an unsettled
-    # module can name one that would have covered it.
+    # module can name one that would have covered it - and the workers it had, because
+    # the budget is wall time and the same budget covers more with more of them.
     budget: float = 0.0
+    jobs: int = 1
 
 
 def test_ids(source: str) -> frozenset[str]:
@@ -475,8 +482,13 @@ def settled(
     )
 
 
+def rounds(entries: int, jobs: int) -> int:
+    """How many entries each worker runs, one after another: the wall-time multiplier."""
+    return math.ceil(entries / jobs)
+
+
 def affordable(
-    timings: dict[str, float], entries: int, budget: float
+    timings: dict[str, float], entries: int, budget: float, jobs: int = 1
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Which modules to settle and which to refuse, cheapest first, within `budget`.
 
@@ -484,12 +496,19 @@ def affordable(
     entries, because it is run once under each. Cheapest first, so one slow module
     costs the pull request that module rather than the fast ones queued behind it;
     tie-broken by name so two runs choose alike. Both halves come back sorted by name.
+
+    The budget is wall time - it exists because a job waited over half an hour - so
+    with `jobs` workers the multiplier is the entries each worker runs in turn,
+    rounded up, rather than all of them. That is a floor on the real figure: workers
+    share the machine's cores, and a suite run slows when several run at once, so a
+    parallel settle can overrun a budget a serial one would have kept. `--jobs auto`
+    takes half the cores to leave that headroom.
     """
     chosen: list[str] = []
     refused: list[str] = []
     spent = 0.0
     for module in sorted(timings, key=lambda name: (timings[name], name)):
-        projected = timings[module] * entries
+        projected = timings[module] * rounds(entries, jobs)
         if spent + projected <= budget:
             chosen.append(module)
             spent += projected
@@ -504,7 +523,12 @@ def _ids(arrived: Arrivals, modules: Iterable[str]) -> tuple[str, ...]:
 
 
 def observe_arrivals(
-    table: tuple[gate.Mutation, ...], arrived: Arrivals, budget: float, *, clock=time.monotonic
+    table: tuple[gate.Mutation, ...],
+    arrived: Arrivals,
+    budget: float,
+    *,
+    clock=time.monotonic,
+    jobs: int = 1,
 ) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]], tuple[str, ...], tuple[Unsettled, ...]]:
     """What the arrived tests reported unmutated and under each entry, within `budget`.
 
@@ -522,6 +546,10 @@ def observe_arrivals(
     recovery and import-path checks come first for the gate's reasons - a mutation
     left applied, or a child importing an installed copy, makes every run below
     conclude about the wrong tree.
+
+    With `jobs` above one the mutated runs go to the gate's workers, each in its own
+    copy of the tree, and the unmutated timing runs stay here: they are what the
+    budget is decided from, and they mutate nothing.
     """
     if gate.recover() or gate.check_import_path():
         raise SystemExit(1)
@@ -535,16 +563,19 @@ def observe_arrivals(
             started = clock()
             failed_unmutated.extend(gate._run(_ids(arrived, (module,))).observers)  # noqa: SLF001
             timings[module] = clock() - started
-        chosen, refused = affordable(timings, len(table), budget)
+        chosen, refused = affordable(timings, len(table), budget, jobs)
+        multiplier = rounds(len(table), jobs)
         unsettled = tuple(
             Unsettled(
-                module, _ids(arrived, (module,)), timings[module], timings[module] * len(table)
+                module, _ids(arrived, (module,)), timings[module], timings[module] * multiplier
             )
             for module in refused
         )
         selection = _ids(arrived, chosen)
         # Never an empty selection: `_run` reads no names as the whole suite.
-        if selection:
+        if selection and jobs > 1:
+            _observe_in_parallel(table, selection, observed, jobs)
+        elif selection:
 
             def observe(mutation: gate.Mutation) -> None:
                 observed[mutation.name] = gate._run(selection).observers  # noqa: SLF001
@@ -556,11 +587,39 @@ def observe_arrivals(
     return tuple(failed_unmutated), observed, chosen, unsettled
 
 
+def _observe_in_parallel(
+    table: tuple[gate.Mutation, ...],
+    selection: tuple[str, ...],
+    observed: dict[str, tuple[str, ...]],
+    jobs: int,
+) -> None:
+    """Fill `observed` from the gate's workers, one entry per request.
+
+    An entry no worker answered for stops the run rather than settling: an entry
+    missing from `observed` reads as observed by nothing, which is the CLEAN this
+    module exists not to print over a question it did not ask.
+    """
+    unrun: list[str] = []
+
+    def judge(mutation: gate.Mutation, failed: tuple[tuple[str, ...], ...]) -> None:
+        observed[mutation.name] = failed[0]
+        print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
+
+    try:
+        with gate.workers(jobs) as pool:
+            gate.measuring(table, lambda mutation: (selection,), judge, unrun, pool)
+    except gate.Terminated as termination:
+        raise SystemExit(128 + termination.number) from None
+    if gate.report_unrun(unrun):
+        raise SystemExit(1)
+
+
 def settle(
     table: tuple[gate.Mutation, ...],
     arrived: Arrivals | None,
     since: str,
     budget: float = BUDGET_MINUTES * 60,
+    jobs: int = 1,
 ) -> Report:
     """Settle what the id comparison can only suspect, by running the arrivals.
 
@@ -572,10 +631,10 @@ def settle(
     """
     if not arrived:
         return judge(table, arrived, since)
-    baseline, observed, chosen, unsettled = observe_arrivals(table, arrived, budget)
+    baseline, observed, chosen, unsettled = observe_arrivals(table, arrived, budget, jobs=jobs)
     settled_arrivals = {module: arrived[module] for module in chosen}
     report = settled(table, settled_arrivals, baseline, observed, since, unsettled)
-    return dataclasses.replace(report, budget=budget)
+    return dataclasses.replace(report, budget=budget, jobs=jobs)
 
 
 def needed_minutes(report: Report) -> int:
@@ -733,8 +792,12 @@ def remedies(report: Report) -> tuple[str, ...]:
     if wider:
         commands.append(verifying(wider))
     if report.unsettled:
+        # The workers too: the projection was made for them, so the same budget
+        # without them would not cover it.
+        workers = f" --jobs {report.jobs}" if report.jobs > 1 else ""
         commands.append(
             f"python3 tests/observer_staleness.py --settle --budget {needed_minutes(report)}"
+            + workers
         )
     if report.unattributed or report.unjudged or report.unsettled or report.verdict == CANNOT_TELL:
         commands.append(
@@ -888,9 +951,18 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         metavar="MINUTES",
         help=f"with --settle, the most the mutated runs may cost (default {BUDGET_MINUTES})",
     )
+    parser.add_argument(
+        "--jobs",
+        default="1",
+        metavar="N",
+        help="with --settle, run the entries over N workers, each in its own copy of the "
+        "tree; `auto` is half the cores, and the budget is then wall time over them",
+    )
     parsed = parser.parse_args(argv)
     if parsed.settle and parsed.head != "HEAD":
         parser.error("--settle runs the working tree, so it compares against HEAD only")
+    if parsed.jobs != "1" and not parsed.settle:
+        parser.error("--jobs spreads --settle over workers, and nothing else here runs a test")
     return parsed
 
 
@@ -911,7 +983,8 @@ def main(argv: list[str] | None = None, *, run=subprocess.run, runner=subprocess
     base, since = base_for(parsed.base, runner=runner)
     arrived, why = (None, since) if base is None else what_arrived(base, parsed.head, run=run)
     if parsed.settle:
-        report = settle(gate.MUTATIONS, arrived, why or since, parsed.budget * 60)
+        jobs = gate.jobs_argument(parsed.jobs)
+        report = settle(gate.MUTATIONS, arrived, why or since, parsed.budget * 60, jobs)
     else:
         report = judge(gate.MUTATIONS, arrived, why or since)
     announce(report, as_json=parsed.json)

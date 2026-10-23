@@ -19,6 +19,7 @@ would have stopped the thing that actually happened.
     python3 tests/mutation_gate.py --verify-mapping  # check every entry's observers
     python3 tests/mutation_gate.py --verify-mapping --shard 2/4  # one runner's slice
     python3 tests/mutation_gate.py --isolate         # run each observer by itself
+    python3 tests/mutation_gate.py --derive-mapping --jobs auto  # over half the cores
 
 Each entry names the tests that observe it. A run applies the mutation, runs the
 modules holding those tests, and asks whether the *named* ones failed. Whole
@@ -46,6 +47,17 @@ schedule and on `workflow_dispatch`, sharded over four runners with
 a whole suite run per entry, which was 28 minutes in one job (#285).
 The slices are reconciled against the table before anything is applied, because a
 shard that drops an entry prints `N of N` over a smaller N and reads as a pass.
+
+On one machine the same three modes take `--jobs N`, or `--jobs auto` for half the
+cores. They were serial because the gate mutates a real file, and two workers in one
+checkout corrupt each other's subject - so each worker gets its own copy instead: a
+clone sharing this repository's objects, holding every file git does not ignore as
+it stands on disk, with the suite pointed at the copy's `src`. The checkout itself is
+never mutated, so `--status` exits 0 through a parallel run and names it beside that
+answer; results print in table order whatever order the workers finish in; an entry
+no worker could answer for is reported as NOT RUN against its name and fails the
+run. Default `1`, which is the serial run exactly - and what CI uses, because its
+legs are runners of their own.
 
 The last of them exists because the other two, and every ordinary run, select at
 module granularity - so none of them ever runs a test alone, and a third way an
@@ -119,16 +131,21 @@ dead file-to-ticket join. Neither gate covers the other.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
+import queue
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
+from contextlib import contextmanager, redirect_stderr, redirect_stdout, suppress
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import FrameType
 
@@ -10325,6 +10342,107 @@ MUTATIONS = (
             "test_build_answers_layer.OneEntryPerFile.test_files_that_are_not_markdown_are_named_as_skipped",
         ),
     ),
+    # The defects spreading the slow modes over workers invites, named in the change
+    # that added `--jobs` as #285 named the one sharding invites. Each `find` that
+    # targets this file is split, so the table does not hold a second copy of it.
+    Mutation(
+        "parallel results print in the order workers finish",
+        "tests/mutation_gate.py",
+        "            while index not in "
+        + "held:\n"
+        + "                arrived, measured = self._next(waiting, answered, feeders)\n"
+        + "                held[arrived] = measured\n"
+        + "            consume(index, held.pop(index))",
+        "            arrived, measured = self._next(waiting, answered, feeders)\n"
+        + "            consume(arrived, measured)",
+        "named in the change that added `--jobs`: answers arrive in the order workers "
+        "finish, which moves with machine load, so two runs over one table print the same "
+        "lines in different orders (CLAUDE.md 1.3) while every line in each is correct",
+        (
+            "test_mutation_gate_parallel.ParallelGateTest.test_results_print_in_table_order_whatever_order_they_finish_in",
+        ),
+    ),
+    Mutation(
+        "a parallel worker mutates the checkout rather than its copy",
+        "tests/mutation_gate.py",
+        '            "root": str(self.' + "copy),",
+        '            "root": str(ROOT),',
+        "the reason the slow modes were serial: the gate mutates a real file, and a worker "
+        "applying its entry to the checkout rather than to its own copy corrupts every other "
+        "worker's subject and the tree a developer is editing. The restore puts the file "
+        "back afterwards, so only where each mutation was read can show it",
+        (
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_parallel_run_never_mutates_the_checkout",
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
+            "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_that_cannot_be_applied_is_reported_and_the_rest_still_run",
+            "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_whose_suite_dies_is_reported_against_that_entry",
+            "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelGateTest.test_results_print_in_table_order_whatever_order_they_finish_in",
+            "test_mutation_gate_parallel.ParallelGateTest.test_two_workers_derive_the_mapping_one_worker_derives",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
+        ),
+    ),
+    Mutation(
+        "an entry no worker answered for drops out of the count",
+        "tests/mutation_gate.py",
+        '            unrun.append(f"{mutation.name}: ' + '{measured.error}")',
+        "            return",
+        "named in the change that added `--jobs`: a `find` that no longer applies, a suite "
+        "that ends without reporting, or a worker that dies leaves an entry with no answer, "
+        "and a mode counting the answers prints `N of N` over a smaller N",
+        (
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
+            "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_that_cannot_be_applied_is_reported_and_the_rest_still_run",
+            "test_mutation_gate_parallel.ParallelGateTest.test_an_entry_whose_suite_dies_is_reported_against_that_entry",
+            "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+        ),
+    ),
+    Mutation(
+        "an interrupted parallel run leaves its worker copies behind",
+        "tests/mutation_gate.py",
+        "            shutil.rmtree(self.workspace, " + "ignore_errors=True)",
+        "            pass",
+        "named in the change that added `--jobs`: every parallel run copies the checkout "
+        "once per worker, and an ending that skips the removal - Ctrl-C, SIGTERM, a refusal "
+        "- fills the temporary directory one checkout at a time",
+        (
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_copy_whose_suite_imports_another_tree_is_refused",
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_parallel_run_never_mutates_the_checkout",
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
+            "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
+        ),
+    ),
+    Mutation(
+        "a worker's copy skips the import-path guard",
+        "tests/mutation_gate.py",
+        "        refused = recover() or " + "check_import_path()",
+        "        refused = recover()",
+        "the guard #269 added, lost one level down: a worker whose suite imports another "
+        "tree's `knowledgestore` concludes about code nobody is changing, and every entry it "
+        "runs reads as observed by nothing",
+        (
+            "test_mutation_gate_parallel.ParallelGateTest.test_a_copy_whose_suite_imports_another_tree_is_refused",
+        ),
+    ),
+    Mutation(
+        "the settle budget ignores the workers it has",
+        "tests/observer_staleness.py",
+        "        projected = timings[module] * rounds(entries, jobs)",
+        "        projected = timings[module] * entries",
+        "named in the change that added `--jobs`: `--budget` bounds how long the job waits, "
+        "so a projection that charges every entry to one worker refuses modules a parallel "
+        "settle would have covered inside it",
+        (
+            "test_mutation_gate_parallel.BudgetIsWallTimeTest.test_workers_divide_the_entries_a_module_is_run_under",
+        ),
+    ),
 )
 
 
@@ -10694,7 +10812,7 @@ def run_alone(observer: str) -> bool:
 
     The discriminator this gate lacked. Every other run shape here selects at
     module granularity - `run_observers` runs the modules an entry names, and
-    `failing_observers` discovers everything - so a test that fails only because
+    a whole-suite run discovers everything - so a test that fails only because
     a sibling ran first is indistinguishable from one that observes the defect
     (#334). Selecting the single test is what separates them.
 
@@ -10734,11 +10852,6 @@ def run_observers(observers: Sequence[str]) -> tuple[str, ...]:
     modules = tuple(dict.fromkeys(module_of(observer) for observer in observers))
     failed = set(_run(modules).observers)
     return tuple(observer for observer in observers if observer in failed)
-
-
-def failing_observers() -> tuple[str, ...]:
-    """The tests that fail with the current tree, from a whole-suite run."""
-    return _run(None).observers
 
 
 def behavioural(observers: Iterable[str]) -> tuple[str, ...]:
@@ -10911,13 +11024,21 @@ def status(*, as_json: bool = False, run=run_ps) -> int:
     edit and a mutated tree as merely dirty. `--json` carries the pid so a caller
     that wants to stop the run can signal that process rather than matching
     command lines, which finds every checkout on the machine.
+
+    A parallel run never mutates this tree, so it never writes the record and the
+    exit code is unaffected by one - committing during it commits nothing it did.
+    It is still a gate run holding this checkout, so it is named beside the answer:
+    under `workers` in the JSON, and as a sentence after the line.
     """
     present = RECOVERY_PATH.is_file()
+    parallel, sentence = _parallel_status(run)
     if not present:
         if as_json:
-            print(json.dumps({"applied": False}, sort_keys=True))
+            print(json.dumps({"applied": False, **parallel}, sort_keys=True))
         else:
             print(f"No mutation is applied in {ROOT}.")
+            if sentence:
+                print(sentence)
         return 0
 
     record = read_record()
@@ -10947,6 +11068,7 @@ def status(*, as_json: bool = False, run=run_ps) -> int:
                     "pid": record.pid,
                     "host": record.host,
                     "started": record.started,
+                    **parallel,
                 },
                 sort_keys=True,
             )
@@ -10987,6 +11109,619 @@ def each_mutation(mutations: Sequence[Mutation], observe: Callable[[Mutation], N
                 # what the record `apply` writes to RECOVERY_PATH is for.
                 restore(mutation.module, original)
     return None
+
+
+# Where `--jobs` makes the copies its workers mutate: the system's temporary
+# directory when None. A setting rather than a constant so that a test can hold a
+# run's copies where it can see whether any of them outlived the run.
+WORKSPACE: str | None = None
+
+# Every workspace a parallel run makes carries this prefix, and it is the only kind
+# of directory a marker left by a killed run is trusted to name for removal.
+WORKSPACE_PREFIX = "mutation-gate-workers-"
+
+# Prefixes each answer a worker writes to its parent, for the reason REPORT_MARKER
+# prefixes the suite's: the stream is shared with anything else the worker prints.
+WORKER_MARKER = "mutation-gate-worker "
+
+# One suite run inside a worker: the named tests, or None for the whole suite.
+Selection = tuple[str, ...] | None
+
+
+def jobs_argument(specification: str) -> int:
+    """`--jobs` as a worker count: a positive number, or `auto` for half the cores.
+
+    Half rather than all, because each worker runs a whole suite whose tests spawn
+    processes of their own, so a worker per core leaves those contending for the
+    cores the workers already fill. Anything that names no worker is refused,
+    because every mode here reports an empty run as a pass.
+    """
+    if specification == "auto":
+        return max(1, (os.cpu_count() or 1) // 2)
+    if specification.isdigit() and int(specification) > 0:
+        return int(specification)
+    raise SystemExit(
+        f"--jobs takes a number of workers, at least 1, or `auto` for half this machine's "
+        f"cores: {specification!r} is neither."
+    )
+
+
+def workers_path() -> Path:
+    """Where a parallel run says it is running: beside the recovery record.
+
+    A parallel run never mutates this tree, so it never writes that record, and
+    `--status` - which is how a session asks whether a gate run holds a checkout -
+    would otherwise see nothing while one is going. This marker names the run and
+    where its copies are, which is also what lets the next run remove the copies a
+    killed one left behind.
+    """
+    return RECOVERY_PATH.with_name(".mutation-gate-workers")
+
+
+@dataclass(frozen=True)
+class Marker:
+    """What the marker says: the run, as a Record so `liveness` can judge it, and the
+    workspace holding its copies. `run` is None when the marker cannot be read."""
+
+    run: Record | None
+    workspace: str
+
+
+def read_marker() -> Marker | None:
+    """The marker in this checkout, or None when there is none."""
+    path = workers_path()
+    if not path.is_file():
+        return None
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        run = Record(
+            module="",
+            original=b"",
+            root=str(parsed["root"]),
+            pid=int(parsed["pid"]),
+            host=str(parsed["host"]),
+            started=str(parsed["started"]),
+        )
+        return Marker(run, str(parsed["workspace"]))
+    except (KeyError, TypeError, ValueError):
+        return Marker(None, "")
+
+
+def marker_state(marker: Marker, run=run_ps) -> str:
+    """The marker's run judged as the recovery record's is, and undecidable unread."""
+    return liveness(marker.run, run=run) if marker.run else UNDECIDABLE
+
+
+def _marker_sentence(marker: Marker, state: str) -> str:
+    """What `--status` says about a parallel run, by state."""
+    pid = marker.run.pid if marker.run else 0
+    if state == LIVE:
+        return (
+            f"A parallel gate run is live: pid {pid}. Its workers mutate private copies "
+            f"under {marker.workspace}, never this tree. Stop it with `kill -TERM {pid}`, "
+            "which removes the copies on the way out."
+        )
+    if state == ABANDONED:
+        return (
+            f"A parallel gate run, pid {pid}, was killed before it could clean up, and its "
+            f"copies are still under {marker.workspace}. It never mutated this tree. The "
+            "next `--jobs` run here removes them."
+        )
+    return (
+        f"{workers_path()} names a parallel gate run this host cannot judge ({state}). Such "
+        f"a run never mutates this tree. If none is going, delete {workers_path()} and "
+        f"{marker.workspace or 'the workspace it names'}."
+    )
+
+
+def _parallel_status(run=run_ps) -> tuple[dict[str, object], str]:
+    """The `--json` field and the sentence for a parallel run, or nothing to add."""
+    marker = read_marker()
+    if marker is None:
+        return {}, ""
+    state = marker_state(marker, run=run)
+    field = {
+        "state": state,
+        "pid": marker.run.pid if marker.run else 0,
+        "workspace": marker.workspace,
+    }
+    return {"workers": field}, _marker_sentence(marker, state)
+
+
+def _reclaim_abandoned() -> None:
+    """Remove the copies a killed parallel run left, or refuse to start beside a live one.
+
+    Only an abandoned run's workspace is removed, and only a directory carrying this
+    gate's prefix: a marker is a file anything could have written, and it must not be
+    able to name a directory for deletion. A live run is refused rather than joined -
+    two runs would each think the marker was theirs, and the first to finish would
+    delete the other's.
+    """
+    marker = read_marker()
+    if marker is None:
+        return
+    state = marker_state(marker)
+    if state != ABANDONED:
+        raise SystemExit(
+            _marker_sentence(marker, state) + " This run will not start beside it: both "
+            "would take the marker for theirs, and the first to finish would remove it."
+        )
+    workspace = Path(marker.workspace)
+    if workspace.name.startswith(WORKSPACE_PREFIX) and workspace.is_dir():
+        shutil.rmtree(workspace, ignore_errors=True)
+    workers_path().unlink(missing_ok=True)
+    print(
+        f"Removed {workspace}, which a killed parallel run left behind.",
+        file=sys.stderr,
+    )
+
+
+def _git_environment() -> dict[str, str]:
+    """This environment less the variables that bind git to a repository.
+
+    Read from `git rev-parse --local-env-vars`, git's own list, because this module
+    imports nothing from the package: a `GIT_DIR` inherited from a hook would point
+    every call below at whatever repository that hook belongs to.
+    """
+    listed = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"], capture_output=True, text=True, check=False
+    ).stdout.split()
+    return {name: value for name, value in os.environ.items() if name not in listed}
+
+
+def _git(arguments: Sequence[str], where: Path) -> str:
+    """One git command's output, or a refusal that names it."""
+    completed = subprocess.run(
+        ["git", *arguments], cwd=where, capture_output=True, text=True, env=_git_environment()
+    )
+    if completed.returncode != 0:
+        raise SystemExit(
+            f"`git {' '.join(arguments)}` failed in {where}: {completed.stderr.strip()}. "
+            "--jobs copies the checkout through git, so no worker could be given one; "
+            "run with --jobs 1."
+        )
+    return completed.stdout
+
+
+def copy_tree(destination: Path) -> None:
+    """A private copy of the checkout at `destination`, as the suite sees it.
+
+    The whole tree rather than `src/` and `tests/`, because the suite reads far more
+    than those: run in a copy holding only the two, it failed 266 tests that read
+    documents, skills, the workflow and `pyproject.toml`. Every file git does not
+    ignore, as it stands on disk - so an edit not yet committed is in the copy, and a
+    build output is not.
+
+    And a repository, because the suite also reads its own git history: a clone that
+    shares this one's objects rather than copying them, with HEAD and the index taken
+    from this checkout so `git ls-files` and `git status` in the copy answer as they
+    would here. Nothing is written to this checkout's repository.
+    """
+    head = _git(["rev-parse", "HEAD"], ROOT).strip()
+    index = Path(_git(["rev-parse", "--path-format=absolute", "--git-path", "index"], ROOT).strip())
+    listed = _git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], ROOT)
+    _git(["clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(destination)], ROOT)
+    _git(["update-ref", "--no-deref", "HEAD", head], destination)
+    if index.is_file():
+        shutil.copyfile(index, destination / ".git" / "index")
+    for name in filter(None, listed.split("\0")):
+        source = ROOT / name
+        # A tracked file deleted from the working tree is listed and absent, and is
+        # absent from the copy too; a submodule is a directory and has no bytes here.
+        if source.is_symlink() or source.is_file():
+            target = destination / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target, follow_symlinks=False)
+
+
+def _worker_environment(copy: Path) -> dict[str, str]:
+    """This environment with `PYTHONPATH` pointed at `copy` rather than at this tree.
+
+    The copy's `src` first, because without it a worker on an editable install
+    imports this tree's package through the install and every mutation in the copy
+    is invisible to it. An absolute entry inside this tree is moved to the same
+    place in the copy, so nothing on the path still reaches the checkout; anything
+    else is left as written, including a relative entry, which means in a copy
+    what it means here. The worker's own `check_import_path` then asserts the result
+    rather than this function assuming it.
+    """
+    root = ROOT.resolve()
+
+    def moved(entry: str) -> str:
+        path = Path(entry)
+        if not path.is_absolute():
+            return entry
+        try:
+            return str(copy / path.resolve().relative_to(root))
+        except ValueError:
+            return entry
+
+    first = str(copy / SRC.parent.relative_to(ROOT))
+    rest = [moved(entry) for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    paths = [first, *(entry for entry in rest if entry != first)]
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
+
+
+@dataclass(frozen=True)
+class Measured:
+    """One worker's answer: what each run reported, in the order asked, or why none."""
+
+    runs: tuple[SuiteRun, ...] = ()
+    error: str = ""
+
+
+class _Worker:
+    """One worker process and the copy it mutates."""
+
+    def __init__(self, number: int, copy: Path, log: Path) -> None:
+        self.number = number
+        self.copy = copy
+        self.log = log
+        self.dead = False
+        self.process: subprocess.Popen[str] | None = None
+
+    def start(self) -> None:
+        layout = {
+            "root": str(self.copy),
+            "src": str(SRC.relative_to(ROOT)),
+            "recovery": str(RECOVERY_PATH.relative_to(ROOT)),
+        }
+        with self.log.open("w", encoding="utf-8") as log:
+            self.process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-B",
+                    str(Path(__file__).resolve()),
+                    "--worker",
+                    json.dumps(layout),
+                ],
+                cwd=self.copy,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=log,
+                text=True,
+                env=_worker_environment(self.copy),
+            )
+
+    def _answer(self) -> dict | None:
+        """The next answer the worker writes, or None once it has stopped."""
+        assert self.process is not None and self.process.stdout is not None
+        for line in iter(self.process.stdout.readline, ""):
+            if line.startswith(WORKER_MARKER):
+                return json.loads(line[len(WORKER_MARKER) :])
+        return None
+
+    def stopped(self) -> str:
+        """Why this worker cannot answer, with the last thing it wrote."""
+        self.dead = True
+        assert self.process is not None
+        try:
+            code: int | str = self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            code = "still running"
+        tail = self.log.read_text(encoding="utf-8", errors="replace").splitlines()[-5:]
+        said = f": {' / '.join(tail)}" if tail else ""
+        return f"worker {self.number} stopped (exit {code}) before it answered{said}"
+
+    def ready(self) -> str:
+        """The empty string when the worker can take requests, otherwise why not."""
+        answer = self._answer()
+        if answer is None:
+            return self.stopped()
+        return str(answer.get("refused", ""))
+
+    def ask(self, request: dict) -> Measured:
+        assert self.process is not None and self.process.stdin is not None
+        try:
+            self.process.stdin.write(json.dumps(request) + "\n")
+            self.process.stdin.flush()
+        except OSError:
+            return Measured(error=self.stopped())
+        answer = self._answer()
+        if answer is None:
+            return Measured(error=self.stopped())
+        if "error" in answer:
+            return Measured(error=str(answer["error"]))
+        return Measured(
+            tuple(SuiteRun(bool(run["passed"]), tuple(run["observers"])) for run in answer["runs"])
+        )
+
+    def finish(self, interrupted: bool) -> None:
+        """Stop the worker: at once when interrupted, after its current answer otherwise.
+
+        Closing its input is the normal ending - it reads to the end and exits. On an
+        interrupt it is mid-run, so it is sent SIGTERM, which it handles as the
+        serial gate does: the run under it is killed and its copy restored.
+        """
+        process = self.process
+        if process is None:
+            return
+        if process.stdin is not None:
+            with suppress(OSError):
+                process.stdin.close()
+        if interrupted and process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+class Workers:
+    """A pool of workers, each in its own copy of the checkout, fed through a queue.
+
+    Requests go to whichever worker is free, and answers come back to `consume` in
+    the order the requests were given, whatever order they finished in: two runs over
+    one table print the same lines in the same order (CLAUDE.md 1.3). A request a
+    worker could not answer comes back as an error against that request, and a
+    worker that dies stops taking requests while the others finish the queue.
+    """
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+        self.workspace: Path | None = None
+        self.workers: list[_Worker] = []
+        self.feeders: list[threading.Thread] = []
+        self.stopping = threading.Event()
+        # Whether the marker on disk is this pool's. A pool refused because another
+        # run is live never writes one, and must not remove that run's on its way out.
+        self.marked = False
+
+    def start(self) -> None:
+        _reclaim_abandoned()
+        self.workspace = Path(tempfile.mkdtemp(prefix=WORKSPACE_PREFIX, dir=WORKSPACE))
+        # The record's own identity line, so a marker and a record name a run the same
+        # way and `liveness` reads both.
+        identity = json.loads(_header(""))
+        identity.pop("module")
+        identity["workspace"] = str(self.workspace)
+        workers_path().write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+        self.marked = True
+        for number in range(1, self.count + 1):
+            copy = self.workspace / f"worker-{number}"
+            copy_tree(copy)
+            self.workers.append(_Worker(number, copy, self.workspace / f"worker-{number}.log"))
+        for worker in self.workers:
+            worker.start()
+        refusals = [
+            f"worker {worker.number}, in {worker.copy}: {why}"
+            for worker in self.workers
+            if (why := worker.ready())
+        ]
+        if refusals:
+            raise SystemExit(
+                "A worker refused to start, so nothing a run in its copy reported could be "
+                "trusted:\n" + "\n".join(refusals)
+            )
+
+    def close(self, interrupted: bool) -> None:
+        self.stopping.set()
+        for worker in self.workers:
+            worker.finish(interrupted)
+        for feeder in self.feeders:
+            feeder.join(timeout=30)
+        for worker in self.workers:
+            if worker.process is not None and worker.process.stdout is not None:
+                worker.process.stdout.close()
+        if self.workspace is not None:
+            shutil.rmtree(self.workspace, ignore_errors=True)
+        if self.marked:
+            workers_path().unlink(missing_ok=True)
+
+    def _feed(self, worker: _Worker, waiting: queue.Queue, answered: queue.Queue) -> None:
+        while not self.stopping.is_set() and not worker.dead:
+            try:
+                index, request = waiting.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                measured = worker.ask(request)
+            except Exception as failure:  # an answer must come back for every request taken
+                worker.dead = True
+                measured = Measured(error=f"worker {worker.number} failed: {failure!r}")
+            answered.put((index, measured))
+
+    def _next(
+        self, waiting: queue.Queue, answered: queue.Queue, feeders: list[threading.Thread]
+    ) -> tuple[int, Measured]:
+        """The next answer to arrive, or an unrun request once no worker is left."""
+        while True:
+            try:
+                return answered.get(timeout=0.1)
+            except queue.Empty:
+                # Liveness first, emptiness second: an answer put just before a feeder
+                # ended is visible by the time its thread reads as stopped.
+                if any(feeder.is_alive() for feeder in feeders) or not answered.empty():
+                    continue
+                try:
+                    index, _ = waiting.get_nowait()
+                except queue.Empty:
+                    raise SystemExit("the workers stopped without answering every request")
+                return index, Measured(error="not run: every worker had stopped before it")
+
+    def measure(
+        self,
+        requests: Sequence[tuple[Mutation | None, tuple[Selection, ...]]],
+        consume: Callable[[int, Measured], None],
+    ) -> None:
+        """Answer each request in a worker, handing the answers to `consume` in order."""
+        waiting: queue.Queue = queue.Queue()
+        answered: queue.Queue = queue.Queue()
+        for index, (mutation, runs) in enumerate(requests):
+            request = {
+                "mutation": None if mutation is None else asdict(mutation),
+                "runs": [None if selection is None else list(selection) for selection in runs],
+            }
+            waiting.put((index, request))
+        feeders = [
+            threading.Thread(target=self._feed, args=(worker, waiting, answered), daemon=True)
+            for worker in self.workers
+            if not worker.dead
+        ]
+        self.feeders.extend(feeders)
+        for feeder in feeders:
+            feeder.start()
+        held: dict[int, Measured] = {}
+        for index in range(len(requests)):
+            while index not in held:
+                arrived, measured = self._next(waiting, answered, feeders)
+                held[arrived] = measured
+            consume(index, held.pop(index))
+
+    def baseline(self) -> SuiteRun:
+        """A whole-suite run of an unmutated copy: the baseline every conclusion needs.
+
+        In a copy rather than in this tree, because the copies are what the entries
+        will be run in - a copy missing something the suite reads is red here, and
+        stops the run before any entry is concluded from it.
+        """
+        found: list[Measured] = []
+        self.measure([(None, (None,))], lambda index, measured: found.append(measured))
+        if found[0].error:
+            raise SystemExit(
+                f"the baseline run in a worker's copy did not answer: {found[0].error}"
+            )
+        return found[0].runs[0]
+
+
+@contextmanager
+def workers(count: int) -> Iterator[Workers | None]:
+    """A started pool of `count` workers, or None for one - today's serial run, unchanged.
+
+    Every way out removes every copy and the marker: a normal end, a refusal, an
+    exception, Ctrl-C, and SIGTERM or SIGHUP, which raise `Terminated` here as they
+    do in the serial loop. SIGKILL cannot be handled, so it leaves the copies - the
+    marker names them, and the next parallel run removes them.
+    """
+    if count == 1:
+        yield None
+        return
+    pool = Workers(count)
+    with restoring_on_termination():
+        interrupted = True
+        try:
+            pool.start()
+            yield pool
+            interrupted = False
+        finally:
+            pool.close(interrupted)
+
+
+def measuring(
+    mutations: Sequence[Mutation],
+    runs: Callable[[Mutation], tuple[Selection, ...]],
+    judge: Callable[[Mutation, tuple[tuple[str, ...], ...]], None],
+    unrun: list[str],
+    pool: Workers | None,
+) -> int | None:
+    """Apply each entry, make `runs(entry)` under it, and give `judge` what failed.
+
+    Serially through `each_mutation`, making exactly the runs the modes made before
+    workers existed, in the same order. Through the pool otherwise, where `judge`
+    still sees the entries in table order. An entry a worker could not answer for -
+    a `find` that no longer applies, a suite that ended without reporting, a worker
+    that died - is added to `unrun` against its name rather than dropped, so a count
+    over the answers cannot read as a count over the table.
+    """
+    if pool is None:
+        return each_mutation(
+            mutations,
+            lambda mutation: judge(
+                mutation, tuple(_run(selection).observers for selection in runs(mutation))
+            ),
+        )
+
+    def consume(index: int, measured: Measured) -> None:
+        mutation = mutations[index]
+        if measured.error:
+            unrun.append(f"{mutation.name}: {measured.error}")
+            print(f"  NOT RUN  {mutation.name}", file=sys.stderr, flush=True)
+        else:
+            judge(mutation, tuple(run.observers for run in measured.runs))
+
+    pool.measure([(mutation, runs(mutation)) for mutation in mutations], consume)
+    return None
+
+
+def report_unrun(unrun: Sequence[str]) -> bool:
+    """Name every entry no worker answered for. True when there was one."""
+    for line in unrun:
+        print(f"  NOT RUN: {line}", file=sys.stderr)
+    if unrun:
+        print(
+            "\nEach of those entries went to a worker and came back without an answer, so "
+            "this run concluded nothing about it and is not a pass over it. Run it again "
+            "with `--only` to see the cause in full.",
+            file=sys.stderr,
+        )
+    return bool(unrun)
+
+
+def _answer_parent(answer: dict) -> None:
+    print(WORKER_MARKER + json.dumps(answer, sort_keys=True), flush=True)
+
+
+def _measure(request: dict) -> dict | int:
+    """One request, answered in this worker's copy: an answer, or an exit code to stop.
+
+    The mutation is applied through `each_mutation`, the gate's one applier, so the
+    copy gets the recovery record and the restore on a signal that the checkout gets
+    in a serial run. A refusal - a `find` that does not apply, a suite that ended
+    without reporting - is that request's answer rather than the worker's end.
+    """
+    runs = tuple(None if selection is None else tuple(selection) for selection in request["runs"])
+    reports: list[SuiteRun] = []
+
+    def observe(mutation: Mutation | None = None) -> None:
+        reports.extend(_run(selection) for selection in runs)
+
+    raw = request["mutation"]
+    try:
+        if raw is None:
+            observe()
+        else:
+            mutation = Mutation(**{**raw, "observers": tuple(raw["observers"])})
+            interrupted = each_mutation((mutation,), observe)
+            if interrupted is not None:
+                return interrupted
+    except SystemExit as refused:
+        return {"error": str(refused.code)}
+    return {"runs": [{"passed": run.passed, "observers": list(run.observers)} for run in reports]}
+
+
+def serve(specification: str) -> int:
+    """Be one worker of a parallel run: answer requests from stdin, in a copy.
+
+    The worker is this file run again with the copy as its tree, so everything the
+    serial gate asserts about the checkout it asserts about the copy: a recovery
+    record is consumed, and the child must import `knowledgestore` from the copy's
+    `src` - a worker whose suite reads another tree refuses before it is sent any
+    entry, and the parent stops the run.
+    """
+    global ROOT, SRC, RECOVERY_PATH
+    layout = json.loads(specification)
+    ROOT = Path(layout["root"])
+    SRC = ROOT / layout["src"]
+    RECOVERY_PATH = ROOT / layout["recovery"]
+    said = io.StringIO()
+    with redirect_stderr(said), redirect_stdout(said):
+        refused = recover() or check_import_path()
+    _answer_parent(
+        {"refused": said.getvalue().strip() or "refused"} if refused else {"ready": True}
+    )
+    if refused:
+        return 1
+    try:
+        with restoring_on_termination():
+            for line in iter(sys.stdin.readline, ""):
+                answer = _measure(json.loads(line))
+                if isinstance(answer, int):
+                    return answer
+                _answer_parent(answer)
+    except Terminated as termination:
+        return 128 + termination.number
+    return 0
 
 
 def sweep(mutations: Sequence[Mutation]) -> int:
@@ -11055,7 +11790,7 @@ def _sweep_verdict(
     return 1 if survived or silent else 0
 
 
-def derive_mapping(mutations: Sequence[Mutation]) -> int:
+def derive_mapping(mutations: Sequence[Mutation], pool: Workers | None = None) -> int:
     """Print the observers of each entry, from a whole-suite run per entry.
 
     What the table's `observers` are filled in from. Slow by construction - one
@@ -11070,15 +11805,16 @@ def derive_mapping(mutations: Sequence[Mutation]) -> int:
     rather than printing an empty tuple to be pasted in.
     """
     unobserved: list[Mutation] = []
+    unrun: list[str] = []
 
-    def observe(mutation: Mutation) -> None:
-        observers = behavioural(failing_observers())
+    def observe(mutation: Mutation, failed: tuple[tuple[str, ...], ...]) -> None:
+        observers = behavioural(failed[0])
         if not observers:
             unobserved.append(mutation)
         print(json.dumps({"name": mutation.name, "observers": list(observers)}), flush=True)
         print(f"  {len(observers) or 'NOTHING'} <- {mutation.name}", file=sys.stderr)
 
-    interrupted = each_mutation(mutations, observe)
+    interrupted = measuring(mutations, lambda mutation: (None,), observe, unrun, pool)
     if interrupted is not None:
         return interrupted
 
@@ -11094,10 +11830,11 @@ def derive_mapping(mutations: Sequence[Mutation]) -> int:
             "tree looks like - see `_run` on a relative PYTHONPATH.",
             file=sys.stderr,
         )
-    return 1 if unobserved else 0
+    not_run = report_unrun(unrun)
+    return 1 if unobserved or not_run else 0
 
 
-def verify_mapping(mutations: Sequence[Mutation]) -> int:
+def verify_mapping(mutations: Sequence[Mutation], pool: Workers | None = None) -> int:
     """Check every entry's observers against a whole-suite run. The slow, complete mode.
 
     A wrong name is invisible to a normal run, which is the cost of running only
@@ -11112,10 +11849,11 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
     check_mapping(mutations)
     wrong: list[str] = []
     disagreed: set[str] = set()
+    unrun: list[str] = []
 
-    def observe(mutation: Mutation) -> None:
+    def observe(mutation: Mutation, reported: tuple[tuple[str, ...], ...]) -> None:
         complaints = len(wrong)
-        failed = set(behavioural(failing_observers()))
+        failed = set(behavioural(reported[0]))
         named = set(mutation.observers)
         if not failed:
             wrong.append(f"{mutation.name}: nothing observes it, so it is a survivor")
@@ -11131,14 +11869,15 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
             disagreed.add(mutation.name)
         print(f"  {'agrees  ' if failed == named else 'DIFFERS '} {mutation.name}", flush=True)
 
-    interrupted = each_mutation(mutations, observe)
+    interrupted = measuring(mutations, lambda mutation: (None,), observe, unrun, pool)
     if interrupted is not None:
         return interrupted
 
     # `wrong` holds messages and one entry can raise three of them, so counting it
     # here would answer a different question than the sentence asks - it printed
-    # `-1 of 1` for a single entry that disagreed in both directions at once.
-    agreeing = len(mutations) - len(disagreed)
+    # `-1 of 1` for a single entry that disagreed in both directions at once. An
+    # entry no worker answered for agrees with nothing: it was not asked.
+    agreeing = len(mutations) - len(disagreed) - len(unrun)
     print(f"\n{agreeing} of {len(mutations)} entries name what observes them.")
     for entry in wrong:
         print(f"  WRONG MAPPING: {entry}", file=sys.stderr)
@@ -11149,10 +11888,11 @@ def verify_mapping(mutations: Sequence[Mutation]) -> int:
             "reported. Take the set from `--derive-mapping` rather than editing by hand.",
             file=sys.stderr,
         )
-    return 1 if wrong else 0
+    not_run = report_unrun(unrun)
+    return 1 if wrong or not_run else 0
 
 
-def already_red_alone(observers: Sequence[str]) -> tuple[str, ...]:
+def already_red_alone(observers: Sequence[str], pool: Workers | None = None) -> tuple[str, ...]:
     """The observers that fail alone against the tree as it stands. Run unmutated.
 
     The control for `--isolate`, and the reason its number means what its
@@ -11166,11 +11906,29 @@ def already_red_alone(observers: Sequence[str]) -> tuple[str, ...]:
     Run once over the distinct names rather than per entry, on the unmutated
     tree, before anything is applied. One subprocess per distinct observer, and
     an entry's observer is named by several entries on average.
+
+    In a pool, one request per name, so the pass spreads over the workers like the
+    entries do; a name no worker answered for stops the run, because without its
+    control nothing measured under a mutation could be read.
     """
-    return tuple(observer for observer in observers if isolable(observer) and run_alone(observer))
+    if pool is None:
+        return tuple(
+            observer for observer in observers if isolable(observer) and run_alone(observer)
+        )
+    alone = tuple(observer for observer in observers if isolable(observer))
+    red: list[str] = []
+
+    def consume(index: int, measured: Measured) -> None:
+        if measured.error:
+            raise SystemExit(f"the control run of {alone[index]} did not answer: {measured.error}")
+        if alone[index] in measured.runs[0].observers:
+            red.append(alone[index])
+
+    pool.measure([(None, ((observer,),)) for observer in alone], consume)
+    return tuple(red)
 
 
-def isolate_mapping(mutations: Sequence[Mutation]) -> int:
+def isolate_mapping(mutations: Sequence[Mutation], pool: Workers | None = None) -> int:
     """Re-run each named observer alone under its entry's mutation. The third slow mode.
 
     What `--verify-mapping` cannot do. Both of the gate's other run shapes select
@@ -11224,19 +11982,24 @@ def isolate_mapping(mutations: Sequence[Mutation]) -> int:
         file=sys.stderr,
         flush=True,
     )
-    red_alone = already_red_alone(named)
+    red_alone = already_red_alone(named, pool)
     unchecked = frozenset(unisolable) | frozenset(red_alone)
     artefacts: list[str] = []
+    unrun: list[str] = []
     decided = 0
 
-    def observe(mutation: Mutation) -> None:
+    def checkable(mutation: Mutation) -> tuple[str, ...]:
+        return tuple(observer for observer in mutation.observers if observer not in unchecked)
+
+    def observe(mutation: Mutation, alone: tuple[tuple[str, ...], ...]) -> None:
         nonlocal decided
+        # One run per checkable observer, in order, each of that observer alone.
         passing = [
             observer
-            for observer in mutation.observers
-            if observer not in unchecked and not run_alone(observer)
+            for observer, failed in zip(checkable(mutation), alone)
+            if observer not in failed
         ]
-        decided += sum(1 for observer in mutation.observers if observer not in unchecked)
+        decided += len(checkable(mutation))
         artefacts.extend(f"{mutation.name}: {observer}" for observer in passing)
         if passing:
             verdict = "ARTEFACT"
@@ -11246,7 +12009,10 @@ def isolate_mapping(mutations: Sequence[Mutation]) -> int:
             verdict = "isolated"
         print(f"  {verdict:<9} {mutation.name}", flush=True)
 
-    interrupted = each_mutation(mutations, observe)
+    def alone(mutation: Mutation) -> tuple[Selection, ...]:
+        return tuple((observer,) for observer in checkable(mutation))
+
+    interrupted = measuring(mutations, alone, observe, unrun, pool)
     if interrupted is not None:
         return interrupted
 
@@ -11286,6 +12052,7 @@ def isolate_mapping(mutations: Sequence[Mutation]) -> int:
             "before and after is the one to believe.",
             file=sys.stderr,
         )
+    not_run = report_unrun(unrun)
     if not decided:
         print(
             f"\nNothing was decided: all {len(named)} named observers were unchecked, so "
@@ -11295,7 +12062,7 @@ def isolate_mapping(mutations: Sequence[Mutation]) -> int:
             file=sys.stderr,
         )
         return 1
-    return 1 if artefacts else 0
+    return 1 if artefacts or not_run else 0
 
 
 def shard(mutations: Sequence[Mutation], index: int, count: int) -> tuple[Mutation, ...]:
@@ -11457,7 +12224,30 @@ def main(argv: list[str] | None = None) -> int:
         metavar="N/M",
         help="run the Nth of M interleaved slices of the entries, one runner per shard",
     )
+    parser.add_argument(
+        "--jobs",
+        default="1",
+        metavar="N",
+        help="with --derive-mapping, --verify-mapping or --isolate, spread the entries over "
+        "N workers, each mutating its own copy of the tree; `auto` is half the cores",
+    )
+    # How a parallel run starts its workers: this file again, in a copy, answering
+    # requests on stdin. Not an operator's option, so it is not listed.
+    parser.add_argument("--worker", help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
+    if arguments.worker:
+        return serve(arguments.worker)
+    jobs = jobs_argument(arguments.jobs)
+    # Refused rather than ignored: the sweep, `--list` and `--status` stay serial, and
+    # an operator who asked for workers would otherwise wait the serial time believing
+    # they had asked for less. The sweep is serial on purpose - half its time is
+    # process-and-import floor, and its entries crowd onto a few modules.
+    if jobs > 1 and not (arguments.derive_mapping or arguments.verify_mapping or arguments.isolate):
+        raise SystemExit(
+            "--jobs spreads the three slow modes - --derive-mapping, --verify-mapping and "
+            "--isolate - over workers. Nothing else here runs in parallel, so it was not "
+            "accepted for this run."
+        )
     # Refused rather than ordered, unlike the two modes above it, because the issue
     # that asked for this proposed it as `--verify-mapping --isolate` - so that is
     # the command an operator will type, and silently running one of the two would
@@ -11508,39 +12298,59 @@ def main(argv: list[str] | None = None) -> int:
     # red over an entry this run is not touching, and every derived set would then
     # name the guard's own module alongside the real observers.
     with excusing_unmapped(MUTATIONS if arguments.derive_mapping else ()):
-        baseline = run_suite()
-        if not baseline.passed:
-            # Named, because the reader is not always looking at the failure: a guard
-            # over the table below fails this run while every test in the module they
-            # are editing passes, and an anonymous refusal sends them there.
-            blamed = (
-                f"these failed: {', '.join(baseline.observers)}"
-                if baseline.observers
-                else "the run named no failing test, so it did not fail inside one - run the "
-                "suite directly and read what it printed"
-            )
+        try:
+            with workers(jobs) as pool:
+                return _conclude(arguments, mutations, reconciliation, pool)
+        except Terminated as termination:
+            # Only a parallel run reaches here: the serial loop handles its own.
             print(
-                "The suite is already failing, so nothing can be concluded about any "
-                f"mutation. Fix that first - {blamed}.",
+                f"\n{termination} during a parallel run. Every worker copy is removed, and "
+                f"nothing in {ROOT} was mutated.",
                 file=sys.stderr,
             )
-            return 1
+            return 128 + termination.number
 
-        if arguments.derive_mapping:
-            code = derive_mapping(mutations)
-        elif arguments.verify_mapping:
-            code = verify_mapping(mutations)
-        elif arguments.isolate:
-            code = isolate_mapping(mutations)
-        else:
-            code = sweep(mutations)
-        if reconciliation:
-            # After the mode's own count rather than before it, because that count is
-            # over the shard and reads exactly like one over the table: `47 of 47
-            # entries name what observes them` is what a leg prints and what the whole
-            # check prints, and only this line beside it says which.
-            print(reconciliation)
-        return code
+
+def _conclude(
+    arguments: argparse.Namespace,
+    mutations: Sequence[Mutation],
+    reconciliation: str,
+    pool: Workers | None,
+) -> int:
+    """The baseline, then the mode: serially in this tree, or in the pool's copies."""
+    baseline = pool.baseline() if pool else run_suite()
+    if not baseline.passed:
+        # Named, because the reader is not always looking at the failure: a guard
+        # over the table below fails this run while every test in the module they
+        # are editing passes, and an anonymous refusal sends them there.
+        blamed = (
+            f"these failed: {', '.join(baseline.observers)}"
+            if baseline.observers
+            else "the run named no failing test, so it did not fail inside one - run the "
+            "suite directly and read what it printed"
+        )
+        print(
+            "The suite is already failing, so nothing can be concluded about any "
+            f"mutation. Fix that first - {blamed}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if arguments.derive_mapping:
+        code = derive_mapping(mutations, pool)
+    elif arguments.verify_mapping:
+        code = verify_mapping(mutations, pool)
+    elif arguments.isolate:
+        code = isolate_mapping(mutations, pool)
+    else:
+        code = sweep(mutations)
+    if reconciliation:
+        # After the mode's own count rather than before it, because that count is
+        # over the shard and reads exactly like one over the table: `47 of 47
+        # entries name what observes them` is what a leg prints and what the whole
+        # check prints, and only this line beside it says which.
+        print(reconciliation)
+    return code
 
 
 if __name__ == "__main__":

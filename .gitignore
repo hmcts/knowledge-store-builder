@@ -253,3 +253,8 @@ node_modules/
 # deleted after the restore. Present only while a run is in flight, or after one
 # was killed - in which case the next run consumes it.
 /tests/.mutation-gate-recovery
+
+# A parallel run's marker (`--jobs`): which run is going and where its worker
+# copies are. It never mutates the tree, so it writes this instead of the record
+# above; `--status` reads it, and the next run removes a killed one's copies.
+/tests/.mutation-gate-workers
