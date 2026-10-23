@@ -861,7 +861,10 @@ MUTATIONS = (
         "graphify writes `links` in node-link JSON and `edges` in its extract files, "
         "so reading one key silently ranks nothing on half the artefacts this is "
         "pointed at - indistinguishable from a graph with no edges",
-        ("test_most_connected.MostConnectedTest.test_it_reads_edges_as_well_as_links",),
+        (
+            "test_most_connected.MostConnectedTest.test_it_reads_edges_as_well_as_links",
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
+        ),
     ),
     Mutation(
         "the committed archive is no longer read when the plain graph is absent",
