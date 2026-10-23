@@ -300,6 +300,7 @@ the question:
 | `dependents` | What depends on a repository, with pinned refs and example lines. Walks dependents of dependents on request, and reports cycles. |
 | `tickets` | The tickets whose commits touched a repository or one file in it, landed and proposed kept apart. |
 | `ticket` | One ticket: whether it landed, its branches, its descriptions and commit text, and the files it touched. |
+| `minimum_standard` | Evidence against the GOV.UK minimum standard for publicly accessible systems, scoped by `repos`, a `pattern` or a declared `product`: each point's state per repository (`not_determinable` is not `absent`), with its cited evidence, `as_of` and `settings_read_at`. Never a pass, a score or an overall verdict, so do not give one. |
 
 A list too long for one answer comes back paged: pass its `next_page` as
 `cursor` to read on.

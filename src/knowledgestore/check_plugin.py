@@ -42,7 +42,7 @@ from . import config
 SERVER = "knowledge-store"
 MCP_JSON = ".mcp.json"
 SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
-DOCUMENTED_TAG = "v0.2.0"
+DOCUMENTED_TAG = "v0.2.1"
 # The layers the server answers from; without either it falls back or does not answer.
 READ_LAYERS = ("index", "relationships")
 

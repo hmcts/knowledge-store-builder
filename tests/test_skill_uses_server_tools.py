@@ -154,13 +154,13 @@ def message_problems(message: str) -> list[str]:
 
 
 class ThePinTest(unittest.TestCase):
-    def test_the_pin_names_a_tag_and_twelve_sorted_tools(self):
+    def test_the_pin_names_a_tag_and_thirteen_sorted_tools(self):
         """Breaks if the pin file loses its tag line or its tool list, which every
         check below reads - an empty list would let the skill name anything."""
         text = PIN.read_text(encoding="utf-8")
         self.assertRegex(pinned_tag(text), TAG)
         tools = pinned_tools(text)
-        self.assertEqual(len(tools), 12, tools)
+        self.assertEqual(len(tools), 13, tools)
         self.assertEqual(tools, sorted(set(tools)))
 
 
