@@ -247,6 +247,10 @@ class Mutation:
 # Both store-id mutations stop every manifest being computed under the fixed test
 # id, so every manifest test observes them; one list keeps the two entries in step.
 _EVERY_MANIFEST_TEST = (
+    "test_authored_dates.TheManifestRecordsEachLayersRange.test_a_layer_with_no_dated_entry_has_no_range",
+    "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
+    "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_the_oldest_and_newest_authored_date",
+    "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
     "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
     "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
     "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
@@ -4121,6 +4125,17 @@ MUTATIONS = (
         "count-only refresh leaves the file alone - the artefact is untouched, the run "
         "prints its usual counts, and authored prose simply never reaches disk",
         (
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_a_carried_legacy_summary_stays_undated",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_exact_carry_keeps_the_original_date",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_overlap_carry_keeps_the_original_date",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_the_block_is_ordered_by_community_id_after_a_remap",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_fresh_summary_takes_the_build_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_legacy_summary_stays_undated",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_re_authored_summary_takes_the_new_build_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_summary_merged_again_unchanged_keeps_its_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_re_authoring_where_no_build_date_is_recorded_drops_the_old_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_without_provenance_a_fresh_summary_is_left_undated",
+            "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
             "test_prose_integrity.SummariesDriftTest.test_a_remap_reports_a_summary_edited_before_it_ran",
             "test_prose_integrity.SummariesDriftTest.test_a_remap_that_moves_an_id_leaves_the_record_identical",
             "test_prose_integrity.SummariesDriftTest.test_a_run_that_changed_no_prose_still_records_the_digests",
@@ -4189,6 +4204,13 @@ MUTATIONS = (
         "displaced entry in a remap report. Each of those is ordinary-looking output, "
         "which is why the strip lives in one reader rather than in six",
         (
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_exact_carry_keeps_the_original_date",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_overlap_carry_keeps_the_original_date",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_the_block_is_ordered_by_community_id_after_a_remap",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_re_authored_summary_takes_the_new_build_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_summary_merged_again_unchanged_keeps_its_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_re_authoring_where_no_build_date_is_recorded_drops_the_old_date",
+            "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
             "test_build_deep_dives.MainDispatchTest.test_merge_dispatch_produces_the_same_artefact_as_a_direct_call",
             "test_build_deep_dives.MergeTest.test_merge_rejects_a_dossier_that_does_not_state_its_build",
             "test_build_deep_dives.MergeTest.test_one_bad_dossier_does_not_block_a_good_one",
@@ -7951,6 +7973,7 @@ MUTATIONS = (
         '    if kind != "dir":\n        return _text_digest([str(path.stat().st_mtime)])\n',
         "a clone and an identical rebuild move every mtime, so the committed manifest would change on every build",
         (
+            "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
             "test_build_store_manifest.WritingTheManifest.test_a_rerun_writes_a_byte_identical_file",
             "test_store_manifest.Determinism.test_a_file_layer_digest_is_the_sha256_of_its_bytes",
@@ -8043,7 +8066,16 @@ MUTATIONS = (
         "    return max(dated)[1] if dated else None\n",
         "    return max(entry for _, entry in dated) if dated else None\n",
         "`%cI` keeps each committer's offset, and two offsets do not sort as text, so a later-looking string can be the earlier commit",
-        ("test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",),
+        (
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_exact_carry_keeps_the_original_date",
+            "test_authored_dates.CarriedSummariesKeepTheirDate.test_an_overlap_carry_keeps_the_original_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_fresh_summary_takes_the_build_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_re_authored_summary_takes_the_new_build_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_a_summary_merged_again_unchanged_keeps_its_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_re_authoring_where_no_build_date_is_recorded_drops_the_old_date",
+            "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
+            "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
+        ),
     ),
     Mutation(
         "store manifest: sources_as_of counts fetch-only repositories",
@@ -8243,6 +8275,8 @@ MUTATIONS = (
         '    return max(dated)[1] if dated else ""\n',
         "a store that recorded no source would carry a date-shaped field, and a reader testing for null would treat it as dated",
         (
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_re_authoring_where_no_build_date_is_recorded_drops_the_old_date",
+            "test_authored_dates.SummariesAreDatedByTheBuildThatWroteThem.test_without_provenance_a_fresh_summary_is_left_undated",
             "test_store_manifest.AnEmptyStore.test_every_layer_is_absent_with_no_digest",
             "test_store_manifest.SourcesAsOf.test_without_provenance_it_is_null",
         ),
@@ -8270,6 +8304,7 @@ MUTATIONS = (
         '    Layer("topics", (_rel(config.TOPICS_INPUT_PATH),)),',
         "an input and an output of the same stage sit side by side in config; a layer pointed at the input reports written answers present before any were written",
         (
+            "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
             "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
             "test_store_manifest.EveryArtefactIsAccountedFor.test_the_excusal_list_holds_no_stale_or_contradictory_entry",
             "test_store_manifest.WhichLayersArePresent.test_a_subset_of_layers_reports_exactly_that_subset",
@@ -8825,6 +8860,10 @@ MUTATIONS = (
         "",
         "a store outside any repository has no rules to judge by and is described as it is on disk; refusing it would stop every unversioned build",
         (
+            "test_authored_dates.TheManifestRecordsEachLayersRange.test_a_layer_with_no_dated_entry_has_no_range",
+            "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_read_from_what_the_stages_wrote",
+            "test_authored_dates.TheManifestRecordsEachLayersRange.test_the_range_is_the_oldest_and_newest_authored_date",
+            "test_authored_dates.TwoRunsGiveIdenticalBytes.test_two_builds_over_one_input_write_the_same_bytes",
             "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
             "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
