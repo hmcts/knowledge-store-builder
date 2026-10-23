@@ -43,6 +43,7 @@ SERVER = "knowledge-store"
 MCP_JSON = ".mcp.json"
 SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
 DOCUMENTED_TAG = "v0.2.0"
+UNRESOLVED_BUILD_ID = "build id not resolved (KSB_STORE_ID unset); its check was skipped"
 # The layers the server answers from; without either it falls back or does not answer.
 READ_LAYERS = ("index", "relationships")
 
@@ -184,15 +185,19 @@ def _check_layers(manifest: Path, failures: list[str], warnings: list[str]) -> N
             )
 
 
-def _check_build_id(manifest: Path, failures: list[str]) -> None:
+def _check_build_id(manifest: Path, failures: list[str], warnings: list[str]) -> None:
     """The id the next `manifest` run will write, when one is declared, must match.
 
     Read from `config.STORE_ID`, which is the id the build itself uses, rather than
     from the environment here: a CI step running this stage then sees whatever the
     build would see, including any source `config` learns to resolve it from.
+
+    An unresolved id is said, not skipped in silence: a CI step that does not load the
+    store's settings would otherwise read as covered by a check that never ran.
     """
     building = config.STORE_ID.strip()
     if not building:
+        warnings.append(UNRESOLVED_BUILD_ID)
         return
     wanted, _why = manifest_store_id(manifest)
     if wanted is not None and building != wanted:
@@ -216,7 +221,7 @@ def check(plugin: Path, root: Path, manifest: Path) -> tuple[list[str], list[str
         )
 
     _check_layers(manifest, failures, warnings)
-    _check_build_id(manifest, failures)
+    _check_build_id(manifest, failures, warnings)
 
     found = declared_servers(plugin)
     if isinstance(found, str):

@@ -111,7 +111,7 @@ class AnEmptyStore(_Store):
 
         config.configure(GITHUB_ORG="example-org")
         manifest = compute(self)
-        self.assertEqual(manifest["format"], {"major": 1, "minor": 1})
+        self.assertEqual(manifest["format"], {"major": 1, "minor": 3})
         self.assertEqual(manifest["store"], {"id": "example-store", "github_org": "example-org"})
         self.assertEqual(manifest["library_version"], __version__)
 
@@ -576,6 +576,48 @@ class RelationshipsLayerIsRecognised(_Store):
         """Breaks if a store without the layer reports it unrecognised: false says a
         layer was measured and refused, and there is none."""
         self.assertIsNone(compute(self)["layers"]["relationships"]["recognised"])
+
+
+class RelationshipsUnresolvedCount(_Store):
+    """#483: the manifest says how many charts the layer left unresolved, so a reader
+    can call the layer incomplete instead of serving partial dependents as whole."""
+
+    STAMP = {"layer": "relationships", "major": 1, "minor": 1}
+
+    def count(self, body) -> int | None:
+        _touch(self.root, RelationshipsLayerIsRecognised.STAMP, json.dumps(body))
+        return compute(self)["layers"]["relationships"]["unresolved_conflicts"]
+
+    def test_charts_are_counted_across_every_kind(self):
+        """Breaks if the count is of kinds, or of one kind only."""
+        body = {
+            "format": self.STAMP,
+            "unresolved_conflicts": {
+                "helm_chart": {"a": ["x", "y"], "z": ["x", "y"]},
+                "store_kind": {"q": ["x", "y"]},
+            },
+        }
+        self.assertEqual(self.count(body), 3)
+
+    def test_an_empty_report_is_zero(self):
+        """Breaks if a complete layer reads as unknown, which a reader treats as suspect."""
+        self.assertEqual(self.count({"format": self.STAMP, "unresolved_conflicts": {}}), 0)
+
+    def test_unknown_is_null_never_zero(self):
+        """Breaks if a layer that cannot say - written before the field, malformed, or
+        at a major this library does not read - is reported complete."""
+        for body in (
+            {"format": self.STAMP},
+            {"format": self.STAMP, "unresolved_conflicts": ["a"]},
+            {"format": self.STAMP, "unresolved_conflicts": {"helm_chart": ["a"]}},
+            {"format": {"layer": "relationships", "major": 2}, "unresolved_conflicts": {}},
+        ):
+            with self.subTest(body=body):
+                self.assertIsNone(self.count(body))
+
+    def test_an_absent_layer_has_no_count(self):
+        """Breaks if a store without the layer reports a count for it."""
+        self.assertIsNone(compute(self)["layers"]["relationships"]["unresolved_conflicts"])
 
 
 class Determinism(_Store):

@@ -37,9 +37,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import authored
 from . import config
 from . import io
 from . import kinds
+from . import store_manifest
 
 
 MAX_NODES_PER_REPO = 12
@@ -392,6 +394,8 @@ def merge() -> int:
     """
     topics = read_topics(config.TOPICS_CONFIG_PATH)
     briefs: dict[str, dict] = {}
+    # The digest of each entry's Markdown, which is what decides it was rewritten.
+    sources: dict[str, str] = {}
     problems: list[str] = []
     committed = io.read_json_dict(config.TOPICS_BRIEFS_PATH)
     drift = io.prose_drift(config.TOPICS_BRIEFS_PATH, committed, io.rendered_prose(committed))
@@ -404,6 +408,7 @@ def merge() -> int:
         if len(markdown) < MIN_BRIEF_LENGTH:
             problems.append(f"{topic.slug}: brief shorter than {MIN_BRIEF_LENGTH} chars")
             continue
+        sources[topic.slug] = authored.source_digest(markdown)
         briefs[topic.slug] = {
             "title": topic.title,
             "keywords": topic.keywords,
@@ -414,9 +419,18 @@ def merge() -> int:
         config.TOPICS_BRIEFS_PATH,
         {
             **briefs,
-            io.SUMMARIES_METADATA_KEY: io.prose_metadata(
-                brief["html"] for brief in briefs.values()
-            ),
+            io.SUMMARIES_METADATA_KEY: {
+                **io.prose_metadata(brief["html"] for brief in briefs.values()),
+                **authored.block(
+                    authored.rendered_dated(
+                        sources,
+                        {name: brief["html"] for name, brief in briefs.items()},
+                        io.rendered_prose(committed),
+                        authored.recorded(committed),
+                        store_manifest.build_commit(config.ROOT),
+                    )
+                ),
+            },
         },
         indent=1,
     )
