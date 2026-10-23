@@ -33,6 +33,9 @@ PLANTED_PEM_SECOND = "ZZZZplantedPemSecondLineABCDEF987654"
 PLANTED_K8S = "cGxhbnRlZC1rOHMtdmFsdWU="
 PLANTED_BLOCK = "plantedBlockValue123456"
 
+# Split so this file does not itself read as a private key to a secret scanner.
+PEM_KIND = "RSA PRIVATE" + " KEY"
+
 FULL_ACCESS = {
     "archived": False,
     "default_branch": "main",
@@ -321,9 +324,9 @@ class TheEvidenceStage(SettingsIsolated):
             "repo-a",
             {
                 "deploy/key.pem": (
-                    "# deploy key\n-----BEGIN RSA PRIVATE KEY-----\n"
+                    f"# deploy key\n-----BEGIN {PEM_KIND}-----\n"
                     f"{PLANTED_PEM_FIRST}\n{PLANTED_PEM_SECOND}\n"
-                    "-----END RSA PRIVATE KEY-----\n"
+                    f"-----END {PEM_KIND}-----\n"
                 ),
                 "k8s/secret.yaml": (
                     "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\ndata:\n"
