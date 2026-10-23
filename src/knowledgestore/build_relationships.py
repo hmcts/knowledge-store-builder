@@ -1,6 +1,7 @@
 """Which repositories depend on which others, as a layer an agent reads whole.
 
     knowledgestore relationships                   # build and write the layer
+    knowledgestore relationships --strict          # the same, failing on an unresolved chart
     knowledgestore relationships --compare PATH    # compare against a layer file
 
 Every kind in `relationships.BUILTIN` - Terraform module sources, Helm charts,
@@ -22,6 +23,12 @@ The stage reads clones, `config/repositories.txt` (for links, and each clone's
 organisation) and `knowledge/provenance.json` (for links), and never the graph. Two runs over the same clones write the same
 bytes, and a repository no longer cloned loses its `by-repo` file in the same run.
 
+A chart several clones define that no rule chooses between leaves every consumer
+of it out of `dependents`, so the run ends with one line counting them -
+`N charts unresolved: declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN` - and
+`--strict` turns that into exit 1, after the layer is written, for a store that
+wants the build to stop there.
+
 `--compare PATH` builds the layer, writes nothing, and prints every
 (consumer, provider, chart, kind) whose references or pins differ from PATH's,
 and every unresolved target that differs. It exits 1 on any difference. PATH must
@@ -32,8 +39,8 @@ converting that tool's output to this format first, which is the store's job.
 
 Exit codes: 0 on success; 1 on a parser failure, a kind declaration that cannot be used, an unreadable configuration or
 `extra` input, a missing `repositories/`, a Flux `HelmRelease` with PyYAML not
-installed (the `deploy` extra), or a `--compare` difference; 2 when the layer
-cannot be written.
+installed (the `deploy` extra), a `--compare` difference, or under `--strict` an
+unresolved chart; 2 when the layer cannot be written.
 """
 
 from __future__ import annotations
@@ -82,7 +89,19 @@ def report(layer: relationships.Layer) -> list[str]:
                 "KSB_CHART_REPO_PATTERN"
             )
     lines.extend(f"  unreadable: {path}" for path in layer.unreadable)
+    unresolved = unresolved_charts(layer)
+    if unresolved:
+        lines.append(f"{_plural(unresolved, 'chart')} unresolved: {DECLARE}")
     return lines
+
+
+# What settles an unresolved chart, named wherever one is reported.
+DECLARE = "declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN"
+
+
+def unresolved_charts(layer: relationships.Layer) -> int:
+    """How many targets `unresolved_conflicts` holds, across every kind it names."""
+    return sum(len(targets) for targets in layer.unresolved_conflicts.values())
 
 
 def shape_error(body: object) -> str:
@@ -230,6 +249,11 @@ def main(argv: list[str] | None = None) -> int:
             "this format first"
         ),
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 when any chart is left unresolved; the layer is written first",
+    )
     arguments = parser.parse_args(argv)
 
     if not config.REPOSITORIES_DIR.is_dir():
@@ -285,6 +309,13 @@ def main(argv: list[str] | None = None) -> int:
             "relationships.unresolved": sum(k["unresolved"] for k in layer.kinds.values()),
         }
     )
+    if arguments.strict and unresolved_charts(layer):
+        print(
+            f"--strict: {_plural(unresolved_charts(layer), 'chart')} unresolved, so the "
+            "layer is written and the run fails",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

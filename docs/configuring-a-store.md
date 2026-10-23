@@ -39,9 +39,58 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_PROPOSED_LINKS` | `write` | Whether the intent index publishes links from commits found only on a branch, under `proposed`. `omit` leaves proposals out; branch work whose content landed on the default branch is still indexed. Changing this setting needs no re-export, but separating proposed links in the first place does: history exported before `reach` was recorded reads as all landed until `export-history` is re-run (`intent` reports how many repositories are in that state) |
 
 The full set, including tuning thresholds, is defined in
-[`src/knowledgestore/config.py`](../src/knowledgestore/config.py). A store can
-keep its values in a file such as `config/pipeline.sh`; source it before each
-build or refresh.
+[`src/knowledgestore/config.py`](../src/knowledgestore/config.py).
+
+### Commit the store's settings
+
+Put every non-secret setting that changes what the store contains in
+`config/knowledgestore.toml` and commit it. The library reads it on every run,
+so a rebuild in a fresh shell builds the same layers:
+
+```toml
+# config/knowledgestore.toml
+[settings]
+KSB_GITHUB_ORG = "example-org"
+KSB_UMBRELLA_REPOS = "platform-charts"
+KSB_CHART_REPO_PATTERN = "chart-{name}"
+```
+
+Check that it was read:
+
+```bash
+knowledgestore --version   # the `settings` line names the file and the keys it set
+```
+
+`knowledgestore status` prints the same on its `Settings:` line. Both print
+keys, never values.
+
+The rules:
+
+- **The environment wins.** A variable already set in the environment
+  overrides the file, so CI and one-off runs can still change a setting. The
+  `settings` line names any key the environment overrode.
+- **One `[settings]` table of strings.** Every value is a TOML string, written
+  as the environment variable would hold it: `"7"`, not `7`, and a list as
+  `"a,b"`. Another table, a key outside `[settings]` or a value that is not a
+  string stops the run, naming it. Nothing is expanded, so `$` and `{name}`
+  arrive as written.
+- **Only settings the library reads.** A key that is not one of its `KSB_*`
+  settings stops the run at start-up, naming the key, so a misspelt setting
+  cannot be silently ignored.
+- **No secrets.** A key ending `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`, and
+  any value shaped like a credential, stops the run. Keep `KSB_TRACKER_TOKEN`
+  in the environment.
+- **Not `KSB_ROOT`.** The root decides where the file is read from, so the
+  file cannot set it. Use `KSB_ROOT` or `--root`; with `--root`, the file under
+  that root is the one read.
+
+A file that breaks a rule stops every stage before it runs. Fix the key the
+message names; the message never prints the value.
+
+The file is TOML rather than `.env` on purpose: secret guards, secret scanners
+and common `.gitignore` templates treat any `*.env` file as a secret, so an
+agent could not read the store's settings and a store could silently leave the
+file uncommitted.
 
 ## Read ticket detail from the issue tracker
 
