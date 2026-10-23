@@ -901,7 +901,8 @@ class ParallelSettleTest(ParallelTree):
             sorted(each["name"] for each in self._derived(printed)),
             sorted(each.name for each in ENTRIES),
         )
-        self.assertEqual((fingerprint(worktree), fingerprint(self.root / ".git")), before)
+        after = (fingerprint(worktree), fingerprint(self.root / ".git"))
+        self.assertEqual(after, before)
         self.assertEqual(self._left_behind(), [])
 
 
