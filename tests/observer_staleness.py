@@ -502,7 +502,10 @@ def affordable(
     rounded up, rather than all of them. That is a floor on the real figure: workers
     share the machine's cores, and a suite run slows when several run at once, so a
     parallel settle can overrun a budget a serial one would have kept. `--jobs auto`
-    takes half the cores to leave that headroom.
+    takes half the cores to leave that headroom. Nor does the projection count what
+    a parallel run pays once before any entry: copying the tree for each worker and
+    starting it, which runs the import-path guard in each copy - seconds per worker
+    on this repository, outside the budget like the unmutated timing runs.
     """
     chosen: list[str] = []
     refused: list[str] = []
@@ -551,6 +554,8 @@ def observe_arrivals(
     copy of the tree, and the unmutated timing runs stay here: they are what the
     budget is decided from, and they mutate nothing.
     """
+    if jobs == 1:
+        gate.refuse_beside_live_parallel()
     if gate.recover() or gate.check_import_path():
         raise SystemExit(1)
     observed: dict[str, tuple[str, ...]] = {}
@@ -559,39 +564,65 @@ def observe_arrivals(
     # An empty excusal, as every gate mode but `--derive-mapping` enters: the
     # variable is the run's channel to its children, not a value left in a shell.
     with gate.excusing_unmapped(()):
-        for module in sorted(arrived):
-            started = clock()
-            failed_unmutated.extend(gate._run(_ids(arrived, (module,))).observers)  # noqa: SLF001
-            timings[module] = clock() - started
-        chosen, refused = affordable(timings, len(table), budget, jobs)
-        multiplier = rounds(len(table), jobs)
-        unsettled = tuple(
-            Unsettled(
-                module, _ids(arrived, (module,)), timings[module], timings[module] * multiplier
-            )
-            for module in refused
-        )
-        selection = _ids(arrived, chosen)
-        # Never an empty selection: `_run` reads no names as the whole suite.
-        if selection and jobs > 1:
-            _observe_in_parallel(table, selection, observed, jobs)
-        elif selection:
+        try:
+            with gate.workers(jobs) as pool:
+                for module in sorted(arrived):
+                    started = clock()
+                    failed_unmutated.extend(_unmutated(pool, _ids(arrived, (module,))))
+                    timings[module] = clock() - started
+                chosen, refused = affordable(timings, len(table), budget, jobs)
+                multiplier = rounds(len(table), jobs)
+                unsettled = tuple(
+                    Unsettled(
+                        module,
+                        _ids(arrived, (module,)),
+                        timings[module],
+                        timings[module] * multiplier,
+                    )
+                    for module in refused
+                )
+                selection = _ids(arrived, chosen)
+                # Never an empty selection: `_run` reads no names as the whole suite.
+                if selection and pool is not None:
+                    _observe_in_parallel(table, selection, observed, pool)
+                elif selection:
 
-            def observe(mutation: gate.Mutation) -> None:
-                observed[mutation.name] = gate._run(selection).observers  # noqa: SLF001
-                print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
+                    def observe(mutation: gate.Mutation) -> None:
+                        observed[mutation.name] = gate._run(selection).observers  # noqa: SLF001
+                        print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
 
-            interrupted = gate.each_mutation(table, observe)
-            if interrupted is not None:
-                raise SystemExit(interrupted)
+                    interrupted = gate.each_mutation(table, observe)
+                    if interrupted is not None:
+                        raise SystemExit(interrupted)
+        except gate.Terminated as termination:
+            raise SystemExit(128 + termination.number) from None
     return tuple(failed_unmutated), observed, chosen, unsettled
+
+
+def _unmutated(pool: gate.Workers | None, ids: tuple[str, ...]) -> tuple[str, ...]:
+    """What `ids` reported with nothing applied: here, or in a worker's copy.
+
+    In the pool when there is one, because the mutated runs happen there: an
+    arrival that passes in this checkout and fails in a copy - one reading an
+    ignored file, say - would otherwise read as passing unmutated and failing under
+    every entry, which is a STALE verdict against the whole table for a difference
+    between two trees. Judged in the same tree, it fails unmutated and is unjudged.
+    One request at a time, so the timing the budget is decided from is one run's.
+    """
+    if pool is None:
+        return gate._run(ids).observers  # noqa: SLF001
+    found: list[gate.Measured] = []
+    pool.measure([(None, (ids,))], lambda index, measured: found.append(measured))
+    if found[0].error:
+        raise SystemExit(f"the unmutated run of the arrivals did not answer: {found[0].error}")
+    return found[0].runs[0].observers
 
 
 def _observe_in_parallel(
     table: tuple[gate.Mutation, ...],
     selection: tuple[str, ...],
     observed: dict[str, tuple[str, ...]],
-    jobs: int,
+    pool: gate.Workers,
 ) -> None:
     """Fill `observed` from the gate's workers, one entry per request.
 
@@ -605,11 +636,7 @@ def _observe_in_parallel(
         observed[mutation.name] = failed[0]
         print(f"  settled {mutation.name}", file=sys.stderr, flush=True)
 
-    try:
-        with gate.workers(jobs) as pool:
-            gate.measuring(table, lambda mutation: (selection,), judge, unrun, pool)
-    except gate.Terminated as termination:
-        raise SystemExit(128 + termination.number) from None
+    gate.measuring(table, lambda mutation: (selection,), judge, unrun, pool)
     if gate.report_unrun(unrun):
         raise SystemExit(1)
 

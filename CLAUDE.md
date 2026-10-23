@@ -150,6 +150,13 @@ Each entry costs a whole-suite run, and entries share nothing, so the cost divid
 by the number of workers. `--only` repeats, so one command covers every entry a
 branch adds. `--isolate` takes `--jobs` too.
 
+A parallel run is the CI-faithful one. Each worker's copy holds what git tracks
+and nothing it ignores, which is what a fresh CI checkout holds, while a serial
+run reads this checkout as it stands. The two can disagree when ignored build output
+is present: `.fixture-store/` is the known case, which `test_check_answers` reuses
+when it exists instead of rebuilding, so a serial derive can judge a mutation
+against a stale prebuilt page.
+
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked
 with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
 the page regression verifies that the tested code is the code that ships.

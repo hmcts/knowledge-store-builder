@@ -93,6 +93,38 @@ class Observe(unittest.TestCase):
         self.assertIn("{value}", text)
 """
 
+# Passes only where an ignored file exists: in the checkout, never in a copy.
+LOCAL_ONLY = """
+import unittest
+from pathlib import Path
+
+
+class Local(unittest.TestCase):
+    def test_the_ignored_file_is_here(self):
+        self.assertTrue((Path(__file__).resolve().parent.parent / "local.marker").is_file())
+"""
+
+# Asks git, in the tree it runs in, whether it tracks this file - which only a tree
+# carrying the repository's index can answer yes to.
+SEES_ITSELF = """
+import os
+import subprocess
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class SeesItself(unittest.TestCase):
+    def test_git_lists_this_file(self):
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        listed = subprocess.run(
+            ["git", "ls-files", "tests/test_git_sees_itself.py"],
+            cwd=ROOT, capture_output=True, text=True, env=environment,
+        )
+        self.assertEqual(listed.stdout.strip(), "tests/test_git_sees_itself.py")
+"""
+
 BYSTANDER = """
 import unittest
 
@@ -642,6 +674,88 @@ class StatusSeesAParallelRunTest(ParallelTree):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(self._left_behind(), [], f"{left} was not reclaimed")
 
+    def test_a_serial_run_beside_a_live_parallel_one_is_refused(self):
+        """Catches a serial run starting while a parallel run holds this checkout. It
+        would mutate the tree `--status` reports another gate run as answering for, and
+        its recovery would act on that run's checkout - so it refuses, naming the
+        live run, before anything is applied."""
+        process = self._spawn((entry("first", replace="HANG"),))
+        self._wait_until_mutated(process)
+        before = fingerprint(self.root)
+
+        with self.assertRaises(SystemExit) as raised:
+            self._main("--derive-mapping")
+
+        self.assertIn("serial run will not start", str(raised.exception))
+        self.assertIn(str(process.pid), str(raised.exception))
+        self.assertEqual(fingerprint(self.root), before, "the refused serial run touched the tree")
+
+    def _abandoned_marker(self, workspace: Path) -> None:
+        """A marker naming a run that has exited: a real pid, now gone, and a start time
+        `ps` will not report for it - the shape a SIGKILLed parent leaves."""
+        gone = subprocess.run(
+            [sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True
+        )
+        identity = json.loads(gate._header(""))  # noqa: SLF001
+        identity.pop("module")
+        identity.update(
+            pid=int(gone.stdout), started="Mon Jan  1 00:00:00 2001", workspace=str(workspace)
+        )
+        gate.workers_path().write_text(json.dumps(identity), encoding="utf-8")
+
+    def test_a_marker_naming_a_directory_without_the_prefix_never_has_it_removed(self):
+        """Catches the prefix guard on the reclaim being dropped. A marker is a file
+        anything could have written; an abandoned one naming a directory the gate did
+        not make - here one without its prefix - must leave that directory alone, while
+        the stale marker itself still goes."""
+        precious = self.root.parent / "not-a-gate-workspace"
+        precious.mkdir()
+        (precious / "keep.txt").write_text("keep", encoding="utf-8")
+        self._abandoned_marker(precious)
+        self.assertEqual(gate.marker_state(gate.read_marker()), gate.ABANDONED)
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            gate._reclaim_abandoned()  # noqa: SLF001
+
+        self.assertTrue(
+            (precious / "keep.txt").is_file(), "the reclaim removed a foreign directory"
+        )
+        self.assertFalse(gate.workers_path().exists())
+
+    def test_two_runs_starting_together_cannot_both_hold_the_marker(self):
+        """Catches the marker being written over rather than created. Two runs that
+        start in the same moment both read no marker; the second to write must find
+        the first's and refuse, rather than replace it and leave `--status` naming
+        only one of two live runs. The race is staged by letting the marker appear
+        after the check that would otherwise have refused."""
+        self.addCleanup(setattr, gate, "_reclaim_abandoned", gate._reclaim_abandoned)  # noqa: SLF001
+        gate._reclaim_abandoned = lambda: gate.workers_path().write_text(
+            "the other run's", encoding="utf-8"
+        )  # noqa: SLF001
+
+        with self.assertRaises(SystemExit) as raised:
+            self._main("--derive-mapping", "--jobs", "2")
+
+        self.assertIn("same moment", str(raised.exception))
+        self.assertEqual(gate.workers_path().read_text(encoding="utf-8"), "the other run's")
+        self.assertEqual(self._left_behind(), [])
+
+    def test_plain_status_names_the_parallel_run_beside_a_mutation_record(self):
+        """Catches the parallel sentence printed only when no record exists. A record
+        and a marker together are two gate runs' worth of state in one checkout, and
+        the text form is what a person reads - it has to name both."""
+        self._abandoned_marker(self.workspace / f"{gate.WORKSPACE_PREFIX}left")
+        gate.RECOVERY_PATH.write_bytes(gate._header("first.py") + b"\n" + b'VALUE = "FIRST"\n')  # noqa: SLF001
+        reported = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(reported):
+            code = gate.status()
+
+        self.assertEqual(code, 1)
+        self.assertIn("is mutated", reported.getvalue())
+        self.assertIn("A parallel gate run", reported.getvalue())
+        self.assertIn("may still be finishing", reported.getvalue())
+
 
 class JobsArgumentTest(unittest.TestCase):
     def test_a_count_is_taken_as_written_and_auto_is_half_the_cores(self):
@@ -721,6 +835,73 @@ class ParallelSettleTest(ParallelTree):
 
         self.assertEqual(raised.exception.code, 1)
         self.assertIn(f"NOT RUN: {absent.name}", reported.getvalue())
+        self.assertEqual(self._left_behind(), [])
+
+    def test_an_arrival_that_fails_only_in_a_copy_is_not_read_as_an_observer(self):
+        """Catches settle judging its unmutated pass in one tree and its mutated runs
+        in another. This arrival reads an ignored file, which the checkout holds and no
+        copy does: judged unmutated in the checkout it passes, under every entry in a
+        copy it fails, and every entry would come back STALE for a difference between
+        two trees. Judged unmutated in a copy as well, it fails there too and is
+        unjudged - which is what it is."""
+        (self.root / ".gitignore").write_text(
+            "sidecar\n.mutation-gate-workers\nlocal.marker\n", encoding="utf-8"
+        )
+        (self.root / "local.marker").write_text("only here", encoding="utf-8")
+        (self.root / "tests" / "test_local.py").write_text(LOCAL_ONLY, encoding="utf-8")
+        arrived = {"test_local": ("Local.test_the_ignored_file_is_here",)}
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            report = staleness.settle(ENTRIES, arrived, "the base", 600.0, jobs=2)
+
+        self.assertEqual(report.stale, (), "a tree difference was reported as observation")
+        self.assertNotEqual(report.verdict, staleness.STALE)
+        self.assertEqual(report.unjudged, ("test_local.Local.test_the_ignored_file_is_here",))
+
+    def test_a_copy_has_no_origin_to_mistake_for_the_real_one(self):
+        """Pins that a copy's `origin/*` cannot be read as the real remote. A clone's
+        origin is the checkout it was cloned from, so its `origin/main` would be this
+        checkout's local `main` - a test comparing against it would compare a branch
+        with itself. The copy carries no origin, so such a read fails loudly."""
+        git(self.root, "remote", "add", "origin", "https://example.invalid/real.git")
+        copy = self.workspace / "copy"
+
+        gate.copy_tree(copy)
+
+        remotes = subprocess.run(["git", "remote"], cwd=copy, capture_output=True, text=True)
+        refs = subprocess.run(
+            ["git", "for-each-ref", "refs/remotes"], cwd=copy, capture_output=True, text=True
+        )
+        self.assertEqual((remotes.stdout, refs.stdout), ("", ""))
+
+    def test_a_worktree_is_copied_without_writing_to_its_repository(self):
+        """The layout this repository is usually worked in: a linked worktree, whose
+        `.git` is a file naming a directory inside the main repository's. A copy taken
+        from it has to carry its index - a fixture test asks git for its own file, and
+        a copy without the index is red at baseline - and must write nothing to either
+        the worktree or the common git directory it shares."""
+        (self.root / "tests" / "test_git_sees_itself.py").write_text(SEES_ITSELF, encoding="utf-8")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-q", "-m", "a test that reads the index")
+        worktree = self.root.parent / "worktree"
+        git(self.root, "worktree", "add", "-q", "--detach", str(worktree))
+        self.assertTrue((worktree / ".git").is_file(), "this fixture is not a linked worktree")
+        gate.ROOT = worktree
+        gate.SRC = worktree / "src" / "knowledgestore"
+        gate.RECOVERY_PATH = worktree / "sidecar"
+        os.environ["PYTHONPATH"] = str(worktree / "src")
+        before = (fingerprint(worktree), fingerprint(self.root / ".git"))
+
+        code, printed, reported = self._main("--derive-mapping", "--jobs", "2")
+
+        self.assertEqual(code, 0, reported)
+        # By name: order is the ordering check's question, and asked here it would
+        # fail by chance under an ordering defect.
+        self.assertEqual(
+            sorted(each["name"] for each in self._derived(printed)),
+            sorted(each.name for each in ENTRIES),
+        )
+        self.assertEqual((fingerprint(worktree), fingerprint(self.root / ".git")), before)
         self.assertEqual(self._left_behind(), [])
 
 

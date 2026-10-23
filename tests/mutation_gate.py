@@ -59,6 +59,11 @@ no worker could answer for is reported as NOT RUN against its name and fails the
 run. Default `1`, which is the serial run exactly - and what CI uses, because its
 legs are runners of their own.
 
+A copy holds what git tracks and nothing it ignores - a fresh checkout, as CI has
+- so the parallel answer is the CI-faithful one. A serial run in a checkout holding
+ignored build output can differ: `.fixture-store/`, which `test_check_answers`
+reuses when present, lets a serial derive judge a mutation against a stale page.
+
 The last of them exists because the other two, and every ordinary run, select at
 module granularity - so none of them ever runs a test alone, and a third way an
 entry's claim can be untrue is invisible to all of them. A test that fails in
@@ -3528,6 +3533,7 @@ MUTATIONS = (
         "reason that was untrue a minute later. The pre-commit hook is this query, so a "
         "query that always reports clean is a hook that reads as protection and is none",
         (
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_plain_status_names_the_parallel_run_beside_a_mutation_record",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_a_record_the_query_cannot_read_is_refused_rather_than_ignored",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_live_remedy_says_how_to_find_which_checkout_a_run_holds",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_pre_commit_hook_runs_the_query_and_refuses_a_live_mutation",
@@ -3548,7 +3554,10 @@ MUTATIONS = (
         "it cares about and signal the one process that holds it",
         (
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_marker_naming_a_directory_without_the_prefix_never_has_it_removed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_serial_run_beside_a_live_parallel_one_is_refused",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_plain_status_names_the_parallel_run_beside_a_mutation_record",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
             "test_mutation_gate_visibility.MutationGateVisibilityTest.test_the_record_apply_writes_names_the_tree_and_the_process",
         ),
@@ -3672,6 +3681,7 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_serial_run_beside_a_live_parallel_one_is_refused",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
             "test_mutation_gate_refusals.MutationGateRefusalsTest.test_a_suite_red_for_its_own_reasons_still_refuses_to_derive",
@@ -10975,10 +10985,13 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
             "test_mutation_gate_parallel.ParallelGateTest.test_results_print_in_table_order_whatever_order_they_finish_in",
             "test_mutation_gate_parallel.ParallelGateTest.test_two_workers_derive_the_mapping_one_worker_derives",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_a_worktree_is_copied_without_writing_to_its_repository",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_an_arrival_that_fails_only_in_a_copy_is_not_read_as_an_observer",
             "test_mutation_gate_parallel.ParallelSettleTest.test_an_entry_no_worker_answered_for_stops_the_settle",
             "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_second_parallel_run_beside_a_live_one_is_refused_and_leaves_it_visible",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_serial_run_beside_a_live_parallel_one_is_refused",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_status_names_a_live_parallel_run_and_says_the_tree_is_not_mutated",
         ),
@@ -11012,10 +11025,12 @@ MUTATIONS = (
             "test_mutation_gate_parallel.ParallelGateTest.test_a_parallel_run_never_mutates_the_checkout",
             "test_mutation_gate_parallel.ParallelGateTest.test_a_worker_that_dies_is_reported_and_its_queue_is_finished_by_the_others",
             "test_mutation_gate_parallel.ParallelGateTest.test_entries_left_when_every_worker_has_died_are_reported_not_run",
+            "test_mutation_gate_parallel.ParallelSettleTest.test_a_worktree_is_copied_without_writing_to_its_repository",
             "test_mutation_gate_parallel.ParallelSettleTest.test_an_entry_no_worker_answered_for_stops_the_settle",
             "test_mutation_gate_parallel.ParallelSettleTest.test_two_workers_settle_what_one_worker_settles",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_a_killed_run_is_reported_abandoned_and_its_copies_are_reclaimed",
             "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_an_interrupted_run_removes_every_worker_copy",
+            "test_mutation_gate_parallel.StatusSeesAParallelRunTest.test_two_runs_starting_together_cannot_both_hold_the_marker",
         ),
     ),
     Mutation(
@@ -11643,11 +11658,12 @@ def status(*, as_json: bool = False, run=run_ps) -> int:
     record = read_record()
     if record is None:
         if as_json:
-            print(json.dumps({"applied": True, "readable": False}, sort_keys=True))
+            print(json.dumps({"applied": True, "readable": False, **parallel}, sort_keys=True))
         print(
             f"{RECOVERY_PATH} cannot be read as a mutation record, so a file in {ROOT} may "
             f"hold a deliberately introduced defect and nothing here can say which. "
-            f"Restore the tree from git, then delete {RECOVERY_PATH}.",
+            f"Restore the tree from git, then delete {RECOVERY_PATH}."
+            + (f"\n{sentence}" if sentence else ""),
             file=sys.stderr,
         )
         return 1
@@ -11675,7 +11691,7 @@ def status(*, as_json: bool = False, run=run_ps) -> int:
     print(
         f"{path} is mutated: the mutation gate has a deliberately introduced defect in it "
         f"right now, so nothing read from this tree means what it says - and committing it "
-        f"commits the defect.\n{_remedy(record, state)}",
+        f"commits the defect.\n{_remedy(record, state)}" + (f"\n{sentence}" if sentence else ""),
         file=sys.stderr,
     )
     return 1
@@ -11802,9 +11818,10 @@ def _marker_sentence(marker: Marker, state: str) -> str:
         )
     if state == ABANDONED:
         return (
-            f"A parallel gate run, pid {pid}, was killed before it could clean up, and its "
-            f"copies are still under {marker.workspace}. It never mutated this tree. The "
-            "next `--jobs` run here removes them."
+            f"A parallel gate run, pid {pid}, ended without cleaning up - killed, most "
+            f"likely - and its copies are still under {marker.workspace}. Its workers may "
+            "still be finishing the entry each held; they stop at the end of it. It never "
+            "mutated this tree. The next `--jobs` run here removes the copies."
         )
     return (
         f"{workers_path()} names a parallel gate run this host cannot judge ({state}). Such "
@@ -11825,6 +11842,19 @@ def _parallel_status(run=run_ps) -> tuple[dict[str, object], str]:
         "workspace": marker.workspace,
     }
     return {"workers": field}, _marker_sentence(marker, state)
+
+
+def refuse_beside_live_parallel() -> None:
+    """Refuse a serial run while a parallel run is live in this checkout.
+
+    A serial run mutates this tree, and its `recover` would act on a tree another
+    gate run is answering for. The parallel run copied the tree when it started, but
+    `--status` names it as holding this checkout, and two gate runs at once in one
+    checkout is the shape this gate refuses everywhere else.
+    """
+    marker = read_marker()
+    if marker is not None and marker_state(marker) == LIVE:
+        raise SystemExit(_marker_sentence(marker, LIVE) + " A serial run will not start beside it.")
 
 
 def _reclaim_abandoned() -> None:
@@ -11894,13 +11924,26 @@ def copy_tree(destination: Path) -> None:
     And a repository, because the suite also reads its own git history: a clone that
     shares this one's objects rather than copying them, with HEAD and the index taken
     from this checkout so `git ls-files` and `git status` in the copy answer as they
-    would here. Nothing is written to this checkout's repository.
+    would here. Nothing is written to this checkout's repository. The copy has no
+    `origin`: a clone's would be this checkout, not the real remote.
+
+    Ignored files are left out on purpose, and that is the one way a parallel run can
+    answer differently from a serial one. An ignored build output a test reuses when
+    it exists - `.fixture-store/`, which `test_check_answers` reads instead of
+    rebuilding - is present to a serial run in this checkout and absent from every
+    copy, so a serial run can judge a mutation against a stale prebuilt artefact
+    while a copy rebuilds it. The copy is what CI sees, a fresh checkout, so the
+    parallel answer is the CI-faithful one.
     """
     head = _git(["rev-parse", "HEAD"], ROOT).strip()
     index = Path(_git(["rev-parse", "--path-format=absolute", "--git-path", "index"], ROOT).strip())
     listed = _git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], ROOT)
     _git(["clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(destination)], ROOT)
     _git(["update-ref", "--no-deref", "HEAD", head], destination)
+    # The clone's `origin` is this checkout, so its `origin/*` refs are this
+    # checkout's local branches. Removed, so a test reading `origin/main` in a copy
+    # fails loudly rather than reading a local branch as the real remote.
+    _git(["remote", "remove", "origin"], destination)
     if index.is_file():
         shutil.copyfile(index, destination / ".git" / "index")
     for name in filter(None, listed.split("\0")):
@@ -12075,7 +12118,16 @@ class Workers:
         identity = json.loads(_header(""))
         identity.pop("module")
         identity["workspace"] = str(self.workspace)
-        workers_path().write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+        # Created exclusively: two runs starting in the same moment both read no
+        # marker above, and only one of them may then hold it.
+        try:
+            with workers_path().open("x", encoding="utf-8") as marker:
+                marker.write(json.dumps(identity, sort_keys=True))
+        except FileExistsError:
+            raise SystemExit(
+                f"{workers_path()} appeared while this run was starting, so another parallel "
+                "run started at the same moment. This one will not start beside it."
+            ) from None
         self.marked = True
         for number in range(1, self.count + 1):
             copy = self.workspace / f"worker-{number}"
@@ -12882,6 +12934,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.status:
         return status(as_json=arguments.json)
 
+    if jobs == 1:
+        refuse_beside_live_parallel()
     if recover():
         return 1
 
