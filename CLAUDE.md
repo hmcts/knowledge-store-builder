@@ -105,8 +105,8 @@ node tests/explorer/answer-graph-mode.mjs
 **After merging `main` into a branch, ask what the merge may have staled:**
 
 ```bash
-python3 tests/observer_staleness.py --base ORIG_HEAD            # seconds: suspects
-python3 tests/observer_staleness.py --base ORIG_HEAD --settle   # minutes: verdicts
+python3 tests/observer_staleness.py --base ORIG_HEAD                        # seconds: suspects
+python3 tests/observer_staleness.py --base ORIG_HEAD --settle --jobs auto   # minutes: verdicts
 ```
 
 A merge is how a correct entry in the mutation table comes to *under-describe*
@@ -129,9 +129,33 @@ module that would not fit is reported **UNSETTLED** with its projected cost —
 the verdict is then SUSPECT, not CLEAN. Its limit: the projection uses unmutated
 timings, so a mutation that makes a test hang is not bounded.
 
+`--jobs auto` spreads the entries over half the cores, each worker in its own
+copy of the tree, so the checkout is never mutated. The budget stays wall time:
+a module is projected at its unmutated time times the entries each worker runs
+in turn. That is a lower bound, because parallel suites share the cores. CI
+leaves `--jobs` at 1.
+
 Both read arrivals only. A set also goes stale when `src/` puts an existing test
 onto a mutated line with no test touched; the nightly run owns that half, and a
 `CLEAN` from either does not claim otherwise.
+
+**When you add mutation entries, derive their observers in parallel:**
+
+```bash
+python3 tests/mutation_gate.py --derive-mapping --only '<entry name>' --jobs auto
+python3 tests/mutation_gate.py --verify-mapping --only '<entry name>' --jobs auto
+```
+
+Each entry costs a whole-suite run, and entries share nothing, so the cost divides
+by the number of workers. `--only` repeats, so one command covers every entry a
+branch adds. `--isolate` takes `--jobs` too.
+
+A parallel run is the CI-faithful one. Each worker's copy holds what git tracks
+and nothing it ignores, which is what a fresh CI checkout holds, while a serial
+run reads this checkout as it stands. The two can disagree when ignored build output
+is present: `.fixture-store/` is the known case, which `test_check_answers` reuses
+when it exists instead of rebuilding, so a serial derive can judge a mutation
+against a stale prebuilt page.
 
 The explorer application is `src/knowledgestore/assets/app.js`. It is checked
 with JSDoc and `tsc --checkJs`, inlined verbatim into the generated page, and
