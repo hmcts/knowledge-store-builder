@@ -21,8 +21,10 @@ classifiers = [
   "Topic :: Software Development :: Documentation",
 ]
 # The core pipeline is standard library only, by design: it runs anywhere
-# Python does, with no supply chain to review.
-dependencies = []
+# Python does, with no supply chain to review. The one exception is the TOML
+# reader for a store's `config/knowledgestore.toml`, which is the standard
+# library's `tomllib` from 3.11 and its backport below that.
+dependencies = ["tomli>=1.1; python_version < '3.11'"]
 
 [project.optional-dependencies]
 # Only the semantic index needs a model. Everything else works without it.

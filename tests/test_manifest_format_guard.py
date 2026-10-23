@@ -187,7 +187,7 @@ def representative_manifest(root: Path) -> dict:
     _touch(
         root,
         "knowledge/relationships/repository-dependencies.json",
-        json.dumps({"format": {"layer": "relationships", "major": 1}}),
+        json.dumps({"format": {"layer": "relationships", "major": 1}, "unresolved_conflicts": {}}),
     )
     _touch(
         root,
@@ -237,6 +237,7 @@ class TheManifestShapeIsGuarded(SettingsIsolated):
             "layers.graph.digest: str",
             "layers.graph.source_urls: bool",
             "layers.relationships.recognised: bool",
+            "layers.relationships.unresolved_conflicts: int",
             "layers.minimum_standard.recognised: bool",
             "layers.deployments.present: bool",
             "extra_layers.*.local_only: bool",

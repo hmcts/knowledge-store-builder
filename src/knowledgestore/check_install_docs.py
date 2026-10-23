@@ -135,6 +135,17 @@ AUTHORED_MARKER = "# knowledgestore: hand-authored lock"
 _PINNED = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)(?:\[[^\]]*\])?==(?P<version>[^\s;#]+)")
 
 
+# A requirement that names a package and nothing else: `name`, `name[extras]`,
+# optionally followed by a marker or a comment. This is the reference layout's
+# `hmcts-knowledge-store-builder[ast]` - the version lives in the lock, which is the
+# pin. Anything carrying a specifier (`>=`, `~=`, `==`), a URL or an `@` reference
+# does not match, so a range is still "not compared" exactly as before and a URL
+# line is not mistaken for a package called `https`.
+_UNVERSIONED = re.compile(
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*(?:;[^#]*)?(?:#.*)?$"
+)
+
+
 # pip's own list, and it is a parse-time rule rather than a verification one: a lock
 # naming anything else is refused before pip reads a single file, with
 #
@@ -245,6 +256,22 @@ def pinned_versions(requirements: Path) -> dict[str, str]:
     return found
 
 
+def unversioned_requirements(requirements: Path) -> list[str]:
+    """Normalised names of every requirement stated with no version at all.
+
+    The lock is the pin for these, so the question the comparison asks of them is
+    whether the lock resolves the package, not which version it holds.
+    """
+    found: set[str] = set()
+    if not requirements.is_file():
+        return []
+    for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = _UNVERSIONED.match(line.strip())
+        if match:
+            found.add(_normalise(match.group("name")))
+    return sorted(found)
+
+
 def locked_versions(lock: Path) -> dict[str, str]:
     """Normalised name -> version, for every requirement the lock resolves.
 
@@ -274,6 +301,12 @@ def unresolved_pins(requirements: Path, lock: Path) -> list[tuple[str, str, str 
         for name, version in sorted(pinned_versions(requirements).items())
         if locked.get(name) != version
     ]
+
+
+def unlocked_requirements(requirements: Path, lock: Path) -> list[str]:
+    """Unversioned requirements the lock does not pin, by name."""
+    locked = locked_versions(lock)
+    return [name for name in unversioned_requirements(requirements) if name not in locked]
 
 
 def index_directive(line: str) -> tuple[str, str | None] | None:
@@ -501,7 +534,8 @@ def _report_unresolved(requirements: Path, lock: Path) -> int:
     compared, and a store cannot mark its way out of a disagreement.
     """
     pinned = pinned_versions(requirements)
-    if not pinned:
+    unversioned = unversioned_requirements(requirements)
+    if not pinned and not unversioned:
         authored = declares_itself_authored(lock)
         if authored is not None:
             print(_comparison_skipped(lock, authored))
@@ -509,25 +543,68 @@ def _report_unresolved(requirements: Path, lock: Path) -> int:
         print(_nothing_to_compare(requirements, lock), file=sys.stderr)
         return 1
     unresolved = unresolved_pins(requirements, lock)
-    if not unresolved:
+    unlocked = unlocked_requirements(requirements, lock)
+    if unresolved or unlocked:
+        _print_disagreements(requirements, lock, unresolved, unlocked)
+        return 1
+    if pinned:
         print(
             f"{lock.name} resolves every one of the {len(pinned)} pin(s) {requirements.name} states"
         )
-        return 0
+    _print_unversioned_resolved(requirements, lock, unversioned)
+    return 0
+
+
+def _print_unversioned_resolved(requirements: Path, lock: Path, unversioned: list[str]) -> None:
+    """Which version the lock resolved each unversioned requirement to."""
+    if not unversioned:
+        return
+    locked = locked_versions(lock)
     print(
-        f"{lock.name} does not deliver what {requirements.name} pins, and the lock is what"
-        f"\n`pip install --require-hashes` reads - so a build would use the lock's version:\n",
-        file=sys.stderr,
+        f"{requirements.name} states no version for {len(unversioned)} requirement(s); "
+        f"{lock.name} is their pin:"
     )
-    for name, pinned, locked in unresolved:
-        got = locked if locked is not None else "not resolved at all"
-        print(f"  {name}: pinned {pinned}, lock has {got}", file=sys.stderr)
-    print(
-        f"\nRecompile the lock from {requirements.name}. If it cannot resolve a pinned"
-        f"\nversion, that version is not published and the pin should not have moved.",
-        file=sys.stderr,
-    )
-    return 1
+    for name in unversioned:
+        print(f"  {name}: {lock.name} resolves it to {locked[name]}")
+
+
+def _print_disagreements(
+    requirements: Path,
+    lock: Path,
+    unresolved: list[tuple[str, str, str | None]],
+    unlocked: list[str],
+) -> None:
+    """Both kinds of failure in one run, so fixing one does not hide the other."""
+    if unresolved:
+        print(
+            f"{lock.name} does not deliver what {requirements.name} pins, and the lock is what"
+            f"\n`pip install --require-hashes` reads - so a build would use the lock's version:\n",
+            file=sys.stderr,
+        )
+        for name, pinned_version, locked_version in unresolved:
+            got = locked_version if locked_version is not None else "not resolved at all"
+            print(f"  {name}: pinned {pinned_version}, lock has {got}", file=sys.stderr)
+        print(
+            f"\nRecompile the lock from {requirements.name}. If it cannot resolve a pinned"
+            f"\nversion, that version is not published and the pin should not have moved.",
+            file=sys.stderr,
+        )
+    if unlocked:
+        print(
+            f"{lock.name} does not pin a package {requirements.name} names without a version, "
+            f"\nso nothing says which version a build installs:\n",
+            file=sys.stderr,
+        )
+        for name in unlocked:
+            print(
+                f"  {name}: no version in {requirements.name}, not resolved by the lock",
+                file=sys.stderr,
+            )
+        print(
+            f"\nRecompile the lock from {requirements.name}, or write `==X.Y.Z` in "
+            f"{requirements.name} if a specific release is wanted.",
+            file=sys.stderr,
+        )
 
 
 def main() -> int:

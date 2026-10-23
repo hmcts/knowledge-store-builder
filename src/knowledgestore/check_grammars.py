@@ -155,12 +155,16 @@ def graphify_file_list(interpreter: str, clone: Path, run: "Run | None" = None):
 
 
 def _bracket(pattern: str, start: int) -> "tuple[str, int]":
-    """A gitignore character class at `start` as a regex, and the index of its last character."""
+    """A gitignore character class at `start` as a regex, and the index of its last character.
+
+    As in git, a class never matches `/`, and an unterminated `[` makes the whole pattern
+    match nothing rather than reading as a literal.
+    """
     close = pattern.find("]", start + 2)
     if close == -1:
-        return re.escape("["), start
+        return "(?!)", len(pattern)
     body = pattern[start + 1 : close]
-    return "[" + ("^" if body.startswith("!") else "") + body.lstrip("!") + "]", close
+    return "(?!/)[" + ("^" if body.startswith("!") else "") + body.lstrip("!") + "]", close
 
 
 def _glob_regex(pattern: str) -> str:

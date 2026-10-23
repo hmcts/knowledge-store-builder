@@ -335,6 +335,9 @@ wheels = [
 [[package]]
 name = "hmcts-knowledge-store-builder"
 source = { editable = "." }
+dependencies = [
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
 
 [package.optional-dependencies]
 ast = [
@@ -366,6 +369,7 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.414" },
     { name = "pyyaml", marker = "extra == 'deploy'", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.10" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1" },
 ]
 provides-extras = ["ast", "deploy", "dev", "documents", "semantic"]
 

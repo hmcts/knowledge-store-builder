@@ -69,8 +69,14 @@ holds on every machine and CI runner that reads the store's clones. `sync`,
 `drift`, `export-history` and `check-citations` refuse to start below it; if one
 does, stop and ask for git to be upgraded rather than working around it.
 
-If the store repository has a settings file (commonly `config/pipeline.sh`),
-source it first — it carries estate branding such as the page title.
+The library reads the store's committed settings from the `[settings]` table of
+`config/knowledgestore.toml` by itself, and `knowledgestore --version` names the
+keys it set; a variable in the environment overrides the file. A store that
+still keeps its settings in a shell script (commonly `config/pipeline.sh`) must
+have it sourced first. Move the non-secret `KSB_*` settings into
+`config/knowledgestore.toml` as string values so a rebuild cannot run without
+them; see
+[Commit the store's settings](../../docs/configuring-a-store.md#commit-the-stores-settings).
 
 ## Full build
 
@@ -778,9 +784,17 @@ skipped declarations. **Read the unresolved count**: those are dependencies the
 store does not hold, and the layer lists every one. Set `KSB_CHART_REPO_PATTERN`
 (for example `chart-{name}`) only when the estate names chart repositories by a
 rule, and `KSB_UMBRELLA_REPOS` to the repositories that bundle or wrap others'
-charts. A chart two clones define, with neither setting to choose between them,
+charts. **Put both in `config/knowledgestore.toml` and commit it**, never only in
+a shell: a rebuild without them still exits 0, with every consumer of the
+charts they settle missing from `dependents`. `knowledgestore --version` names
+the keys the file set; see
+[Commit the store's settings](../../docs/configuring-a-store.md#commit-the-stores-settings).
+A chart two clones define, with neither setting to choose between them,
 is printed as a conflict and left unresolved, never guessed: name the wrapper or
-set the pattern. A Maven coordinate or npm package two clones publish is printed
+set the pattern. The run then ends with `N charts unresolved: declare
+KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN`, and the manifest records the
+count. **Read that line**; run `relationships --strict` to make it exit 1 after
+writing the layer. A Maven coordinate or npm package two clones publish is printed
 and resolved to the first by name. It exits 1 on a parser failure, an
 unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
 extra), and 2 when it cannot write. A store whose clones declare a
@@ -1495,8 +1509,8 @@ Brief structure that works:
 6. `**Sources:**` — the evidence basis and the graph-build-time caveat.
 
 Only a constrained markdown subset renders: headings, paragraphs, bold, inline
-code, flat bullet lists, pipe tables. No links, blockquotes, code fences or
-raw HTML.
+code, flat bullet lists, pipe tables and fenced code blocks (shown as written,
+nothing inside them rendered). No links, blockquotes or raw HTML.
 
 **Audit what you wrote.** Every ticket id, repository name and file path in a
 brief must appear in that topic's dossier. Check it mechanically — extract the
@@ -1534,7 +1548,7 @@ Write `docs/deep-dives/<repo>.md` from the bundle. Structure that works:
 7. `**Sources:**` — the bundle path and the graph-build caveat.
 
 Only the constrained markdown subset renders (headings, bold, inline code,
-flat bullets, pipe tables). Base every number on the bundle — never re-derive
+flat bullets, pipe tables, fenced code blocks). Base every number on the bundle — never re-derive
 figures by hand, and never soften them either.
 
 Then:
@@ -1698,7 +1712,7 @@ library declares:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }

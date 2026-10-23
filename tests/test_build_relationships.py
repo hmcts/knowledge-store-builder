@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 from settings_isolation import SettingsIsolated  # noqa: E402
-from knowledgestore import build_relationships, config, relationships, status  # noqa: E402
+from knowledgestore import build_relationships, config, relationships, status, store_manifest  # noqa: E402
 from knowledgestore.source_urls import SourceUrls  # noqa: E402
 
 try:  # PyYAML is the `deploy` extra, not a runtime dependency of this library
@@ -747,6 +747,66 @@ class NameOrderTest(_HelmStore):
             json.loads(before[dependencies])["unresolved_conflicts"],
             {"helm_chart": {"a": ["app-a", "app-m"], "z": ["app-m", "app-z"]}},
         )
+
+
+SUMMARY = "2 charts unresolved: declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN"
+
+
+class UnresolvedChartsAreLoudTest(_HelmStore):
+    """#483: a build without the chart settings exited 0 with every consumer of
+    the unresolved charts missing from `dependents`, and nothing above the
+    per-chart lines said the layer was incomplete."""
+
+    def wrapped(self, *argv: str, umbrellas: set[str] | None = None) -> tuple[int, str, str]:
+        self.repos.mkdir()
+        for name, files in WRAPPED_ESTATE.items():
+            _write(self.repos / name, files)
+        if umbrellas is not None:
+            config.configure(UMBRELLA_REPOS=umbrellas)
+        return self.run_stage(*argv)
+
+    def test_the_summary_line_counts_every_unresolved_chart(self):
+        """Break caught: no summary, or one counting kinds or conflicts rather than
+        charts - two charts are unresolved here, under one kind."""
+        code, out, err = self.wrapped()
+        self.assertEqual(code, 0, err)
+        self.assertIn(SUMMARY + "\n", out)
+
+    def test_no_summary_line_when_nothing_is_unresolved(self):
+        """Break caught: the warning printed on every run, so it stops being read."""
+        code, out, err = self.wrapped(umbrellas={"app-m"})
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("unresolved: declare", out)
+
+    def test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer(self):
+        """Break caught: `--strict` unable to fail, so a store's gate passes the
+        incomplete layer; or failing without writing, so the layer it names as
+        incomplete cannot be inspected."""
+        code, out, err = self.wrapped("--strict")
+        self.assertEqual(code, 1, out)
+        self.assertIn(SUMMARY, out)
+        self.assertIn("--strict", err)
+        self.assertTrue((self.root / "knowledge" / "relationships" / "kinds.json").is_file())
+
+    def test_strict_exits_0_when_every_chart_resolves(self):
+        """Break caught: `--strict` failing a complete layer, so no store can adopt it."""
+        code, _, err = self.wrapped("--strict", umbrellas={"app-m"})
+        self.assertEqual(code, 0, err)
+
+    def test_the_manifest_carries_the_unresolved_count_the_stage_wrote(self):
+        """Break caught: the manifest silent about an incomplete layer, so the server
+        serves partial `dependents` as complete; or a count of something other than
+        the charts the stage left unresolved."""
+        for umbrellas, expected in ((None, 2), ({"app-m"}, 0)):
+            with self.subTest(umbrellas=umbrellas):
+                if self.repos.exists():
+                    shutil.rmtree(self.repos)
+                self.assertEqual(self.wrapped(umbrellas=umbrellas)[0], 0)
+                config.configure(STORE_ID="example-store")
+                manifest = store_manifest.compute(self.root)
+                self.assertEqual(
+                    manifest["layers"]["relationships"]["unresolved_conflicts"], expected
+                )
 
 
 class SshModuleSourceTest(_Store):

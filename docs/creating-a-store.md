@@ -712,6 +712,46 @@ Declare topics in `config/topics.txt` as
 question needs it, rather than predicting demand. The build skill defines the
 accepted Markdown and evidence checks.
 
+### Serve the store's own written answers
+
+A store's journeys, findings and design notes are usually a directory of
+Markdown. The MCP server's `answers` tool reads them only as one JSON file of
+entries, so write that file, then declare it as an extra layer:
+
+```bash
+knowledgestore answers-layer --markdown docs/answers --out knowledge/answers.json
+```
+
+```json
+{
+  "answers": {
+    "path": "knowledge/answers.json",
+    "description": "Written journeys and findings.",
+    "kind": "answers"
+  }
+}
+```
+
+The declaration goes in `config/store-extra-layers.json`. Declare the JSON file,
+never the Markdown directory: the server reports a directory as `not_read`.
+
+Each `.md` file becomes one entry, keyed by its name without `.md`: its first
+heading as `title` (else the file name), the body rendered as `html` with the
+topic briefs' Markdown subset, and its store-relative path as `source`. A
+fenced code block, such as a Mermaid diagram, is kept as written and escaped.
+The stage names any file in the directory that is not `.md`, because it is not
+served.
+
+Written answers are point-in-time, so every entry carries `as_of` and `commit`.
+`as_of` is the front matter's `date:` when the file has one, otherwise the date
+of the last commit to the file, and `commit` is that commit's SHA, null for a
+dated file not yet committed. Two runs at one commit write identical bytes.
+
+The stage exits 1 and writes nothing when the directory holds no `.md` file,
+when a file has neither a `date:` nor a commit, or when a file sits in a
+subdirectory or has a space in its name — the server skips such an entry
+without saying so. Run it before `manifest`.
+
 ### Build and check the page
 
 Record which partitioner clustered the graph, recompress it after clustering or
@@ -885,15 +925,22 @@ authored coverage remains and whether grounding checks passed.
 
 Assistants answer a store's questions through the knowledge-store MCP server.
 Declare it in the store plugin so an asker's assistant launches it with no setup
-beyond the plugin. Create `<store-plugin>/.mcp.json`:
+beyond the plugin. Where you declare it depends on where the plugin lives.
+
+**The plugin root is the store repository's root (the usual case).** Declare the
+server inline as `mcpServers` in `.claude-plugin/plugin.json`, beside the
+plugin's own keys:
 
 ```json
 {
+  "name": "<store-name>",
+  "description": "Questions about <the estate>, answered from the store.",
+  "author": { "name": "<owner>" },
   "mcpServers": {
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.1.0",
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
         "knowledge-store-mcp", "--store-id", "<id>"
       ]
     }
@@ -901,10 +948,27 @@ beyond the plugin. Create `<store-plugin>/.mcp.json`:
 }
 ```
 
-When the plugin root is the store repository's root, put the same
-`mcpServers` object in `.claude-plugin/plugin.json` instead. A `.mcp.json` at a
-repository root also loads as project configuration for anyone working in that
-repository. `claude plugin validate` accepts either form.
+Do not create a `.mcp.json` at the repository root: it also loads as project
+configuration for anyone working in the repository, and `check-plugin` refuses it.
+
+**The plugin lives in its own subdirectory.** Create `<store-plugin>/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "knowledge-store": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.2.0",
+        "knowledge-store-mcp", "--store-id", "<id>"
+      ]
+    }
+  }
+}
+```
+
+`claude plugin validate` accepts either form, and `knowledgestore check-plugin`
+reads either, so a store can verify the declaration before publishing.
 
 Take `<id>` from the store's manifest, not from the plugin name:
 
@@ -914,6 +978,27 @@ jq -r .store.id knowledge/store-manifest.json
 
 `knowledgestore manifest` writes that id, from `KSB_STORE_ID` or else the
 repository name of the clone's `origin` remote.
+
+Check the plugin before you publish it, and in CI beside `check-install-docs`:
+
+```bash
+knowledgestore check-plugin [--plugin <store-plugin>]
+```
+
+`--plugin` defaults to the store root. The stage reads `.mcp.json`, or
+`mcpServers` in `.claude-plugin/plugin.json`, and exits 1 naming each reason when
+the `knowledge-store` server is missing, the command is not `uvx`, `--from` is
+not an exact `knowledge-store-mcp` tag, `--store-id` is absent or differs from
+the manifest's `store.id`, or the plugin root is the repository root and a root
+`.mcp.json` exists. A pinned tag older than the one this guide documents is a
+warning. When everything agrees it prints the tag and the id and exits 0.
+
+It also reads the committed manifest. It fails when the manifest does not
+record the index and relationships layers as present, or the relationships layer
+as recognised, because the server then answers from a fallback or not at all; a
+layer recorded as `present: null` is a warning. When `KSB_STORE_ID` is set it
+must equal the manifest's `store.id`, or the next manifest build writes an id the
+plugin does not ask for.
 
 - **Build and commit the manifest before you publish.** At v0.1.0 the server
   exits at start-up when it finds no registered clone or no

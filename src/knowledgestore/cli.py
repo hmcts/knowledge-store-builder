@@ -33,6 +33,7 @@ SELF_PARSING = frozenset(
         "check-answers",
         "check-citations",
         "check-corpus",
+        "check-plugin",
         "chunk-plan",
         "chunk-status",
         "check-chunk",
@@ -51,6 +52,7 @@ SELF_PARSING = frozenset(
         "cost",
         "answers",
         "relationships",
+        "answers-layer",
     }
 )
 
@@ -213,6 +215,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "build_deep_dives",
         "extract a repository evidence bundle, or merge written deep dives",
     ),
+    "answers-layer": (
+        "build_answers_layer",
+        "write a store's written answers from Markdown as the layer the MCP server serves",
+    ),
     "explorer": ("build_explorer", "build the self-contained explorer.html search page"),
     "index": (
         "build_store_index",
@@ -262,6 +268,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "check_citations",
         "fail if a published answer cites code the graph does not hold",
     ),
+    "check-plugin": (
+        "check_plugin",
+        "fail if the store plugin would not launch the knowledge-store server for this store",
+    ),
 }
 
 
@@ -288,6 +298,8 @@ def usage() -> str:
         "",
         "Settings can also come from the environment: KSB_ROOT, KSB_GITHUB_ORG,",
         "KSB_TICKET_BROWSE_URL, KSB_EXPLORER_TITLE and others - see config.py.",
+        "A store commits its non-secret settings in config/knowledgestore.toml;",
+        "a variable already in the environment wins over the file.",
     ]
     return "\n".join(lines)
 
@@ -302,7 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root")
     known, rest = parser.parse_known_args(argv)
     if known.root:
-        config.configure(root=known.root)
+        try:
+            config.configure(root=known.root)
+        except config.SettingsFileError as error:
+            print(f"knowledgestore: {error}", file=sys.stderr)
+            return 1
 
     if rest[:1] in (["--version"], ["-V"]):
         # Askable, because it was not. The skills are distributed separately from
@@ -333,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"interpreter {sys.executable}")
         print(f"package {Path(__file__).resolve().parent}")
         print(git_version.describe())
+        # Which committed settings were in force, by key: a build log then says
+        # whether the store's own settings reached the run. Never a value.
+        print(f"settings {config.describe_settings_file()}")
         return 0
 
     stage = rest[0] if rest else ""

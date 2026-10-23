@@ -247,6 +247,7 @@ class Mutation:
 # Both store-id mutations stop every manifest being computed under the fixed test
 # id, so every manifest test observes them; one list keeps the two entries in step.
 _EVERY_MANIFEST_TEST = (
+    "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
     "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
     "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
     "test_build_store_manifest.Refusals.test_a_bad_extra_layer_exits_1_and_writes_nothing",
@@ -298,6 +299,10 @@ _EVERY_MANIFEST_TEST = (
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
     "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_absent_layer_has_no_count",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+    "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
     "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
     "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
     "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -864,7 +869,10 @@ MUTATIONS = (
         "graphify writes `links` in node-link JSON and `edges` in its extract files, "
         "so reading one key silently ranks nothing on half the artefacts this is "
         "pointed at - indistinguishable from a graph with no edges",
-        ("test_most_connected.MostConnectedTest.test_it_reads_edges_as_well_as_links",),
+        (
+            "test_most_connected.MostConnectedTest.test_it_reads_edges_as_well_as_links",
+            "test_store_index.EdgesUnderEitherKey.test_a_graph_that_keys_its_edges_as_edges_is_indexed_with_them",
+        ),
     ),
     Mutation(
         "the committed archive is no longer read when the plain graph is absent",
@@ -1678,6 +1686,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1700,6 +1709,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
@@ -1770,6 +1780,7 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
             "test_check_grammars.ClonesTest.test_a_graphifyignored_tf_is_not_counted_and_an_unignored_one_is",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
         ),
     ),
@@ -1796,10 +1807,101 @@ MUTATIONS = (
             "test_check_grammars.ClonesTest.test_a_pipeline_output_directory_and_git_are_not_counted",
             "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
             "test_check_grammars.ClonesTest.test_a_tf_the_content_set_does_not_list_is_caught",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
             "test_check_grammars.ClonesTest.test_the_approximate_method_is_named",
             "test_check_grammars.ClonesWithGraphifyTest.test_a_graphifyignored_tf_is_not_counted_by_graphify_and_an_unignored_one_is",
             "test_check_grammars.ClonesWithGraphifyTest.test_graphify_decides_what_is_vendored",
             "test_check_grammars.ClonesWithGraphifyTest.test_the_exact_method_is_named",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore * crosses a path separator",
+        "check_grammars.py",
+        '"*": "[^/]*"',
+        '"*": ".*"',
+        "`docs/*.tf` names one directory's files; a star that crosses `/` also excludes `docs/deep/x.tf`, so the stage under-counts the .tf graphify will read and certifies an environment without checking them",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches a path separator",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "."',
+        "an anchored `x/a?b.tf` must not exclude `x/a/b.tf`; a question mark that matches `/` hides files in a different directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore ? matches more than one character",
+        "check_grammars.py",
+        '"?": "[^/]"',
+        '"?": "[^/]*"',
+        "`v?.tf` is exactly one character, so `v12.tf` stays counted; a question mark that behaves as a star drops it",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class is read as a positive one",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '""',
+        "`f[!abc].tf` excludes the names a class does not list; reading it as `[abc]` excludes the opposite set, so the count is of the wrong files",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class is always read as negated",
+        "check_grammars.py",
+        '("^" if body.startswith("!") else "")',
+        '"^"',
+        "`f[abc].tf` excludes the listed characters; reading every class as negated excludes everything else, the mirror of the defect above",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore negated class keeps its ! as a member",
+        "check_grammars.py",
+        'body.lstrip("!")',
+        "body",
+        "the `!` marks the negation and is not a character of the class: left in, `f[!abc].tf` stops excluding `f!.tf`",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ raises",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'raise ValueError("unterminated class")',
+        "a stray `[` in a hand-written ignore file is an ordinary line, not a reason to abort the whole stage: git matches nothing for it, and so must the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore unterminated [ is read as a literal",
+        "check_grammars.py",
+        'return "(?!)", len(pattern)',
+        'return re.escape("["), start',
+        "git treats an unterminated `[` as a pattern that matches nothing; reading it as a literal `[` excludes a file git would keep, so the count drops a .tf that graphify reads",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
+    ),
+    Mutation(
+        "a graphifyignore class matches a path separator",
+        "check_grammars.py",
+        '"(?!/)[" +',
+        '"[" +',
+        "a class never matches `/` in git, so `x/f[!a]y.tf` keeps `x/f/y.tf`; a negated class that can match `/` hides files in a deeper directory from the count",
+        (
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
@@ -1808,7 +1910,10 @@ MUTATIONS = (
         "    for repository in declared:",
         "    for repository in [type('R', (), {'name': d.name}) for d in sorted(config.REPOSITORIES_DIR.iterdir())]:",
         "a directory under repositories/ that config/repositories.txt does not name is not a repository this store extracts; refusing on a stray clone's .tf teaches operators to ignore the refusal",
-        ("test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",),
+        (
+            "test_check_grammars.ClonesTest.test_a_repository_not_declared_is_not_scanned",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
+        ),
     ),
     Mutation(
         "--clones never asks graphify for its file list",
@@ -1858,6 +1963,7 @@ MUTATIONS = (
         "stores write vendor, PnP and symlink patterns into .graphifyignore; counting those files refuses on grammars graphify will never need",
         (
             "test_check_grammars.ClonesTest.test_a_file_pattern_in_graphifyignore_excludes_that_file_only",
+            "test_check_grammars.ClonesTest.test_each_glob_form_in_graphifyignore_excludes_what_gitignore_would",
         ),
     ),
     Mutation(
@@ -2263,8 +2369,8 @@ MUTATIONS = (
     Mutation(
         "an extras-bearing pin silently stops being compared",
         "check_install_docs.py",
-        "(?:\\[[^\\]]*\\])?",
-        "",
+        "(?:\\[[^\\]]*\\])?==",
+        "==",
         "found by review: with the extras group deleted, `alpha[deploy]==1.2.3` matches "
         "nothing and the pin is not compared at all - and the test asserted an empty "
         "result, which is equally what agreement produces. An emptiness assertion "
@@ -2289,6 +2395,9 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_lock_that_only_quotes_the_marker_does_not_declare_it",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_an_undeclared_lock_with_no_input_is_still_refused",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2307,6 +2416,7 @@ MUTATIONS = (
         "having opened that input for correctness",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
@@ -2326,6 +2436,7 @@ MUTATIONS = (
         "missing the entry rather than holding a stale one",
         (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_a_declared_lock_is_still_compared_when_the_input_states_a_pin",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_lock_delivering_another_version_is_reported",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_a_pin_the_lock_omits_entirely_is_distinguished",
             "test_check_install_docs.TheLockMustResolveThePinTest.test_every_pin_is_checked_rather_than_one_named_package",
@@ -2346,6 +2457,10 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_equals_pin_beside_an_unversioned_line_is_still_compared",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
             "test_check_install_docs.InstallDocsGateTest.test_a_lock_that_does_not_deliver_the_pin_fails_the_stage",
             "test_check_install_docs.InstallDocsGateTest.test_the_no_index_branch_still_carries_the_resolution",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
@@ -2356,7 +2471,7 @@ MUTATIONS = (
     Mutation(
         "an empty pin parse reads as a clean comparison",
         "check_install_docs.py",
-        "    if not pinned:",
+        "    if not pinned and not unversioned:",
         "    if False:",
         "#277, and the state that shipped: an empty result has two causes the code could "
         "not tell apart - every pin resolved, or no pin ever parsed - and the second "
@@ -2371,6 +2486,7 @@ MUTATIONS = (
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_documented_command_half_still_runs_behind_the_marker",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_refusal_offers_the_marker_alongside_the_two_it_already_offered",
             "test_check_install_docs.AHandAuthoredLockDeclaresItselfTest.test_the_skip_says_it_compared_nothing_rather_than_passing_quietly",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_empty_input_is_still_refused",
             "test_check_install_docs.NothingToCompareTest.test_an_absent_input_is_refused_rather_than_read_as_agreement",
             "test_check_install_docs.NothingToCompareTest.test_an_input_stating_no_pin_is_refused_rather_than_reported_as_resolved",
         ),
@@ -2389,6 +2505,48 @@ MUTATIONS = (
         "document installing from its lock at all, so naming what it read is the fix",
         (
             "test_check_install_docs.NothingToCompareTest.test_no_documented_install_is_not_reported_as_every_install_passing",
+        ),
+    ),
+    Mutation(
+        "an unversioned requirement the lock does not pin reads as resolved",
+        "check_install_docs.py",
+        "    return [name for name in unversioned_requirements(requirements) if name not in locked]",
+        "    return []",
+        "the reference layout names the library with no version and lets the lock be the pin, so a package the lock has dropped installs whatever the index serves while the input claims nothing is wrong; without this the stage passes for a requirement nothing pins",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+        ),
+    ),
+    Mutation(
+        "a bare package name stops being read as a requirement",
+        "check_install_docs.py",
+        '            found.add(_normalise(match.group("name")))\n    return sorted(found)',
+        "            pass\n    return sorted(found)",
+        "the same shape as an extras group dropped from the pin pattern: the parse stops matching and the result is empty, which reads as a store naming no package, so an unversioned store is refused again or an unlocked one passes",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "a store naming only unversioned packages is refused as comparing nothing",
+        "check_install_docs.py",
+        "    if not pinned and not unversioned:",
+        "    if not pinned:",
+        "the refusal was written for a parse that matched nothing; a named package is something to compare, so a store following the unversioned layout must not be sent to the nothing-to-compare message",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_pins_passes_and_names_the_version",
+        ),
+    ),
+    Mutation(
+        "an unlocked unversioned requirement stops failing the stage",
+        "check_install_docs.py",
+        "    if unresolved or unlocked:",
+        "    if unresolved:",
+        "a requirement the lock does not pin is reported on stderr but the exit is 0 if only the pin half gates it, so the text scrolls past in a green run and nothing chains on it",
+        (
+            "test_check_install_docs.AnUnversionedRequirementIsPinnedByTheLockTest.test_an_unversioned_requirement_the_lock_lacks_fails_naming_the_package",
         ),
     ),
     Mutation(
@@ -8160,6 +8318,7 @@ MUTATIONS = (
         "a reader that trusts `recognised` would parse a relationships layer written at a major this library cannot read",
         (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
         ),
     ),
     Mutation(
@@ -8702,6 +8861,7 @@ MUTATIONS = (
         "",
         "a store outside any repository has no rules to judge by and is described as it is on disk; refusing it would stop every unversioned build",
         (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_build_store_manifest.RecognisedLayers.test_a_stamped_layer_still_prints_the_plain_tick",
             "test_build_store_manifest.RecognisedLayers.test_an_unstamped_present_layer_is_not_printed_as_built",
             "test_build_store_manifest.Refusals.test_an_unreadable_layer_file_exits_2_with_a_message",
@@ -8735,6 +8895,9 @@ MUTATIONS = (
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unknown_major_is_present_digested_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_an_unstamped_legacy_by_repo_directory_is_present_and_not_recognised",
             "test_store_manifest.RelationshipsLayerIsRecognised.test_no_stamp_or_another_layers_stamp_is_not_recognised",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_unknown_is_null_never_zero",
             "test_store_manifest.SourcesAsOf.test_an_unparseable_date_is_skipped",
             "test_store_manifest.SourcesAsOf.test_fetch_only_repositories_are_not_sources",
             "test_store_manifest.SourcesAsOf.test_the_newest_commit_date_is_reported_as_recorded",
@@ -9144,7 +9307,10 @@ MUTATIONS = (
         '_env_int("KSB_INDEX_WARN_MB", 90)',
         "90",
         "an operator's `KSB_INDEX_WARN_MB` is read and dropped, so the warning fires at the wrong size",
-        ("test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",),
+        (
+            "test_build_store_index.TheSizeWarning.test_the_threshold_is_read_from_the_environment",
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
     ),
     Mutation(
         "store index: a node with no repository is listed as a repository",
@@ -9403,7 +9569,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_a_declared_wrapper_between_two_applications_loses_both_charts",
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
             "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_no_summary_line_when_nothing_is_unresolved",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_0_when_every_chart_resolves",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9427,7 +9597,11 @@ MUTATIONS = (
             "test_build_relationships.ChartPrecedenceTest.test_two_umbrellas_and_no_owner_leave_the_chart_unresolved",
             "test_build_relationships.ChartResolutionTest.test_two_definitions_are_left_unresolved_and_listed_not_guessed",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9797,10 +9971,14 @@ MUTATIONS = (
             "test_build_relationships.ChartResolutionTest.test_the_chart_is_part_of_the_aggregation_key",
             "test_build_relationships.MissingPyYamlTest.test_an_estate_with_no_release_builds_without_pyyaml",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
             "test_package_edges.ChartEstateTest.test_a_chart_is_in_the_estate_only_when_the_graph_holds_its_repository",
             "test_package_edges.TheDeclaredGraphChangesTest.test_a_chart_resolves_to_the_repository_that_provides_it",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
         ),
     ),
     Mutation(
@@ -9993,6 +10171,7 @@ MUTATIONS = (
             "test_build_relationships.StatusTest.test_status_reports_the_layer_or_that_it_is_not_built",
             "test_build_relationships.StatusTest.test_status_survives_a_pathologically_nested_kinds_file",
             "test_build_relationships.SvcATest.test_the_flat_edge_list_names_both_ends",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
         ),
     ),
     Mutation(
@@ -10036,6 +10215,8 @@ MUTATIONS = (
         (
             "test_store_manifest.EveryArtefactIsAccountedFor.test_every_config_path_is_a_layer_or_named_as_not_one",
             "test_store_manifest.EveryArtefactIsAccountedFor.test_the_excusal_list_holds_no_stale_or_contradictory_entry",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
             "test_store_manifest.WhichLayersArePresent.test_directory_layers_are_listed_with_a_trailing_slash",
             "test_store_manifest.WhichLayersArePresent.test_the_relationships_digest_covers_the_whole_directory",
         ),
@@ -10084,6 +10265,559 @@ MUTATIONS = (
         "mode it fails the same way, and the clone it was run on stays without a graph",
         (
             "test_skill_clone_block.RepairBlockTest.test_repair_restores_what_step_six_selects_to_a_cone_mode_clone",
+        ),
+    ),
+    Mutation(
+        "settings file: the store's file is never read",
+        "config.py",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = _load(SETTINGS_FILE_PATH)",
+        "_FILE_VALUES, _FILE_READ, _FILE_OVERRIDDEN = {}, False, ()",
+        "#483: chart settings lived only in a shell, and a rebuild without them exited 0 "
+        "with every consumer of the unresolved charts missing from `dependents`",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileIsRefused.test_a_file_toml_cannot_read_is_refused",
+            "test_settings_file.TheFileIsRefused.test_a_key_outside_the_library_fails",
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+            "test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: --root does not read the new root's file",
+        "config.py",
+        "        _adopt(at_root)\n",
+        "        _adopt(None)\n",
+        "`knowledgestore --root <store> relationships`, the way the guides run a stage, "
+        "would build without the store's committed settings - the #483 layer again",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_value_is_the_string_toml_reads",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_chart_pattern_arrives_exactly_as_written",
+        ),
+    ),
+    Mutation(
+        "settings file: a key the last file set survives a new root",
+        "config.py",
+        '    reached = set(module["_FILE_VALUES"]) | set(at_root._FILE_VALUES)',
+        "    reached = set(at_root._FILE_VALUES)",
+        "a caller configuring two stores in one process builds the second with the "
+        "first one's settings",
+        (
+            "test_settings_file.ConfigureFollowsTheRoot.test_a_new_root_reads_its_own_file_and_drops_the_last_ones",
+        ),
+    ),
+    Mutation(
+        "settings file: the file overrides the environment",
+        "config.py",
+        "    if name in os.environ:\n"
+        "        return os.environ[name]\n"
+        "    return _FILE_VALUES.get(name, default)",
+        "    if name in _FILE_VALUES:\n"
+        "        return _FILE_VALUES[name]\n"
+        "    return os.environ.get(name, default)",
+        "CI and a one-off override could no longer change a setting the store committed",
+        (
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_the_environment_overrides_the_file",
+        ),
+    ),
+    Mutation(
+        "settings file: an unknown key is accepted",
+        "config.py",
+        "    if key not in settings_keys():\n",
+        "    if False:\n",
+        "a misspelt setting is read and ignored, so the store builds the poorer layer "
+        "with a file that appears to prevent it",
+        ("test_settings_file.TheFileIsRefused.test_an_unknown_key_fails_naming_it",),
+    ),
+    Mutation(
+        "settings file: a secret-looking key is accepted",
+        "config.py",
+        "    if key.endswith(_SECRET_KEY_ENDINGS):\n",
+        "    if False:\n",
+        "`KSB_TRACKER_TOKEN` is a setting the library reads, so a committed tracker "
+        "token would be accepted and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_looking_key_fails_even_when_the_library_reads_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a secret-shaped value is accepted",
+        "config.py",
+        "\n_check_values(SETTINGS_FILE_PATH, _FILE_VALUES)\n",
+        "\n",
+        "a token pasted under an innocent key is committed and published with the store",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_secret_shaped_value_fails_without_printing_it",
+        ),
+    ),
+    Mutation(
+        "settings file: a value that is not a string is accepted",
+        "config.py",
+        "    if not isinstance(value, str):\n",
+        "    if False:\n",
+        '`KSB_UMBRELLA_REPOS = ["a"]` reaches a setting the environment only ever '
+        "gives a string, and the stage misreads it rather than the file being refused",
+        (
+            "test_settings_file.TheFileIsRefused.test_a_value_that_is_not_a_string_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: a table outside [settings] is accepted",
+        "config.py",
+        '        if name != "settings":\n',
+        "        if False:\n",
+        "a setting written under the wrong table is read and ignored, so it is as absent "
+        "as one never written - the #483 layer with a file that appears to prevent it",
+        (
+            "test_settings_file.TheFileIsRefused.test_anything_outside_the_settings_table_is_refused_by_name",
+        ),
+    ),
+    Mutation(
+        "settings file: KSB_ROOT is accepted",
+        "config.py",
+        '    if key == "KSB_ROOT":\n',
+        "    if False:\n",
+        "the file would name a root nothing honours - the root is what says where the "
+        "file is - and the store would build somewhere the operator did not expect",
+        ("test_settings_file.TheFileIsRefused.test_ksb_root_in_the_file_is_refused",),
+    ),
+    Mutation(
+        "settings file: the allowed keys miss annotated settings",
+        "config.py",
+        "        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:\n",
+        "        elif False:\n",
+        "a setting the derivation misses is one the file refuses as unknown although "
+        "the library reads it",
+        (
+            "test_settings_file.TheAllowedKeysAreDerived.test_the_derivation_finds_every_key_config_reads",
+        ),
+    ),
+    Mutation(
+        "settings file: --version does not say which file was read",
+        "cli.py",
+        '        print(f"settings {config.describe_settings_file()}")\n',
+        "",
+        "a build log cannot say whether the store's committed settings were in force",
+        (
+            "test_settings_file.TheFileReadIsReported.test_a_store_without_the_file_says_so",
+            "test_settings_file.TheFileReadIsReported.test_version_and_status_name_the_file_and_its_keys_never_its_values",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: no summary line",
+        "build_relationships.py",
+        "        lines.append(f\"{_plural(unresolved, 'chart')} unresolved: {DECLARE}\")\n",
+        "        pass\n",
+        "#483: the run exited 0 and nothing above the per-chart lines said the layer "
+        "was incomplete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: --strict cannot fail",
+        "build_relationships.py",
+        "    if arguments.strict and unresolved_charts(layer):\n",
+        "    if False:\n",
+        "a store's gate passes a layer that leaves consumers out of `dependents`",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
+        ),
+    ),
+    Mutation(
+        "unresolved charts: the manifest carries no count",
+        "store_manifest.py",
+        '        _relationships_unresolved(root) if layers["relationships"]["present"] else None\n',
+        "        None\n",
+        "#483: the manifest marked the incomplete layer recognised and said nothing "
+        "else, so a reader served partial `dependents` as complete",
+        (
+            "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_manifest_carries_the_unresolved_count_the_stage_wrote",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_a_layer_added_to_a_copy_of_the_shape_needs_a_minor_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_hash_alone_cannot_be_updated_without_a_bump",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_matches_the_format_it_is_recorded_under",
+            "test_manifest_format_guard.TheManifestShapeIsGuarded.test_the_shape_names_what_a_reader_depends_on",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_an_empty_report_is_zero",
+            "test_store_manifest.RelationshipsUnresolvedCount.test_charts_are_counted_across_every_kind",
+        ),
+    ),
+    Mutation(
+        "answers-layer: the title is the file stem even when the file has a heading",
+        "build_answers_layer.py",
+        '        "title": first_heading(body) or path.stem,\n',
+        '        "title": path.stem,\n',
+        "every written answer would be served under its file name, so a search on the question its heading states would rank it by body text alone",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_two_files_give_two_entries_with_their_headings_and_sources",
+        ),
+    ),
+    Mutation(
+        "answers-layer: a file with no heading gets an empty title",
+        "build_answers_layer.py",
+        '        "title": first_heading(body) or path.stem,\n',
+        '        "title": first_heading(body) or "",\n',
+        "a heading-less answer would be served with nothing to name it",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_a_file_with_no_heading_takes_its_title_from_its_stem",
+        ),
+    ),
+    Mutation(
+        "answers-layer: the commit date overrides the front-matter date",
+        "build_answers_layer.py",
+        '    as_of = fields.get("date") or (committed[0] if committed else None)\n',
+        '    as_of = (committed[0] if committed else None) or fields.get("date")\n',
+        "an answer written about an earlier state and committed later would read as true at its commit, which is the point-in-time claim #476 exists to make honest",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_front_matter_date_wins_over_the_commit_date",
+        ),
+    ),
+    Mutation(
+        "answers-layer: as_of is the author date, not the commit date",
+        "build_answers_layer.py",
+        '"--format=%H%x1f%cI"',
+        '"--format=%H%x1f%aI"',
+        "a rebased or cherry-picked answer would carry the date it was first drafted, not the date it entered the store",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_without_front_matter_the_last_commit_date_and_sha_are_used",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an uncommitted file is attributed to the last commit in the repository",
+        "build_answers_layer.py",
+        '"--", path.name]',
+        "]",
+        "a draft never committed would carry the SHA of an unrelated commit, which does not hold it",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_an_uncommitted_file_with_a_front_matter_date_has_no_commit",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an undated answer is written",
+        "build_answers_layer.py",
+        "    if not as_of:\n        return None\n",
+        "    if False:\n        return None\n",
+        "an answer with no date and no commit would be served with a null as_of and read as today's knowledge",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_file_with_neither_a_date_nor_a_commit_is_refused",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an id the server skips is written",
+        "build_answers_layer.py",
+        "        if not plain_segment(answer_id):\n",
+        "        if False:\n",
+        "a file in a subdirectory gives an id with a slash, which the server skips without telling the store, so the answer is published and never served",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_an_id_the_server_would_skip_is_refused_and_nothing_is_written",
+        ),
+    ),
+    Mutation(
+        "answers-layer: an empty directory writes an empty layer",
+        "build_answers_layer.py",
+        "    if not files:\n",
+        "    if False:\n",
+        "a mistyped --markdown writes {}, which the manifest records as a present answers layer and the server serves as nothing",
+        ("test_build_answers_layer.OneEntryPerFile.test_a_directory_with_no_markdown_is_refused",),
+    ),
+    Mutation(
+        "answers-layer: the front matter is served in the html",
+        "build_answers_layer.py",
+        '        "html": markdown_to_html(body),\n',
+        '        "html": markdown_to_html(path.read_text(encoding="utf-8")),\n',
+        "an answer's front matter would be rendered as a paragraph at the top of every served body",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_front_matter_date_wins_over_the_commit_date",
+        ),
+    ),
+    Mutation(
+        "answers-layer: entries are written in file-system order",
+        "build_answers_layer.py",
+        '    files = sorted(p for p in source_dir.resolve().rglob("*.md") if p.is_file())\n',
+        '    files = sorted((p for p in source_dir.resolve().rglob("*.md") if p.is_file()), reverse=True)\n',
+        "two builds on different file systems would order the ids differently and write different bytes from one commit (CLAUDE.md 1.3)",
+        ("test_build_answers_layer.Determinism.test_two_runs_at_one_commit_write_identical_bytes",),
+    ),
+    Mutation(
+        "answers-layer: git's Z spelling of UTC is passed through",
+        "build_answers_layer.py",
+        '    if date.endswith("Z"):\n',
+        "    if False:\n",
+        "newer git writes UTC as Z and older git as +00:00, so one commit would give different bytes on two machines",
+        (
+            "test_build_answers_layer.WhenEachAnswerWasWritten.test_a_utc_commit_date_is_spelled_one_way_whatever_git_wrote",
+        ),
+    ),
+    Mutation(
+        "answers-layer: source is the absolute path",
+        "build_answers_layer.py",
+        "        written = entry(path, path.relative_to(root).as_posix(), run)\n",
+        "        written = entry(path, path.as_posix(), run)\n",
+        "the server drops a source that is not a relative path of plain segments, so no served answer would say where it came from",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_two_files_give_two_entries_with_their_headings_and_sources",
+            "test_build_answers_layer.TheServerReadsIt.test_every_entry_has_the_shape_the_server_reads",
+        ),
+    ),
+    Mutation(
+        "answers-layer: a file outside the store root ends in a traceback or a foreign source",
+        "build_answers_layer.py",
+        "        if root not in path.parents:\n",
+        "        if False:\n",
+        "a --markdown outside the store would either crash on relative_to or publish a source no clone holds",
+        ("test_build_answers_layer.OneEntryPerFile.test_a_directory_outside_the_store_is_refused",),
+    ),
+    Mutation(
+        "check-plugin stops requiring the uvx command",
+        "check_plugin.py",
+        '    if server.get("command") != "uvx":',
+        "    if False:",
+        "#480: a plugin launching through any other command passes, and every asker's assistant fails to start the server",
+        ("test_check_plugin.PluginGateTest.test_a_command_other_than_uvx_fails",),
+    ),
+    Mutation(
+        "check-plugin accepts a floating ref as if it were a tag",
+        "check_plugin.py",
+        "_tag_key(source[len(prefix) :])):",
+        "source[len(prefix) :]):",
+        "#480: `@main` or `@latest` passes the pin check, so askers run a server nobody chose",
+        ("test_check_plugin.PluginGateTest.test_a_floating_or_missing_ref_fails",),
+    ),
+    Mutation(
+        "check-plugin stops comparing --store-id with the manifest",
+        "check_plugin.py",
+        "    elif declared != wanted:",
+        "    elif False:",
+        "#480: the wrong id passes and the failure shows only when an asker's assistant starts, naming a missing clone",
+        (
+            "test_check_plugin.PluginGateTest.test_a_store_id_that_differs_from_the_manifest_fails_naming_both",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops refusing a root .mcp.json",
+        "check_plugin.py",
+        "(root / MCP_JSON).exists()",
+        "False",
+        "#480: a root .mcp.json also loads as project configuration for anyone working in the repository",
+        (
+            "test_check_plugin.PluginGateTest.test_a_root_mcp_json_at_the_repository_root_fails_even_when_correct",
+        ),
+    ),
+    Mutation(
+        "check-plugin never reads the plugin.json declaration",
+        "check_plugin.py",
+        "        if manifest.is_file():",
+        "        if False:",
+        "#480: a store whose plugin root is the repository root declares the server in plugin.json, and is reported as declaring none",
+        (
+            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops warning about an older pinned tag",
+        "check_plugin.py",
+        "if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):",
+        "if False:",
+        "#480: a store pinned behind the documented tag is told nothing",
+        ("test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",),
+    ),
+    Mutation(
+        "check-plugin warns about a newer pinned tag instead of an older one",
+        "check_plugin.py",
+        "if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):",
+        "if _tag_key(tag) > _tag_key(DOCUMENTED_TAG):",
+        "#480: the comparison points the wrong way, so a store ahead of the library is nagged and one behind it is not",
+        (
+            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
+            "test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",
+        ),
+    ),
+    Mutation(
+        "check-plugin reports failures and exits 0",
+        "check_plugin.py",
+        '        return 1\n    print(f"{plugin}: launches',
+        '        return 0\n    print(f"{plugin}: launches',
+        "#480: the reasons scroll past in a green run and nothing chaining on the stage stops",
+        (
+            "test_check_plugin.PluginGateTest.test_a_build_id_that_differs_from_the_manifest_fails_naming_both",
+            "test_check_plugin.PluginGateTest.test_a_command_other_than_uvx_fails",
+            "test_check_plugin.PluginGateTest.test_a_floating_or_missing_ref_fails",
+            "test_check_plugin.PluginGateTest.test_a_missing_manifest_fails_rather_than_passing_unchecked",
+            "test_check_plugin.PluginGateTest.test_a_missing_or_absent_layer_fails_naming_it",
+            "test_check_plugin.PluginGateTest.test_a_missing_store_id_fails",
+            "test_check_plugin.PluginGateTest.test_a_relationships_layer_that_is_not_recognised_fails",
+            "test_check_plugin.PluginGateTest.test_a_root_mcp_json_at_the_repository_root_fails_even_when_correct",
+            "test_check_plugin.PluginGateTest.test_a_store_id_that_differs_from_the_manifest_fails_naming_both",
+            "test_check_plugin.PluginGateTest.test_no_declaration_at_all_fails",
+            "test_check_plugin.PluginGateTest.test_no_from_fails",
+            "test_check_plugin.PluginGateTest.test_no_knowledge_store_server_fails",
+        ),
+    ),
+    Mutation(
+        "check-plugin reads --store-id=value as absent",
+        "check_plugin.py",
+        'elif isinstance(argument, str) and argument.startswith(flag + "="):',
+        "elif False:",
+        "#480: a plugin writing the option with an equals sign is refused for omitting it",
+        ("test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",),
+    ),
+    Mutation(
+        "check-plugin accepts a launch with no --store-id",
+        "check_plugin.py",
+        "    if declared is None:",
+        "    if False:",
+        "#480: a server launched without a store id cannot resolve a clone and serves nothing",
+        ("test_check_plugin.PluginGateTest.test_a_missing_store_id_fails",),
+    ),
+    Mutation(
+        "renderer: a fenced block is read as a paragraph",
+        "build_topic_briefs.py",
+        '        if stripped.startswith("```"):\n',
+        "        if False:\n",
+        "nine of fifteen findings in one store's answers used fences - Mermaid diagrams and code excerpts - and each collapsed into one paragraph",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_with_a_language_keeps_its_lines_and_names_the_language",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_without_a_language_has_no_class",
+            "test_build_topic_briefs.MarkdownTest.test_a_language_that_is_not_a_plain_word_gets_no_class",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: a fenced block's content is not escaped",
+        "build_topic_briefs.py",
+        '    body = html.escape("\\n".join(code), quote=False)\n',
+        '    body = "\\n".join(code)\n',
+        "a `<script>` in a code excerpt would reach a served answer and the explorer page as markup",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: a fenced block loses its newlines",
+        "build_topic_briefs.py",
+        '    body = html.escape("\\n".join(code), quote=False)\n',
+        '    body = html.escape(" ".join(code), quote=False)\n',
+        "a diagram or code excerpt would be served as one line, which neither a reader nor Mermaid can use",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_escapes_its_content_and_renders_nothing_inside_it",
+            "test_build_topic_briefs.MarkdownTest.test_a_fence_with_a_language_keeps_its_lines_and_names_the_language",
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "renderer: any text after the fence becomes the language class",
+        "build_topic_briefs.py",
+        '    attribute = f\' class="language-{language}"\' if _FENCE_LANGUAGE.fullmatch(language) else ""\n',
+        '    attribute = f\' class="language-{language}"\' if language else ""\n',
+        "a quote after the opening fence would close the attribute and turn the rest of the line into markup",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_a_language_that_is_not_a_plain_word_gets_no_class",
+        ),
+    ),
+    Mutation(
+        "renderer: a paragraph runs on over a fence",
+        "build_topic_briefs.py",
+        '    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\\||- |```)", lines[i].strip()):\n',
+        '    while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\\||- )", lines[i].strip()):\n',
+        "a fence written straight after a paragraph line, with no blank line, would be folded into the paragraph and rendered as prose",
+        (
+            "test_build_topic_briefs.MarkdownTest.test_an_unterminated_fence_runs_to_the_end_and_stays_escaped",
+        ),
+    ),
+    Mutation(
+        "answers-layer: other files in the directory are skipped in silence",
+        "build_answers_layer.py",
+        "    if others:\n",
+        "    if False:\n",
+        "a store holding .html or .json answers beside its Markdown would assume they were served",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_files_that_are_not_markdown_are_named_as_skipped",
+        ),
+    ),
+    Mutation(
+        "answers-layer: Markdown files are reported as skipped",
+        "build_answers_layer.py",
+        ' and path.suffix != ".md"',
+        "",
+        "every run would report the answers it served as skipped, and the line would stop meaning anything",
+        (
+            "test_build_answers_layer.OneEntryPerFile.test_files_that_are_not_markdown_are_named_as_skipped",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops requiring the index and relationships layers",
+        "check_plugin.py",
+        "        elif not present:",
+        "        elif False:",
+        "a store whose manifest records the index or relationships layer as missing launches a server that answers from a fallback or not at all",
+        ("test_check_plugin.PluginGateTest.test_a_missing_or_absent_layer_fails_naming_it",),
+    ),
+    Mutation(
+        "check-plugin reads a present relationships layer as readable without recognition",
+        "check_plugin.py",
+        '        elif name == "relationships" and layer.get("recognised") is not True:',
+        "        elif False:",
+        "a relationships layer whose format the library does not recognise passes on `present` alone",
+        (
+            "test_check_plugin.PluginGateTest.test_a_relationships_layer_that_is_not_recognised_fails",
+        ),
+    ),
+    Mutation(
+        "check-plugin reads a layer not recorded as present",
+        "check_plugin.py",
+        "        if present is None:",
+        "        if False:",
+        "`present: null` fails (or passes) instead of warning that the layer was never measured",
+        (
+            "test_check_plugin.PluginGateTest.test_a_layer_not_recorded_warns_and_never_passes_silently",
+        ),
+    ),
+    Mutation(
+        "check-plugin stops comparing the build id with the manifest",
+        "check_plugin.py",
+        "    if wanted is not None and building != wanted:",
+        "    if False:",
+        "a store ran the check with a different KSB_STORE_ID set and it passed, so the next manifest run writes an id the plugin does not ask for",
+        (
+            "test_check_plugin.PluginGateTest.test_a_build_id_that_differs_from_the_manifest_fails_naming_both",
+        ),
+    ),
+    Mutation(
+        "check-plugin compares an undeclared build id as an empty id",
+        "check_plugin.py",
+        "    if not building:\n        return\n",
+        "    if False:\n        return\n",
+        "a store that declares no build id is failed against an empty string",
+        (
+            "test_check_plugin.PluginGateTest.test_a_layer_not_recorded_warns_and_never_passes_silently",
+            "test_check_plugin.PluginGateTest.test_a_newer_tag_than_documented_does_not_warn",
+            "test_check_plugin.PluginGateTest.test_a_plugin_json_declaration_at_the_repository_root_passes_by_default",
+            "test_check_plugin.PluginGateTest.test_a_subdirectory_plugin_may_carry_an_mcp_json_beside_a_root_without_one",
+            "test_check_plugin.PluginGateTest.test_an_mcp_json_declaration_that_agrees_passes_and_names_tag_and_id",
+            "test_check_plugin.PluginGateTest.test_an_older_tag_warns_but_passes",
+            "test_check_plugin.PluginGateTest.test_an_unset_or_blank_build_id_is_skipped_silently",
+            "test_check_plugin.PluginGateTest.test_options_written_with_equals_are_read",
+        ),
+    ),
+    Mutation(
+        "check-plugin reads the build id from the environment instead of config",
+        "check_plugin.py",
+        "    building = config.STORE_ID.strip()",
+        '    building = __import__("os").environ.get("KSB_STORE_ID", "").strip()',
+        "a CI step that does not source the environment, or a build id config resolves from elsewhere, is invisible to the check although the build would use it",
+        (
+            "test_check_plugin.PluginGateTest.test_a_build_id_that_differs_from_the_manifest_fails_naming_both",
         ),
     ),
 )
