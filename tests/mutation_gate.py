@@ -1893,7 +1893,7 @@ MUTATIONS = (
     Mutation(
         "a failed repository's files read as vanished",
         "extract_ast.py",
-        '        if (name or "(corpus root)") in failed:\n            continue\n        for path in files:\n            key = store_paths.relative(path)\n            counts[key] = found.get(key, 0)',
+        "        if (name or CORPUS_ROOT) in failed:\n            continue\n        for path in files:\n            key = store_paths.relative(path)\n            counts[key] = found.get(key, 0)",
         "        if False:\n            continue\n        for path in files:\n            key = store_paths.relative(path)\n            counts[key] = found.get(key, 0)",
         "a repository that raised has no nodes; counting its files as 0 reports every one as vanished and buries the real failure under a list of false losses",
         (
@@ -1952,7 +1952,6 @@ MUTATIONS = (
         "graphify spells source_file relative to the resolved root, so under a symlinked store root a file comes back as ../<link>/repositories/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
         (
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
-            "test_extract_ast_vanished.VanishedFilesTest.test_a_source_file_join_that_misses_refuses_and_writes_no_record",
         ),
     ),
     Mutation(

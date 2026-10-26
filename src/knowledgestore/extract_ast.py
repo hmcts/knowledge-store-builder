@@ -176,10 +176,15 @@ import signal
 import sys
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import apply_ignores, config, content_set, export_git_history, io, store_paths
 from .build_store_manifest import write_atomically
+
+# How a file outside every repository is grouped and labelled: as a group of its own
+# rather than dropped, so the stage's count still reconciles with its input.
+CORPUS_ROOT = "(corpus root)"
 
 # The kinds `detect` classifies that hold parseable source. `paper`, `image` and
 # `video` are content the semantic layer reads and the AST parser cannot, so
@@ -425,6 +430,61 @@ def declined_path(name: str, entry: str) -> str:
     return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
 
 
+@dataclass
+class _EstateRun:
+    """What `extract_estate` accumulates across repositories, in the order it returns it."""
+
+    nodes: list = field(default_factory=list)
+    edges: list = field(default_factory=list)
+    failures: "list[tuple[str, str]]" = field(default_factory=list)
+    counts: "dict[str, int]" = field(default_factory=dict)
+    skipped: "list[str]" = field(default_factory=list)
+    declined: "set[str]" = field(default_factory=set)
+    unbounded_reported: bool = False
+
+
+def _bounded_extract(extractor, files: "list[Path]", root: Path, timeout: int, run: _EstateRun):
+    """One repository's extract call, under the per-repository time limit."""
+    with repository_time_limit(timeout) as bounded:
+        if timeout > 0 and not bounded and not run.unbounded_reported:
+            # Once, not per repository: a limit that could not be installed
+            # is a fact about the platform, and repeating it per repository
+            # buries the failures it sits among.
+            print(
+                f"  (no per-repository time limit available here; --timeout "
+                f"{timeout} is not in force)",
+                file=sys.stderr,
+            )
+            run.unbounded_reported = True
+        return extractor(files, cache_root=root)
+
+
+def _progress_note(unread: "list[str]", found: int, previous: "int | None") -> str:
+    """The tail of a repository's progress line: files unread, and a decrease as measured."""
+    note = f"  {len(unread):>4,} unread" if unread else ""
+    if previous is not None and found < previous:
+        note += f"  down from {previous:,}"
+    return note
+
+
+def _absorb(result: dict, name: str, label: str, run: _EstateRun) -> "tuple[int, int, list[str]]":
+    """Fold one repository's result into the run: (nodes, edges, unread) for its line."""
+    found = result.get("nodes") or []
+    relations = result.get("edges") or []
+    # The extractor names every file it could not read, and until this line the
+    # stage discarded that. A repository can return successfully having parsed
+    # none of its files: the per-file handler catches, records, and carries on,
+    # so "extracted" and "extracted anything" are different facts and only one
+    # of them was being reported.
+    unread = [str(f) for f in (result.get("failed_sources") or [])]
+    run.skipped.extend(unread)
+    run.declined.update(declined_path(name, str(f)) for f in result.get("skipped_sources") or [])
+    run.nodes.extend(found)
+    run.edges.extend(relations)
+    run.counts[label] = len(found)
+    return len(found), len(relations), unread
+
+
 def extract_estate(
     groups: "dict[str, list[Path]]",
     extractor,
@@ -449,75 +509,38 @@ def extract_estate(
     counts and failures so far and the labels not yet reached - which is what lets
     an interrupted run keep what it measured.
     """
-    nodes: list = []
-    edges: list = []
-    failures: list[tuple[str, str]] = []
-    counts: dict[str, int] = {}
-    skipped: list[str] = []
-    declined: set[str] = set()
+    run = _EstateRun()
     width = max((len(name) for name in groups), default=1)
-    unbounded_reported = False
     ordered = sorted(groups.items())
-    labels = [name or "(corpus root)" for name, _ in ordered]
+    labels = [name or CORPUS_ROOT for name, _ in ordered]
     for position, (name, files) in enumerate(ordered):
         label = labels[position]
-        pending = labels[position + 1 :]
         started = time.monotonic()
         try:
-            with repository_time_limit(timeout) as bounded:
-                if timeout > 0 and not bounded and not unbounded_reported:
-                    # Once, not per repository: a limit that could not be installed
-                    # is a fact about the platform, and repeating it per repository
-                    # buries the failures it sits among.
-                    print(
-                        f"  (no per-repository time limit available here; --timeout "
-                        f"{timeout} is not in force)",
-                        file=sys.stderr,
-                    )
-                    unbounded_reported = True
-                result = extractor(files, cache_root=root)
+            result = _bounded_extract(extractor, files, root, timeout, run)
         except RepositoryTimeout as error:
             # A timeout is a failure, not a separate outcome: named, counted, the
             # partial layer kept, and the exit code carries it. The only reason to
             # tell them apart at all is that the operator's next action differs.
-            failures.append((label, f"TIMED OUT: {error}"))
+            run.failures.append((label, f"TIMED OUT: {error}"))
             print(f"  {label:<{width}}  TIMED OUT  {error}", file=sys.stderr)
-            if checkpoint:
-                checkpoint(counts, failures, pending)
-            continue
         except Exception as error:  # a parser raises whatever the grammar raises
             # Named and counted, never fatal: on a large estate one unparseable
             # repository must not cost the other several hundred.
-            failures.append((label, str(error)))
+            run.failures.append((label, str(error)))
             print(f"  {label:<{width}}  FAILED  {error}", file=sys.stderr)
-            if checkpoint:
-                checkpoint(counts, failures, pending)
-            continue
-        found = result.get("nodes") or []
-        relations = result.get("edges") or []
-        # The extractor names every file it could not read, and until this line the
-        # stage discarded that. A repository can return successfully having parsed
-        # none of its files: the per-file handler catches, records, and carries on,
-        # so "extracted" and "extracted anything" are different facts and only one
-        # of them was being reported.
-        unread = [str(f) for f in (result.get("failed_sources") or [])]
-        skipped.extend(unread)
-        declined.update(declined_path(name, str(f)) for f in result.get("skipped_sources") or [])
-        nodes.extend(found)
-        edges.extend(relations)
-        counts[label] = len(found)
-        elapsed = time.monotonic() - started
-        note = f"  {len(unread):>4,} unread" if unread else ""
-        previous = (before or {}).get(label)
-        if previous is not None and len(found) < previous:
-            note += f"  down from {previous:,}"
-        print(
-            f"  {label:<{width}}  {len(files):>6,} files  {len(found):>7,} nodes  "
-            f"{len(relations):>7,} edges  {elapsed:6.1f}s{note}"
-        )
+        else:
+            found, relations, unread = _absorb(result, name, label, run)
+            elapsed = time.monotonic() - started
+            note = _progress_note(unread, found, (before or {}).get(label))
+            print(
+                f"  {label:<{width}}  {len(files):>6,} files  {found:>7,} nodes  "
+                f"{relations:>7,} edges  {elapsed:6.1f}s{note}"
+            )
         if checkpoint:
-            checkpoint(counts, failures, pending)
-    return {"nodes": nodes, "edges": edges}, failures, counts, skipped, declined
+            checkpoint(run.counts, run.failures, labels[position + 1 :])
+    layer = {"nodes": run.nodes, "edges": run.edges}
+    return layer, run.failures, run.counts, run.skipped, run.declined
 
 
 # The share of `source_file`-bearing nodes that must match a content-set file before
@@ -549,6 +572,17 @@ def file_counts_path(layer: Path) -> Path:
     return layer.with_name(f"{layer.stem}_file_counts.json")
 
 
+def _nodes_by_source(layer: dict) -> "dict[str, int]":
+    """Nodes per content-set key, from each node's `source_file`; nodes without one skipped."""
+    found: dict[str, int] = {}
+    for node in layer["nodes"]:
+        source = node.get("source_file") if isinstance(node, dict) else None
+        if isinstance(source, str) and source:
+            key = source_key(source)
+            found[key] = found.get(key, 0) + 1
+    return found
+
+
 def nodes_per_file(
     layer: dict, groups: "dict[str, list[Path]]", failures: list
 ) -> "tuple[dict[str, int], int, int, str]":
@@ -562,16 +596,11 @@ def nodes_per_file(
     Also returns how many `source_file`-bearing nodes there were, how many of them
     matched a counted file, and the first that did not - the instrument check.
     """
-    found: dict[str, int] = {}
-    for node in layer["nodes"]:
-        source = node.get("source_file") if isinstance(node, dict) else None
-        if isinstance(source, str) and source:
-            key = source_key(source)
-            found[key] = found.get(key, 0) + 1
+    found = _nodes_by_source(layer)
     failed = {label for label, _ in failures}
     counts: dict[str, int] = {}
     for name, files in groups.items():
-        if (name or "(corpus root)") in failed:
+        if (name or CORPUS_ROOT) in failed:
             continue
         for path in files:
             key = store_paths.relative(path)
@@ -611,7 +640,7 @@ def file_record(
     carried = {
         key: before[key]
         for name, files in groups.items()
-        if (name or "(corpus root)") in failed
+        if (name or CORPUS_ROOT) in failed
         for key in (store_paths.relative(path) for path in files)
         if key in before
     }
@@ -848,6 +877,14 @@ def check_declared(groups: "dict[str, list[Path]]") -> "list[str]":
     ]
 
 
+def _read_file_record(path: Path) -> "dict[str, int] | None":
+    """Last run's per-file counts, or None when there was no last run."""
+    stored = io.read_json(path, default=None)
+    if not isinstance(stored, dict):
+        return None
+    return {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
+
+
 def instrument_refusal(sourced: int, matched: int, stray: str) -> str:
     """The refusal when the `source_file` join does not hold, or "" when it does."""
     if matched >= sourced * MATCHED_SHARE:
@@ -885,12 +922,7 @@ def vanished_report(
     if refusal:
         print(refusal, file=sys.stderr)
         return True
-    stored = io.read_json(path, default=None)
-    previous = (
-        {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
-        if isinstance(stored, dict)
-        else None
-    )
+    previous = _read_file_record(path)
     vanished = vanished_files(previous or {}, now)
     accepted = {store_paths.relative(p) for p in allow}
     refused = [(file, count) for file, count in vanished if file not in accepted]
