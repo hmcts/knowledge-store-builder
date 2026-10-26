@@ -125,8 +125,8 @@ with how often it is referenced and every repository that references it.
   none is recorded), and `extra`, copied from `extra/<repo>.json` when the store
   writes one. The stage never interprets `extra`.
 - `repository-dependencies.json`: every edge with both ends, the unresolved
-  targets, `conflicts`, and `unresolved_conflicts` (charts no rule chooses a
-  repository for, below). Its top level opens with
+  targets, `conflicts`, and `unresolved_conflicts` (charts, Maven coordinates
+  and npm packages no rule chooses a repository for, below). Its top level opens with
   `"format": {"layer": "relationships", "major": 1, "minor": 1}`, the stamp that
   says whose layer this is: major changes for an incompatible change, minor for an
   addition. A reader refuses a file with no stamp or another major, so a store's
@@ -191,9 +191,20 @@ after it. Declare the wrapper in `KSB_UMBRELLA_REPOS`, or set
 is not listed.
 
 A `Chart.yaml` under another chart's `charts/` directory is a vendored copy of a
-dependency, and is neither published nor read. When two clones publish one Maven
-coordinate or npm package, the first by name wins and both are listed under
-`conflicts`. A Terraform GitHub source belongs to the estate only when its
+dependency, and is neither published nor read.
+
+**A Maven coordinate or npm package resolves** to the one clone publishing it
+that is not a declared fork (`KSB_FORK_REPOS`), else to the one fork publishing
+it. A fork is a repository that copies another and publishes its coordinates.
+Like a chart, a coordinate is never resolved by name order: when several clones
+that are not forks publish it, or several forks and nothing else, it is listed
+under `unresolved_conflicts` with every candidate, and each reference to it is
+counted under `skipped` as `ambiguous`. Declare the copies in `KSB_FORK_REPOS`
+and the conflict resolves. `KSB_CHART_REPO_PATTERN` names chart repositories
+only, and settles no coordinate. `conflicts` lists only a store's own kinds,
+which take the first by name.
+
+A Terraform GitHub source belongs to the estate only when its
 repository is a clone and its organisation is that clone's own, ignoring case. A
 clone's organisation is read from its clone URL in `config/repositories.txt`, so a
 store holding clones from several organisations matches each against its own. A
@@ -910,8 +921,8 @@ last by `knowledgestore manifest` and committed with the store.
   not recognised `!` with the reason beside it, and `knowledgestore status` names it
   on a `not recognised:` line, because consumers read it as absent until it is
   rebuilt with this library.
-  Its `unresolved_conflicts` counts the charts the layer left unresolved, across
-  every kind: `0` means every chart resolved, and `null` means the layer cannot
+  Its `unresolved_conflicts` counts the charts, Maven coordinates and npm
+  packages the layer left unresolved, across every kind: `0` means every one resolved, and `null` means the layer cannot
   say - absent, not recognised, or written before the field existed (format 1.2).
 - **Present means a clone receives it.** Measured when the manifest is
   computed, from files git would commit: a path a `.gitignore` rule ignores does

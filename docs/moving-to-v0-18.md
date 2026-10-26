@@ -87,6 +87,7 @@ Do these in order, then tell your askers to follow [For askers](#for-askers).
    [The relationships layer](how-it-works.md#the-relationships-layer), and the
    file's rules under
    [Commit the store's settings](configuring-a-store.md#commit-the-stores-settings).
+   Declare forks in `KSB_FORK_REPOS` before running `relationships`.
 
    ```toml
    # config/knowledgestore.toml

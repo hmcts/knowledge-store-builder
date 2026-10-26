@@ -1202,8 +1202,8 @@ class Layer:
     `dependencies` is the `repository-dependencies.json` body, `by_repo` each
     `by-repo/<repo>.json` body, `kinds` the `kinds.json` body. `conflicts` is
     `{kind: {target: [repositories]}}`, the first of which was chosen;
-    `unresolved_conflicts` has the same shape, for a chart no rule chooses between
-    its repositories, so none was chosen; `skipped` is
+    `unresolved_conflicts` has the same shape, for a chart, Maven coordinate or npm
+    package no rule chooses between its repositories, so none was chosen; `skipped` is
     `{kind: {reason: count}}`; `unreadable` names each file a parser could not read,
     store-relative.
     """
@@ -1325,28 +1325,38 @@ class _Unresolved:
     referenced_by: set = field(default_factory=set)
 
 
+# The kinds never resolved by name order (#475, #478). A target several clones of
+# one of these kinds define goes to the one that is not passed over (`_choose`),
+# and otherwise to nobody. Every other kind - a store's own - keeps the first by
+# name.
+NEVER_BY_NAME = frozenset({"helm_chart", "maven_artifact", "npm_package"})
+
+
 def _choose(
-    kind: str, published: dict[str, list[str]], umbrellas: Set[str]
+    kind: str, published: dict[str, list[str]], umbrellas: Set[str], forks: Set[str] = frozenset()
 ) -> tuple[dict[str, str], dict[str, list[str]], dict[str, list[str]]]:
     """For one kind: target -> the clone chosen to provide it; the conflicts
-    (masked target -> every candidate, the chosen one first); and the charts left
+    (masked target -> every candidate, the chosen one first); and the targets left
     unchosen (target, unmasked -> every candidate).
 
-    A chart goes to the one clone defining it that is not an umbrella, else to the
-    one umbrella defining it, and otherwise to nobody: a chart several clones
-    define resolves by name order to whichever sorts first, which moves when a
-    repository is renamed and silently captures the consumers of every chart a
-    wrapper republishes (#475). Every other kind keeps the first by name.
+    A target of a kind in `NEVER_BY_NAME` goes to the one clone defining it that is
+    not passed over - an umbrella for a chart, a fork for a Maven coordinate or an
+    npm package - else to the one passed-over clone defining it, and otherwise to
+    nobody: a target several clones define resolves by name order to whichever
+    sorts first, which moves when a repository is renamed and silently captures
+    the consumers of every chart a wrapper republishes (#475) and every coordinate
+    a fork copies (#478). Every other kind keeps the first by name.
     """
     chosen: dict[str, str] = {}
     conflicts: dict[str, list[str]] = {}
     unchosen: dict[str, list[str]] = {}
+    # An umbrella bundles other repositories' charts and owns none of them; a fork
+    # republishes its original's coordinates and owns none of them.
+    passed_over = umbrellas if kind == "helm_chart" else forks
     for target, repos in sorted(published.items()):
-        # Only the chart resolver knows umbrellas: an umbrella bundles other
-        # repositories' charts, and is the owner of none of them.
-        own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos
+        own = [r for r in repos if r not in passed_over] if kind in NEVER_BY_NAME else repos
         candidates = own or repos
-        if kind == "helm_chart" and len(candidates) > 1:
+        if kind in NEVER_BY_NAME and len(candidates) > 1:
             unchosen[target] = candidates
             continue
         chosen[target] = candidates[0]
@@ -1366,6 +1376,7 @@ class _Resolver:
         pattern: str,
         umbrellas: Set[str],
         publishers: dict[str, dict[str, list[str]]],
+        forks: Set[str] = frozenset(),
     ) -> None:
         self.estate = frozenset(orgs)
         self.orgs = orgs
@@ -1375,29 +1386,33 @@ class _Resolver:
         self.conflicts: dict[str, dict[str, list[str]]] = {}
         self.unchosen: dict[str, dict[str, list[str]]] = {}
         for kind, published in publishers.items():
-            self.chosen[kind], conflicts, unchosen = _choose(kind, published, umbrellas)
+            self.chosen[kind], conflicts, unchosen = _choose(kind, published, umbrellas, forks)
             if conflicts:
                 self.conflicts[kind] = conflicts
             # A chart the naming pattern settles is no conflict: step 1 decides it
-            # before any definition is consulted.
+            # before any definition is consulted. The pattern names chart
+            # repositories only, so it settles no other kind's target.
             unchosen = {
                 target: candidates
                 for target, candidates in unchosen.items()
-                if not (pattern and pattern.format(name=target) in self.estate)
+                if not (
+                    kind == "helm_chart" and pattern and pattern.format(name=target) in self.estate
+                )
             }
             if unchosen:
                 self.unchosen[kind] = unchosen
 
     @property
     def unresolved_conflicts(self) -> dict[str, dict[str, list[str]]]:
-        """`{kind: {masked target: [candidates]}}` for every chart left unchosen."""
+        """`{kind: {masked target: [candidates]}}` for every chart, Maven coordinate
+        or npm package left unchosen."""
         return {
             kind: {secret_mask.mask(target): repos for target, repos in targets.items()}
             for kind, targets in self.unchosen.items()
         }
 
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
-        """`("edge", provider)`, `("self", "")`, `("ambiguous", "")` for a chart
+        """`("edge", provider)`, `("self", "")`, `("ambiguous", "")` for a target
         several clones define and no rule chooses between, or
         `("unresolved", target key)`."""
         if ref.resolved_repo is not None:
@@ -1521,8 +1536,8 @@ def _check_references(kind: Kind, clone: Path, rel: str, found: object) -> None:
 
 
 UNREADABLE = "unreadable"
-# The skip reason for a reference to a chart several clones define with no rule to
-# choose between them (`unresolved_conflicts`).
+# The skip reason for a reference to a target several clones define with no rule
+# to choose between them (`unresolved_conflicts`).
 AMBIGUOUS = "ambiguous"
 
 
@@ -1666,6 +1681,7 @@ def build(
     examples: int,
     urls: SourceUrls | None,
     extra_dir: Path,
+    forks: Set[str] = frozenset(),
 ) -> Layer:
     """The layer for these clones, in memory. Nothing is written.
 
@@ -1675,15 +1691,18 @@ def build(
     `umbrellas` are repositories that bundle other repositories' charts; `examples`
     caps the example lines per edge and nothing else; `urls` links each example and
     names each repository's commit, or None for a store with no provenance;
-    `extra_dir` holds the store's `<repo>.json` inputs for `extra`.
-    Raises `KindError` when a parser fails, and `ValueError` for an unreadable
+    `extra_dir` holds the store's `<repo>.json` inputs for `extra`; `forks` are
+    repositories that republish another repository's Maven coordinates or npm
+    packages. Raises `KindError` when a parser fails, and `ValueError` for an unreadable
     `extra` input.
     """
     clones = sorted(clones, key=lambda clone: clone.name)
     names = [clone.name for clone in clones]
     publishers = {kind.name: _publishers(clones, kind) for kind in kinds}
     clone_urls = {name: urls.clone_url(name) for name in names} if urls is not None else {}
-    resolver = _Resolver(estate_orgs(names, clone_urls, org), chart_pattern, umbrellas, publishers)
+    resolver = _Resolver(
+        estate_orgs(names, clone_urls, org), chart_pattern, umbrellas, publishers, forks
+    )
     edges, unresolved, skipped, unreadable = _scan_layer(clones, kinds, resolver, root)
 
     flat, depends_on, depended_on_by = [], {}, {}

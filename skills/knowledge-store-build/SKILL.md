@@ -794,8 +794,10 @@ is printed as a conflict and left unresolved, never guessed: name the wrapper or
 set the pattern. The run then ends with `N charts unresolved: declare
 KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN`, and the manifest records the
 count. **Read that line**; run `relationships --strict` to make it exit 1 after
-writing the layer. A Maven coordinate or npm package two clones publish is printed
-and resolved to the first by name. It exits 1 on a parser failure, an
+writing the layer. A Maven coordinate or npm package two clones publish is
+left unresolved the same way, never guessed: declare the copies in
+`KSB_FORK_REPOS`, in the same file. The run then ends with `N coordinates
+unresolved: declare KSB_FORK_REPOS`. It exits 1 on a parser failure, an
 unreadable input, or a Flux `HelmRelease` without PyYAML (install the `deploy`
 extra), and 2 when it cannot write. A store whose clones declare a
 dependency the four built-in kinds do not read registers its own kind in
