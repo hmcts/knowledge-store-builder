@@ -1751,6 +1751,95 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a file that went to zero passes",
+        "extract_ast.py",
+        "        if count == 0 and before.get(path, 0) > 0\n",
+        "        if False\n",
+        "graphify extracted nothing from JSON Schema files using definitions or $defs, "
+        "with failed_sources empty, and the repository-level report saw only a decrease "
+        "- which it reports and never refuses. Nothing named the files (#492)",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+        ),
+    ),
+    Mutation(
+        "a vanished file is reported but never refused",
+        "extract_ast.py",
+        "    return not allowed\n",
+        "    return False\n",
+        "a loud report on a run that exits 0 is read by nobody in a chain; the files "
+        "the extractor stopped reading reach the committed layer as absent (#492)",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+        ),
+    ),
+    Mutation(
+        "a file graphify declined is reported as vanished",
+        "extract_ast.py",
+        'kind = "declined by graphify" if path in declined else "VANISHED"',
+        'kind = "VANISHED"',
+        "graphify 0.9.94 names files an extractor declines by design in skipped_sources; "
+        "calling them vanished sends an operator hunting a parser fault that is a "
+        "deliberate decision upstream",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+        ),
+    ),
+    Mutation(
+        "a file removed from the content set counts as vanished",
+        "extract_ast.py",
+        "        for path, count in now.items()\n        if count == 0 and before.get(path, 0) > 0\n",
+        "        for path, count in before.items()\n        if now.get(path, 0) == 0 and count > 0\n",
+        "comparing the record rather than this run's content set reads a deleted file as "
+        "lost data, so every legitimate removal fails the build and trains the operator "
+        "to pass --allow-vanished by reflex",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
+        ),
+    ),
+    Mutation(
+        "any per-file decrease fails the stage",
+        "extract_ast.py",
+        "        if count == 0 and before.get(path, 0) > 0\n",
+        "        if count < before.get(path, 0)\n",
+        "a shrinking file is the repository-level report's case, reported and never "
+        "refused because deleted code is legitimate; refusing on it makes the stage "
+        "unusable in a chain",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_shrank_but_kept_nodes_does_not_fail",
+        ),
+    ),
+    Mutation(
+        "the per-file record is never written",
+        "extract_ast.py",
+        "    write_counts(\n        path, file_record(",
+        "    (\n        path, file_record(",
+        "with no record the comparison has nothing to compare against, so the guard "
+        "reports a first run forever and never fails",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_shrank_but_kept_nodes_does_not_fail",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
+        ),
+    ),
+    Mutation(
+        "a refused vanish is taken as the new baseline",
+        "extract_ast.py",
+        "[] if allowed else vanished",
+        "[]",
+        "writing the zero after refusing makes the next run pass with nobody having "
+        "decided anything: re-running is then the way past the guard",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+        ),
+    ),
+    Mutation(
         "a lost grammar is certified present",
         "check_grammars.py",
         "    return done.returncode == 0",

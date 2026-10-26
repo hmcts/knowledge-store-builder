@@ -565,6 +565,25 @@ deleted code is a legitimate reason for a smaller layer. The counts are written 
 interrupted run keeps every count it measured, and a repository that went
 backwards says `down from N` on its own progress line.
 
+**It fails on a file that went to zero.** Each content-set file's node count is
+recorded in `graphify-out/.graphify_ast_file_counts.json`, by store-relative path.
+A file that produced nodes last run and produces none now, while still in the
+content set, is named with its previous count, and the run exits 1:
+
+```text
+  VANISHED  repositories/service-a/schema/order.json  (12 node(s) last run, 0 now)
+1 file(s) vanished, 12 node(s) lost.
+```
+
+A file graphify declined by design, which it lists in `skipped_sources` from
+0.9.94, is named `declined by graphify` instead, and fails the same way: declined is
+still lost data. Pass `--allow-vanished` when the change is intended, such as a
+file whose content legitimately emptied; the zero then becomes the record.
+Without it the previous count stands, so the next run fails again. A file removed
+from the content set is not a vanished one, and a file that shrank but kept nodes
+is left to the per-repository report above. The first run says it has no record
+and writes one.
+
 **It refuses before extracting when graphify cannot parse a file type the content
 set holds.** graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` files as nothing
 when its grammar package is absent, with no error, so a green run proves nothing

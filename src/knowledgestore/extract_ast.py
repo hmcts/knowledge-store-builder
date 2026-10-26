@@ -139,6 +139,23 @@ and the rest keep last run's. That replaces a completed repository's baseline
 before the end-of-run movement report prints, so its progress line names a
 decrease as it is measured - otherwise an interrupt would leave that decrease
 recorded nowhere.
+
+## A file that went to zero
+
+Beside the per-repository counts sits a per-file record, `<layer>_file_counts.json`:
+store-relative path to node count, sorted. A file that produced nodes last run and
+none now, while still in the content set, fails the run - unless `--allow-vanished`
+says the change is intended. That is a different event from a decrease, which is
+reported and never refused: the content is still there and the extractor stopped
+reading it. A consuming store met exactly that - graphify extracting nothing from
+JSON Schema files using `definitions` or `$defs`, with `failed_sources` empty - and
+nothing in the library noticed.
+
+graphify names files an extractor declined by design in `skipped_sources`, from
+0.9.94. Such a file is reported as declined rather than vanished, and fails all the
+same: declined is still lost data. Without `--allow-vanished` a vanished file keeps
+its previous count in the record, so the next run fails again rather than taking
+the zero as the new baseline.
 """
 
 from __future__ import annotations
@@ -383,6 +400,19 @@ def write_counts(path: Path, counts: "dict[str, int]") -> None:
     write_atomically(path, json.dumps(counts, ensure_ascii=False))
 
 
+def declined_path(name: str, entry: str) -> str:
+    """A `skipped_sources` entry as a store-relative path, whichever form it arrived in.
+
+    graphify writes its source paths relative to `cache_root`, which here is the store
+    root; an entry relative to the repository instead is placed under it, so the
+    comparison with the per-file record cannot miss on spelling alone.
+    """
+    relative = store_paths.relative(entry)
+    if relative.startswith(f"{config.REPOSITORIES_DIR.name}/") or not name:
+        return relative
+    return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
+
+
 def extract_estate(
     groups: "dict[str, list[Path]]",
     extractor,
@@ -390,8 +420,9 @@ def extract_estate(
     timeout: int = 0,
     before: "dict[str, int] | None" = None,
     checkpoint: "Callable[[dict, list, list], None] | None" = None,
-) -> "tuple[dict, list, dict, list]":
-    """Extract each repository in turn: the layer, the failures, the counts, the unread.
+) -> "tuple[dict, list, dict, list, set]":
+    """Extract each repository in turn: the layer, the failures, the counts, the unread,
+    and the files graphify declined by design.
 
     `extractor` is `graphify.extract.extract`, injected rather than imported here
     so the loop, the reporting and the isolation are testable without the parser
@@ -411,6 +442,7 @@ def extract_estate(
     failures: list[tuple[str, str]] = []
     counts: dict[str, int] = {}
     skipped: list[str] = []
+    declined: set[str] = set()
     width = max((len(name) for name in groups), default=1)
     unbounded_reported = False
     ordered = sorted(groups.items())
@@ -458,6 +490,7 @@ def extract_estate(
         # of them was being reported.
         unread = [str(f) for f in (result.get("failed_sources") or [])]
         skipped.extend(unread)
+        declined.update(declined_path(name, str(f)) for f in result.get("skipped_sources") or [])
         nodes.extend(found)
         edges.extend(relations)
         counts[label] = len(found)
@@ -472,7 +505,87 @@ def extract_estate(
         )
         if checkpoint:
             checkpoint(counts, failures, pending)
-    return {"nodes": nodes, "edges": edges}, failures, counts, skipped
+    return {"nodes": nodes, "edges": edges}, failures, counts, skipped, declined
+
+
+def file_counts_path(layer: Path) -> Path:
+    """Where the per-file node counts sit: beside the layer and its per-repository counts."""
+    return layer.with_name(f"{layer.stem}_file_counts.json")
+
+
+def nodes_per_file(
+    layer: dict, groups: "dict[str, list[Path]]", failures: list
+) -> "dict[str, int]":
+    """Each content-set file's node count, for the repositories that extracted.
+
+    Keyed by store-relative path, from each node's `source_file`. A file with no node
+    is recorded as 0, which is what lets the next run tell "went to zero" from "was
+    never there". A failed repository's files are left out: they did not extract,
+    and a 0 for them would read as every file vanishing.
+    """
+    found: dict[str, int] = {}
+    for node in layer["nodes"]:
+        source = node.get("source_file") if isinstance(node, dict) else None
+        if isinstance(source, str) and source:
+            key = store_paths.relative(source)
+            found[key] = found.get(key, 0) + 1
+    failed = {label for label, _ in failures}
+    counts: dict[str, int] = {}
+    for name, files in groups.items():
+        if (name or "(corpus root)") in failed:
+            continue
+        for path in files:
+            key = store_paths.relative(path)
+            counts[key] = found.get(key, 0)
+    return counts
+
+
+def vanished_files(before: "dict[str, int]", now: "dict[str, int]") -> "list[tuple[str, int]]":
+    """(path, previous count) for each file that had nodes last run and has none now.
+
+    Only files in this run's content set are compared, so a file removed from it is
+    not a loss.
+    """
+    return sorted(
+        (path, before[path])
+        for path, count in now.items()
+        if count == 0 and before.get(path, 0) > 0
+    )
+
+
+def file_record(
+    before: "dict[str, int]",
+    now: "dict[str, int]",
+    groups: "dict[str, list[Path]]",
+    failures: list,
+    keep: "list[tuple[str, int]]",
+) -> "dict[str, int]":
+    """The record to write: this run's counts, a failed repository's last ones, sorted.
+
+    `keep` are vanished files whose previous count stands, so an unaccepted loss
+    fails every run until someone passes `--allow-vanished`.
+    """
+    failed = {label for label, _ in failures}
+    carried = {
+        key: before[key]
+        for name, files in groups.items()
+        if (name or "(corpus root)") in failed
+        for key in (store_paths.relative(path) for path in files)
+        if key in before
+    }
+    merged = {**carried, **now, **dict(keep)}
+    return dict(sorted(merged.items()))
+
+
+def report_vanished(vanished: "list[tuple[str, int]]", declined: "set[str]") -> "list[str]":
+    """One line per lost file, naming why when graphify said, then the summary."""
+    lines = []
+    for path, previous in vanished:
+        kind = "declined by graphify" if path in declined else "VANISHED"
+        lines.append(f"  {kind}  {path}  ({previous:,} node(s) last run, 0 now)")
+    lost = sum(previous for _, previous in vanished)
+    lines.append(f"{len(vanished)} file(s) vanished, {lost:,} node(s) lost.")
+    return lines
 
 
 def report_unread(skipped: "list[str]", total: int) -> str:
@@ -529,6 +642,11 @@ def parse_args(argv: "list[str] | None") -> argparse.Namespace:
         help="a newline-delimited path list to extract instead of the content set",
     )
     parser.add_argument("--out", type=Path, help="destination layer (default: .graphify_ast.json)")
+    parser.add_argument(
+        "--allow-vanished",
+        action="store_true",
+        help="accept files that produced nodes last run and none now (an intended change)",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
@@ -670,6 +788,49 @@ def check_declared(groups: "dict[str, list[Path]]") -> "list[str]":
     ]
 
 
+def vanished_report(
+    destination: Path,
+    layer: dict,
+    groups: "dict[str, list[Path]]",
+    failures: list,
+    declined: "set[str]",
+    arguments,
+) -> bool:
+    """Compare and rewrite the per-file record; True when a lost file refuses the run."""
+    path = file_counts_path(destination)
+    stored = io.read_json(path, default=None)
+    previous = (
+        {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
+        if isinstance(stored, dict)
+        else None
+    )
+    now = nodes_per_file(layer, groups, failures)
+    vanished = vanished_files(previous or {}, now)
+    allowed = arguments.allow_vanished
+    write_counts(
+        path, file_record(previous or {}, now, groups, failures, [] if allowed else vanished)
+    )
+    if previous is None:
+        print(
+            f"\nno per-file record in {path.name}; wrote one, so a file going to zero "
+            "is caught from the next run."
+        )
+        return False
+    if not vanished:
+        print("\n0 file(s) vanished, 0 node(s) lost.")
+        return False
+    heading = (
+        "accepted by --allow-vanished" if allowed else "refusing: pass --allow-vanished if intended"
+    )
+    print(
+        f"\n{len(vanished)} file(s) produced nodes last run and none now ({heading}):",
+        file=sys.stderr,
+    )
+    for line in report_vanished(vanished, declined):
+        print(line, file=sys.stderr)
+    return not allowed
+
+
 def main(argv: "list[str] | None" = None) -> int:
     arguments = parse_args(argv)
     graph_directory = config.GRAPH_PATH.parent
@@ -718,7 +879,7 @@ def main(argv: "list[str] | None" = None) -> int:
         write_counts(sidecar, carry_forward(before, counts, failures, pending))
 
     print(f"Extracting {len(files):,} file(s) across {len(groups):,} repository group(s):")
-    layer, failures, counts, skipped = extract_estate(
+    layer, failures, counts, skipped, declined = extract_estate(
         groups, extract, config.ROOT, arguments.timeout, before, record
     )
 
@@ -741,6 +902,7 @@ def main(argv: "list[str] | None" = None) -> int:
         print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
     else:
         print(f"\nno previous run recorded in {sidecar.name}; movement starts next run.")
+    refused = vanished_report(destination, layer, groups, failures, declined, arguments)
     if failures:
         print(
             f"\n{len(failures)} repository group(s) failed to extract and are absent from the "
@@ -750,7 +912,7 @@ def main(argv: "list[str] | None" = None) -> int:
         for label, error in failures:
             print(f"  {label}: {error}", file=sys.stderr)
         return 1
-    return 0
+    return 1 if refused else 0
 
 
 if __name__ == "__main__":

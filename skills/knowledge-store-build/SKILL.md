@@ -120,7 +120,10 @@ then `extract-ast`. It refuses, with exit 1 and nothing written, when a
 repository in `config/repositories.txt` has no clone - on a first run too - and
 when a clone's `.graphifyignore` lacks a declared exclusion; it names a declared
 repository with no parseable code as a warning. It writes its per-repository
-counts as each repository finishes, so an interrupted run keeps them.
+counts as each repository finishes, so an interrupted run keeps them. It exits 1
+on a content-set file that produced nodes last run and none now, naming it and
+its previous count (`declined by graphify` when graphify listed it in
+`skipped_sources`); pass `--allow-vanished` only when that loss is intended.
 
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
