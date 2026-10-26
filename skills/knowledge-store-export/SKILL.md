@@ -79,7 +79,8 @@ document exists to close.
 A `knowledge/minimum-standard/summary.json` row is a worklist, not a verdict. One
 ticket per repository and point, naming the point, the state and the `as_of` commit
 and date. For `no_secrets` findings give **locations and rule names only**: the
-path, the line number and the rule, never a value, a line of the file or a masked
+path, the line number where there is one (a `key-file` finding has none) and the
+rule, never a value, a line of the file or a masked
 copy of one, and say in the ticket that the layer holds none. Say what `absent`
 means, that the practice is not evidenced in the repository, and do not turn
 `not_determinable` into a ticket as if it were a failure: it records that the build

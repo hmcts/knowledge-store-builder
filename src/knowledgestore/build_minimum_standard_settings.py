@@ -12,6 +12,11 @@ never as a default. Whether a repository is unprotected and whether the token wa
 refused look alike from outside, and the layer must not turn the second into the
 first.
 
+Each organisation's default security policy is read once, under `organisations`:
+GitHub applies a SECURITY.md in an organisation's `.github` repository to every
+repository there that has none of its own, so a repository can have a security
+contact that its clone does not show.
+
 Run:
 
     knowledgestore minimum-standard-settings
@@ -19,6 +24,8 @@ Run:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import subprocess
 import sys
@@ -26,6 +33,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from . import config, minimum_standard
+from .build_minimum_standard import SECURITY_PATHS, carries_a_contact
 from .build_store_manifest import write_atomically
 from .export_git_history import read_repository_config
 from .generate_repository_list import run_gh
@@ -99,6 +107,67 @@ def read_repository(runner, org: str, name: str) -> dict:
     return record
 
 
+DEFAULT_POLICY = "default_security_policy"
+
+
+def _not_found(error: subprocess.CalledProcessError) -> bool:
+    """Whether `gh api` failed with a 404. It exits 1 and prints GitHub's JSON error
+    on stdout, whose `status` is the HTTP code as a string."""
+    try:
+        body = json.loads(error.output) if isinstance(error.output, str) else None
+    except json.JSONDecodeError:
+        return False
+    return isinstance(body, dict) and body.get("status") == "404"
+
+
+def _file_text(text: str) -> str | None:
+    """A contents-API answer's file, decoded, or None when it is not a file inline.
+
+    GitHub sends a file's bytes base64-encoded; a directory comes back as a list, and
+    a file too large to inline carries an encoding of `none` and no content."""
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(body, dict) or body.get("encoding") != "base64":
+        return None
+    content = body.get("content")
+    if not isinstance(content, str) or not content:
+        return None
+    try:
+        raw = base64.b64decode("".join(content.split()), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw.decode("utf-8", errors="replace")
+
+
+def read_organisation(runner, org: str) -> dict:
+    """The organisation's default SECURITY.md: the first its `.github` repository holds,
+    in the order the evidence stage reads a repository's own, and whether it carries
+    a contact. Only the path and that judgement are kept, never the text.
+
+    A 404 is the one answer that shows a file is not there. Any other failure, before
+    a file is found, leaves the default unknown, because the file not read may be the
+    one GitHub applies; it is recorded as unreadable, never as "no default".
+    """
+    unread = {DEFAULT_POLICY: None, "unreadable": [DEFAULT_POLICY]}
+    for path in SECURITY_PATHS:
+        try:
+            text = runner(["api", f"repos/{org}/.github/contents/{path}"])
+        except subprocess.CalledProcessError as error:
+            if _not_found(error):
+                continue
+            return unread
+        except OSError:
+            return unread
+        policy = _file_text(text)
+        if policy is None:
+            return unread
+        found = {"contact": carries_a_contact(policy), "path": path}
+        return {DEFAULT_POLICY: found, "unreadable": []}
+    return {DEFAULT_POLICY: None, "unreadable": []}
+
+
 def main(runner=run_gh) -> int:
     if not config.REPOSITORIES_CONFIG.is_file():
         print(
@@ -107,6 +176,7 @@ def main(runner=run_gh) -> int:
         )
         return 1
     repositories: dict[str, dict] = {}
+    organisations: set[str] = set()
     for entry in read_repository_config(config.REPOSITORIES_CONFIG):
         origin = github_origin(entry.clone_url)
         if origin is None:
@@ -115,9 +185,13 @@ def main(runner=run_gh) -> int:
             record["unreadable"] = sorted(FIELDS)
         else:
             record = read_repository(runner, *origin)
+            organisations.add(origin[0])
+        # `None` off github.com, where no organisation's default can apply.
+        record["organisation"] = origin[0] if origin is not None else None
         repositories[entry.name] = record
     snapshot = {
         "format": minimum_standard.format_stamp(),
+        "organisations": {org: read_organisation(runner, org) for org in sorted(organisations)},
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "repositories": repositories,
     }

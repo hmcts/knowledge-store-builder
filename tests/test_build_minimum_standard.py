@@ -42,6 +42,7 @@ FULL_ACCESS = {
     "branch_protection": "present",
     "secret_scanning": "enabled",
     "dependabot_alerts": "enabled",
+    "organisation": "example-org",
     "unreadable": [],
 }
 
@@ -51,6 +52,7 @@ NO_ACCESS = {
     "branch_protection": None,
     "secret_scanning": None,
     "dependabot_alerts": None,
+    "organisation": "example-org",
     "unreadable": [
         "archived",
         "branch_protection",
@@ -70,6 +72,14 @@ DEPENDENCY_CONFIGS_CHECKED = [
 
 CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
 SECURITY_PATHS = [".github/SECURITY.md", "SECURITY.md", "docs/SECURITY.md"]
+
+# An organisation whose `.github` repository holds no SECURITY.md, as the settings
+# stage records one when every path answers 404.
+NO_DEFAULT = {"default_security_policy": None, "unreadable": []}
+
+# Fake key material, split so this file does not read as a key to a secret scanner.
+PLANTED_KEY_FILE = "plantedKeyFileMarker" + "Q9x7Zk2"
+KEY_FILE_TEXT = "-----BEGIN OPENSSH PRIVATE" + " KEY-----\n" + PLANTED_KEY_FILE + "\n"
 
 
 def _git(repo: Path, *arguments: str) -> str:
@@ -110,9 +120,17 @@ class TheEvidenceStage(SettingsIsolated):
             self.content.extend(f"repositories/{name}/{path}" for path in files)
         return _git(repo, "rev-parse", "HEAD")
 
-    def snapshot(self, repositories: dict[str, dict], read_at: str = "2026-10-22T10:00:00+00:00"):
+    def snapshot(
+        self,
+        repositories: dict[str, dict],
+        read_at: str = "2026-10-22T10:00:00+00:00",
+        organisations: dict[str, dict] | None = None,
+    ):
         body = {
             "format": minimum_standard.format_stamp(),
+            "organisations": {"example-org": NO_DEFAULT}
+            if organisations is None
+            else organisations,
             "read_at": read_at,
             "repositories": repositories,
         }
@@ -201,7 +219,10 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(points["security_contact"]["state"], "absent")
         self.assertEqual(
             points["security_contact"]["evidence"],
-            [{"path": path, "reason": "not found"} for path in SECURITY_PATHS],
+            [{"path": path, "reason": "not found"} for path in SECURITY_PATHS]
+            + [
+                {"path": "example-org/.github", "reason": "no organisation default security policy"}
+            ],
         )
 
     def test_a_codeowners_naming_no_owner_is_absent(self):
@@ -282,6 +303,120 @@ class TheEvidenceStage(SettingsIsolated):
             contact["evidence"], [{"path": "docs/SECURITY.md", "reason": "no contact"}]
         )
 
+    # -- the organisation's default security policy -----------------------------
+
+    def contact_with_default(self, default: dict, files: dict[str, str] | None = None) -> dict:
+        """repo-a's security_contact, under an example-org whose record is `default`."""
+        self.clone("repo-a", files or {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": FULL_ACCESS}, organisations={"example-org": default})
+        self.run_stage()
+        return self.record("repo-a")["points"]["security_contact"]
+
+    def test_an_organisation_default_with_a_contact_is_present_and_cited(self):
+        """Breaks if a repository with no SECURITY.md of its own reads as absent when its
+        organisation's `.github` repository supplies one with a contact: GitHub shows
+        that policy on the repository, so the contact is there."""
+        default = {
+            "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+            "unreadable": [],
+        }
+        contact = self.contact_with_default(default)
+        self.assertEqual(contact["state"], "present")
+        self.assertEqual(
+            contact["evidence"],
+            [
+                {
+                    "path": "example-org/.github:SECURITY.md",
+                    "reason": "organisation default security policy",
+                }
+            ],
+        )
+
+    def test_the_repositorys_own_security_md_wins_over_the_organisation_default(self):
+        """Breaks if the organisation's default is consulted for a repository that has
+        its own SECURITY.md: GitHub shows the repository's own, so its own is judged,
+        and its lack of a contact is not covered by the organisation's."""
+        default = {
+            "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+            "unreadable": [],
+        }
+        contact = self.contact_with_default(
+            default, {"SECURITY.md": "Please tell us about problems.\n"}
+        )
+        self.assertEqual(contact["state"], "absent")
+        self.assertEqual(contact["evidence"], [{"path": "SECURITY.md", "reason": "no contact"}])
+
+    def test_an_organisation_default_without_a_contact_is_not_present(self):
+        """Breaks if a default policy counts merely by existing: it is judged by the
+        same contact rule as a repository's own."""
+        default = {
+            "default_security_policy": {"contact": False, "path": "docs/SECURITY.md"},
+            "unreadable": [],
+        }
+        contact = self.contact_with_default(default)
+        self.assertEqual(contact["state"], "absent")
+        self.assertIn(
+            {
+                "path": "example-org/.github:docs/SECURITY.md",
+                "reason": "organisation default security policy has no contact",
+            },
+            contact["evidence"],
+        )
+
+    def test_no_organisation_default_is_absent_and_says_where_it_looked(self):
+        """Breaks if an organisation with no default (every path a 404) stops reading
+        as absent, or the record stops naming the `.github` repository it checked."""
+        contact = self.contact_with_default(NO_DEFAULT)
+        self.assertEqual(contact["state"], "absent")
+        self.assertEqual(contact["reason"], "no SECURITY.md")
+        self.assertEqual(
+            contact["evidence"],
+            [{"path": path, "reason": "not found"} for path in SECURITY_PATHS]
+            + [
+                {"path": "example-org/.github", "reason": "no organisation default security policy"}
+            ],
+        )
+
+    def test_an_unreadable_organisation_default_is_not_determinable_with_no_access(self):
+        """Breaks if an organisation default the token could not read is taken for no
+        default, which would report every repository relying on it as having no
+        security contact, from no access."""
+        unread = {"default_security_policy": None, "unreadable": ["default_security_policy"]}
+        contact = self.contact_with_default(unread)
+        self.assertEqual(contact["state"], "not_determinable")
+        self.assertEqual(contact["reason"], "no access")
+
+    def test_no_snapshot_leaves_a_repository_without_security_md_not_determinable(self):
+        """Breaks if a repository with no SECURITY.md reads as absent when nothing was
+        read about its organisation's default, with no snapshot or none for this
+        repository or its organisation."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.clone("repo-b", {"README.md": "# repo-b\n"})
+        cases = {
+            "no snapshot": None,
+            "missing from the snapshot": ({"repo-b": FULL_ACCESS}, None),
+            "organisation not read": ({"repo-a": FULL_ACCESS}, {}),
+        }
+        for case, given in cases.items():
+            with self.subTest(case=case):
+                config.MINIMUM_STANDARD_SETTINGS_PATH.unlink(missing_ok=True)
+                if given is not None:
+                    self.snapshot(given[0], organisations=given[1])
+                self.run_stage()
+                contact = self.record("repo-a")["points"]["security_contact"]
+                self.assertEqual(contact["state"], "not_determinable")
+                self.assertEqual(contact["reason"], "no settings snapshot")
+
+    def test_a_repository_off_github_has_no_organisation_default(self):
+        """Breaks if a repository not on github.com, which no organisation's default can
+        reach, stops reading as absent for want of a SECURITY.md."""
+        self.clone("repo-a", {"README.md": "# repo-a\n"})
+        self.snapshot({"repo-a": {**NO_ACCESS, "organisation": None}}, organisations={})
+        self.run_stage()
+        contact = self.record("repo-a")["points"]["security_contact"]
+        self.assertEqual(contact["state"], "absent")
+        self.assertEqual(contact["reason"], "no SECURITY.md")
+
     # -- no secrets ---------------------------------------------------------------
 
     def test_a_planted_secret_is_reported_by_location_and_its_value_appears_nowhere(self):
@@ -342,6 +477,7 @@ class TheEvidenceStage(SettingsIsolated):
         self.assertEqual(
             no_secrets["evidence"],
             [
+                {"path": "deploy/key.pem", "rule": "key-file"},
                 {"line": 3, "path": "deploy/key.pem", "rule": "pem-private-key"},
                 {"line": 4, "path": "deploy/key.pem", "rule": "pem-private-key"},
                 {"line": 6, "path": "k8s/secret.yaml", "rule": "key-name"},
@@ -356,6 +492,139 @@ class TheEvidenceStage(SettingsIsolated):
                     self.assertNotIn(value.encode(), body)
         for value in planted:
             self.assertNotIn(value, out + err)
+
+    def test_a_tracked_key_file_is_found_by_name_and_never_read(self):
+        """Breaks if a committed key file outside the content set goes unreported, which
+        is how a `.priv` beside the code was missed; or if its content is read into the
+        layer or onto the output. The planted marker is inside the file."""
+        self.clone(
+            "repo-a",
+            {"deploy/signing.priv": KEY_FILE_TEXT, "README.md": "# a\n"},
+            in_content_set=False,
+        )
+        self.content.append("repositories/repo-a/README.md")
+        self.snapshot({"repo-a": FULL_ACCESS})
+        _, out, err = self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "absent")
+        self.assertEqual(
+            no_secrets["evidence"], [{"path": "deploy/signing.priv", "rule": "key-file"}]
+        )
+        for path in (p for p in (self.root / "knowledge").rglob("*") if p.is_file()):
+            with self.subTest(path=path.name):
+                self.assertNotIn(PLANTED_KEY_FILE.encode(), path.read_bytes())
+        self.assertNotIn(PLANTED_KEY_FILE, out + err)
+
+    def test_a_key_file_is_found_when_the_content_set_is_empty(self):
+        """Breaks if a repository the content set excluded skips the key-file walk: the
+        walk reads the tracked names, not the content set."""
+        self.clone("repo-a", {"certs/server.key": KEY_FILE_TEXT}, in_content_set=False)
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "absent")
+        self.assertEqual(no_secrets["evidence"], [{"path": "certs/server.key", "rule": "key-file"}])
+
+    def test_a_public_key_and_an_untracked_key_file_are_not_found(self):
+        """Breaks if a `.pub` file is taken for a private key, or if the walk reads the
+        working directory rather than what git tracks: an untracked file is not
+        committed."""
+        self.clone("repo-a", {".ssh/id_rsa.pub": "ssh-rsa AAAA example\n", "README.md": "# a\n"})
+        (config.REPOSITORIES_DIR / "repo-a" / "id_ed25519").write_text(
+            KEY_FILE_TEXT, encoding="utf-8"
+        )
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "not_determinable")
+        self.assertEqual(no_secrets["evidence"], [])
+
+    def test_key_file_names_are_recognised_by_their_documented_patterns(self):
+        """Breaks if a documented key-file name stops matching, or a near miss starts."""
+        found = [
+            "a.pem",
+            "b.KEY",
+            "c.priv",
+            "d.p12",
+            "e.pfx",
+            "f.jks",
+            "g.keystore",
+            "id_rsa",
+            "id_ecdsa_deploy",
+            "id_ed25519",
+            "dir/id_rsa.old",
+        ]
+        missed = ["id_rsa.pub", "key.pem.pub", "keys.md", "monkey.py", "pemfile", "src/id.py"]
+        for path in found:
+            with self.subTest(path=path):
+                self.assertTrue(stage.is_key_file(path))
+        for path in missed:
+            with self.subTest(path=path):
+                self.assertFalse(stage.is_key_file(path))
+
+    def test_setting_names_alone_are_not_determinable_and_keep_their_findings(self):
+        """Breaks if a `key-name` hit alone makes the point absent: a setting named for
+        a secret shows no committed value, and in most repositories those hits are
+        yaml and terraform setting names. The findings stay listed as evidence."""
+        self.clone("repo-a", {"values.yaml": "db:\n  password: hunter2value\n"})
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "not_determinable")
+        self.assertEqual(
+            no_secrets["reason"],
+            "only secret-looking setting names were found; no committed value was confirmed",
+        )
+        self.assertEqual(
+            no_secrets["evidence"], [{"line": 2, "path": "values.yaml", "rule": "key-name"}]
+        )
+
+    def test_a_setting_name_beside_a_value_shaped_finding_is_absent(self):
+        """Breaks if a value-shaped finding stops making the point absent when a
+        `key-name` hit is beside it."""
+        self.clone(
+            "repo-a",
+            {
+                "values.yaml": "db:\n  password: hunter2value\n",
+                "notes.txt": f"-----BEGIN {PEM_KIND}-----\n{PLANTED_PEM_FIRST}\n"
+                f"-----END {PEM_KIND}-----\n",
+            },
+        )
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        no_secrets = self.record("repo-a")["points"]["no_secrets"]
+        self.assertEqual(no_secrets["state"], "absent")
+        self.assertEqual(
+            {e["rule"] for e in no_secrets["evidence"]}, {"key-name", "pem-private-key"}
+        )
+
+    def test_the_value_shaped_rules_are_every_rule_but_key_name(self):
+        """Breaks if a rule that finds a value drops out of the set that makes
+        `no_secrets` absent, or `key-name` joins it. Named by hand: the default value
+        shapes, the built-in query-parameter rule and the key-file walk."""
+        self.assertEqual(
+            stage.value_shaped_rules(),
+            {
+                "authorization-header",
+                "aws-access-key-id",
+                "cli-secret-flag",
+                "connection-string-credential",
+                "connection-string-key",
+                "feature-flag-sdk-key",
+                "github-token",
+                "jwt",
+                "key-file",
+                "pem-private-key",
+                "sas-signature",
+                "sk-key",
+                "slack-webhook",
+                "sonarqube-token",
+                "sops-encrypted",
+                "sql-credential",
+                "url-credential",
+                "url-query-secret",
+            },
+        )
 
     def test_a_clean_scan_is_not_determinable_never_present(self):
         """Breaks if a scan that finds nothing reads as present or absent: a pattern

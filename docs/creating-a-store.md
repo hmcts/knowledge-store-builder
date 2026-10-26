@@ -462,9 +462,11 @@ without it the stage exits 1 and names the file. The
 [relationships layer](how-it-works.md#the-relationships-layer) lists the files it
 writes and the resolution order.
 
-To record the GitHub settings the build's token can read (archived, default branch,
-branch protection, secret scanning, Dependabot alerts) for the minimum-standard
-layer, run:
+To record the GitHub settings the build's token can read for the minimum-standard
+layer, run the command below. It records archived, default branch, branch
+protection, secret scanning, Dependabot alerts and organisation for each repository.
+For each organisation it records the default `SECURITY.md` in its `.github`
+repository, and whether that file carries a contact.
 
 ```bash
 knowledgestore minimum-standard-settings
@@ -485,7 +487,9 @@ It reads the clones, the content-file list and that snapshot, and writes
 repositories recorded and the count of points in each state. Run `content-set`
 first: with no content-file list the stage exits 1 and writes nothing, because an
 empty list would read every secret scan as clean. A missing snapshot is not a
-refusal; the settings items read `not_determinable`, "no settings snapshot".
+refusal; the settings items read `not_determinable`, "no settings snapshot", and so
+does `security_contact` for a repository with no SECURITY.md of its own, because its
+organisation's default was not read.
 
 To scope questions by product, declare them in `config/products.json`, a map from a
 product name to repository names (`{"payments": ["repo-a", "repo-b"]}`). A malformed

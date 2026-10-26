@@ -12,7 +12,8 @@ bytes, and a setting nobody could read stays `not_determinable` rather than beco
 a finding against the team.
 
 No secret value is written. The scan reports a rule, a path and a line number, never
-the line, so nothing it finds can reach the layer.
+the line, so nothing it finds can reach the layer. A committed key file is found by
+its name among the tracked files and is never opened.
 
 Run:
 
@@ -21,6 +22,7 @@ Run:
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -65,7 +67,27 @@ WORKFLOWS = ".github/workflows/"
 CODE_SCANNERS = ("codeql-action", "github/codeql")
 SECRET_SCANNERS = ("gitleaks", "trufflehog", "detect-secrets")
 
+# A key file is reported by name alone, so one kept outside the content set, or with an
+# extension the content set does not read, is still found. Matched on the file name,
+# in any case; a `.pub` file is the public half and is never a finding.
+KEY_FILE_RULE = "key-file"
+KEY_FILE_NAMES = (
+    "*.pem",
+    "*.key",
+    "*.priv",
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.keystore",
+    "id_rsa*",
+    "id_ecdsa*",
+    "id_ed25519*",
+)
+
+ORG_DEFAULT = "organisation default security policy"
+
 CLEAN_SCAN = "pattern scan found nothing; a scan cannot show absence"
+NAMES_ONLY = "only secret-looking setting names were found; no committed value was confirmed"
 NO_CONTENT = "no files in the content set"
 FOUND_SECRETS = (
     "pattern scan of the current tree found these; values are not recorded "
@@ -138,7 +160,9 @@ def _is_mailbox(word: str) -> bool:
     )
 
 
-def _carries_a_contact(text: str) -> bool:
+def carries_a_contact(text: str) -> bool:
+    """Whether a SECURITY.md's text names a contact. The settings stage judges an
+    organisation's default policy by this same rule."""
     if any(_is_mailbox(word) for word in WORD_BREAKS.split(text)):
         return True
     return any(
@@ -146,12 +170,12 @@ def _carries_a_contact(text: str) -> bool:
     )
 
 
-def _security_contact(clone: Path) -> dict:
+def _security_contact(clone: Path, own: dict | None, settings: dict | None) -> dict:
     for path in SECURITY_PATHS:
         text = _read(clone / path)
         if text is None:
             continue
-        if _carries_a_contact(text):
+        if carries_a_contact(text):
             reason = "carries a contact; whether it is monitored is not recorded"
             return minimum_standard.point(
                 "security_contact", "present", [{"path": path, "reason": reason}]
@@ -162,12 +186,45 @@ def _security_contact(clone: Path) -> dict:
             [{"path": path, "reason": "no contact"}],
             "no contact in SECURITY.md",
         )
-    return minimum_standard.point(
-        "security_contact",
-        "absent",
-        [{"path": path, "reason": "not found"} for path in SECURITY_PATHS],
-        "no SECURITY.md",
-    )
+    checked = [{"path": path, "reason": "not found"} for path in SECURITY_PATHS]
+    return _organisation_default(checked, own, settings)
+
+
+def _organisation_default(checked: list[dict], own: dict | None, settings: dict | None) -> dict:
+    """The contact point for a repository with no SECURITY.md of its own.
+
+    GitHub shows such a repository its organisation's default, from the `.github`
+    repository, so that default is judged in its place. A repository off github.com
+    has no organisation to inherit from. Where nothing was read about the default,
+    the point is not determinable rather than absent.
+    """
+    if own is None or settings is None or "organisation" not in own:
+        return minimum_standard.point("security_contact", "not_determinable", checked, NO_SNAPSHOT)
+    org = own["organisation"]
+    if not isinstance(org, str):
+        return minimum_standard.point("security_contact", "absent", checked, "no SECURITY.md")
+    entries = settings.get("organisations")
+    entry = entries.get(org) if isinstance(entries, dict) else None
+    if not isinstance(entry, dict):
+        return minimum_standard.point("security_contact", "not_determinable", checked, NO_SNAPSHOT)
+    policy = entry.get("default_security_policy")
+    if isinstance(policy, dict) and isinstance(policy.get("path"), str):
+        cited = f"{org}/.github:{policy['path']}"
+        if policy.get("contact") is True:
+            evidence = [{"path": cited, "reason": ORG_DEFAULT}]
+            return minimum_standard.point("security_contact", "present", evidence)
+        if policy.get("contact") is False:
+            evidence = [*checked, {"path": cited, "reason": f"{ORG_DEFAULT} has no contact"}]
+            return minimum_standard.point(
+                "security_contact",
+                "absent",
+                evidence,
+                "no contact in the organisation's default SECURITY.md",
+            )
+    if policy is None and entry.get("unreadable") == []:
+        evidence = [*checked, {"path": f"{org}/.github", "reason": f"no {ORG_DEFAULT}"}]
+        return minimum_standard.point("security_contact", "absent", evidence, "no SECURITY.md")
+    return minimum_standard.point("security_contact", "not_determinable", checked, NO_ACCESS)
 
 
 def _hits(text: str) -> tuple[str, Counter[str]]:
@@ -211,8 +268,32 @@ def _findings(text: str) -> set[tuple[int, str]]:
     }
 
 
-def _no_secrets(clone: Path, files: list[str]) -> dict:
-    if not files:
+def is_key_file(path: str) -> bool:
+    """Whether a tracked path is named as a private key or a keystore is."""
+    name = path.rsplit("/", 1)[-1].lower()
+    return not name.endswith(".pub") and any(
+        fnmatch.fnmatchcase(name, pattern) for pattern in KEY_FILE_NAMES
+    )
+
+
+def value_shaped_rules() -> frozenset[str]:
+    """The rules whose finding is a committed value, not merely a name.
+
+    Every value shape in force (an estate's own included), the URL query-parameter
+    shape built into the masker, and a key file. The one rule left out is
+    `secret_mask.KEY_NAME_RULE`: it fires on a setting named for a secret, and a
+    name shows no value was committed. A rule not named here is treated as a name.
+    """
+    shapes = {rule for rule, _ in secret_mask.rules()}
+    return frozenset({*shapes, secret_mask.URL_QUERY_RULE, KEY_FILE_RULE})
+
+
+def _no_secrets(clone: Path, files: list[str], tracked: list[str]) -> dict:
+    # Key files are named, never opened, so none of their content can reach the layer.
+    evidence: list[dict] = [
+        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)
+    ]
+    if not files and not evidence:
         return minimum_standard.point("no_secrets", "not_determinable", reason=NO_CONTENT)
     findings: set[tuple[str, int, str]] = set()
     for path in sorted(set(files)):
@@ -220,12 +301,14 @@ def _no_secrets(clone: Path, files: list[str]) -> dict:
         if text is None:
             continue
         findings.update((path, number, rule) for number, rule in _findings(text))
-    if not findings:
+    evidence.extend({"line": number, "path": path, "rule": rule} for path, number, rule in findings)
+    if not evidence:
         return minimum_standard.point("no_secrets", "not_determinable", reason=CLEAN_SCAN)
-    evidence = [
-        {"line": number, "path": path, "rule": rule} for path, number, rule in sorted(findings)
-    ]
-    return minimum_standard.point("no_secrets", "absent", evidence, FOUND_SECRETS)
+    evidence.sort(key=lambda found: (found["path"], found.get("line", 0), found["rule"]))
+    # A setting named for a secret is not a committed value; only a value shape is.
+    if any(found["rule"] in value_shaped_rules() for found in evidence):
+        return minimum_standard.point("no_secrets", "absent", evidence, FOUND_SECRETS)
+    return minimum_standard.point("no_secrets", "not_determinable", evidence, NAMES_ONLY)
 
 
 def _is_threat_model(path: str) -> bool:
@@ -415,8 +498,8 @@ def evidence_for(clone: Path, files: list[str], settings: dict | None, run=run_g
     own = entry if isinstance(entry, dict) else None
     points = {
         "owner": _owner(clone),
-        "security_contact": _security_contact(clone),
-        "no_secrets": _no_secrets(clone, files),
+        "security_contact": _security_contact(clone, own, settings),
+        "no_secrets": _no_secrets(clone, files, tracked),
         "secure_by_design": _secure_by_design(tracked),
         "hygiene": _hygiene(clone, tracked, own),
         "patching": minimum_standard.point("patching", "not_determinable", reason=PATCHING),
