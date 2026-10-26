@@ -29,6 +29,7 @@ import base64
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -218,7 +219,7 @@ def _read_default(runner, org: str) -> dict:
     return {DEFAULT_POLICY: None, "unreadable": []}
 
 
-def main(runner=run_gh) -> int:
+def main(runner=run_gh, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> int:
     if not config.REPOSITORIES_CONFIG.is_file():
         print(
             f"{config.REPOSITORIES_CONFIG} does not exist; run `knowledgestore discover` first.",
@@ -242,7 +243,7 @@ def main(runner=run_gh) -> int:
     snapshot = {
         "format": minimum_standard.format_stamp(),
         "organisations": {org: read_organisation(runner, org) for org in sorted(organisations)},
-        "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "read_at": now().isoformat(timespec="seconds"),
         "repositories": repositories,
     }
     write_atomically(
