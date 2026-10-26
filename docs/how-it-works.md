@@ -522,7 +522,15 @@ The scan also walks every tracked file's name, whether or not it is in the conte
 set, for key files: `*.pem`, `*.key`, `*.priv`, `*.p12`, `*.pfx`, `*.jks`,
 `*.keystore`, `id_rsa*`, `id_ecdsa*` and `id_ed25519*`, in any case, but not `*.pub`.
 Each is recorded as `{rule: "key-file", path}`, with no line, and makes the point
-`absent`. A key file is never opened, so nothing in it can reach the layer. The scan masks whole files,
+`absent`. Two kinds are judged further than their name. A PEM-style text file
+(`.pem`, `.key`, `.crt`, `.cer`) is read for its `-----BEGIN <label>-----` lines
+only: it is a key file when a label names a private key, it is not one when its
+labels are only certificates or public keys, and a `.pem` or `.key` with no label at
+all stays one. A binary keystore (`.jks`, `.p12`, `.pfx`, `.keystore`) cannot be
+judged without opening it; one whose name contains `truststore` or `cacerts` is
+recorded as `{rule: "trust-store", path}` and leaves the point `not_determinable`
+rather than `absent`, while any other keystore stays a key file. No line of a key
+file but a boundary label is read, and none of it reaches the layer. The scan masks whole files,
 so a secret that spans lines, such as a private-key block, is found; every line
 masking changed is reported. A finding's `rule` is a rule that masked that file, not
 necessarily the only one that matches the line. The scan covers the current tree of

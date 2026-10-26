@@ -9280,8 +9280,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: tracked key files are not walked",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in [] if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in [] if is_key_file(path, clone)\n',
         "a committed private key outside the content set, such as a `.priv` file, would go unreported, the gap a real estate run found",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_key_file_is_found_when_the_content_set_is_empty",
@@ -9292,8 +9292,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: the key-file walk reads the working directory",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE}\n        for path in sorted(str(f.relative_to(clone)) for f in clone.rglob("*") if f.is_file())\n        if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE}\n        for path in sorted(str(f.relative_to(clone)) for f in clone.rglob("*") if f.is_file())\n        if is_key_file(path, clone)\n',
         "an untracked key file in the clone, which is not committed, would be reported as a committed secret",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_public_key_and_an_untracked_key_file_are_not_found",
@@ -9302,8 +9302,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: a key file's content reaches the layer",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE, "excerpt": _read(clone / path)}\n        for path in tracked\n        if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE, "excerpt": _read(clone / path)}\n        for path in tracked\n        if is_key_file(path, clone)\n',
         "the private key a finding names would be copied into the layer, leaking the secret the point exists to report",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_key_file_is_found_when_the_content_set_is_empty",
@@ -9314,8 +9314,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: a public key file is a finding",
         "build_minimum_standard.py",
-        '    return not name.endswith(".pub") and any(\n',
-        "    return any(\n",
+        '    if name.endswith(".pub") or is_trust_store(path):\n',
+        "    if is_trust_store(path):\n",
         "a committed `id_rsa.pub`, the public half of a key and safe to publish, would make `no_secrets` absent",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_public_key_and_an_untracked_key_file_are_not_found",
@@ -12106,6 +12106,58 @@ MUTATIONS = (
         "#510: the edge is about the manifest that declares the package, so its node is the anchor when the graph has one",
         (
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_edge_lands_on_the_manifest_node_in_both_stage_orders",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: every PEM-named file is a key file",
+        "build_minimum_standard.py",
+        '        return any("PRIVATE KEY" in label for label in labels)\n',
+        "        return True\n",
+        "#511: a CA bundle, a leaf certificate or a public key was reported as a committed key by its extension, setting `no_secrets` to `absent` for a repository that committed no secret",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_certificate_only_pem_is_not_a_key_file",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a PEM with no boundary is not a key file",
+        "build_minimum_standard.py",
+        '            return name.endswith((".pem", ".key"))\n',
+        "            return False\n",
+        "#511: the conservative choice for a file whose boundary cannot be read is to keep it a key file; a missed key costs more than a flagged certificate",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_pem_with_no_boundary_stays_a_key_file",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a trust store is a key file",
+        "build_minimum_standard.py",
+        "    return name.endswith(KEYSTORE_SUFFIXES) and any(word in name for word in TRUST_STORE_NAMES)\n",
+        "    return False\n",
+        "#511: a binary keystore named for a trust store was reported as a committed key, although it cannot be judged without opening it and usually holds certificates",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_leaves_the_point_undetermined_and_a_keystore_stays_a_finding",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_beside_a_real_key_does_not_hide_it",
+            "test_build_minimum_standard.TheEvidenceStage.test_is_key_file_reads_a_clone_only_when_given_one",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: every keystore is taken for a trust store",
+        "build_minimum_standard.py",
+        'TRUST_STORE_NAMES = ("truststore", "cacerts")\n',
+        'TRUST_STORE_NAMES = ("store", "cacerts")\n',
+        "#511: the exemption must name trust stores only; a keystore not named for one still holds private keys and stays a finding",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_leaves_the_point_undetermined_and_a_keystore_stays_a_finding",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a trust store counts as a committed value",
+        "build_minimum_standard.py",
+        "    return frozenset({*shapes, secret_mask.URL_QUERY_RULE, KEY_FILE_RULE})\n",
+        "    return frozenset({*shapes, secret_mask.URL_QUERY_RULE, KEY_FILE_RULE, TRUST_STORE_RULE})\n",
+        "#511: a trust store is evidence that the point cannot be judged, never a committed value; counting it would turn it back into an `absent` finding",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_the_value_shaped_rules_are_every_rule_but_key_name",
         ),
     ),
 )

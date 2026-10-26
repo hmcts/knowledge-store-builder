@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -79,6 +80,7 @@ NO_DEFAULT = {"default_security_policy": None, "public": True, "unreadable": []}
 
 # Fake key material, split so this file does not read as a key to a secret scanner.
 PLANTED_KEY_FILE = "plantedKeyFileMarker" + "Q9x7Zk2"
+FAKE_PEM_BODY = "fixture-not-a-secret"
 KEY_FILE_TEXT = "-----BEGIN OPENSSH PRIVATE" + " KEY-----\n" + PLANTED_KEY_FILE + "\n"
 
 
@@ -603,6 +605,122 @@ class TheEvidenceStage(SettingsIsolated):
         for path in missed:
             with self.subTest(path=path):
                 self.assertFalse(stage.is_key_file(path))
+
+    def pem(self, *labels: str) -> str:
+        """A PEM-looking file: real boundary lines around a body that is not a secret."""
+        return "".join(
+            f"-----BEGIN {label}-----\n{FAKE_PEM_BODY}\n-----END {label}-----\n" for label in labels
+        )
+
+    def no_secrets_for(self, files: dict[str, str]) -> dict:
+        """The `no_secrets` point for a fresh `repo-a` holding `files`, outside the
+        content set; callable more than once in a test."""
+        shutil.rmtree(config.REPOSITORIES_DIR / "repo-a", ignore_errors=True)
+        self.clone("repo-a", files, in_content_set=False)
+        self.snapshot({"repo-a": FULL_ACCESS})
+        self.run_stage()
+        return self.record("repo-a")["points"]["no_secrets"]
+
+    def test_a_certificate_only_pem_is_not_a_key_file(self):
+        """Breaks if a CA bundle, a leaf certificate or a public key is reported as a
+        committed key because of its extension: it holds no secret, and the point
+        would read `absent` for a repository that committed none."""
+        for name, text in {
+            "certs/ca-bundle.pem": self.pem("CERTIFICATE", "CERTIFICATE"),
+            "certs/leaf.crt": self.pem("CERTIFICATE"),
+            "certs/server.cer": self.pem("CERTIFICATE"),
+            "certs/public.key": self.pem("PUBLIC KEY"),
+            "certs/mixed.pem": self.pem("CERTIFICATE", "PUBLIC KEY"),
+        }.items():
+            with self.subTest(path=name):
+                no_secrets = self.no_secrets_for({name: text})
+                self.assertEqual(no_secrets["state"], "not_determinable")
+                self.assertEqual(no_secrets["evidence"], [])
+
+    def test_a_pem_holding_a_private_key_block_is_a_key_file_whatever_else_it_holds(self):
+        """Breaks if the boundary labels are not read, or only the first is: every
+        private-key label counts, and a bundle that ends in one is a key file."""
+        for kind in (
+            "PRIVATE KEY",
+            "RSA PRIVATE KEY",
+            "EC PRIVATE KEY",
+            "OPENSSH PRIVATE KEY",
+            "ENCRYPTED PRIVATE KEY",
+        ):
+            for name in ("deploy/key.pem", "deploy/key.key", "deploy/cert.crt", "deploy/c.cer"):
+                with self.subTest(kind=kind, path=name):
+                    no_secrets = self.no_secrets_for({name: self.pem("CERTIFICATE", kind)})
+                    self.assertEqual(no_secrets["state"], "absent")
+                    self.assertEqual(no_secrets["evidence"], [{"path": name, "rule": "key-file"}])
+
+    def test_a_pem_with_no_boundary_stays_a_key_file(self):
+        """Breaks if the conservative choice flips: a `.pem` or `.key` whose boundary
+        cannot be read is still reported, because a missed key is the costlier error.
+        A `.crt` with no boundary was never reported and still is not."""
+        for name in ("certs/raw.pem", "certs/raw.key"):
+            with self.subTest(path=name):
+                no_secrets = self.no_secrets_for({name: FAKE_PEM_BODY + "\n"})
+                self.assertEqual(no_secrets["state"], "absent")
+                self.assertEqual(no_secrets["evidence"], [{"path": name, "rule": "key-file"}])
+        self.assertEqual(
+            self.no_secrets_for({"certs/raw.crt": FAKE_PEM_BODY + "\n"})["state"],
+            "not_determinable",
+        )
+
+    def test_a_trust_store_leaves_the_point_undetermined_and_a_keystore_stays_a_finding(self):
+        """Breaks if a binary keystore named for a trust store is reported as a key
+        (the file cannot be judged without opening it), or if the exemption spreads to
+        a keystore that is not named for one."""
+        trust = self.no_secrets_for({"config/truststore.jks": "binary"})
+        self.assertEqual(trust["state"], "not_determinable")
+        self.assertEqual(
+            trust["evidence"], [{"path": "config/truststore.jks", "rule": "trust-store"}]
+        )
+        self.assertIn("trust store", trust["reason"])
+        for name in ("config/cacerts.jks", "config/CACERTS.p12", "ssl/my-TrustStore.pfx"):
+            with self.subTest(path=name):
+                self.assertEqual(self.no_secrets_for({name: "binary"})["state"], "not_determinable")
+        for name in ("config/keystore.p12", "config/app.jks", "config/store.keystore"):
+            with self.subTest(path=name):
+                no_secrets = self.no_secrets_for({name: "binary"})
+                self.assertEqual(no_secrets["state"], "absent")
+                self.assertEqual(no_secrets["evidence"], [{"path": name, "rule": "key-file"}])
+
+    def test_a_trust_store_beside_a_real_key_does_not_hide_it(self):
+        """Breaks if the trust-store exemption swallows a genuine finding in the same
+        repository: the key keeps the point `absent`."""
+        no_secrets = self.no_secrets_for(
+            {"config/truststore.jks": "binary", "deploy/key.pem": self.pem("PRIVATE KEY")}
+        )
+        self.assertEqual(no_secrets["state"], "absent")
+        self.assertEqual(no_secrets["evidence"], [{"path": "deploy/key.pem", "rule": "key-file"}])
+
+    def test_no_pem_content_reaches_a_finding_or_the_output(self):
+        """Breaks if reading the boundary labels lets a body line, or the label itself
+        beyond the rule name, into the layer or the printed output."""
+        self.clone(
+            "repo-a",
+            {
+                "deploy/key.pem": self.pem("PRIVATE KEY"),
+                "certs/ca.pem": self.pem("CERTIFICATE"),
+            },
+            in_content_set=False,
+        )
+        self.snapshot({"repo-a": FULL_ACCESS})
+        _, out, err = self.run_stage()
+        for path in (p for p in (self.root / "knowledge").rglob("*") if p.is_file()):
+            with self.subTest(path=path.name):
+                self.assertNotIn(FAKE_PEM_BODY.encode(), path.read_bytes())
+        self.assertNotIn(FAKE_PEM_BODY, out + err)
+
+    def test_is_key_file_reads_a_clone_only_when_given_one(self):
+        """Breaks if the name-only form, used where no clone is at hand, changes: it
+        still answers by name alone."""
+        self.assertTrue(stage.is_key_file("certs/ca.pem"))
+        self.assertFalse(stage.is_key_file("certs/a.crt"))
+        self.assertFalse(stage.is_key_file("config/truststore.jks"))
+        self.assertTrue(stage.is_trust_store("config/Truststore.JKS"))
+        self.assertFalse(stage.is_trust_store("config/truststore.txt"))
 
     def test_setting_names_alone_are_not_determinable_and_keep_their_findings(self):
         """Breaks if a `key-name` hit alone makes the point absent: a setting named for
