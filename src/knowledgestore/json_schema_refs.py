@@ -4,7 +4,8 @@ Pure: no graph, no filesystem, no fetching. A reference resolves to a file and
 a pointer the stage already read, or to a named reason it did not.
 
 Which repositories are forks is a parameter, not a read of configuration: the
-caller owns that policy (#478 will supply it), and this module stays testable.
+caller owns that policy (the stage reads `KSB_FORK_REPOS`), and this module stays
+testable.
 """
 
 from __future__ import annotations
