@@ -109,6 +109,23 @@ class VanishedFilesTest(_DeclaredStoreCase, unittest.TestCase):
         # The baseline stands, so the next run still fails until someone decides.
         self.assertEqual(self._record()["repositories/repo-a/schema.json"], 3)
 
+    def test_a_run_with_no_source_file_node_at_all_fails_when_the_record_had_files(self):
+        """Catches the total loss going quiet: an extractor that returns nothing.
+
+        With no node carrying `source_file` there is nothing to join on, and the
+        stage once returned early and passed - the one case the guard exists for.
+        Every baseline file with nodes is vanished, so the run fails naming them and
+        the baseline stands.
+        """
+        detect = self._store("schema.json", "main.py")
+        self._run(_PerFile(self.root, {"schema.json": 3, "main.py": 2}), ["--detect", str(detect)])
+        code, out, err = self._run(_PerFile(self.root, {}), ["--detect", str(detect)])
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("schema.json", err)
+        self.assertIn("main.py", err)
+        self.assertIn("2 file(s) vanished, 5 node(s) lost", err)
+        self.assertEqual(self._record()["repositories/repo-a/schema.json"], 3)
+
     def test_a_file_graphify_declined_is_named_as_declined_and_still_fails(self):
         """Catches a declined file passing: declined by design is still lost data."""
         detect = self._store("schema.json", "main.py")

@@ -1795,6 +1795,17 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a run with no source_file node at all passes over a record with files",
+        "extract_ast.py",
+        "    if not sourced and not vanished_files(previous or {}, now):\n",
+        "    if not sourced:\n",
+        "an extractor returning nothing is every file vanishing, the loss the guard "
+        "exists for; an early return on 'nothing to count' made it pass silently",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_run_with_no_source_file_node_at_all_fails_when_the_record_had_files",
+        ),
+    ),
+    Mutation(
         "a vanished file is reported but never refused",
         "extract_ast.py",
         "    return bool(refused)\n",

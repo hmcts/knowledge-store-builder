@@ -912,7 +912,10 @@ def vanished_report(
     """
     path = file_counts_path(destination)
     now, sourced, matched, stray = nodes_per_file(layer, groups, failures)
-    if not sourced:
+    previous = _read_file_record(path)
+    # No node at all is every file going to zero, so it takes the vanished path when
+    # the record had files with nodes; with nothing to lose there is nothing to say.
+    if not sourced and not vanished_files(previous or {}, now):
         print(
             f"\nno node carries a source_file, so no file can be counted; {path.name} "
             "was not written."
@@ -922,7 +925,6 @@ def vanished_report(
     if refusal:
         print(refusal, file=sys.stderr)
         return True
-    previous = _read_file_record(path)
     vanished = vanished_files(previous or {}, now)
     accepted = {store_paths.relative(p) for p in allow}
     refused = [(file, count) for file, count in vanished if file not in accepted]
