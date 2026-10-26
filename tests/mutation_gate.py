@@ -8905,7 +8905,7 @@ MUTATIONS = (
         "minimum standard evidence: the organisation default is never consulted",
         "build_minimum_standard.py",
         "    return _organisation_default(checked, own, settings)\n",
-        '    return minimum_standard.point("security_contact", "absent", checked, "no SECURITY.md")\n',
+        '    return minimum_standard.point("security_contact", "absent", checked, NO_SECURITY_MD)\n',
         "a repository whose organisation supplies a default SECURITY.md with a contact would read as having no security contact, which is the false absent a real estate run found",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_default_whose_repository_visibility_was_not_read_is_not_present",

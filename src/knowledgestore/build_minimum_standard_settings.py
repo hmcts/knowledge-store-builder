@@ -26,7 +26,6 @@ Run:
 from __future__ import annotations
 
 import base64
-import binascii
 import json
 import subprocess
 import sys
@@ -137,7 +136,7 @@ def _file_text(text: str) -> str | None:
         return None
     try:
         raw = base64.b64decode("".join(content.split()), validate=True)
-    except (binascii.Error, ValueError):
+    except ValueError:  # binascii.Error, a malformed base64 body, is one
         return None
     return raw.decode("utf-8", errors="replace")
 

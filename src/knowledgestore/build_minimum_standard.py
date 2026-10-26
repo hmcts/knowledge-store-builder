@@ -86,6 +86,7 @@ KEY_FILE_NAMES = (
 
 ORG_DEFAULT = "organisation default security policy"
 NOT_PUBLIC = "not public, so GitHub applies no default from it"
+NO_SECURITY_MD = "no SECURITY.md"
 
 CLEAN_SCAN = "pattern scan found nothing; a scan cannot show absence"
 NAMES_ONLY = "only secret-looking setting names were found; no committed value was confirmed"
@@ -203,7 +204,7 @@ def _organisation_default(checked: list[dict], own: dict | None, settings: dict 
         return minimum_standard.point("security_contact", "not_determinable", checked, NO_SNAPSHOT)
     org = own["organisation"]
     if not isinstance(org, str):
-        return minimum_standard.point("security_contact", "absent", checked, "no SECURITY.md")
+        return minimum_standard.point("security_contact", "absent", checked, NO_SECURITY_MD)
     entries = settings.get("organisations")
     entry = entries.get(org) if isinstance(entries, dict) else None
     if not isinstance(entry, dict):
@@ -220,7 +221,7 @@ def _judge_default(org: str, entry: dict, checked: list[dict]) -> dict:
     """
     if entry.get("public") is False:
         evidence = [*checked, {"path": f"{org}/.github", "reason": NOT_PUBLIC}]
-        return minimum_standard.point("security_contact", "absent", evidence, "no SECURITY.md")
+        return minimum_standard.point("security_contact", "absent", evidence, NO_SECURITY_MD)
     policy = entry.get("default_security_policy")
     if isinstance(policy, dict) and isinstance(policy.get("path"), str):
         cited = f"{org}/.github:{policy['path']}"
@@ -237,7 +238,7 @@ def _judge_default(org: str, entry: dict, checked: list[dict]) -> dict:
             )
     if policy is None and entry.get("unreadable") == []:
         evidence = [*checked, {"path": f"{org}/.github", "reason": f"no {ORG_DEFAULT}"}]
-        return minimum_standard.point("security_contact", "absent", evidence, "no SECURITY.md")
+        return minimum_standard.point("security_contact", "absent", evidence, NO_SECURITY_MD)
     return minimum_standard.point("security_contact", "not_determinable", checked, NO_ACCESS)
 
 
