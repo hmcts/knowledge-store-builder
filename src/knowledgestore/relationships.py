@@ -27,6 +27,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import posixpath
 import re
 import sys
 import tempfile
@@ -1411,10 +1412,24 @@ class _Resolver:
             for kind, targets in self.unchosen.items()
         }
 
+    def _stays_in_the_clone(self, consumer: str, ref: Reference) -> bool:
+        """Whether `ref` can only mean the consumer's own package.
+
+        npm, pnpm and Yarn resolve `workspace:` within one monorepo, and `link:` or
+        `file:` to a path inside the clone is a path in this clone, so none of them
+        can name another repository's copy. Decided before the fork, umbrella and
+        name-order rules, which choose among copies a registry range could reach.
+        """
+        if not ref.ref.startswith("workspace:") and not _points_inside_clone(ref):
+            return False
+        return consumer in self.publishers.get(ref.kind, {}).get(ref.target, ())
+
     def resolve(self, consumer: str, ref: Reference) -> tuple[str, str]:
         """`("edge", provider)`, `("self", "")`, `("ambiguous", "")` for a target
         several clones define and no rule chooses between, or
         `("unresolved", target key)`."""
+        if self._stays_in_the_clone(consumer, ref):
+            return "self", ""
         if ref.resolved_repo is not None:
             if not names_estate_repo(ref, self.orgs):
                 return "unresolved", f"{ref.org}/{ref.target}" if ref.org else ref.target
@@ -1436,6 +1451,18 @@ class _Resolver:
         if provider == consumer:
             return "self", ""
         return "edge", provider
+
+
+_IN_CLONE_PREFIXES = ("link:", "file:")
+
+
+def _points_inside_clone(ref: Reference) -> bool:
+    """Whether a `link:` or `file:` spec names a path within the declaring clone."""
+    spec = next((ref.ref[len(p) :] for p in _IN_CLONE_PREFIXES if ref.ref.startswith(p)), None)
+    if spec is None or not spec or spec.startswith(("/", "~")):
+        return False
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(ref.rel), spec))
+    return resolved != ".." and not resolved.startswith("../")
 
 
 def chart_definitions(clones: list[Path], umbrellas: Set[str]) -> dict[str, str]:

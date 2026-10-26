@@ -67,10 +67,19 @@ WORKFLOWS = ".github/workflows/"
 CODE_SCANNERS = ("codeql-action", "github/codeql")
 SECRET_SCANNERS = ("gitleaks", "trufflehog", "detect-secrets")
 
-# A key file is reported by name alone, so one kept outside the content set, or with an
-# extension the content set does not read, is still found. Matched on the file name,
-# in any case; a `.pub` file is the public half and is never a finding.
+# A key file is reported without reading its content, so one kept outside the content
+# set, or with an extension the content set does not read, is still found. Matched on
+# the file name, in any case; a `.pub` file is the public half and is never a finding.
+#
+# Two kinds of file are judged further, because the name cannot tell a key from a
+# certificate. A PEM-style text file is judged by its `-----BEGIN <label>-----` lines
+# alone (`PEM_TEXT_SUFFIXES`): a private-key label makes it a key file, a file whose
+# labels are only certificates or public keys is not one, and a file with no label stays
+# one. A binary keystore (`KEYSTORE_SUFFIXES`) cannot be judged without opening it, so
+# one whose name says it is a trust store is not a finding and leaves `no_secrets`
+# undetermined instead; any other keystore stays a key file.
 KEY_FILE_RULE = "key-file"
+TRUST_STORE_RULE = "trust-store"
 KEY_FILE_NAMES = (
     "*.pem",
     "*.key",
@@ -83,6 +92,10 @@ KEY_FILE_NAMES = (
     "id_ecdsa*",
     "id_ed25519*",
 )
+PEM_TEXT_SUFFIXES = (".pem", ".key", ".crt", ".cer")
+KEYSTORE_SUFFIXES = (".jks", ".p12", ".pfx", ".keystore")
+TRUST_STORE_NAMES = ("truststore", "cacerts")
+PEM_BOUNDARY = re.compile(r"^-----BEGIN ([A-Z0-9 ]+)-----", re.MULTILINE)
 
 ORG_DEFAULT = "organisation default security policy"
 NOT_PUBLIC = "not public, so GitHub applies no default from it"
@@ -91,6 +104,10 @@ NO_SECURITY_MD = "no SECURITY.md"
 CLEAN_SCAN = "pattern scan found nothing; a scan cannot show absence"
 NAMES_ONLY = "only secret-looking setting names were found; no committed value was confirmed"
 NO_CONTENT = "no files in the content set"
+TRUST_STORE = (
+    "a trust store was found; whether it holds only certificates cannot be judged "
+    "without opening it"
+)
 FOUND_SECRETS = (
     "pattern scan of the current tree found these; values are not recorded "
     "and history is not scanned"
@@ -283,12 +300,38 @@ def _findings(text: str) -> set[tuple[int, str]]:
     }
 
 
-def is_key_file(path: str) -> bool:
-    """Whether a tracked path is named as a private key or a keystore is."""
+def _boundary_labels(path: Path) -> list[str] | None:
+    """The labels of the `-----BEGIN <label>-----` lines in a file, or None if unreadable.
+
+    Only the label is kept: the label of a boundary line is not secret, and no other
+    line of the file leaves this function.
+    """
+    text = _read(path)
+    return None if text is None else PEM_BOUNDARY.findall(text)
+
+
+def is_trust_store(path: str) -> bool:
+    """Whether a path is a binary keystore whose name says it holds trusted certificates."""
     name = path.rsplit("/", 1)[-1].lower()
-    return not name.endswith(".pub") and any(
-        fnmatch.fnmatchcase(name, pattern) for pattern in KEY_FILE_NAMES
-    )
+    return name.endswith(KEYSTORE_SUFFIXES) and any(word in name for word in TRUST_STORE_NAMES)
+
+
+def is_key_file(path: str, clone: Path | None = None) -> bool:
+    """Whether a tracked path is a private key or a keystore.
+
+    Judged on the name, and for a PEM-style text file on its boundary labels when
+    `clone` is given: see the note on `KEY_FILE_NAMES`. A trust store is not a key file.
+    """
+    name = path.rsplit("/", 1)[-1].lower()
+    if name.endswith(".pub") or is_trust_store(path):
+        return False
+    if clone is not None and name.endswith(PEM_TEXT_SUFFIXES):
+        labels = _boundary_labels(clone / path)
+        if labels is None or not labels:
+            # Unreadable, or no boundary: kept, because a key is the costlier miss.
+            return name.endswith((".pem", ".key"))
+        return any("PRIVATE KEY" in label for label in labels)
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in KEY_FILE_NAMES)
 
 
 def value_shaped_rules() -> frozenset[str]:
@@ -304,11 +347,15 @@ def value_shaped_rules() -> frozenset[str]:
 
 
 def _no_secrets(clone: Path, files: list[str], tracked: list[str]) -> dict:
-    # Key files are named, never opened, so none of their content can reach the layer.
+    # Key files are named; a PEM-style one is read for its boundary labels only, so none
+    # of its content can reach the layer.
     evidence: list[dict] = [
-        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)
+        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)
     ]
+    trust = [{"path": path, "rule": TRUST_STORE_RULE} for path in tracked if is_trust_store(path)]
     if not files and not evidence:
+        if trust:
+            return minimum_standard.point("no_secrets", "not_determinable", trust, TRUST_STORE)
         return minimum_standard.point("no_secrets", "not_determinable", reason=NO_CONTENT)
     findings: set[tuple[str, int, str]] = set()
     for path in sorted(set(files)):
@@ -318,12 +365,17 @@ def _no_secrets(clone: Path, files: list[str], tracked: list[str]) -> dict:
         findings.update((path, number, rule) for number, rule in _findings(text))
     evidence.extend({"line": number, "path": path, "rule": rule} for path, number, rule in findings)
     if not evidence:
+        if trust:
+            return minimum_standard.point("no_secrets", "not_determinable", trust, TRUST_STORE)
         return minimum_standard.point("no_secrets", "not_determinable", reason=CLEAN_SCAN)
     evidence.sort(key=lambda found: (found["path"], found.get("line", 0), found["rule"]))
     # A setting named for a secret is not a committed value; only a value shape is.
     if any(found["rule"] in value_shaped_rules() for found in evidence):
         return minimum_standard.point("no_secrets", "absent", evidence, FOUND_SECRETS)
-    return minimum_standard.point("no_secrets", "not_determinable", evidence, NAMES_ONLY)
+    evidence = sorted([*evidence, *trust], key=lambda f: (f["path"], f.get("line", 0), f["rule"]))
+    return minimum_standard.point(
+        "no_secrets", "not_determinable", evidence, TRUST_STORE if trust else NAMES_ONLY
+    )
 
 
 def _is_threat_model(path: str) -> bool:

@@ -2293,8 +2293,9 @@ MUTATIONS = (
         "        wanted = list({_identity(path): path for path in matching}.values())",
         "        wanted = matching",
         'a consuming store\'s detect file lists every code path twice, so the default mode reported roughly double the files that --clones did for the same store; "present for N file(s)" is a claim about files, and two modes disagreeing with no explanation reads as one of them being wrong',
+        # The content set's reader now drops a path listed twice before this count
+        # sees it (#509), so only the symlinked spelling still reaches this line.
         (
-            "test_check_grammars.CheckGrammarsTest.test_a_content_set_listing_a_path_twice_counts_the_file_once",
             "test_check_grammars.CheckGrammarsTest.test_a_symlinked_spelling_of_the_same_file_counts_once",
         ),
     ),
@@ -9280,8 +9281,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: tracked key files are not walked",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in [] if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in [] if is_key_file(path, clone)\n',
         "a committed private key outside the content set, such as a `.priv` file, would go unreported, the gap a real estate run found",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_key_file_is_found_when_the_content_set_is_empty",
@@ -9292,8 +9293,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: the key-file walk reads the working directory",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE}\n        for path in sorted(str(f.relative_to(clone)) for f in clone.rglob("*") if f.is_file())\n        if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE}\n        for path in sorted(str(f.relative_to(clone)) for f in clone.rglob("*") if f.is_file())\n        if is_key_file(path, clone)\n',
         "an untracked key file in the clone, which is not committed, would be reported as a committed secret",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_public_key_and_an_untracked_key_file_are_not_found",
@@ -9302,8 +9303,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: a key file's content reaches the layer",
         "build_minimum_standard.py",
-        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path)\n',
-        '        {"path": path, "rule": KEY_FILE_RULE, "excerpt": _read(clone / path)}\n        for path in tracked\n        if is_key_file(path)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE} for path in tracked if is_key_file(path, clone)\n',
+        '        {"path": path, "rule": KEY_FILE_RULE, "excerpt": _read(clone / path)}\n        for path in tracked\n        if is_key_file(path, clone)\n',
         "the private key a finding names would be copied into the layer, leaking the secret the point exists to report",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_key_file_is_found_when_the_content_set_is_empty",
@@ -9314,8 +9315,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: a public key file is a finding",
         "build_minimum_standard.py",
-        '    return not name.endswith(".pub") and any(\n',
-        "    return any(\n",
+        '    if name.endswith(".pub") or is_trust_store(path):\n',
+        "    if is_trust_store(path):\n",
         "a committed `id_rsa.pub`, the public half of a key and safe to publish, would make `no_secrets` absent",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_public_key_and_an_untracked_key_file_are_not_found",
@@ -11949,6 +11950,216 @@ MUTATIONS = (
         "    pass",
         "CLAUDE.md 1.3: two runs over the same estate in a different order must give identical bytes",
         ("test_extract_json_schema.AddLayerTest.test_layer_edges_are_written_in_key_order",),
+    ),
+    Mutation(
+        "relationships: a workspace: reference follows the fork rule",
+        "relationships.py",
+        '        if not ref.ref.startswith("workspace:") and not _points_inside_clone(ref):\n',
+        "        if not _points_inside_clone(ref):\n",
+        "#507: a fork's `workspace:*` reference to its own package was sent to the original, counting a pin that names no registry version and making an edge between two repositories that npm, pnpm and Yarn can never join through that protocol",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_registry_range_from_the_fork_still_resolves_to_the_original",
+            "test_build_relationships.WorkspaceReferenceTest.test_a_workspace_reference_in_each_copy_is_self_not_an_edge",
+            "test_build_relationships.WorkspaceReferenceTest.test_workspace_references_are_self_when_the_fork_is_undeclared",
+        ),
+    ),
+    Mutation(
+        "relationships: a link: or file: reference inside the clone follows the fork rule",
+        "relationships.py",
+        '_IN_CLONE_PREFIXES = ("link:", "file:")\n',
+        "_IN_CLONE_PREFIXES = ()\n",
+        "#507: a `link:` or `file:` path inside the declaring clone names a directory of that clone, so it can never reach another repository's copy of the package",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_path_inside_the_clone_is_self_and_a_path_outside_it_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: a link: or file: path leaving the clone is taken as inside it",
+        "relationships.py",
+        '    return resolved != ".." and not resolved.startswith("../")\n',
+        "    return True\n",
+        "#507: a path that climbs out of the clone (or is absolute) is not inside it, and its package can be another repository's",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_path_inside_the_clone_is_self_and_a_path_outside_it_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: a workspace: reference is self whatever the consumer publishes",
+        "relationships.py",
+        "        return consumer in self.publishers.get(ref.kind, {}).get(ref.target, ())\n",
+        "        return True\n",
+        "#507: the self rule needs the consumer to publish the target; without it a `workspace:` reference to a package another clone publishes is dropped as self and the dependency is lost",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_workspace_reference_to_a_package_the_consumer_does_not_publish",
+        ),
+    ),
+    Mutation(
+        "json-schema: a bare extends makes a tool config a schema",
+        "json_schema.py",
+        '    return _has_schema_type(document.get("type")) and (\n        "properties" in document or "items" in document\n    )\n',
+        '    return _has_schema_type(document.get("type")) or "extends" in document\n',
+        "#508: an instance document whose `$schema` names its tool's schema, with `extends` presets, was claimed as a schema; graphify's nodes for it were removed and its presets reported as unresolved refs",
+        (
+            "test_json_schema.RecogniseTest.test_a_foreign_schema_needs_a_defining_keyword",
+            "test_json_schema.RecogniseTest.test_real_tool_configs_declaring_a_schema_are_not_schemas",
+            "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_tool_configs_declaring_a_schema_keep_graphifys_nodes",
+        ),
+    ),
+    Mutation(
+        "json-schema: a bare type makes a foreign-schema document a schema",
+        "json_schema.py",
+        '    return _has_schema_type(document.get("type")) and (\n        "properties" in document or "items" in document\n    )\n',
+        '    return _has_schema_type(document.get("type"))\n',
+        "#508: a root `type` alone, which instance documents carry, was enough under a `$schema` that does not name json-schema.org",
+        ("test_json_schema.RecogniseTest.test_a_foreign_schema_needs_a_defining_keyword",),
+    ),
+    Mutation(
+        "json-schema: a string under extends is walked as a reference",
+        "json_schema.py",
+        "        if isinstance(sub, dict):\n            ctx.plain(sub,",
+        '        if isinstance(sub, str):\n            ctx.walked.refs.append(Ref(f.owner, sub, "extends", "extends", ctx.line, ctx.base))\n        elif isinstance(sub, dict):\n            ctx.plain(sub,',
+        "#508: preset names under `extends` were emitted as `extends` refs and reached the unresolved list as `unrecognised-target`",
+        (
+            "test_json_schema.WalkTest.test_extends_as_a_string_or_a_list_of_strings_is_not_a_reference",
+        ),
+    ),
+    Mutation(
+        "content sets: a repeated file is read under both spellings",
+        "extract_ast.py",
+        "        key = os.path.normpath(store_paths.relative(path))\n        if key not in position:",
+        "        key = str(path)\n        if key not in position:",
+        "#509: a list naming one file as an absolute path and as a store-relative one counted it twice, parsed it twice and doubled its nodes",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_both_spellings_reach_the_parser_once_and_the_repeat_is_reported",
+            "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
+            "test_duplicate_input_paths.JsonSchemaTest.test_both_spellings_of_a_schema_count_once",
+        ),
+    ),
+    Mutation(
+        "content sets: dropped repeats are not reported",
+        "extract_ast.py",
+        "    if dropped:\n        print(duplicate_notice(dropped))\n",
+        "    if dropped:\n        pass\n",
+        "#509: a list generator emitting both spellings of a file went unnoticed because nothing said a repeat had been dropped",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_both_spellings_reach_the_parser_once_and_the_repeat_is_reported",
+            "test_duplicate_input_paths.JsonSchemaTest.test_both_spellings_of_a_schema_count_once",
+        ),
+    ),
+    Mutation(
+        "content sets: a relative spelling wins over the absolute one",
+        "extract_ast.py",
+        "        elif path.is_absolute() and not kept[position[key]].is_absolute():",
+        "        elif False:",
+        "#509: keeping a relative spelling reads it against the working directory, so the file is grouped as outside every repository",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_the_absolute_spelling_is_kept_when_the_relative_one_comes_first",
+        ),
+    ),
+    Mutation(
+        "content-set: a repeat is not counted",
+        "content_set.py",
+        "    return sorted(found), named - len(found)\n",
+        "    return sorted(found), 0\n",
+        "#509: the content-set stage deduplicated silently, so a doubled list read as the corpus's own size",
+        (
+            "test_duplicate_input_paths.ContentSetTest.test_both_spellings_are_one_path_and_the_repeat_is_counted",
+            "test_duplicate_input_paths.ContentSetTest.test_the_stage_reports_the_repeat",
+        ),
+    ),
+    Mutation(
+        "content-set: spellings are not normalised before deduplicating",
+        "content_set.py",
+        "                    found.add(os.path.normpath(store_paths.relative(p)))\n",
+        "                    found.add(p)\n",
+        "#509: an absolute and a store-relative spelling of one file were two entries of the content set",
+        (
+            "test_duplicate_input_paths.ContentSetTest.test_both_spellings_are_one_path_and_the_repeat_is_counted",
+            "test_duplicate_input_paths.ContentSetTest.test_the_stage_reports_the_repeat",
+        ),
+    ),
+    Mutation(
+        "packages: a json-schema node can be the anchor",
+        "build_package_edges.py",
+        '        if not (repo and src) or node.get("_origin") == JSON_SCHEMA_ORIGIN:\n',
+        "        if not (repo and src):\n",
+        "#510: with the json-schema layer in the graph, ids sort before most graphify ids, so `provided_by` landed on a schema node",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_a_manifest_the_json_schema_stage_owns_is_not_the_anchor",
+        ),
+    ),
+    Mutation(
+        "packages: a JSON file's node can be the anchor",
+        "build_package_edges.py",
+        '        if node_repo == repo and src.startswith(prefix) and not src.lower().endswith(".json")\n',
+        "        if node_repo == repo and src.startswith(prefix)\n",
+        "#510: the lowest id under the package directory was a graphify keyword node from a schema file, which the json-schema stage removes with its edges, so the package lost its `provided_by` edge",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_without_a_manifest_node_the_edge_lands_on_a_code_node",
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_a_code_node_in_both_stage_orders",
+        ),
+    ),
+    Mutation(
+        "packages: the manifest's own node is not preferred",
+        "build_package_edges.py",
+        "    return graph_reps.get((repo, manifest_rel)) or _code_anchor(graph_reps, repo, prefix)\n",
+        "    return _code_anchor(graph_reps, repo, prefix)\n",
+        "#510: the edge is about the manifest that declares the package, so its node is the anchor when the graph has one",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_edge_lands_on_the_manifest_node_in_both_stage_orders",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: every PEM-named file is a key file",
+        "build_minimum_standard.py",
+        '        return any("PRIVATE KEY" in label for label in labels)\n',
+        "        return True\n",
+        "#511: a CA bundle, a leaf certificate or a public key was reported as a committed key by its extension, setting `no_secrets` to `absent` for a repository that committed no secret",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_certificate_only_pem_is_not_a_key_file",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a PEM with no boundary is not a key file",
+        "build_minimum_standard.py",
+        '            return name.endswith((".pem", ".key"))\n',
+        "            return False\n",
+        "#511: the conservative choice for a file whose boundary cannot be read is to keep it a key file; a missed key costs more than a flagged certificate",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_pem_with_no_boundary_stays_a_key_file",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a trust store is a key file",
+        "build_minimum_standard.py",
+        "    return name.endswith(KEYSTORE_SUFFIXES) and any(word in name for word in TRUST_STORE_NAMES)\n",
+        "    return False\n",
+        "#511: a binary keystore named for a trust store was reported as a committed key, although it cannot be judged without opening it and usually holds certificates",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_leaves_the_point_undetermined_and_a_keystore_stays_a_finding",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_beside_a_real_key_does_not_hide_it",
+            "test_build_minimum_standard.TheEvidenceStage.test_is_key_file_reads_a_clone_only_when_given_one",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: every keystore is taken for a trust store",
+        "build_minimum_standard.py",
+        'TRUST_STORE_NAMES = ("truststore", "cacerts")\n',
+        'TRUST_STORE_NAMES = ("store", "cacerts")\n',
+        "#511: the exemption must name trust stores only; a keystore not named for one still holds private keys and stays a finding",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_trust_store_leaves_the_point_undetermined_and_a_keystore_stays_a_finding",
+        ),
+    ),
+    Mutation(
+        "minimum-standard: a trust store counts as a committed value",
+        "build_minimum_standard.py",
+        "    return frozenset({*shapes, secret_mask.URL_QUERY_RULE, KEY_FILE_RULE})\n",
+        "    return frozenset({*shapes, secret_mask.URL_QUERY_RULE, KEY_FILE_RULE, TRUST_STORE_RULE})\n",
+        "#511: a trust store is evidence that the point cannot be judged, never a committed value; counting it would turn it back into an `absent` finding",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_the_value_shaped_rules_are_every_rule_but_key_name",
+        ),
     ),
 )
 

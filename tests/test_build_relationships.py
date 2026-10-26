@@ -878,6 +878,100 @@ class ForkTest(_Store):
                 self.assertNotIn("chart unresolved", out)
 
 
+def _workspace_monorepo(app_spec: str, legacy_spec: str = "^1.0.0") -> dict[str, str]:
+    """A pnpm/yarn monorepo as `package.json` files really lay out: the library is
+    published from `libs/`, the app beside it consumes the library, and a second app
+    consumes it from the registry."""
+    return {
+        "package.json": '{\n  "name": "example-root",\n  "private": true\n}\n',
+        "pnpm-workspace.yaml": "packages:\n  - 'libs/*'\n  - 'apps/*'\n",
+        "libs/lib/package.json": '{\n  "name": "@example/lib",\n  "version": "1.2.0"\n}\n',
+        "apps/web/package.json": (
+            '{\n  "name": "@example/web",\n  "private": true,\n  "dependencies": {\n'
+            f'    "@example/lib": "{app_spec}"\n  }}\n}}\n'
+        ),
+        "apps/legacy/package.json": (
+            '{\n  "name": "@example/legacy",\n  "private": true,\n  "dependencies": {\n'
+            f'    "@example/lib": "{legacy_spec}"\n  }}\n}}\n'
+        ),
+    }
+
+
+class WorkspaceReferenceTest(_Store):
+    """#507: `workspace:`, and `link:` or `file:` inside the clone, can only name the
+    declaring clone's own package. Real monorepo, cloned twice, one copy a fork."""
+
+    def monorepo(self, app_spec: str, forks=("repo-a-copy",), legacy_spec: str = "^1.0.0"):
+        for name in ("repo-a", "repo-a-copy"):
+            _write(self.repos / name, _workspace_monorepo(app_spec, legacy_spec))
+        return self.build(kinds=(_kind("npm_package"),), forks=forks)
+
+    def test_a_workspace_reference_in_each_copy_is_self_not_an_edge(self):
+        """Break caught: a fork's `workspace:*` reference sent to the original (an
+        edge, and a pin `workspace:*` counted against it), or the original's sent to
+        the copy. Each copy's two workspace references are its own."""
+        layer = self.monorepo("workspace:*", legacy_spec="workspace:^")
+        self.assertEqual(layer.dependencies["edges"], [])
+        self.assertEqual(layer.by_repo["repo-a-copy"]["depends_on"], [])
+        self.assertEqual(layer.by_repo["repo-a"]["depends_on"], [])
+        self.assertEqual(layer.skipped["npm_package"], {"self": 4})
+
+    def test_a_registry_range_from_the_fork_still_resolves_to_the_original(self):
+        """Break caught: the self rule swallowing every reference to a package the
+        consumer publishes, so the fork's registry range stops reaching the
+        original. The edge carries one pin, the range, and not `workspace:*`."""
+        layer = self.monorepo("workspace:*")
+        depends_on = layer.by_repo["repo-a-copy"]["depends_on"]
+        self.assertEqual([e["repository"] for e in depends_on], ["repo-a"])
+        self.assertEqual(depends_on[0]["references"], 1)
+        self.assertEqual(depends_on[0]["refs_pinned"], {"^1.0.0": 1})
+        # The original's registry range is its own copy's too: it publishes it.
+        self.assertEqual(layer.by_repo["repo-a"]["depends_on"], [])
+        self.assertEqual(layer.skipped["npm_package"], {"self": 3})
+
+    def test_workspace_references_are_self_when_the_fork_is_undeclared(self):
+        """Break caught: the rule applying only once a fork is declared. The copies
+        are in conflict, the registry range is ambiguous, and the workspace
+        references are still each clone's own."""
+        layer = self.monorepo("workspace:*", forks=())
+        self.assertEqual(layer.dependencies["edges"], [])
+        self.assertEqual(layer.skipped["npm_package"], {"self": 2, "ambiguous": 2})
+
+    def test_a_path_inside_the_clone_is_self_and_a_path_outside_it_is_not(self):
+        """Break caught: `file:` and `link:` read as registry specs (the fork's
+        in-clone link sent to the original), or an escaping path read as inside.
+        `apps/web` reaches `libs/lib` as `../../libs/lib`; `../../../elsewhere`
+        leaves the clone."""
+        inside = self.monorepo("link:../../libs/lib", legacy_spec="file:../../libs/lib")
+        self.assertEqual(inside.by_repo["repo-a-copy"]["depends_on"], [])
+        self.assertEqual(inside.skipped["npm_package"], {"self": 4})
+        outside = self.monorepo("link:../../../elsewhere/lib", legacy_spec="file:/abs/lib")
+        edges = outside.by_repo["repo-a-copy"]["depends_on"]
+        self.assertEqual([e["repository"] for e in edges], ["repo-a"])
+        self.assertEqual(edges[0]["references"], 2)
+        self.assertEqual(outside.skipped["npm_package"], {"self": 2})
+
+    def test_a_workspace_reference_to_a_package_the_consumer_does_not_publish(self):
+        """Break caught: `workspace:` read as self whatever the target. A consumer
+        that does not publish the package still depends on the clone that does."""
+        _write(
+            self.repos / "repo-a",
+            {"package.json": '{"name": "@example/lib"}\n'},
+        )
+        _write(
+            self.repos / "repo-b",
+            {
+                "package.json": (
+                    '{"name": "repo-b", "dependencies": {"@example/lib": "workspace:*"}}\n'
+                )
+            },
+        )
+        layer = self.build(kinds=(_kind("npm_package"),))
+        self.assertEqual(
+            [e["repository"] for e in layer.by_repo["repo-b"]["depends_on"]], ["repo-a"]
+        )
+
+
 class ForkNameOrderTest(_Store):
     """CLAUDE.md 1.3 and #478: renaming a fork so it sorts on the other side of its
     original must not move a coordinate's resolution, declared or not."""

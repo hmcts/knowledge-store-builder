@@ -13,6 +13,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from settings_isolation import SettingsIsolated  # noqa: E402
@@ -93,6 +94,24 @@ class TheSettingsSnapshot(SettingsIsolated):
     def run_stage(self, gh: Gh) -> dict:
         self.assertEqual(stage.main(runner=gh), 0)
         return json.loads(config.MINIMUM_STANDARD_SETTINGS_PATH.read_text(encoding="utf-8"))
+
+    def test_an_injected_clock_makes_two_runs_byte_identical(self):
+        """Breaks if a direct `datetime.now()` is reintroduced for `read_at`: the
+        snapshot then differs between two runs of the same input, and the injected
+        time is not the one recorded."""
+        self.declare("repo-a")
+        answers = {
+            "repos/example-org/repo-a": REPO_BODY,
+            "repos/example-org/repo-a/vulnerability-alerts": "",
+            "repos/example-org/repo-a/branches/main": {"name": "main", "protected": True},
+        }
+        fixed = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        written = []
+        for _ in range(2):
+            self.assertEqual(stage.main(runner=Gh(answers), now=lambda: fixed), 0)
+            written.append(config.MINIMUM_STANDARD_SETTINGS_PATH.read_bytes())
+        self.assertEqual(written[0], written[1])
+        self.assertEqual(json.loads(written[0])["read_at"], "2026-01-02T03:04:05+00:00")
 
     def test_full_access_records_every_setting(self):
         """Breaks if a readable setting is dropped, misread or recorded under another

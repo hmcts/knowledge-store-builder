@@ -217,6 +217,33 @@ def read_file_list(path: Path) -> "list[Path]":
     return [Path(line.strip()) for line in lines if line.strip()]
 
 
+def distinct_paths(files: "list[Path]") -> "tuple[list[Path], int]":
+    """`files` with each file once, and how many repeats were dropped.
+
+    Two spellings of one file are one file: an absolute path and the
+    store-relative one name the same thing, and a list generator that emits both
+    makes every count the stages report twice what the corpus holds. The kept
+    spelling is the first, in the list's order - except that an absolute one
+    replaces a relative one, because a relative path is read against the working
+    directory and would be grouped as outside every repository.
+    """
+    position: dict[str, int] = {}
+    kept: list[Path] = []
+    for path in files:
+        key = os.path.normpath(store_paths.relative(path))
+        if key not in position:
+            position[key] = len(kept)
+            kept.append(path)
+        elif path.is_absolute() and not kept[position[key]].is_absolute():
+            kept[position[key]] = path
+    return kept, len(files) - len(kept)
+
+
+def duplicate_notice(dropped: int) -> str:
+    """The line that says repeats were dropped, or an empty string when none were."""
+    return f"{dropped:,} duplicate path(s) in the input ignored" if dropped else ""
+
+
 def pipeline_artefacts(files: "list[Path]", graph_directory: Path) -> "list[Path]":
     """Input paths that lie in a directory this pipeline writes.
 
@@ -776,6 +803,10 @@ def resolve_input(arguments, graph_directory: Path) -> "tuple[list[Path], Path]"
                 "explicit list with --files."
             )
         files = content_files(io.read_json_dict(source))
+
+    files, dropped = distinct_paths(files)
+    if dropped:
+        print(duplicate_notice(dropped))
 
     if not files:
         # An empty layer is an upstream failure, and writing one would look like a

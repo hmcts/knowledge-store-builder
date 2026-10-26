@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import json_schema_fixtures as fixtures  # noqa: E402
+import tool_config_fixtures as tool_configs  # noqa: E402
 from settings_isolation import SettingsIsolated  # noqa: E402
 
 from knowledgestore import config  # noqa: E402
@@ -127,6 +128,64 @@ class JsonSchemaLayerEndToEndTest(SettingsIsolated):
         layer_nodes = [n for n in nodes if n.get("_origin") == "json-schema"]
         self.assertTrue(layer_nodes)
         self.assertLessEqual({n["repo"] for n in layer_nodes}, graphify_repos)
+
+    def test_tool_configs_declaring_a_schema_keep_graphifys_nodes(self):
+        """Catches the stage claiming an instance document: a config whose `$schema` names
+        its tool's schema, with `extends` presets, is not a schema.
+
+        Breaks if the stage removes graphify's nodes for any of these files, writes a
+        `schema` node for one, or reports their preset strings as unresolved refs.
+        """
+        from graphify.detect import detect
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = Path(tmp.name).resolve()
+        configs = self._clone("configs", dict(tool_configs.FILES))
+        common = self._clone("common", {"person.json": fixtures.PERSON})
+        out = self.store / "graphify-out"
+        out.mkdir()
+        (out / ".graphify_detect.json").write_text(
+            json.dumps(detect(self.store, gitignore=False)), encoding="utf-8"
+        )
+        self._graphify(
+            "merge-graphs", str(configs), str(common), "--out", str(out / "graph.json"),
+            cwd=self.store,
+        )  # fmt: skip
+
+        def config_nodes() -> set[str]:
+            graph = json.loads((out / "graph.json").read_text(encoding="utf-8"))
+            return {
+                n["id"]
+                for n in graph["nodes"]
+                if n.get("repo") == "configs" and n.get("source_file") in tool_configs.FILES
+            }
+
+        before = config_nodes()
+        files_with_nodes = {
+            n.get("source_file")
+            for n in json.loads((out / "graph.json").read_text(encoding="utf-8"))["nodes"]
+            if n["id"] in before
+        }
+        self.assertIn(
+            "renovate.json",
+            files_with_nodes,
+            "graphify built no nodes for the config files; the survival check below would be vacuous",
+        )
+
+        config.configure(root=str(self.store))
+        unresolved = self.store / "unresolved.json"
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = layer.main(["--unresolved", str(unresolved)])
+        self.assertEqual(code, 0, printed.getvalue())
+
+        self.assertEqual(config_nodes(), before)
+        graph = json.loads((out / "graph.json").read_text(encoding="utf-8"))
+        schema_files = {
+            n["source_file"] for n in graph["nodes"] if n.get("_origin") == "json-schema"
+        }
+        self.assertEqual(schema_files, {"person.json"})
+        self.assertEqual(json.loads(unresolved.read_text(encoding="utf-8")), [])
 
 
 if __name__ == "__main__":

@@ -40,23 +40,7 @@ _SCHEMA = "$schema"
 
 JSON_TYPES = ("object", "array", "string", "number", "integer", "boolean", "null")
 
-# Root keywords that define a schema (spec row `schema-keywords`).
-SCHEMA_KEYWORDS = (
-    "properties",
-    "definitions",
-    _DEFS,
-    "items",
-    "allOf",
-    "oneOf",
-    "anyOf",
-    "$ref",
-    "extends",
-    "patternProperties",
-    "additionalProperties",
-    "type",
-)
-
-# Root keywords that carry sub-schemas (spec row `declared-id`).
+# Root keywords that define structure (spec rows `declared-id` and `schema-keywords`).
 _DEFINING_KEYWORDS = ("properties", "definitions", _DEFS)
 
 # The stdlib hooks used below (`JSONObject`, `py_make_scanner`, the decoder's
@@ -155,12 +139,19 @@ def _has_schema_type(value: object) -> bool:
 
 
 def _has_schema_keyword(document: dict) -> bool:
-    for keyword in SCHEMA_KEYWORDS:
-        if keyword not in document:
-            continue
-        if keyword != "type" or _has_schema_type(document["type"]):
-            return True
-    return False
+    """Whether a root key says the document is a schema rather than an instance.
+
+    A `$schema` that does not name json-schema.org declares the file an
+    instance of some other schema, and tool configurations do that. Only a
+    keyword that defines structure then counts: `properties`, `definitions` or
+    `$defs`, or a JSON `type` beside `properties` or `items`. A bare `extends`,
+    `$ref` or `items` does not.
+    """
+    if any(keyword in document for keyword in _DEFINING_KEYWORDS):
+        return True
+    return _has_schema_type(document.get("type")) and (
+        "properties" in document or "items" in document
+    )
 
 
 def recognise(document: object) -> str | None:
@@ -519,15 +510,15 @@ def _on_pattern_properties(ctx: _Expansion, keyword: str, value: object) -> None
 
 
 def _on_extends(ctx: _Expansion, keyword: str, value: object) -> None:
+    """Read `extends` where it holds schemas: an object, or the objects of a list.
+
+    Tool configurations use the same key for a string or a list of preset names,
+    which are not schemas and are neither walked nor recorded as references.
+    """
     f = ctx.frame
     for i, sub in enumerate(value if isinstance(value, list) else [value]):
-        key = ("extends", i) if isinstance(value, list) else ("extends",)
-        if isinstance(sub, str):
-            context = "/".join(str(t) for t in f.own + f.rel + key)
-            relation = "references" if f.refs_only else "extends"
-            ctx.walked.refs.append(Ref(f.owner, sub, relation, context, ctx.line, ctx.base))
-        else:
-            ctx.plain(sub, key, f.via, True)
+        if isinstance(sub, dict):
+            ctx.plain(sub, ("extends", i) if isinstance(value, list) else ("extends",), f.via, True)
 
 
 _HANDLERS = {
