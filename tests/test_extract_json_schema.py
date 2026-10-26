@@ -7,8 +7,10 @@ import dataclasses
 import gzip
 import io
 import json
+import os
 import sys
 import tempfile
+import time
 import unittest.mock
 from pathlib import Path
 
@@ -18,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import json_schema_fixtures as fixtures  # noqa: E402
 from settings_isolation import SettingsIsolated  # noqa: E402
 
-from knowledgestore import config, telemetry  # noqa: E402
+from knowledgestore import config, extract_ast, telemetry  # noqa: E402
 from knowledgestore import extract_json_schema as layer  # noqa: E402
 from knowledgestore import json_schema, json_schema_refs as refs  # noqa: E402
 
@@ -325,6 +327,14 @@ class AddLayerTest(SettingsIsolated):
             ],
         )
 
+    def test_the_same_file_given_twice_adds_its_nodes_once(self):
+        """Breaks if two `Owned` for one (repo, path) each write the file's nodes, so
+        the graph holds duplicate ids and the file is its own rival for its id."""
+        once = graph_after(W, P)
+        twice = graph_after(W, P, W)
+        self.assertEqual(twice["nodes"], once["nodes"])
+        self.assertEqual(twice["links"], once["links"])
+
 
 class OwnedKeyTest(unittest.TestCase):
     def test_repository_relative_path_that_looks_store_relative_stays_in_its_repository(self):
@@ -454,8 +464,8 @@ def run_capturing(main, argv: list[str]) -> Run:
     return Run(code, out.getvalue(), err.getvalue())
 
 
-class StageTest(SettingsIsolated):
-    """`main` against a real store on disk: clones, a content set, a graph."""
+class StoreCase(SettingsIsolated):
+    """A real store on disk: clones, a content set, a graph."""
 
     def setUp(self):
         super().setUp()
@@ -491,6 +501,10 @@ class StageTest(SettingsIsolated):
 
     def graph(self) -> dict:
         return json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+
+
+class StageTest(StoreCase):
+    """`main` against a real store on disk."""
 
     def test_main_writes_both_files_and_records_telemetry(self):
         """Breaks if the plain graph and the committed archive diverge, or a metric
@@ -637,10 +651,26 @@ class StageTest(SettingsIsolated):
         self.assertFalse(config.GRAPH_REPORT_PATH.exists())
 
     def test_no_graph_exits_1(self):
-        """Breaks if the stage runs, or creates a graph, with nothing to add to."""
+        """Breaks if the stage runs, or creates a graph, with nothing to add to, or
+        says so on stdout where the other refusals use stderr."""
         config.GRAPH_PATH.unlink()
-        self.assertEqual(run_capturing(layer.main, []).code, 1)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 1)
+        self.assertIn("Graph not found", out.stderr)
+        self.assertNotIn("Graph not found", out.stdout)
         self.assertFalse(config.GRAPH_PATH.exists())
+
+    def test_a_refused_unresolved_target_writes_nothing(self):
+        """Breaks if `--unresolved` is validated only after the graph is rewritten:
+        the run then fails with the graph changed and no report printed."""
+        before = config.GRAPH_PATH.read_bytes()
+        target = self.root / "out" / ".." / "unresolved.json"
+        out = run_capturing(layer.main, ["--unresolved", str(target)])
+        self.assertEqual(out.code, 2)
+        self.assertIn("Not writing --unresolved", out.stderr)
+        self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
+        self.assertFalse(config.GRAPH_PATH.with_suffix(".json.gz").exists())
+        self.assertFalse((self.root / "unresolved.json").exists())
 
     def test_no_content_set_exits_1(self):
         """Breaks if a missing content set is read as an empty estate and the layer wiped."""
@@ -754,3 +784,196 @@ class StageTest(SettingsIsolated):
             config.GRAPH_PATH.with_suffix(".json.gz").read_bytes(),
         )
         self.assertEqual(first, second)
+
+    def test_self_references_are_reported_beside_the_resolved_count(self):
+        """Breaks if a self-reference is counted but never printed, so resolved plus
+        unresolved falls short of the references in the files by an unexplained gap.
+
+        Hand-counted: widget-created has 2 resolved refs (owner by-id, parts local);
+        self.json has 3, `next` and `head` local and the root's `#` a self-reference.
+        """
+        mine = self.widgets / "self.json"
+        mine.write_text(SELF_REFERENCE, encoding="utf-8")
+        self.add_detect_entry(mine)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertRegex(
+            out.stdout,
+            r"\$ref resolved +4 +\(local 3, by-id 1\); self-references 1 \(no edge\)\n",
+        )
+        self.assertRegex(out.stdout, r"\$ref unresolved +0 ")
+
+    def test_a_large_data_file_is_left_to_graphify_without_a_line_parse(self):
+        """Breaks if every `.json` is parsed with line tracking before recognition.
+
+        Two observable outcomes. Nesting 2,000 deep is within the C parser's limit
+        and past the pure-Python scanner's, so a data file that deep is counted
+        `not-a-schema` only if it never reached the line-tracking parse; otherwise
+        it is named `malformed`. And a 5 MB lock-file-shaped data file, which took
+        54 s when every object's line was found by a rescan, is counted well inside
+        a generous bound."""
+        deep = self.widgets / "deep-data.json"
+        deep.write_text('{"a": ' * 2_000 + "1" + "}" * 2_000, encoding="utf-8")
+        self.add_detect_entry(deep)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertRegex(out.stdout, r"not a schema +1 +\(left to graphify\)")
+        self.assertNotIn("malformed", out.stdout)
+
+        packages = {
+            f"pkg{i}": {"version": "1.0.0", "resolved": "https://registry.example/x.tgz",
+                        "integrity": "sha512-" + "a" * 80, "requires": {"b": "1"}}
+            for i in range(20_000)
+        }  # fmt: skip
+        lock = self.widgets / "package-lock.json"
+        lock.write_text(json.dumps({"name": "x", "packages": packages}, indent=2))
+        self.assertGreater(lock.stat().st_size, 5_000_000)
+        groups = extract_ast.by_repository([lock], config.REPOSITORIES_DIR)
+        started = time.monotonic()
+        owned, info = layer.read_owned(groups, config.REPOSITORIES_DIR, layer.DEFAULT_MAX_BYTES)
+        elapsed = time.monotonic() - started
+        self.assertEqual((owned, info["not-a-schema"]["count"]), ([], 1))
+        self.assertLess(elapsed, 5.0)
+
+    def test_nesting_past_the_recursion_limit_is_named_malformed(self):
+        """Breaks if a schema nested past the line-tracking parse's recursion limit
+        raises RecursionError out of the stage instead of being named."""
+        deep = self.widgets / "deep-schema.json"
+        deep.write_text(
+            '{"$schema": "http://json-schema.org/draft-04/schema#", "default": '
+            + '{"a": ' * 2_000
+            + "1"
+            + "}" * 2_000
+            + "}",
+            encoding="utf-8",
+        )
+        self.add_detect_entry(deep)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("malformed 1", out.stdout)
+        self.assertIn("  widgets/deep-schema.json", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 2)
+
+    def test_an_integer_past_the_digit_limit_is_named_malformed(self):
+        """Breaks if an integer over 4,300 digits raises ValueError out of the stage."""
+        huge = self.widgets / "huge.json"
+        huge.write_text(
+            '{"$schema": "http://json-schema.org/draft-04/schema#", "maximum": '
+            + "9" * 5_000
+            + "}",
+            encoding="utf-8",
+        )
+        self.add_detect_entry(huge)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("malformed 1", out.stdout)
+        self.assertIn("  widgets/huge.json", out.stdout)
+
+
+V2 = (
+    '{"$schema": "http://json-schema.org/draft-04/schema#",'
+    ' "id": "http://schemas.example/widgets/v2.json",'
+    ' "properties": {"colour": {"type": "string"}}}'
+)
+
+USES_V2 = (
+    '{"$schema": "http://json-schema.org/draft-04/schema#",'
+    ' "id": "http://schemas.example/widgets/uses.json",'
+    ' "properties": {"paint": {"$ref": "http://schemas.example/widgets/v2.json"}}}'
+)
+
+
+class SymlinkTest(StoreCase):
+    """A content-set path that is a symlink, read through a real link in the clone."""
+
+    def link(self, link: Path, target: str) -> None:
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as error:  # pragma: no cover - platform
+            self.skipTest(f"this platform cannot create symlinks: {error}")
+
+    def write_graph(self, *files: str) -> None:
+        """graphify's keyword nodes on each named widgets file, as it leaves them."""
+        nodes = [
+            {"id": f"widgets::{f}_kw", "label": "properties", "source_file": f,
+             "repo": "widgets", "_origin": "ast"}
+            for f in files
+        ]  # fmt: skip
+        graph = {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "links": []}
+        config.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
+
+    def layer_nodes(self) -> list[dict]:
+        return [n for n in self.graph()["nodes"] if n.get("_origin") == "json-schema"]
+
+    def test_a_link_to_a_schema_in_the_same_repository_is_owned_by_the_real_file(self):
+        """Breaks if a link is read under its target's path: the target's nodes are
+        written twice, a reference to its id is a false `ambiguous` between the file
+        and itself, and graphify's keyword nodes on the link path survive."""
+        real = self.widgets / "schemas" / "v2.json"
+        real.write_text(V2, encoding="utf-8")
+        latest = self.widgets / "schemas" / "latest.json"
+        self.link(latest, "v2.json")
+        uses = self.widgets / "uses.json"
+        uses.write_text(USES_V2, encoding="utf-8")
+        for path in (latest, real, uses):
+            self.add_detect_entry(path)
+        self.write_graph("schemas/latest.json", "schemas/v2.json", "app.py")
+
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        ids = [n["id"] for n in self.layer_nodes()]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(
+            sorted(n["id"] for n in self.layer_nodes() if n["source_file"].startswith("schemas/v")),
+            [
+                "widgets::jsonschema:schemas/v2.json#",
+                "widgets::jsonschema:schemas/v2.json#/properties/colour",
+            ],
+        )
+        self.assertFalse([n for n in self.layer_nodes() if "latest" in n["source_file"]])
+        self.assertEqual(
+            [n["id"] for n in self.graph()["nodes"] if n.get("_origin") == "ast"],
+            ["widgets::app.py_kw"],
+        )
+        self.assertNotIn("ambiguous", out.stdout)
+        self.assertIn(
+            (
+                "widgets::jsonschema:uses.json#/properties/paint",
+                "widgets::jsonschema:schemas/v2.json#",
+            ),
+            [(e["source"], e["target"]) for e in self.graph()["links"]],
+        )
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 4)
+        self.assertRegex(out.stdout, r"symlinked to an owned file +1 ")
+
+    def test_a_link_to_another_repository_is_read_under_its_own_path(self):
+        """Breaks if a link into another clone is keyed by the target's repository
+        and path, which writes that file's node ids a second time, rather than by
+        the path graphify gives it in the repository that holds the link."""
+        shared = self.widgets / "shared-person.json"
+        self.link(shared, "../common/person.json")
+        self.add_detect_entry(shared)
+        self.write_graph("shared-person.json")
+
+        self.assertEqual(run_capturing(layer.main, []).code, 0)
+        ids = [n["id"] for n in self.layer_nodes()]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn("widgets::jsonschema:shared-person.json#", ids)
+        self.assertIn("common::jsonschema:person.json#", ids)
+        self.assertEqual([n for n in self.graph()["nodes"] if n.get("_origin") == "ast"], [])
+
+    def test_a_link_out_of_the_store_is_named_and_never_read(self):
+        """Breaks if a link whose target lies outside the store is read: its content
+        would enter the graph under a repository that does not hold it."""
+        with tempfile.TemporaryDirectory() as elsewhere:
+            outside = Path(elsewhere) / "secret.json"
+            outside.write_text(V2, encoding="utf-8")
+            escape = self.widgets / "escape.json"
+            self.link(escape, str(outside))
+            self.add_detect_entry(escape)
+            out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("outside-repositories 1", out.stdout)
+        self.assertIn(str(escape), out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 2)
+        self.assertFalse([n for n in self.layer_nodes() if "v2.json" in json.dumps(n)])

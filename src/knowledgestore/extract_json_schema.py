@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from knowledgestore import config, extract_ast, graph_files, io, kinds, telemetr
 from knowledgestore.json_schema import (
     Entity,
     SchemaReadError,
+    load,
     load_with_lines,
     recognise,
     walk,
@@ -178,12 +180,27 @@ def _unresolved(item: Owned, pointer: str, ref: object, found: Resolution, reaso
     }
 
 
-def add_layer(graph: dict, owned: list[Owned], forks: frozenset[str]) -> LayerReport:
-    """Replace graphify's keyword nodes for `owned` files with the layer; report what it did."""
+def add_layer(
+    graph: dict,
+    owned: list[Owned],
+    forks: frozenset[str],
+    aliases: frozenset[tuple[str, str]] = frozenset(),
+) -> LayerReport:
+    """Replace graphify's keyword nodes for `owned` files with the layer; report what it did.
+
+    `aliases` are (repo, path) pairs naming a symlink to an owned file in the same
+    repository: graphify read the link as a file of its own, so its keyword nodes
+    there are removed too, while the layer's nodes belong to the target alone.
+    """
     report = LayerReport()
-    ordered = sorted(owned, key=lambda o: (o.repo, o.rel))
+    # One file is one entry, whatever the input repeats: a second would write the
+    # file's node ids twice and make it its own rival for the id it declares.
+    unique: dict[tuple[str, str], Owned] = {}
+    for item in sorted(owned, key=lambda o: (o.repo, o.rel)):
+        unique.setdefault((item.repo, item.rel), item)
+    ordered = list(unique.values())
     strip_layer(graph)
-    report.graphify_removed = remove_graphify_nodes(graph, {(o.repo, o.rel) for o in ordered})
+    report.graphify_removed = remove_graphify_nodes(graph, set(unique) | aliases)
 
     index = Index.build(ordered)
     nodes: list[dict] = []
@@ -272,7 +289,7 @@ UNRESOLVED_SHOWN = 20
 _MIB = 1024 * 1024
 _BASES = ("meta-schema", "schema-keywords", "declared-id")
 _SKIP_REASONS = ("malformed", "too-large", "outside-repositories")
-_REASONS = (*_SKIP_REASONS, "truncated", "not-a-schema")
+_REASONS = (*_SKIP_REASONS, "truncated", "symlinked", "not-a-schema")
 _UNRESOLVED_REASONS = (
     "meta-schema",
     "external",
@@ -313,13 +330,102 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _repo_relative(path: Path, repo: str, corpus: Path) -> str:
-    """The POSIX path of `path` inside the clone `repo`."""
+Location = tuple[str, str]  # (repo, POSIX repository-relative path)
+
+
+def _location(parts: tuple[str, ...]) -> Location | None:
+    return (parts[0], "/".join(parts[1:])) if len(parts) > 1 else None
+
+
+def _as_written(path: Path, corpus: Path, resolved: dict[Path, Path]) -> Location | None:
+    """Where `path` sits in the corpus as spelled, without following symlinks.
+
+    graphify names a file by the path it was handed, so a link keeps its own name
+    and this is the key that matches graphify's `source_file`. The corpus itself
+    may be spelled differently from the content set's paths (a temporary directory
+    reached through a symlink, say), so the part above the corpus is matched by
+    the directory it resolves to; only the part beneath it is kept as written.
+    `resolved` memoises that per directory, which every file in a clone shares.
+    """
+    spelled = Path(os.path.abspath(path))
     try:
-        base = corpus.resolve()
+        corpus_real = corpus.resolve()
     except OSError:  # pragma: no cover - an unresolvable corpus is caught upstream
-        base = corpus
-    return "/".join(path.resolve().relative_to(base).parts[1:]) if repo else path.as_posix()
+        return None
+    for base in (Path(os.path.abspath(corpus)), corpus_real):
+        if spelled.is_relative_to(base):
+            return _location(spelled.relative_to(base).parts)
+    for ancestor in spelled.parents:
+        try:
+            if ancestor not in resolved:
+                resolved[ancestor] = ancestor.resolve()
+        except OSError:  # pragma: no cover - an unreadable ancestor
+            return None
+        if resolved[ancestor] == corpus_real:
+            return _location(spelled.relative_to(ancestor).parts)
+    return None
+
+
+def _resolved(path: Path, corpus: Path) -> Location | None:
+    """Where the file `path` names really is in the corpus, following symlinks."""
+    try:
+        return _location(path.resolve().relative_to(corpus.resolve()).parts)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_one(path: Path, max_bytes: int) -> tuple[str, object, dict[int, int]]:
+    """Read one file: its recognition basis or the reason it is not owned, and its parse.
+
+    The reason is `too-large`, `malformed` or `not-a-schema`. A file failing either
+    parse is `malformed`.
+    """
+    try:
+        # Size first: an oversized file is never read.
+        if path.stat().st_size > max_bytes:
+            return "too-large", None, {}
+        text = path.read_bytes().decode("utf-8")
+        # Recognise on the fast parse: most `.json` in a content set is data, and
+        # only a schema needs the slower parse that records line numbers.
+        basis = recognise(load(text))
+        if basis is None:
+            return "not-a-schema", None, {}
+        document, lines = load_with_lines(text)
+    except (OSError, UnicodeDecodeError, SchemaReadError):
+        return "malformed", None, {}
+    return basis, document, lines
+
+
+def _entries(
+    groups: dict[str, list[Path]], corpus: Path, outside: list[str]
+) -> tuple[list[tuple[Location, Path]], list[tuple[Location, Location]]]:
+    """Split the content set into files to read and links that their target owns.
+
+    A path is keyed as written. One whose real file is another content-set path
+    in the same repository is a link: the target is read once, under its own name,
+    and the link takes the target's outcome. Anything `by_repository` placed
+    outside every repository, a link out of the store included, is named in
+    `outside` and never read.
+    """
+    keyed: list[tuple[Location, Location, Path]] = []
+    resolved: dict[Path, Path] = {}
+    for repo in sorted(groups):
+        for path in groups[repo]:
+            real = _resolved(path, corpus) if repo else None
+            if real is None:
+                outside.append(path.as_posix())
+                continue
+            keyed.append((_as_written(path, corpus, resolved) or real, real, path))
+    keyed.sort(key=lambda entry: (entry[0], str(entry[2])))
+    as_spelled = {written for written, real, _ in keyed if written == real}
+    files: list[tuple[Location, Path]] = []
+    links: list[tuple[Location, Location]] = []
+    for written, real, path in keyed:
+        if written != real and written[0] == real[0] and real in as_spelled:
+            links.append((written, real))
+        else:
+            files.append((written, path))
+    return files, links
 
 
 def read_owned(
@@ -328,49 +434,48 @@ def read_owned(
     """Read every file the layer might own; say what was skipped, and why.
 
     The returned dict holds, per reason, `{"count": n, "names": [...]}` with the
-    names sorted, plus `"basis"`, the count of owned files by recognition basis.
-    Only `malformed`, `too-large` and `outside-repositories` are skips. A
-    `truncated` file stays in the layer (its walk stopped at the depth limit) and
-    a `not-a-schema` file is counted only: graphify keeps it.
+    names sorted, plus `"basis"`, the count of owned files by recognition basis,
+    and `"aliases"`, the sorted (repo, path) of each `symlinked` link. Only
+    `malformed`, `too-large` and `outside-repositories` are skips. A `truncated`
+    file stays in the layer (its walk stopped at the depth limit), a `symlinked`
+    link is represented by the owned file it points to, and a `not-a-schema` file
+    is counted only: graphify keeps it.
     """
     names: dict[str, list[str]] = {reason: [] for reason in _REASONS}
     bases: Counter[str] = Counter()
     not_a_schema = 0
     owned: list[Owned] = []
-    for repo in sorted(groups):
-        entries = sorted(
-            ((_repo_relative(p, repo, corpus), p) for p in groups[repo]),
-            key=lambda entry: (entry[0], str(entry[1])),
-        )
-        for rel, path in entries:
-            name = f"{repo}/{rel}" if repo else rel
-            if not repo:
-                names["outside-repositories"].append(name)
-                continue
-            try:
-                # Size first: an oversized file is never read.
-                if path.stat().st_size > max_bytes:
-                    names["too-large"].append(name)
-                    continue
-                text = path.read_bytes().decode("utf-8")
-                document, lines = load_with_lines(text)
-            except (OSError, UnicodeDecodeError, SchemaReadError):
-                names["malformed"].append(name)
-                continue
-            basis = recognise(document)
-            if basis is None:
-                not_a_schema += 1
-                continue
+    outcomes: dict[Location, str] = {}
+    files, links = _entries(groups, corpus, names["outside-repositories"])
+    for (repo, rel), path in files:
+        outcome, document, lines = _read_one(path, max_bytes)
+        outcomes[(repo, rel)] = outcome
+        if outcome == "not-a-schema":
+            not_a_schema += 1
+        elif outcome not in _BASES:
+            names[outcome].append(f"{repo}/{rel}")
+        else:
             walked = walk(document, lines, rel)
             if walked.truncated:
-                names["truncated"].append(name)
-            bases[basis] += 1
-            owned.append(Owned(repo, rel, basis, walked))
+                names["truncated"].append(f"{repo}/{rel}")
+            bases[outcome] += 1
+            owned.append(Owned(repo, rel, outcome, walked))
+    aliases: list[Location] = []
+    for (repo, rel), real in links:
+        outcome = outcomes[real]
+        if outcome == "not-a-schema":
+            not_a_schema += 1
+        elif outcome not in _BASES:
+            names[outcome].append(f"{repo}/{rel}")
+        else:
+            names["symlinked"].append(f"{repo}/{rel}")
+            aliases.append((repo, rel))
     info: dict = {
         reason: {"count": len(found), "names": sorted(found)} for reason, found in names.items()
     }
     info["not-a-schema"] = {"count": not_a_schema, "names": []}
     info["basis"] = {basis: bases[basis] for basis in _BASES if bases[basis]}
+    info["aliases"] = sorted(aliases)
     return owned, info
 
 
@@ -426,6 +531,11 @@ def render_report(
             f"  truncated at depth        {info['truncated']['count']:>7,}   "
             "(kept in the layer; named below)"
         )
+    if info["symlinked"]["count"]:
+        lines.append(
+            f"  symlinked to an owned file {info['symlinked']['count']:>6,}   "
+            "(read once, as the file they point to; named below)"
+        )
     lines += [
         f"  graphify nodes removed    {removed:>7,} from {len(owned):,} owned files "
         f"(keyword scaffolding); {semantic_kept:,} semantic nodes kept",
@@ -434,7 +544,8 @@ def render_report(
         f"                            {sum(layer_report.edges_by_relation.values()):>7,} edges "
         f"({_counts(layer_report.edges_by_relation) or 'none'})",
         f"  $ref resolved             {sum(layer_report.resolved_by_how.values()):>7,}   "
-        f"({_counts(layer_report.resolved_by_how) or 'none'})",
+        f"({_counts(layer_report.resolved_by_how) or 'none'}); "
+        f"self-references {layer_report.self_references:,} (no edge)",
         f"{'cross-repository':>45} {layer_report.cross_repository:,}",
     ]
     reasons = Counter(item["reason"] for item in layer_report.unresolved)
@@ -446,7 +557,7 @@ def render_report(
     lines.append(
         f"  $ref unresolved           {len(layer_report.unresolved):>7,}   ({_counts(ordered)})"
     )
-    for reason in _REASONS[:3] + ("truncated",):
+    for reason in _REASONS[:3] + ("truncated", "symlinked"):
         if info[reason]["names"]:
             lines.append("")
             heading = _size_wording(max_bytes) if reason == "too-large" else reason
@@ -492,8 +603,19 @@ def note_json_schema_layer(nodes: int, edges: int, layer_report: LayerReport) ->
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_args(argv)
     if not config.GRAPH_PATH.exists():
-        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        print(
+            f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)",
+            file=sys.stderr,
+        )
         return 1
+    if arguments.unresolved:
+        # Before any write: a refused target found after the graph is rewritten
+        # fails the run with the graph changed and no report printed.
+        try:
+            io.checked_write_target(arguments.unresolved)
+        except ValueError as error:
+            print(f"Not writing --unresolved: {error}", file=sys.stderr)
+            return 2
     refusal = graph_files.stale_refusal(config.GRAPH_PATH)
     if refusal:
         print(refusal, file=sys.stderr)
@@ -509,7 +631,8 @@ def main(argv: list[str] | None = None) -> int:
     owned, info = read_owned(groups, config.REPOSITORIES_DIR, arguments.max_bytes)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
-    layer_report = add_layer(graph, owned, frozenset(config.FORK_REPOS))
+    aliases = frozenset(info["aliases"])
+    layer_report = add_layer(graph, owned, frozenset(config.FORK_REPOS), aliases)
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
@@ -517,9 +640,8 @@ def main(argv: list[str] | None = None) -> int:
         out.write(serialised)
 
     if arguments.unresolved:
-        io.checked_write_target(arguments.unresolved)
         arguments.unresolved.parent.mkdir(parents=True, exist_ok=True)
-        arguments.unresolved.write_text(  # NOSONAR(S2083) - validated just above
+        arguments.unresolved.write_text(  # NOSONAR(S2083) - validated before the graph write
             json.dumps(layer_report.unresolved, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
