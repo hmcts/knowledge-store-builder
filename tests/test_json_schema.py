@@ -309,6 +309,143 @@ class WalkTest(unittest.TestCase):
             sorted(r.context for r in w.refs), ["additionalProperties", "patternProperties/^x-"]
         )
 
+    def test_required_is_inherited_by_fields_inside_a_combinator_member(self):
+        """Breaks if a name the enclosing node requires reads as optional on a field in its allOf member."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "required": ["a"],
+            "allOf": [{"properties": {"a": {}, "b": {}}}],
+        }
+        by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
+        self.assertEqual(by["/allOf/0/properties/a"].metadata["required"], True)
+        self.assertEqual(by["/allOf/0/properties/b"].metadata["required"], False)
+
+    def test_required_in_a_sibling_all_of_member_applies(self):
+        """Breaks if a `required` array in a sibling allOf member is ignored."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "allOf": [{"properties": {"a": {}}}, {"required": ["a"]}],
+        }
+        by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
+        self.assertEqual(by["/allOf/0/properties/a"].metadata["required"], True)
+
+    def test_required_in_a_one_of_sibling_does_not_apply(self):
+        """Breaks if a oneOf sibling's `required` marks a field optional-by-branch as required."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "oneOf": [{"properties": {"a": {}}}, {"required": ["a"]}],
+        }
+        by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
+        self.assertEqual(by["/oneOf/0/properties/a"].metadata["required"], False)
+
+    def test_required_does_not_leak_into_a_nested_items_schema(self):
+        """Breaks if an outer `required` is applied to same-named fields under `items`."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "required": ["a"],
+            "allOf": [{"items": {"properties": {"a": {}}}}],
+        }
+        by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
+        self.assertEqual(by["/allOf/0/items/properties/a"].metadata["required"], False)
+
+    def test_draft03_required_true_on_the_property(self):
+        """Breaks if the draft-03 form `required: true` on a property is not read."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-03/schema#",
+            "properties": {"a": {"required": True}, "b": {"required": False}},
+        }
+        by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
+        self.assertEqual(
+            (by["/properties/a"].metadata["required"], by["/properties/b"].metadata["required"]),
+            (True, False),
+        )
+
+    def test_tuple_items_get_an_indexed_context(self):
+        """Breaks if tuple `items` refs lose their position or are not descended."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "items": [{"$ref": "#/definitions/A"}, {"$ref": "#/definitions/B"}],
+        }
+        w = json_schema.walk(doc, {}, "x.json")
+        self.assertEqual(
+            [(r.ref, r.context, r.relation) for r in w.refs],
+            [
+                ("#/definitions/A", "items/0", "references"),
+                ("#/definitions/B", "items/1", "references"),
+            ],
+        )
+
+    def test_prefix_items_and_conditionals_keep_their_refs(self):
+        """Breaks if a `$ref` under prefixItems, if, then or else is dropped or misfiled as extends."""
+        doc = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "prefixItems": [{"$ref": "#/$defs/A"}],
+            "if": {"$ref": "#/$defs/B"},
+            "then": {"$ref": "#/$defs/C"},
+            "else": {"$ref": "#/$defs/D"},
+        }
+        w = json_schema.walk(doc, {}, "x.json")
+        self.assertEqual(
+            [(r.ref, r.context, r.relation) for r in w.refs],
+            [
+                ("#/$defs/A", "prefixItems/0", "references"),
+                ("#/$defs/B", "if", "references"),
+                ("#/$defs/C", "then", "references"),
+                ("#/$defs/D", "else", "references"),
+            ],
+        )
+        self.assertEqual([e.kind for e in w.entities], ["schema"])
+
+    def test_other_schema_valued_keywords_keep_their_refs(self):
+        """Breaks if contains, additionalItems, propertyNames, unevaluated*, or dependent schemas drop refs."""
+        doc = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "contains": {"$ref": "#/$defs/A"},
+            "additionalItems": {"$ref": "#/$defs/B"},
+            "propertyNames": {"$ref": "#/$defs/C"},
+            "unevaluatedItems": {"$ref": "#/$defs/D"},
+            "unevaluatedProperties": {"$ref": "#/$defs/E"},
+            "dependentSchemas": {"x": {"$ref": "#/$defs/F"}},
+            "dependencies": {"y": {"$ref": "#/$defs/G"}, "z": ["w"]},
+        }
+        w = json_schema.walk(doc, {}, "x.json")
+        self.assertEqual(
+            [(r.ref, r.context) for r in w.refs],
+            [
+                ("#/$defs/A", "contains"),
+                ("#/$defs/B", "additionalItems"),
+                ("#/$defs/C", "propertyNames"),
+                ("#/$defs/D", "unevaluatedItems"),
+                ("#/$defs/E", "unevaluatedProperties"),
+                ("#/$defs/F", "dependentSchemas/x"),
+                ("#/$defs/G", "dependencies/y"),
+            ],
+        )
+
+    def test_id_is_read_under_an_unknown_schema_uri(self):
+        """Breaks if a `$schema` that is not on json-schema.org stops `id` from being read."""
+        doc = {
+            "$schema": "https://tool.example/dialect.json",
+            "id": "http://schemas.example/x.json",
+        }
+        self.assertEqual(
+            json_schema.walk(doc, {}, "x.json").declared, [("http://schemas.example/x.json", "")]
+        )
+
+    def test_id_is_read_when_schema_is_not_a_string(self):
+        """Breaks if a non-string `$schema` crashes the walk or suppresses `id` (the rule: unknown dialect)."""
+        doc = {"$schema": 4, "id": "http://schemas.example/x.json"}
+        self.assertEqual(
+            json_schema.walk(doc, {}, "x.json").declared, [("http://schemas.example/x.json", "")]
+        )
+
+    def test_only_dollar_id_is_declared_when_both_are_present(self):
+        """Breaks if `id` overrides or joins `$id` under an unknown dialect."""
+        doc = {"id": "http://schemas.example/old.json", "$id": "http://schemas.example/new.json"}
+        w = json_schema.walk(doc, {}, "x.json")
+        self.assertEqual(w.declared, [("http://schemas.example/new.json", "")])
+        self.assertEqual(w.entities[0].metadata["schema_id"], "http://schemas.example/new.json")
+
     def test_normalise_uri(self):
         """Breaks if the empty fragment or a trailing # survives, or the path is lower-cased."""
         self.assertEqual(

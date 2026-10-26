@@ -209,22 +209,28 @@ class _Frame:
     extends: bool
     line: int  # fallback when the node carries none
     entity: _EntityInfo | None
+    # Names required by the enclosing node and, for allOf, by sibling members.
+    inherited: tuple = ()
 
 
-def _reads_id(document: dict, root_schema: object, keyword: str) -> bool:
-    """Whether `keyword` (`$id` or `id`) declares an id here, given the root dialect."""
+def _reads_id(root_schema: object, keyword: str) -> bool:
+    """Whether `keyword` (`$id` or `id`) can declare an id, given the root dialect.
+
+    `id` counts under draft-03/04 and under an unknown dialect (no `$schema`, a
+    non-string one, or one not on json-schema.org). Where both keywords are
+    present `_declared_id` reads `$id` first, so `id` is only ever the fallback.
+    """
     if keyword == "$id":
         return True
     if isinstance(root_schema, str) and ("draft-03" in root_schema or "draft-04" in root_schema):
         return True
-    unknown_dialect = not isinstance(root_schema, str) or "json-schema.org" not in root_schema
-    return unknown_dialect and "$id" not in document
+    return not isinstance(root_schema, str) or "json-schema.org" not in root_schema
 
 
 def _declared_id(document: dict, root_schema: object) -> str | None:
     for keyword in ("$id", "id"):
         value = document.get(keyword)
-        if isinstance(value, str) and _reads_id(document, root_schema, keyword):
+        if isinstance(value, str) and _reads_id(root_schema, keyword):
             return value
     return None
 
@@ -322,11 +328,13 @@ class _Expansion:
         self.walked = walked
         self.children: list[_Frame] = []
 
-    def plain(self, sub: object, key: tuple, via: str | None, extends: bool = False) -> None:
+    def plain(
+        self, sub: object, key: tuple, via: str | None, extends: bool = False, inherited: tuple = ()
+    ) -> None:
         f = self.frame
         self.children.append(
             _Frame(sub, f.tokens + key, f.owner, f.own, f.rel + key, self.base,
-                   f.depth, via, extends, self.line, None)
+                   f.depth, via, extends, self.line, None, inherited)
         )  # fmt: skip
 
     def entity(self, sub: object, key: tuple, kind: str, name: str, required: bool | None) -> None:
@@ -343,12 +351,17 @@ class _Expansion:
         )  # fmt: skip
 
 
+def _required_names(node: object) -> tuple:
+    required = node.get("required") if isinstance(node, dict) else None
+    return tuple(n for n in required if isinstance(n, str)) if isinstance(required, list) else ()
+
+
 def _on_properties(ctx: _Expansion, keyword: str, value: object) -> None:
     if not isinstance(value, dict):
         return
-    required = ctx.node.get("required")
+    required = _required_names(ctx.node) + ctx.frame.inherited
     for name, sub in value.items():
-        listed = isinstance(required, list) and name in required
+        listed = name in required
         draft3 = isinstance(sub, dict) and sub.get("required") is True
         ctx.entity(sub, ("properties", name), kinds.FIELD, name, listed or draft3)
 
@@ -368,13 +381,25 @@ def _on_items(ctx: _Expansion, keyword: str, value: object) -> None:
 
 
 def _on_combinator(ctx: _Expansion, keyword: str, value: object) -> None:
-    if isinstance(value, list):
-        for i, sub in enumerate(value):
-            ctx.plain(sub, (keyword, i), keyword, keyword == "allOf")
+    if not isinstance(value, list):
+        return
+    # A name the enclosing node requires is required of a member's fields. Only
+    # allOf members all apply at once, so only there does a sibling's `required`
+    # count; a oneOf or anyOf sibling may not be the branch that matches.
+    outer = ctx.frame.inherited + _required_names(ctx.node)
+    siblings = tuple(n for sub in value for n in _required_names(sub)) if keyword == "allOf" else ()
+    for i, sub in enumerate(value):
+        ctx.plain(sub, (keyword, i), keyword, keyword == "allOf", outer + siblings)
 
 
 def _on_single(ctx: _Expansion, keyword: str, value: object) -> None:
     ctx.plain(value, (keyword,), ctx.frame.via)
+
+
+def _on_tuple(ctx: _Expansion, keyword: str, value: object) -> None:
+    if isinstance(value, list):
+        for i, sub in enumerate(value):
+            ctx.plain(sub, (keyword, i), ctx.frame.via)
 
 
 def _on_pattern_properties(ctx: _Expansion, keyword: str, value: object) -> None:
@@ -405,6 +430,20 @@ _HANDLERS = {
     "not": _on_single,
     "additionalProperties": _on_single,
     "patternProperties": _on_pattern_properties,
+    # Further schema-valued keywords. A `$ref` under any of them is a
+    # `references` edge; none creates a node. `dependencies` also holds arrays
+    # of property names, which are not schemas and are skipped on visit.
+    "prefixItems": _on_tuple,
+    "if": _on_single,
+    "then": _on_single,
+    "else": _on_single,
+    "contains": _on_single,
+    "additionalItems": _on_single,
+    "propertyNames": _on_single,
+    "unevaluatedItems": _on_single,
+    "unevaluatedProperties": _on_single,
+    "dependencies": _on_pattern_properties,
+    "dependentSchemas": _on_pattern_properties,
     "extends": _on_extends,
 }
 
