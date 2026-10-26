@@ -3778,6 +3778,7 @@ MUTATIONS = (
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
             "test_extract_json_schema.StageTest.test_content_set_without_json_removes_the_layer_and_exits_0",
             "test_extract_json_schema.StageTest.test_data_json_is_counted_but_not_named_or_skipped",
+            "test_extract_json_schema.StageTest.test_declared_fork_settles_an_id_two_repositories_declare",
             "test_extract_json_schema.StageTest.test_file_outside_repositories_is_named_and_skipped",
             "test_extract_json_schema.StageTest.test_file_over_max_bytes_is_skipped_by_name",
             "test_extract_json_schema.StageTest.test_graph_report_note_is_replaced_not_appended",
@@ -11795,6 +11796,7 @@ MUTATIONS = (
         "    non_forks = list(candidates)",
         "the tie rule must pass over a declared fork, or a copied schema becomes ambiguous and its cross-repository edge vanishes",
         (
+            "test_extract_json_schema.StageTest.test_declared_fork_settles_an_id_two_repositories_declare",
             "test_json_schema_refs.TieRuleTest.test_declared_fork_is_passed_over",
             "test_json_schema_refs.TieRuleTest.test_resolve_passes_forks_to_the_rule",
         ),
