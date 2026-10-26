@@ -11951,6 +11951,48 @@ MUTATIONS = (
         ("test_extract_json_schema.AddLayerTest.test_layer_edges_are_written_in_key_order",),
     ),
     Mutation(
+        "relationships: a workspace: reference follows the fork rule",
+        "relationships.py",
+        '        if not ref.ref.startswith("workspace:") and not _points_inside_clone(ref):\n',
+        "        if not _points_inside_clone(ref):\n",
+        "#507: a fork's `workspace:*` reference to its own package was sent to the original, counting a pin that names no registry version and making an edge between two repositories that npm, pnpm and Yarn can never join through that protocol",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_registry_range_from_the_fork_still_resolves_to_the_original",
+            "test_build_relationships.WorkspaceReferenceTest.test_a_workspace_reference_in_each_copy_is_self_not_an_edge",
+            "test_build_relationships.WorkspaceReferenceTest.test_workspace_references_are_self_when_the_fork_is_undeclared",
+        ),
+    ),
+    Mutation(
+        "relationships: a link: or file: reference inside the clone follows the fork rule",
+        "relationships.py",
+        '_IN_CLONE_PREFIXES = ("link:", "file:")\n',
+        "_IN_CLONE_PREFIXES = ()\n",
+        "#507: a `link:` or `file:` path inside the declaring clone names a directory of that clone, so it can never reach another repository's copy of the package",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_path_inside_the_clone_is_self_and_a_path_outside_it_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: a link: or file: path leaving the clone is taken as inside it",
+        "relationships.py",
+        '    return resolved != ".." and not resolved.startswith("../")\n',
+        "    return True\n",
+        "#507: a path that climbs out of the clone (or is absolute) is not inside it, and its package can be another repository's",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_path_inside_the_clone_is_self_and_a_path_outside_it_is_not",
+        ),
+    ),
+    Mutation(
+        "relationships: a workspace: reference is self whatever the consumer publishes",
+        "relationships.py",
+        "        return consumer in self.publishers.get(ref.kind, {}).get(ref.target, ())\n",
+        "        return True\n",
+        "#507: the self rule needs the consumer to publish the target; without it a `workspace:` reference to a package another clone publishes is dropped as self and the dependency is lost",
+        (
+            "test_build_relationships.WorkspaceReferenceTest.test_a_workspace_reference_to_a_package_the_consumer_does_not_publish",
+        ),
+    ),
+    Mutation(
         "json-schema: a bare extends makes a tool config a schema",
         "json_schema.py",
         '    return _has_schema_type(document.get("type")) and (\n        "properties" in document or "items" in document\n    )\n',
