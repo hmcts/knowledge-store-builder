@@ -26,7 +26,11 @@ import json
 import json.decoder
 import json.scanner
 import re
+from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
+
+from knowledgestore import kinds
 
 JSON_TYPES = ("object", "array", "string", "number", "integer", "boolean", "null")
 
@@ -63,7 +67,7 @@ class SchemaReadError(ValueError):
 
 def load_with_lines(text: str) -> tuple[object, dict[int, int]]:
     """Decode `text`; also map `id(obj)` to the 1-based line of each object's `{`."""
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         text = text[1:]
     starts: dict[int, int] = {}
     decoder: Any = json.JSONDecoder()
@@ -122,3 +126,308 @@ def recognise(document: object) -> str | None:
     if has_id and any(k in document for k in _DEFINING_KEYWORDS):
         return "declared-id"
     return None
+
+
+# --- walking one document -------------------------------------------------
+
+MAX_DEPTH = 32
+_DESCRIPTION_LIMIT = 500
+_ENUM_LIMIT = 20
+_COMBINATORS = ("allOf", "oneOf", "anyOf")
+_REF_KEYWORDS = ("$ref", "$dynamicRef", "$recursiveRef")
+
+
+def escape_pointer(token: str) -> str:
+    """Apply the RFC 6901 escapes to one reference token."""
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+def _pointer(tokens: tuple) -> str:
+    return "".join("/" + escape_pointer(str(t)) for t in tokens)
+
+
+def normalise_uri(uri: str) -> str:
+    """Drop an empty fragment and a trailing `#`; lower-case the scheme and host."""
+    try:
+        parts = urlsplit(uri)
+    except ValueError:
+        return uri[:-1] if uri.endswith("#") else uri
+    userinfo, at, hostport = parts.netloc.rpartition("@")
+    netloc = userinfo + at + hostport.lower()
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path, parts.query, parts.fragment))
+
+
+@dataclass(frozen=True)
+class Entity:
+    pointer: str
+    kind: str
+    label: str
+    line: int
+    parent: str | None
+    metadata: dict = field(compare=False, hash=False)
+
+
+@dataclass(frozen=True)
+class Ref:
+    owner: str
+    ref: object
+    relation: str
+    context: str
+    line: int
+    base: str | None
+
+
+@dataclass
+class Walked:
+    entities: list[Entity]
+    refs: list[Ref]
+    declared: list[tuple[str, str]]
+    anchors: dict[str, str]
+    document: object
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class _EntityInfo:
+    kind: str
+    label: str
+    parent: str | None
+    required: bool | None
+    via: str | None
+
+
+@dataclass(frozen=True)
+class _Frame:
+    node: object
+    tokens: tuple
+    owner: str  # pointer of the entity the subschema belongs to
+    own: tuple  # keyword path from the owner's parent entity to the owner
+    rel: tuple  # keyword path from the owner to this subschema
+    base: str | None
+    depth: int  # entity ancestors of the owner
+    via: str | None
+    extends: bool
+    line: int  # fallback when the node carries none
+    entity: _EntityInfo | None
+
+
+def _reads_id(document: dict, root_schema: object, keyword: str) -> bool:
+    """Whether `keyword` (`$id` or `id`) declares an id here, given the root dialect."""
+    if keyword == "$id":
+        return True
+    if isinstance(root_schema, str) and ("draft-03" in root_schema or "draft-04" in root_schema):
+        return True
+    unknown_dialect = not isinstance(root_schema, str) or "json-schema.org" not in root_schema
+    return unknown_dialect and "$id" not in document
+
+
+def _declared_id(document: dict, root_schema: object) -> str | None:
+    for keyword in ("$id", "id"):
+        value = document.get(keyword)
+        if isinstance(value, str) and _reads_id(document, root_schema, keyword):
+            return value
+    return None
+
+
+def _metadata(node: object, info: _EntityInfo, root_schema: object, declared: str | None) -> dict:
+    meta: dict = {}
+    if info.kind == kinds.SCHEMA:
+        if isinstance(root_schema, str):
+            meta["draft"] = root_schema
+        if declared is not None:
+            meta["schema_id"] = declared
+    if not isinstance(node, dict):
+        if info.required is not None:
+            meta["required"] = info.required
+        return meta
+    if isinstance(node.get("title"), str):
+        meta["title"] = node["title"]
+    if isinstance(node.get("description"), str):
+        meta["description"] = node["description"][:_DESCRIPTION_LIMIT]
+    kind = node.get("type")
+    if isinstance(kind, str) or (isinstance(kind, list) and all(isinstance(k, str) for k in kind)):
+        meta["type"] = list(kind) if isinstance(kind, list) else kind
+    if isinstance(node.get("format"), str):
+        meta["format"] = node["format"]
+    if isinstance(node.get("enum"), list):
+        meta["enum"] = node["enum"][:_ENUM_LIMIT]
+        meta["enum_count"] = len(node["enum"])
+    if info.required is not None:
+        meta["required"] = info.required
+    if info.via is not None:
+        meta["via"] = info.via
+    return meta
+
+
+def walk(document: object, lines: dict[int, int], file_name: str) -> Walked:
+    """Walk one schema document into entities, `$ref`s, declared ids and anchors."""
+    walked = Walked([], [], [], {}, document, False)
+    if not isinstance(document, dict):
+        return walked
+    root_schema = document.get("$schema")
+    title = document.get("title")
+    root = _EntityInfo(
+        kinds.SCHEMA, title if isinstance(title, str) and title else file_name, None, None, None
+    )
+    stack = [_Frame(document, (), "", (), (), None, 0, None, False, 1, root)]
+    while stack:
+        frame = stack.pop()
+        _visit(frame, lines, root_schema, walked, stack)
+    return walked
+
+
+def _visit(
+    frame: _Frame, lines: dict[int, int], root_schema: object, walked: Walked, stack: list[_Frame]
+) -> None:
+    node = frame.node
+    pointer = _pointer(frame.tokens)
+    line = lines.get(id(node), frame.line) if isinstance(node, dict) else frame.line
+    declared = _declared_id(node, root_schema) if isinstance(node, dict) else None
+    if frame.entity is not None:
+        info = frame.entity
+        walked.entities.append(
+            Entity(
+                pointer,
+                info.kind,
+                info.label,
+                line,
+                info.parent,
+                _metadata(node, info, root_schema, declared),
+            )
+        )
+    if not isinstance(node, dict):
+        return
+    base = _enter_declarations(node, declared, frame.base, pointer, walked)
+    context = "/".join(str(t) for t in frame.own + frame.rel)
+    relation = "extends" if frame.extends else "references"
+    for keyword in _REF_KEYWORDS:
+        if keyword in node:
+            walked.refs.append(Ref(frame.owner, node[keyword], relation, context, line, base))
+    ctx = _Expansion(frame, node, base, line, walked)
+    for keyword, value in node.items():
+        handler = _HANDLERS.get(keyword)
+        if handler is not None:
+            handler(ctx, keyword, value)
+    stack.extend(reversed(ctx.children))
+
+
+class _Expansion:
+    """The children of one subschema, in document order, and the refs found on the way."""
+
+    def __init__(self, frame: _Frame, node: dict, base: str | None, line: int, walked: Walked):
+        self.frame = frame
+        self.node = node
+        self.base = base
+        self.line = line
+        self.walked = walked
+        self.children: list[_Frame] = []
+
+    def plain(self, sub: object, key: tuple, via: str | None, extends: bool = False) -> None:
+        f = self.frame
+        self.children.append(
+            _Frame(sub, f.tokens + key, f.owner, f.own, f.rel + key, self.base,
+                   f.depth, via, extends, self.line, None)
+        )  # fmt: skip
+
+    def entity(self, sub: object, key: tuple, kind: str, name: str, required: bool | None) -> None:
+        f = self.frame
+        if f.depth + 1 > MAX_DEPTH:
+            self.walked.truncated = True
+            return
+        tokens = f.tokens + key
+        via = f.via if kind == kinds.FIELD else None
+        info = _EntityInfo(kind, name, f.owner, required, via)
+        self.children.append(
+            _Frame(sub, tokens, _pointer(tokens), f.rel + key, (), self.base,
+                   f.depth + 1, None, False, self.line, info)
+        )  # fmt: skip
+
+
+def _on_properties(ctx: _Expansion, keyword: str, value: object) -> None:
+    if not isinstance(value, dict):
+        return
+    required = ctx.node.get("required")
+    for name, sub in value.items():
+        listed = isinstance(required, list) and name in required
+        draft3 = isinstance(sub, dict) and sub.get("required") is True
+        ctx.entity(sub, ("properties", name), kinds.FIELD, name, listed or draft3)
+
+
+def _on_definitions(ctx: _Expansion, keyword: str, value: object) -> None:
+    if isinstance(value, dict):
+        for name, sub in value.items():
+            ctx.entity(sub, (keyword, name), kinds.DEFINITION, name, None)
+
+
+def _on_items(ctx: _Expansion, keyword: str, value: object) -> None:
+    if isinstance(value, list):
+        for i, sub in enumerate(value):
+            ctx.plain(sub, ("items", i), ctx.frame.via)
+    else:
+        ctx.plain(value, ("items",), ctx.frame.via)
+
+
+def _on_combinator(ctx: _Expansion, keyword: str, value: object) -> None:
+    if isinstance(value, list):
+        for i, sub in enumerate(value):
+            ctx.plain(sub, (keyword, i), keyword, keyword == "allOf")
+
+
+def _on_single(ctx: _Expansion, keyword: str, value: object) -> None:
+    ctx.plain(value, (keyword,), ctx.frame.via)
+
+
+def _on_pattern_properties(ctx: _Expansion, keyword: str, value: object) -> None:
+    if isinstance(value, dict):
+        for name, sub in value.items():
+            ctx.plain(sub, (keyword, name), ctx.frame.via)
+
+
+def _on_extends(ctx: _Expansion, keyword: str, value: object) -> None:
+    f = ctx.frame
+    for i, sub in enumerate(value if isinstance(value, list) else [value]):
+        key = ("extends", i) if isinstance(value, list) else ("extends",)
+        if isinstance(sub, str):
+            context = "/".join(str(t) for t in f.own + f.rel + key)
+            ctx.walked.refs.append(Ref(f.owner, sub, "extends", context, ctx.line, ctx.base))
+        else:
+            ctx.plain(sub, key, f.via, True)
+
+
+_HANDLERS = {
+    "properties": _on_properties,
+    "definitions": _on_definitions,
+    "$defs": _on_definitions,
+    "items": _on_items,
+    "allOf": _on_combinator,
+    "oneOf": _on_combinator,
+    "anyOf": _on_combinator,
+    "not": _on_single,
+    "additionalProperties": _on_single,
+    "patternProperties": _on_pattern_properties,
+    "extends": _on_extends,
+}
+
+
+def _enter_declarations(
+    node: dict, declared: str | None, base: str | None, pointer: str, walked: Walked
+) -> str | None:
+    """Record `node`'s anchors and declared id; return the base URI beneath it."""
+    anchor = node.get("$anchor")
+    if isinstance(anchor, str) and anchor:
+        walked.anchors.setdefault(anchor, pointer)
+    if declared is None:
+        return base
+    if declared.startswith("#"):
+        name = declared[1:]
+        if name and not name.startswith("/"):
+            walked.anchors.setdefault(name, pointer)
+        return base
+    absolute = (
+        declared if _is_absolute_uri(declared) else (urljoin(base, declared) if base else None)
+    )
+    if absolute is None or not _is_absolute_uri(absolute):
+        return base
+    normalised = normalise_uri(absolute)
+    walked.declared.append((normalised, pointer))
+    return normalised
