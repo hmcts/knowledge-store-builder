@@ -403,7 +403,7 @@ class AddLayerAccountingTest(SettingsIsolated):
         """
         stray = refs.Resolution(refs.Target("widgets", "gone.json", "", ""), "by-id")
         graph = graph_with_keyword_nodes()
-        with unittest.mock.patch.object(layer, "resolve", lambda *_a: stray):
+        with unittest.mock.patch.object(layer, "resolve", return_value=stray):
             report = layer.add_layer(graph, [W], NO_FORKS)
         self.assertEqual(
             [(u["pointer"], u["reason"]) for u in report.unresolved],
@@ -480,6 +480,11 @@ def run_capturing(main, argv: list[str]) -> Run:
     return Run(code, out.getvalue(), err.getvalue())
 
 
+def stored_graph() -> dict:
+    """The graph the configured store holds now."""
+    return json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+
+
 class StoreCase(SettingsIsolated):
     """A real store on disk: clones, a content set, a graph."""
 
@@ -515,9 +520,6 @@ class StoreCase(SettingsIsolated):
             json.dumps({"files": {"code": self.detect}}), encoding="utf-8"
         )
 
-    def graph(self) -> dict:
-        return json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
-
 
 class StageTest(StoreCase):
     """`main` against a real store on disk."""
@@ -526,7 +528,7 @@ class StageTest(StoreCase):
         """Breaks if the plain graph and the committed archive diverge, or a metric
         is recorded under another name or value (hand-counted: 8 nodes, 8 edges)."""
         self.assertEqual(layer.main([]), 0)
-        plain = self.graph()
+        plain = stored_graph()
         with gzip.open(config.GRAPH_PATH.with_suffix(".json.gz"), "rt", encoding="utf-8") as h:
             self.assertEqual(json.load(h), plain)
         self.assertEqual(
@@ -700,14 +702,14 @@ class StageTest(StoreCase):
     def test_content_set_without_json_removes_the_layer_and_exits_0(self):
         """Breaks if an estate with no schemas leaves the previous run's layer in the graph."""
         layer.main([])
-        self.assertTrue(any(n.get("_origin") == "json-schema" for n in self.graph()["nodes"]))
+        self.assertTrue(any(n.get("_origin") == "json-schema" for n in stored_graph()["nodes"]))
         config.DETECT_PATH.write_text(
             json.dumps({"files": {"code": [str(self.widgets / "app.py")]}}), encoding="utf-8"
         )
         self.assertEqual(layer.main([]), 0)
-        self.assertFalse(any(n.get("_origin") == "json-schema" for n in self.graph()["nodes"]))
+        self.assertFalse(any(n.get("_origin") == "json-schema" for n in stored_graph()["nodes"]))
         with gzip.open(config.GRAPH_PATH.with_suffix(".json.gz"), "rt", encoding="utf-8") as h:
-            self.assertEqual(json.load(h), self.graph())
+            self.assertEqual(json.load(h), stored_graph())
 
     def test_file_outside_repositories_is_named_and_skipped(self):
         """Breaks if a file with no repository to namespace under is read or dropped unnamed."""
@@ -750,7 +752,7 @@ class StageTest(StoreCase):
     def owner_edges(self) -> list[tuple[str, str]]:
         return [
             (e["source"], e["target"])
-            for e in self.graph()["links"]
+            for e in stored_graph()["links"]
             if e.get("context") == "properties/owner"
         ]
 
@@ -921,7 +923,7 @@ class SymlinkTest(StoreCase):
         config.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
 
     def layer_nodes(self) -> list[dict]:
-        return [n for n in self.graph()["nodes"] if n.get("_origin") == "json-schema"]
+        return [n for n in stored_graph()["nodes"] if n.get("_origin") == "json-schema"]
 
     def test_a_link_to_a_schema_in_the_same_repository_is_owned_by_the_real_file(self):
         """Breaks if a link is read under its target's path: the target's nodes are
@@ -950,7 +952,7 @@ class SymlinkTest(StoreCase):
         )
         self.assertFalse([n for n in self.layer_nodes() if "latest" in n["source_file"]])
         self.assertEqual(
-            [n["id"] for n in self.graph()["nodes"] if n.get("_origin") == "ast"],
+            [n["id"] for n in stored_graph()["nodes"] if n.get("_origin") == "ast"],
             ["widgets::app.py_kw"],
         )
         self.assertNotIn("ambiguous", out.stdout)
@@ -959,7 +961,7 @@ class SymlinkTest(StoreCase):
                 "widgets::jsonschema:uses.json#/properties/paint",
                 "widgets::jsonschema:schemas/v2.json#",
             ),
-            [(e["source"], e["target"]) for e in self.graph()["links"]],
+            [(e["source"], e["target"]) for e in stored_graph()["links"]],
         )
         self.assertEqual(telemetry.read()["json_schema.files_recognised"], 4)
         self.assertRegex(out.stdout, r"symlinked to an owned file +1 ")
@@ -978,7 +980,7 @@ class SymlinkTest(StoreCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertIn("widgets::jsonschema:shared-person.json#", ids)
         self.assertIn("common::jsonschema:person.json#", ids)
-        self.assertEqual([n for n in self.graph()["nodes"] if n.get("_origin") == "ast"], [])
+        self.assertEqual([n for n in stored_graph()["nodes"] if n.get("_origin") == "ast"], [])
 
     def test_a_link_out_of_the_store_is_named_and_never_read(self):
         """Breaks if a link whose target lies outside the store is read: its content

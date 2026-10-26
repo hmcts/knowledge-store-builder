@@ -34,13 +34,17 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from knowledgestore import kinds
 
+# Keywords named more than once below.
+_DEFS = "$defs"
+_SCHEMA = "$schema"
+
 JSON_TYPES = ("object", "array", "string", "number", "integer", "boolean", "null")
 
 # Root keywords that define a schema (spec row `schema-keywords`).
 SCHEMA_KEYWORDS = (
     "properties",
     "definitions",
-    "$defs",
+    _DEFS,
     "items",
     "allOf",
     "oneOf",
@@ -53,12 +57,14 @@ SCHEMA_KEYWORDS = (
 )
 
 # Root keywords that carry sub-schemas (spec row `declared-id`).
-_DEFINING_KEYWORDS = ("properties", "definitions", "$defs")
+_DEFINING_KEYWORDS = ("properties", "definitions", _DEFS)
 
 # The stdlib hooks used below (`JSONObject`, `py_make_scanner`, the decoder's
 # `parse_object` and `scan_once`) are real but untyped; reach them as Any.
 _decoder_module: Any = json.decoder
 _scanner_module: Any = json.scanner
+
+_META_SCHEMA_HOST = "json-schema.org"
 
 _ABSOLUTE_URI = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 
@@ -120,6 +126,26 @@ def _is_absolute_uri(value: object) -> bool:
     return isinstance(value, str) and _ABSOLUTE_URI.match(value) is not None
 
 
+def is_json_schema_org_host(host: str | None) -> bool:
+    """Whether a parsed URI host is json-schema.org or one of its subdomains.
+
+    The host, not the text: a URI that merely contains `json-schema.org` in its
+    path or query names some other site, and is not a meta-schema.
+    """
+    return host is not None and (
+        host == _META_SCHEMA_HOST or host.endswith("." + _META_SCHEMA_HOST)
+    )
+
+
+def _names_json_schema_org(uri: str) -> bool:
+    """Whether `uri` is on json-schema.org; a URI that cannot be parsed is not."""
+    try:
+        host = urlsplit(uri).hostname
+    except ValueError:
+        return False
+    return is_json_schema_org_host(host)
+
+
 def _has_schema_type(value: object) -> bool:
     if isinstance(value, str):
         return value in JSON_TYPES
@@ -141,11 +167,11 @@ def recognise(document: object) -> str | None:
     """Return the basis on which `document` is a JSON Schema, or None."""
     if not isinstance(document, dict):
         return None
-    if "$schema" in document:
-        declared = document["$schema"]
+    if _SCHEMA in document:
+        declared = document[_SCHEMA]
         if not isinstance(declared, str):
             return None
-        if "json-schema.org" in declared:
+        if _names_json_schema_org(declared):
             return "meta-schema"
         return "schema-keywords" if _has_schema_keyword(document) else None
     has_id = _is_absolute_uri(document.get("id")) or _is_absolute_uri(document.get("$id"))
@@ -221,7 +247,7 @@ class Entity:
 @dataclass(frozen=True)
 class Ref:
     owner: str
-    ref: object
+    value: object
     relation: str
     context: str
     line: int
@@ -284,7 +310,7 @@ def _reads_id(root_schema: object, keyword: str) -> bool:
         return True
     if isinstance(root_schema, str) and ("draft-03" in root_schema or "draft-04" in root_schema):
         return True
-    return not isinstance(root_schema, str) or "json-schema.org" not in root_schema
+    return not isinstance(root_schema, str) or not _names_json_schema_org(root_schema)
 
 
 def _declared_id(document: dict, root_schema: object) -> str | None:
@@ -296,32 +322,50 @@ def _declared_id(document: dict, root_schema: object) -> str | None:
 
 
 def _metadata(node: object, info: _EntityInfo, root_schema: object, declared: str | None) -> dict:
+    # Key order is part of the byte-identical output (CLAUDE.md 1.3).
+    meta = _schema_metadata(info, root_schema, declared)
+    if isinstance(node, dict):
+        meta.update(_described(node))
+    if info.required is not None:
+        meta["required"] = info.required
+    if isinstance(node, dict) and info.via is not None:
+        meta["via"] = info.via
+    return meta
+
+
+def _schema_metadata(info: _EntityInfo, root_schema: object, declared: str | None) -> dict:
+    """The dialect and declared id, recorded on a schema node only."""
     meta: dict = {}
-    if info.kind == kinds.SCHEMA:
-        if isinstance(root_schema, str):
-            meta["draft"] = root_schema
-        if declared is not None:
-            meta["schema_id"] = declared
-    if not isinstance(node, dict):
-        if info.required is not None:
-            meta["required"] = info.required
+    if info.kind != kinds.SCHEMA:
         return meta
+    if isinstance(root_schema, str):
+        meta["draft"] = root_schema
+    if declared is not None:
+        meta["schema_id"] = declared
+    return meta
+
+
+def _is_type_value(kind: object) -> bool:
+    return isinstance(kind, str) or (
+        isinstance(kind, list) and all(isinstance(k, str) for k in kind)
+    )
+
+
+def _described(node: dict) -> dict:
+    """What a subschema says about the value it describes, as written."""
+    meta: dict = {}
     if isinstance(node.get("title"), str):
         meta["title"] = node["title"]
     if isinstance(node.get("description"), str):
         meta["description"] = node["description"][:_DESCRIPTION_LIMIT]
     kind = node.get("type")
-    if isinstance(kind, str) or (isinstance(kind, list) and all(isinstance(k, str) for k in kind)):
+    if _is_type_value(kind):
         meta["type"] = list(kind) if isinstance(kind, list) else kind
     if isinstance(node.get("format"), str):
         meta["format"] = node["format"]
     if isinstance(node.get("enum"), list):
         meta["enum"] = node["enum"][:_ENUM_LIMIT]
         meta["enum_count"] = len(node["enum"])
-    if info.required is not None:
-        meta["required"] = info.required
-    if info.via is not None:
-        meta["via"] = info.via
     return meta
 
 
@@ -330,7 +374,7 @@ def walk(document: object, lines: dict[int, int], file_name: str) -> Walked:
     walked = Walked([], [], [], {}, document, False)
     if not isinstance(document, dict):
         return walked
-    root_schema = document.get("$schema")
+    root_schema = document.get(_SCHEMA)
     title = document.get("title")
     root = _EntityInfo(
         kinds.SCHEMA, title if isinstance(title, str) and title else file_name, None, None, None
@@ -489,7 +533,7 @@ def _on_extends(ctx: _Expansion, keyword: str, value: object) -> None:
 _HANDLERS = {
     "properties": _on_properties,
     "definitions": _on_definitions,
-    "$defs": _on_definitions,
+    _DEFS: _on_definitions,
     "items": _on_items,
     "allOf": _on_combinator,
     "oneOf": _on_combinator,
@@ -530,10 +574,13 @@ def _enter_declarations(
         if name and not name.startswith("/"):
             walked.anchors.setdefault(name, pointer)
         return base
-    absolute = (
-        declared if _is_absolute_uri(declared) else (urljoin(base, declared) if base else None)
-    )
-    if absolute is None or not _is_absolute_uri(absolute):
+    if _is_absolute_uri(declared):
+        absolute = declared
+    elif base:
+        absolute = urljoin(base, declared)
+    else:
+        return base
+    if not _is_absolute_uri(absolute):
         return base
     normalised = normalise_uri(absolute)
     walked.declared.append((normalised, pointer))

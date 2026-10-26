@@ -192,6 +192,8 @@ class ResolveTest(unittest.TestCase):
             "http://json-schema.org/draft-04/schema#": "meta-schema",
             "https://json-schema.org/draft/2020-12/schema": "meta-schema",
             "https://elsewhere.example/thing.json": "external",
+            "https://www.json-schema.org/draft-07/schema": "meta-schema",
+            "https://evil.example/json-schema.org/draft-07/schema": "external",
             "#/definitions/Nope": "no-such-pointer",
             "missing.json": "unrecognised-target",
             42: "malformed",

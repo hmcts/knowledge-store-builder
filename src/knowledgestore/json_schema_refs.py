@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import posixpath
 from dataclasses import dataclass, field
-from urllib.parse import unquote, urldefrag, urljoin, urlsplit
+from urllib.parse import SplitResult, unquote, urldefrag, urljoin, urlsplit
 
-from knowledgestore.json_schema import Ref, Walked, escape_pointer, normalise_uri
-
-_META_SCHEMA_HOST = "json-schema.org"
+from knowledgestore.json_schema import (
+    Ref,
+    Walked,
+    escape_pointer,
+    is_json_schema_org_host,
+    normalise_uri,
+)
 
 Candidate = tuple[str, str, str]  # (repo, rel, pointer)
 
@@ -90,23 +94,18 @@ def choose(
 
 def resolve(index: Index, source: Owned, ref: Ref, forks: frozenset[str]) -> Resolution:
     """Resolve one reference found in `source`."""
-    value = ref.ref
+    value = ref.value
     if ref.keyword != "$ref" or not isinstance(value, str):
         return Resolution(None, "malformed")
     try:
-        split = urlsplit(value)
-        absolute = bool(split.scheme)
-        is_meta = absolute and _is_meta_schema(value)
-        joined = urljoin(ref.base, value) if ref.base and not absolute else None
-        if joined is not None and _is_meta_schema(joined):
-            is_meta = True
+        split, joined, is_meta = _parse(value, ref.base)
     except ValueError:
         return Resolution(None, "malformed")
     if value.startswith("#"):
         return _resolve_local(source, split.fragment)
     if is_meta:
         return Resolution(None, "meta-schema")
-    if absolute:
+    if split.scheme:
         found = _resolve_by_id(index, source, value, "by-id", forks)
         return found if found is not None else Resolution(None, "external")
     if joined is not None:
@@ -116,8 +115,20 @@ def resolve(index: Index, source: Owned, ref: Ref, forks: frozenset[str]) -> Res
     return _resolve_by_path(index, source, split.path, split.fragment)
 
 
+def _parse(value: str, base: str | None) -> tuple[SplitResult, str | None, bool]:
+    """Split `value`; join a relative one to `base`; say whether either is a meta-schema.
+
+    Raises `ValueError` for a reference that cannot be parsed.
+    """
+    split = urlsplit(value)
+    if split.scheme:
+        return split, None, _is_meta_schema(value)
+    joined = urljoin(base, value) if base else None
+    return split, joined, joined is not None and _is_meta_schema(joined)
+
+
 def _is_meta_schema(uri: str) -> bool:
-    return (urlsplit(uri).hostname or "").lower() == _META_SCHEMA_HOST
+    return is_json_schema_org_host(urlsplit(uri).hostname)
 
 
 def _resolve_local(source: Owned, fragment: str) -> Resolution:

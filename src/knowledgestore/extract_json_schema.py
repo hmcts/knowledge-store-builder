@@ -144,18 +144,22 @@ def _prune_hyperedges(graph: dict, removed: set[str]) -> None:
         return
     holders = [graph, graph.get("graph")]
     for holder in holders:
-        if not isinstance(holder, dict) or not isinstance(holder.get("hyperedges"), list):
-            continue
-        kept = []
-        for hyperedge in holder["hyperedges"]:
-            members = hyperedge.get("nodes") if isinstance(hyperedge, dict) else None
-            if isinstance(members, list):
-                survivors = [m for m in members if not (isinstance(m, str) and m in removed)]
-                if not survivors:
-                    continue
-                hyperedge = {**hyperedge, "nodes": survivors}
-            kept.append(hyperedge)
-        holder["hyperedges"] = kept
+        if isinstance(holder, dict) and isinstance(holder.get("hyperedges"), list):
+            holder["hyperedges"] = _surviving_hyperedges(holder["hyperedges"], removed)
+
+
+def _surviving_hyperedges(hyperedges: list, removed: set[str]) -> list:
+    """`hyperedges` without the removed members, and without any left with none."""
+    kept = []
+    for hyperedge in hyperedges:
+        members = hyperedge.get("nodes") if isinstance(hyperedge, dict) else None
+        if isinstance(members, list):
+            survivors = [m for m in members if not (isinstance(m, str) and m in removed)]
+            if not survivors:
+                continue
+            hyperedge = {**hyperedge, "nodes": survivors}
+        kept.append(hyperedge)
+    return kept
 
 
 @dataclass
@@ -180,6 +184,15 @@ def _unresolved(item: Owned, pointer: str, ref: object, found: Resolution, reaso
     }
 
 
+@dataclass
+class _RefTally:
+    """What resolving the references found, beyond the edges it wrote."""
+
+    how: Counter[str] = field(default_factory=Counter)
+    unresolved: list[dict] = field(default_factory=list)
+    self_references: int = 0
+
+
 def add_layer(
     graph: dict,
     owned: list[Owned],
@@ -193,16 +206,50 @@ def add_layer(
     there are removed too, while the layer's nodes belong to the target alone.
     """
     report = LayerReport()
-    # One file is one entry, whatever the input repeats: a second would write the
-    # file's node ids twice and make it its own rival for the id it declares.
-    unique: dict[tuple[str, str], Owned] = {}
-    for item in sorted(owned, key=lambda o: (o.repo, o.rel)):
-        unique.setdefault((item.repo, item.rel), item)
+    unique = _unique(owned)
     ordered = list(unique.values())
     strip_layer(graph)
     report.graphify_removed = remove_graphify_nodes(graph, set(unique) | aliases)
 
     index = Index.build(ordered)
+    nodes, pointers, kind_counts = _layer_nodes(ordered)
+    tally = _RefTally()
+    added: list[dict] = []
+    for item in ordered:
+        added += _contains_edges(item)
+        added += _reference_edges(item, index, forks, pointers, tally)
+    edges = _deduplicated(added)
+
+    graph["nodes"].extend(nodes)
+    graph["links"].extend(edges)
+    report.cross_repository = sum(
+        1 for e in edges if e["source"].split("::", 1)[0] != e["target"].split("::", 1)[0]
+    )
+    report.self_references = tally.self_references
+    report.nodes_by_kind = {k: kind_counts[k] for k in _KIND_ORDER if kind_counts[k]}
+    report.edges_by_relation = dict(sorted(Counter(e["relation"] for e in edges).items()))
+    report.resolved_by_how = {k: tally.how[k] for k in _RESOLVED_HOW if tally.how[k]}
+    report.unresolved = sorted(
+        tally.unresolved,
+        key=lambda u: (u["repo"], u["source_file"], u["pointer"], str(u["ref"]), u["reason"]),
+    )
+    return report
+
+
+def _unique(owned: list[Owned]) -> dict[tuple[str, str], Owned]:
+    """One entry per file, whatever the input repeats, in (repo, path) order.
+
+    A second entry would write the file's node ids twice and make it its own
+    rival for the id it declares.
+    """
+    unique: dict[tuple[str, str], Owned] = {}
+    for item in sorted(owned, key=lambda o: (o.repo, o.rel)):
+        unique.setdefault((item.repo, item.rel), item)
+    return unique
+
+
+def _layer_nodes(ordered: list[Owned]) -> tuple[list[dict], set[str], Counter[str]]:
+    """Every entity's node, the set of their ids, and the count of each kind."""
     nodes: list[dict] = []
     pointers: set[str] = set()
     kind_counts: Counter[str] = Counter()
@@ -211,52 +258,64 @@ def add_layer(
             nodes.append(node_record(item, entity))
             pointers.add(node_id(item.repo, item.rel, entity.pointer))
             kind_counts[entity.kind] += 1
+    return nodes, pointers, kind_counts
 
-    added: list[dict] = []
-    how_counts: Counter[str] = Counter()
-    unresolved: list[dict] = []
-    for item in ordered:
-        for entity in item.walked.entities:
-            if entity.parent is None:
-                continue
-            added.append(
-                edge_record(
-                    node_id(item.repo, item.rel, entity.parent),
-                    node_id(item.repo, item.rel, entity.pointer),
-                    "contains",
-                    item.rel,
-                    entity.line,
-                    None,
-                    None,
-                )
-            )
-        for ref in item.walked.refs:
-            found = resolve(index, item, ref, forks)
-            target = found.target
-            if target is None:
-                unresolved.append(_unresolved(item, ref.owner, ref.ref, found, found.how))
-                continue
-            target_id = node_id(target.repo, target.rel, target.pointer)
-            if target_id not in pointers:
-                unresolved.append(_unresolved(item, ref.owner, ref.ref, found, "no-such-pointer"))
-                continue
-            source_id = node_id(item.repo, item.rel, ref.owner)
-            if source_id == target_id:
-                report.self_references += 1
-                continue
-            how_counts[found.how] += 1
-            added.append(
-                edge_record(
-                    source_id,
-                    target_id,
-                    ref.relation,
-                    item.rel,
-                    ref.line,
-                    ref.context,
-                    target.target_pointer if target.target_pointer != target.pointer else None,
-                )
-            )
 
+def _contains_edges(item: Owned) -> list[dict]:
+    """An edge from each entity's parent to it, within one file."""
+    return [
+        edge_record(
+            node_id(item.repo, item.rel, entity.parent),
+            node_id(item.repo, item.rel, entity.pointer),
+            "contains",
+            item.rel,
+            entity.line,
+            None,
+            None,
+        )
+        for entity in item.walked.entities
+        if entity.parent is not None
+    ]
+
+
+def _reference_edges(
+    item: Owned, index: Index, forks: frozenset[str], pointers: set[str], tally: _RefTally
+) -> list[dict]:
+    """Resolve each reference in one file into an edge, or record why there is none."""
+    edges: list[dict] = []
+    for ref in item.walked.refs:
+        found = resolve(index, item, ref, forks)
+        target = found.target
+        if target is None:
+            tally.unresolved.append(_unresolved(item, ref.owner, ref.value, found, found.how))
+            continue
+        target_id = node_id(target.repo, target.rel, target.pointer)
+        if target_id not in pointers:
+            tally.unresolved.append(
+                _unresolved(item, ref.owner, ref.value, found, "no-such-pointer")
+            )
+            continue
+        source_id = node_id(item.repo, item.rel, ref.owner)
+        if source_id == target_id:
+            tally.self_references += 1
+            continue
+        tally.how[found.how] += 1
+        edges.append(
+            edge_record(
+                source_id,
+                target_id,
+                ref.relation,
+                item.rel,
+                ref.line,
+                ref.context,
+                target.target_pointer if target.target_pointer != target.pointer else None,
+            )
+        )
+    return edges
+
+
+def _deduplicated(added: list[dict]) -> list[dict]:
+    """`added` in key order, keeping the first edge of each key (CLAUDE.md 1.3)."""
     added.sort(key=lambda e: (e["source"], e["target"], e["relation"], e.get("context") or ""))
     edges: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -265,20 +324,7 @@ def add_layer(
         if key not in seen:
             seen.add(key)
             edges.append(edge)
-
-    graph["nodes"].extend(nodes)
-    graph["links"].extend(edges)
-    report.cross_repository = sum(
-        1 for e in edges if e["source"].split("::", 1)[0] != e["target"].split("::", 1)[0]
-    )
-    report.nodes_by_kind = {k: kind_counts[k] for k in _KIND_ORDER if kind_counts[k]}
-    report.edges_by_relation = dict(sorted(Counter(e["relation"] for e in edges).items()))
-    report.resolved_by_how = {k: how_counts[k] for k in _RESOLVED_HOW if how_counts[k]}
-    unresolved.sort(
-        key=lambda u: (u["repo"], u["source_file"], u["pointer"], str(u["ref"]), u["reason"])
-    )
-    report.unresolved = unresolved
-    return report
+    return edges
 
 
 # --- the stage ------------------------------------------------------------
@@ -507,35 +553,21 @@ def render_report(
     max_bytes: int,
 ) -> list[str]:
     removed, _edges_removed, semantic_kept = layer_report.graphify_removed
-    by_basis = info["basis"]
     skipped = {
-        ("over" in label and _size_wording(max_bytes) or label): info[reason]["count"]
-        for reason, label in (
-            ("malformed", "malformed"),
-            ("too-large", "over"),
-            ("outside-repositories", "outside-repositories"),
-        )
+        _skip_label(reason, max_bytes): info[reason]["count"]
+        for reason in _SKIP_REASONS
         if info[reason]["count"]
     }
     skipped_total = sum(info[reason]["count"] for reason in _SKIP_REASONS)
     lines = [
         f"json-schema: {total:,} .json files in the content set across {repositories:,} "
         "repositories",
-        f"  recognised as JSON Schema {len(owned):>7,}   ({_counts(by_basis) or 'none'})",
+        f"  recognised as JSON Schema {len(owned):>7,}   ({_counts(info['basis']) or 'none'})",
         f"  not a schema              {info['not-a-schema']['count']:>7,}   (left to graphify)",
         f"  skipped                   {skipped_total:>7,}   "
         f"({_counts(skipped) or 'none'}){'  - named below' if skipped_total else ''}",
     ]
-    if info["truncated"]["count"]:
-        lines.append(
-            f"  truncated at depth        {info['truncated']['count']:>7,}   "
-            "(kept in the layer; named below)"
-        )
-    if info["symlinked"]["count"]:
-        lines.append(
-            f"  symlinked to an owned file {info['symlinked']['count']:>6,}   "
-            "(read once, as the file they point to; named below)"
-        )
+    lines += _kept_aside_lines(info)
     lines += [
         f"  graphify nodes removed    {removed:>7,} from {len(owned):,} owned files "
         f"(keyword scaffolding); {semantic_kept:,} semantic nodes kept",
@@ -557,16 +589,46 @@ def render_report(
     lines.append(
         f"  $ref unresolved           {len(layer_report.unresolved):>7,}   ({_counts(ordered)})"
     )
-    for reason in _REASONS[:3] + ("truncated", "symlinked"):
-        if info[reason]["names"]:
-            lines.append("")
-            heading = _size_wording(max_bytes) if reason == "too-large" else reason
-            lines.append(f"{reason} ({heading}):" if reason == "too-large" else f"{reason}:")
-            lines += [f"  {name}" for name in info[reason]["names"]]
+    lines += _named_lines(info, max_bytes)
     shown = layer_report.unresolved[:UNRESOLVED_SHOWN]
     if shown:
         lines += ["", f"first {len(shown):,} of {len(layer_report.unresolved):,} unresolved:"]
         lines += [f"  {_unresolved_line(item)}" for item in shown]
+    return lines
+
+
+def _skip_label(reason: str, max_bytes: int) -> str:
+    """A skip reason as the summary counts it: `too-large` says the limit instead."""
+    return _size_wording(max_bytes) if reason == "too-large" else reason
+
+
+def _kept_aside_lines(info: dict) -> list[str]:
+    """The summary rows for files kept in the layer though not read in full, or not as named."""
+    lines = []
+    if info["truncated"]["count"]:
+        lines.append(
+            f"  truncated at depth        {info['truncated']['count']:>7,}   "
+            "(kept in the layer; named below)"
+        )
+    if info["symlinked"]["count"]:
+        lines.append(
+            f"  symlinked to an owned file {info['symlinked']['count']:>6,}   "
+            "(read once, as the file they point to; named below)"
+        )
+    return lines
+
+
+def _named_lines(info: dict, max_bytes: int) -> list[str]:
+    """One block per reason that names its files, under the reason as a heading."""
+    lines: list[str] = []
+    for reason in _REASONS[:3] + ("truncated", "symlinked"):
+        if info[reason]["names"]:
+            lines.append("")
+            if reason == "too-large":
+                lines.append(f"{reason} ({_size_wording(max_bytes)}):")
+            else:
+                lines.append(f"{reason}:")
+            lines += [f"  {name}" for name in info[reason]["names"]]
     return lines
 
 
@@ -641,7 +703,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if arguments.unresolved:
         arguments.unresolved.parent.mkdir(parents=True, exist_ok=True)
-        arguments.unresolved.write_text(  # NOSONAR(S2083) - validated before the graph write
+        # Sonar S8707 (and S2083): validated by checked_write_target before the graph write.
+        arguments.unresolved.write_text(  # NOSONAR(S2083, S8707) - validated by checked_write_target
             json.dumps(layer_report.unresolved, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )

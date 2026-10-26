@@ -128,7 +128,7 @@ recognises, whatever graphify did with it:
 
 | Basis | Rule |
 |---|---|
-| `meta-schema` | `$schema` names json-schema.org, any draft |
+| `meta-schema` | `$schema` is a URI on json-schema.org (that host or a subdomain), any draft; a URI that only mentions it elsewhere is any other `$schema` |
 | `schema-keywords` | any other `$schema`, and the root has a schema keyword such as `properties`, `definitions`, `items` or a combinator |
 | `declared-id` | no `$schema`, an absolute `id` or `$id`, and `properties`, `definitions` or `$defs` |
 

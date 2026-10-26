@@ -460,4 +460,4 @@ class JsonSchemaHandlingTest(unittest.TestCase):
         import json_schema_fixtures as fixtures
 
         labels = {n["label"] for n in self._extract("plain.json", fixtures.PLAIN_DRAFT04)["nodes"]}
-        self.assertTrue({"$schema", "properties", "type"} <= labels, labels)
+        self.assertLessEqual({"$schema", "properties", "type"}, labels)

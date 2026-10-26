@@ -158,6 +158,28 @@ class RecogniseTest(unittest.TestCase):
         """Breaks if a non-string `$schema` crashes or is taken as a declaration."""
         self.assertIsNone(json_schema.recognise({"$schema": 4, "type": "object"}))
 
+    def test_json_schema_org_named_outside_the_host_is_not_a_meta_schema(self):
+        """Breaks if the meta-schema basis matches `json-schema.org` anywhere in the text.
+
+        A `$schema` on another host only mentions the site, so it is judged on its
+        keywords like any other custom dialect.
+        """
+        evil = "https://evil.example/json-schema.org/x"
+        self.assertEqual(
+            json_schema.recognise({"$schema": evil, "type": "object"}), "schema-keywords"
+        )
+        self.assertIsNone(json_schema.recognise({"$schema": evil, "formatter": {}}))
+
+    def test_a_subdomain_of_json_schema_org_is_a_meta_schema(self):
+        """Breaks if only the bare host counts, or the host is compared case-sensitively."""
+        doc = {"$schema": "https://WWW.Json-Schema.org/draft-07/schema#"}
+        self.assertEqual(json_schema.recognise(doc), "meta-schema")
+
+    def test_an_unparseable_schema_uri_is_judged_on_its_keywords(self):
+        """Breaks if a `$schema` that cannot be parsed as a URI raises out of recognition."""
+        doc = {"$schema": "http://[json-schema.org", "type": "object"}
+        self.assertEqual(json_schema.recognise(doc), "schema-keywords")
+
     def test_list_valued_type_counts_as_schema_keyword(self):
         """Breaks if `type: ["object", "null"]` is not read as a schema type."""
         doc = {"$schema": "urn:example:x", "type": ["object", "null"]}
@@ -197,7 +219,7 @@ class WalkTest(unittest.TestCase):
         """Breaks if a ref loses its owner, context, line or base, or the wrong ones are kept."""
         w = self.walked(fixtures.WIDGET_CREATED, "widget-created.json")
         self.assertEqual(
-            [(r.owner, r.ref, r.relation, r.context, r.line) for r in w.refs],
+            [(r.owner, r.value, r.relation, r.context, r.line) for r in w.refs],
             [
                 ("/properties/owner", "http://schemas.example/common/person.json",
                  "references", "properties/owner", 8),
@@ -216,7 +238,7 @@ class WalkTest(unittest.TestCase):
             by["/properties/widgetId"].metadata,
             {"type": "string", "required": True, "description": "The widget."},
         )
-        self.assertEqual(by["/properties/owner"].metadata["required"], False)
+        self.assertFalse(by["/properties/owner"].metadata["required"])
         self.assertEqual(by["/definitions/Part/properties/sku"].metadata["enum"], ["a", "b"])
         self.assertEqual(
             by[""].metadata["schema_id"], "http://schemas.example/widgets/widget-created.json"
@@ -303,7 +325,7 @@ class WalkTest(unittest.TestCase):
         """Breaks if an allOf member's ref is a plain reference, or its properties get a wrong parent or via."""
         w = self.walked(fixtures.ORDER_PLACED_2020, "order-placed.json")
         self.assertEqual(
-            [(r.owner, r.ref, r.relation, r.context) for r in w.refs],
+            [(r.owner, r.value, r.relation, r.context) for r in w.refs],
             [("", "base.json#/$defs/Envelope", "extends", "allOf/0")],
         )
         field = [e for e in w.entities if e.kind == "field"][0]
@@ -316,7 +338,7 @@ class WalkTest(unittest.TestCase):
         """Breaks if `extends` is ignored or recorded as a plain reference."""
         w = self.walked(fixtures.POJO_CHILD, "child.json")
         self.assertEqual(
-            [(r.owner, r.ref, r.relation, r.context) for r in w.refs],
+            [(r.owner, r.value, r.relation, r.context) for r in w.refs],
             [("", "person.json", "extends", "extends")],
         )
 
@@ -325,7 +347,7 @@ class WalkTest(unittest.TestCase):
         doc = {"$schema": "http://json-schema.org/draft-03/schema#", "extends": "person.json"}
         w = json_schema.walk(doc, {}, "x.json")
         self.assertEqual(
-            [(r.ref, r.relation, r.context) for r in w.refs],
+            [(r.value, r.relation, r.context) for r in w.refs],
             [("person.json", "extends", "extends")],
         )
 
@@ -337,7 +359,7 @@ class WalkTest(unittest.TestCase):
         }
         w = json_schema.walk(doc, {}, "x.json")
         self.assertEqual(
-            [(r.owner, r.ref, r.relation) for r in w.refs],
+            [(r.owner, r.value, r.relation) for r in w.refs],
             [("/properties/a", "#meta", "references"), ("/properties/b", "#", "references")],
         )
 
@@ -398,8 +420,8 @@ class WalkTest(unittest.TestCase):
             "allOf": [{"properties": {"a": {}, "b": {}}}],
         }
         by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
-        self.assertEqual(by["/allOf/0/properties/a"].metadata["required"], True)
-        self.assertEqual(by["/allOf/0/properties/b"].metadata["required"], False)
+        self.assertTrue(by["/allOf/0/properties/a"].metadata["required"])
+        self.assertFalse(by["/allOf/0/properties/b"].metadata["required"])
 
     def test_required_in_a_sibling_all_of_member_applies(self):
         """Breaks if a `required` array in a sibling allOf member is ignored."""
@@ -408,7 +430,7 @@ class WalkTest(unittest.TestCase):
             "allOf": [{"properties": {"a": {}}}, {"required": ["a"]}],
         }
         by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
-        self.assertEqual(by["/allOf/0/properties/a"].metadata["required"], True)
+        self.assertTrue(by["/allOf/0/properties/a"].metadata["required"])
 
     def test_required_in_a_one_of_sibling_does_not_apply(self):
         """Breaks if a oneOf sibling's `required` marks a field optional-by-branch as required."""
@@ -417,7 +439,7 @@ class WalkTest(unittest.TestCase):
             "oneOf": [{"properties": {"a": {}}}, {"required": ["a"]}],
         }
         by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
-        self.assertEqual(by["/oneOf/0/properties/a"].metadata["required"], False)
+        self.assertFalse(by["/oneOf/0/properties/a"].metadata["required"])
 
     def test_required_does_not_leak_into_a_nested_items_schema(self):
         """Breaks if an outer `required` is applied to same-named fields under `items`."""
@@ -427,7 +449,7 @@ class WalkTest(unittest.TestCase):
             "allOf": [{"items": {"properties": {"a": {}}}}],
         }
         by = {e.pointer: e for e in json_schema.walk(doc, {}, "x.json").entities}
-        self.assertEqual(by["/allOf/0/items/properties/a"].metadata["required"], False)
+        self.assertFalse(by["/allOf/0/items/properties/a"].metadata["required"])
 
     def test_draft03_required_true_on_the_property(self):
         """Breaks if the draft-03 form `required: true` on a property is not read."""
@@ -449,7 +471,7 @@ class WalkTest(unittest.TestCase):
         }
         w = json_schema.walk(doc, {}, "x.json")
         self.assertEqual(
-            [(r.ref, r.context, r.relation) for r in w.refs],
+            [(r.value, r.context, r.relation) for r in w.refs],
             [
                 ("#/definitions/A", "items/0", "references"),
                 ("#/definitions/B", "items/1", "references"),
@@ -467,7 +489,7 @@ class WalkTest(unittest.TestCase):
         }
         w = json_schema.walk(doc, {}, "x.json")
         self.assertEqual(
-            [(r.ref, r.context, r.relation) for r in w.refs],
+            [(r.value, r.context, r.relation) for r in w.refs],
             [
                 ("#/$defs/A", "prefixItems/0", "references"),
                 ("#/$defs/B", "if", "references"),
@@ -491,7 +513,7 @@ class WalkTest(unittest.TestCase):
         }
         w = json_schema.walk(doc, {}, "x.json")
         self.assertEqual(
-            [(r.ref, r.context) for r in w.refs],
+            [(r.value, r.context) for r in w.refs],
             [
                 ("#/$defs/A", "contains"),
                 ("#/$defs/B", "additionalItems"),
@@ -506,7 +528,7 @@ class WalkTest(unittest.TestCase):
     def shape(self, doc: dict) -> tuple[list, list]:
         w = json_schema.walk(doc, {}, "x.json")
         entities = sorted((e.pointer, e.kind, e.metadata.get("required")) for e in w.entities)
-        return entities, sorted((r.owner, r.ref, r.relation, r.context) for r in w.refs)
+        return entities, sorted((r.owner, r.value, r.relation, r.context) for r in w.refs)
 
     def test_properties_under_not_are_not_fields(self):
         """Breaks if `not: {properties, required}` turns the forbidden name into a
@@ -673,6 +695,16 @@ class WalkTest(unittest.TestCase):
         """Breaks if a `$schema` that is not on json-schema.org stops `id` from being read."""
         doc = {
             "$schema": "https://tool.example/dialect.json",
+            "id": "http://schemas.example/x.json",
+        }
+        self.assertEqual(
+            json_schema.walk(doc, {}, "x.json").declared, [("http://schemas.example/x.json", "")]
+        )
+
+    def test_id_is_read_under_a_schema_uri_that_only_mentions_json_schema_org(self):
+        """Breaks if the dialect test reads `json-schema.org` in the path as the host."""
+        doc = {
+            "$schema": "https://evil.example/json-schema.org/draft-07/schema",
             "id": "http://schemas.example/x.json",
         }
         self.assertEqual(
