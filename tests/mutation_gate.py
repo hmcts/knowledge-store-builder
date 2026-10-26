@@ -9621,12 +9621,14 @@ MUTATIONS = (
     Mutation(
         "relationships: an umbrella is preferred over the chart's own repository",
         "relationships.py",
-        '        own = [r for r in repos if r not in umbrellas] if kind == "helm_chart" else repos\n',
-        '        own = [r for r in repos if r in umbrellas] if kind == "helm_chart" else repos\n',
+        "        own = [r for r in repos if r not in passed_over] if kind in NEVER_BY_NAME else repos\n",
+        "        own = [r for r in repos if r in passed_over] if kind in NEVER_BY_NAME else repos\n",
         "#455 comment 1: an umbrella bundles other repositories' charts, so preferring it resolves every chart it bundles to the umbrella and `dependents` of the chart's owner reads as empty",
         (
             "test_build_relationships.ChartPrecedenceTest.test_a_declared_wrapper_between_two_applications_loses_both_charts",
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
+            "test_build_relationships.ForkTest.test_a_declared_fork_loses_to_its_original",
+            "test_build_relationships.SelfRuleTest.test_a_coordinate_two_clones_publish_follows_the_conflict_resolution",
             "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
         ),
@@ -9634,8 +9636,8 @@ MUTATIONS = (
     Mutation(
         "relationships: a chart the naming pattern settles is still listed as an unresolved conflict",
         "relationships.py",
-        "                if not (pattern and pattern.format(name=target) in self.estate)\n",
-        "                if True\n",
+        '                    kind == "helm_chart" and pattern and pattern.format(name=target) in self.estate\n',
+        '                    kind == "helm_chart" and pattern and False\n',
         "#475 step 1: a chart `chart-{name}` provides is decided before any definition is read, so listing it as unresolved asks a store to settle something its own naming rule already settled",
         (
             "test_build_relationships.ChartPrecedenceTest.test_the_chart_repository_the_pattern_names_wins_and_is_no_conflict",
@@ -9650,6 +9652,8 @@ MUTATIONS = (
         (
             "test_build_relationships.ChartPrecedenceTest.test_a_declared_wrapper_between_two_applications_loses_both_charts",
             "test_build_relationships.ChartResolutionTest.test_a_non_umbrella_definition_beats_an_umbrella",
+            "test_build_relationships.ForkTest.test_a_declared_fork_loses_to_its_original",
+            "test_build_relationships.SelfRuleTest.test_a_coordinate_two_clones_publish_follows_the_conflict_resolution",
             "test_build_relationships.SelfRuleTest.test_an_umbrella_using_a_chart_another_clone_owns_is_an_edge_to_that_clone",
             "test_build_relationships.UnresolvedChartsAreLoudTest.test_no_summary_line_when_nothing_is_unresolved",
             "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_0_when_every_chart_resolves",
@@ -9661,16 +9665,20 @@ MUTATIONS = (
     Mutation(
         "relationships: a chart only one umbrella defines is left unresolved",
         "relationships.py",
-        '        if kind == "helm_chart" and len(candidates) > 1:\n',
-        '        if kind == "helm_chart" and (len(candidates) > 1 or not own):\n',
+        "        if kind in NEVER_BY_NAME and len(candidates) > 1:\n",
+        "        if kind in NEVER_BY_NAME and (len(candidates) > 1 or not own):\n",
         "#475 step 3: a chart nothing but an umbrella defines has one provider in the estate; leaving it unresolved drops a dependency the store does hold",
-        ("test_build_relationships.ChartResolutionTest.test_the_umbrella_is_the_fallback",),
+        (
+            "test_build_relationships.ChartResolutionTest.test_the_umbrella_is_the_fallback",
+            "test_build_relationships.ForkTest.test_a_coordinate_only_a_fork_defines_resolves_to_it",
+            "test_build_relationships.SelfRuleTest.test_a_coordinate_two_clones_publish_follows_the_conflict_resolution",
+        ),
     ),
     Mutation(
         "relationships: a chart several clones define goes to the first by name",
         "relationships.py",
-        '        if kind == "helm_chart" and len(candidates) > 1:\n',
-        "        if False:\n",
+        "        if kind in NEVER_BY_NAME and len(candidates) > 1:\n",
+        '        if kind in NEVER_BY_NAME - {"helm_chart"} and len(candidates) > 1:\n',
         "#475 step 4: name order sends an undeclared wrapper every chart whose application sorts after it, so consumers point at the wrapper and its own edge to the application is dropped as a self-reference, with nothing marking the answer as a guess",
         (
             "test_build_relationships.ChartPrecedenceTest.test_an_undeclared_wrapper_leaves_both_charts_unresolved",
@@ -9687,6 +9695,73 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "relationships: a coordinate several clones define goes to the first by name",
+        "relationships.py",
+        'NEVER_BY_NAME = frozenset({"helm_chart", "maven_artifact", "npm_package"})\n',
+        'NEVER_BY_NAME = frozenset({"helm_chart"})\n',
+        "#478: a fork publishing its original's Maven coordinates or npm package sorts before it, so name order points every consumer at the copy, with nothing marking the answer as a guess",
+        (
+            "test_build_relationships.ForkNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
+            "test_build_relationships.ForkTest.test_a_declared_fork_loses_to_its_original",
+            "test_build_relationships.ForkTest.test_an_undeclared_fork_leaves_the_coordinate_unresolved_and_listed",
+            "test_build_relationships.ForkTest.test_the_chart_pattern_does_not_settle_a_coordinate",
+            "test_build_relationships.ForkTest.test_the_run_names_ksb_fork_repos_for_an_unresolved_coordinate",
+            "test_build_relationships.ForkTest.test_two_unrelated_definers_are_unresolved",
+            "test_build_relationships.PinMaskingTest.test_pin_and_conflict_keys_are_masked",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+        ),
+    ),
+    Mutation(
+        "relationships: a declared fork is not passed over",
+        "relationships.py",
+        '    passed_over = umbrellas if kind == "helm_chart" else forks\n',
+        '    passed_over = umbrellas if kind == "helm_chart" else frozenset()\n',
+        "#478: `KSB_FORK_REPOS` accepted and then ignored, so the coordinate a fork copies stays unresolved however the store declares it",
+        (
+            "test_build_relationships.ForkTest.test_a_declared_fork_loses_to_its_original",
+            "test_build_relationships.SelfRuleTest.test_a_coordinate_two_clones_publish_follows_the_conflict_resolution",
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+        ),
+    ),
+    Mutation(
+        "relationships: the stage drops KSB_FORK_REPOS",
+        "build_relationships.py",
+        "            forks=set(config.FORK_REPOS),\n",
+        "            forks=set(),\n",
+        "#478: the setting read and never handed to the layer, so a store's committed declaration changes nothing",
+        (
+            "test_settings_file.TheFileSetsWhatTheEnvironmentWould.test_a_file_setting_changes_the_layer_exactly_as_the_environment_variable_does",
+        ),
+    ),
+    Mutation(
+        "relationships: the chart pattern settles a coordinate",
+        "relationships.py",
+        '                    kind == "helm_chart" and pattern and pattern.format(name=target) in self.estate\n',
+        "                    pattern and pattern.format(name=target) in self.estate\n",
+        "#478: a pattern of `{name}` names a clone called after an npm package, dropping it from `unresolved_conflicts` although no rule chose a provider, so its reference reads as outside the estate",
+        ("test_build_relationships.ForkTest.test_the_chart_pattern_does_not_settle_a_coordinate",),
+    ),
+    Mutation(
+        "unresolved coordinates: the report names the chart settings",
+        "build_relationships.py",
+        '            else "declare the copies in KSB_FORK_REPOS"\n',
+        '            else "declare a wrapper in KSB_UMBRELLA_REPOS"\n',
+        "#478: a coordinate left unresolved points the operator at chart settings that cannot settle it",
+        (
+            "test_build_relationships.ForkTest.test_the_run_names_ksb_fork_repos_for_an_unresolved_coordinate",
+        ),
+    ),
+    Mutation(
+        "unresolved coordinates: counted as charts",
+        "build_relationships.py",
+        '    charts = len(layer.unresolved_conflicts.get("helm_chart", {}))\n',
+        "    charts = unresolved_charts(layer)\n",
+        "#478: the summary names the chart settings for a store whose only unresolved targets are forks' coordinates",
+        (
+            "test_build_relationships.ForkTest.test_the_run_names_ksb_fork_repos_for_an_unresolved_coordinate",
+        ),
+    ),
+    Mutation(
         "relationships: a reference to an unchosen chart is reported as outside the estate",
         "relationships.py",
         "            if ref.target in self.unchosen.get(ref.kind, {}):\n",
@@ -9695,6 +9770,9 @@ MUTATIONS = (
         (
             "test_build_relationships.ChartPrecedenceTest.test_an_undeclared_wrapper_leaves_both_charts_unresolved",
             "test_build_relationships.ChartResolutionTest.test_two_definitions_are_left_unresolved_and_listed_not_guessed",
+            "test_build_relationships.ForkTest.test_an_undeclared_fork_leaves_the_coordinate_unresolved_and_listed",
+            "test_build_relationships.ForkTest.test_the_chart_pattern_does_not_settle_a_coordinate",
+            "test_build_relationships.ForkTest.test_two_unrelated_definers_are_unresolved",
             "test_build_relationships.NameOrderTest.test_renaming_the_wrapper_past_an_application_changes_nothing",
         ),
     ),
@@ -9763,6 +9841,7 @@ MUTATIONS = (
         "        if False:\n",
         "#455: `by-repo/` only ever added to, so a repository that left the estate keeps answering dependency questions from a file nothing rewrites - the same shape as the graphs `git clean` left behind (CLAUDE.md 7)",
         (
+            "test_build_relationships.ForkNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
             "test_build_relationships.StageTest.test_a_removed_clone_loses_its_file_and_nothing_else_is_touched",
         ),
     ),
@@ -10497,13 +10576,23 @@ MUTATIONS = (
     Mutation(
         "unresolved charts: no summary line",
         "build_relationships.py",
-        "        lines.append(f\"{_plural(unresolved, 'chart')} unresolved: {DECLARE}\")\n",
+        "        lines.append(f\"{_plural(charts, 'chart')} unresolved: {DECLARE}\")\n",
         "        pass\n",
         "#483: the run exited 0 and nothing above the per-chart lines said the layer "
         "was incomplete",
         (
             "test_build_relationships.UnresolvedChartsAreLoudTest.test_strict_exits_1_with_unresolved_charts_and_still_writes_the_layer",
             "test_build_relationships.UnresolvedChartsAreLoudTest.test_the_summary_line_counts_every_unresolved_chart",
+        ),
+    ),
+    Mutation(
+        "unresolved coordinates: no summary line",
+        "build_relationships.py",
+        "        lines.append(f\"{_plural(coordinates, 'coordinate')} unresolved: {DECLARE_FORKS}\")\n",
+        "        pass\n",
+        "#478: a run leaving forks' coordinates unresolved ends with nothing above the per-conflict lines saying the layer is incomplete",
+        (
+            "test_build_relationships.ForkTest.test_the_run_names_ksb_fork_repos_for_an_unresolved_coordinate",
         ),
     ),
     Mutation(

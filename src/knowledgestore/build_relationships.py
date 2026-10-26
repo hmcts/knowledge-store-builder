@@ -13,8 +13,9 @@ not hold is a finding, never an absence. Three outputs, under
 `knowledge/relationships/`:
 
 - `repository-dependencies.json`, every edge with both ends, the unresolved
-  targets by kind, the conflicts, and the charts several clones define that no
-  rule chooses between (`unresolved_conflicts`);
+  targets by kind, the conflicts, and the charts, Maven coordinates and npm
+  packages several clones define that no rule chooses between
+  (`unresolved_conflicts`);
 - `kinds.json`, the counts per kind, small enough for a manifest to read;
 - `by-repo/<repo>.json`, one per clone: what it depends on and what depends on
   it, plus `extra` copied from `extra/<repo>.json` when the store writes one.
@@ -26,8 +27,9 @@ bytes, and a repository no longer cloned loses its `by-repo` file in the same ru
 A chart several clones define that no rule chooses between leaves every consumer
 of it out of `dependents`, so the run ends with one line counting them -
 `N charts unresolved: declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN` - and
-`--strict` turns that into exit 1, after the layer is written, for a store that
-wants the build to stop there.
+a Maven coordinate or npm package likewise, with
+`N coordinates unresolved: declare KSB_FORK_REPOS`. `--strict` turns either into
+exit 1, after the layer is written, for a store that wants the build to stop there.
 
 `--compare PATH` builds the layer, writes nothing, and prints every
 (consumer, provider, chart, kind) whose references or pins differ from PATH's,
@@ -82,25 +84,36 @@ def report(layer: relationships.Layer) -> list[str]:
                 f"resolved to {repos[0]}, the first by name"
             )
     for kind, targets in layer.unresolved_conflicts.items():
+        settle = (
+            "declare a wrapper in KSB_UMBRELLA_REPOS or name chart repositories with "
+            "KSB_CHART_REPO_PATTERN"
+            if kind == "helm_chart"
+            else "declare the copies in KSB_FORK_REPOS"
+        )
         for target, repos in targets.items():
             lines.append(
                 f"  conflict: {kind} {target} is defined by {', '.join(repos)}; left unresolved - "
-                "declare a wrapper in KSB_UMBRELLA_REPOS or name chart repositories with "
-                "KSB_CHART_REPO_PATTERN"
+                + settle
             )
     lines.extend(f"  unreadable: {path}" for path in layer.unreadable)
-    unresolved = unresolved_charts(layer)
-    if unresolved:
-        lines.append(f"{_plural(unresolved, 'chart')} unresolved: {DECLARE}")
+    charts = len(layer.unresolved_conflicts.get("helm_chart", {}))
+    if charts:
+        lines.append(f"{_plural(charts, 'chart')} unresolved: {DECLARE}")
+    coordinates = unresolved_charts(layer) - charts
+    if coordinates:
+        lines.append(f"{_plural(coordinates, 'coordinate')} unresolved: {DECLARE_FORKS}")
     return lines
 
 
-# What settles an unresolved chart, named wherever one is reported.
+# What settles an unresolved chart, and an unresolved Maven coordinate or npm
+# package, named wherever one is reported.
 DECLARE = "declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN"
+DECLARE_FORKS = "declare KSB_FORK_REPOS"
 
 
 def unresolved_charts(layer: relationships.Layer) -> int:
-    """How many targets `unresolved_conflicts` holds, across every kind it names."""
+    """How many targets `unresolved_conflicts` holds, across every kind it names:
+    charts, Maven coordinates and npm packages alike."""
     return sum(len(targets) for targets in layer.unresolved_conflicts.values())
 
 
@@ -252,7 +265,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="exit 1 when any chart is left unresolved; the layer is written first",
+        help=(
+            "exit 1 when any chart, Maven coordinate or npm package is left unresolved; "
+            "the layer is written first"
+        ),
     )
     arguments = parser.parse_args(argv)
 
@@ -287,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             config.RELATIONSHIP_EXAMPLES,
             urls,
             config.RELATIONSHIPS_EXTRA_DIR,
+            forks=set(config.FORK_REPOS),
         )
     except (relationships.KindError, ValueError) as error:
         print(f"Nothing written: {error}", file=sys.stderr)
@@ -311,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if arguments.strict and unresolved_charts(layer):
         print(
-            f"--strict: {_plural(unresolved_charts(layer), 'chart')} unresolved, so the "
+            f"--strict: {_plural(unresolved_charts(layer), 'conflict')} unresolved, so the "
             "layer is written and the run fails",
             file=sys.stderr,
         )

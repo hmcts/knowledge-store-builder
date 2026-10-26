@@ -8,7 +8,9 @@ show what a store's own file does. The estate holds two chart conflicts each
 setting settles: a wrapper republishing two applications' charts, which
 `KSB_UMBRELLA_REPOS = "app-m"` resolves, and a chart defined both by `chart-foo`
 and by `foo-service`, which `KSB_CHART_REPO_PATTERN = "chart-{name}"` resolves.
-Each test names the break it catches.
+It also holds a Maven coordinate published by `lib` and by its copy `fork-of-lib`,
+which `KSB_FORK_REPOS = "fork-of-lib"` resolves. Each test names the break it
+catches.
 """
 
 from __future__ import annotations
@@ -36,6 +38,19 @@ def _chart(name: str, *deps: str) -> str:
     return text
 
 
+def _pom(artifact: str, *deps: str) -> str:
+    uses = "".join(
+        f"<dependency><groupId>com.example</groupId><artifactId>{d}</artifactId>"
+        "<version>1.0</version></dependency>"
+        for d in deps
+    )
+    return (
+        "<project><groupId>com.example</groupId>"
+        f"<artifactId>{artifact}</artifactId><version>1.0</version>"
+        f"<dependencies>{uses}</dependencies></project>\n"
+    )
+
+
 ESTATE = {
     "app-a": {"Chart.yaml": _chart("a")},
     "app-m": {"a/Chart.yaml": _chart("a", "a"), "z/Chart.yaml": _chart("z", "z")},
@@ -44,10 +59,14 @@ ESTATE = {
     "uses-foo": {"Chart.yaml": _chart("uses-foo", "foo")},
     "chart-foo": {"Chart.yaml": _chart("foo")},
     "foo-service": {"Chart.yaml": _chart("foo")},
+    "lib": {"pom.xml": _pom("lib")},
+    "fork-of-lib": {"pom.xml": _pom("lib")},
+    "uses-lib": {"pom.xml": _pom("uses-lib", "lib")},
 }
 # Each setting the file is tested with, as the environment would give it.
 UMBRELLA = {"KSB_UMBRELLA_REPOS": "app-m"}
 PATTERN = {"KSB_CHART_REPO_PATTERN": "chart-{name}"}
+FORKS = {"KSB_FORK_REPOS": "fork-of-lib"}
 
 
 def _toml(settings: dict[str, str]) -> str:
@@ -100,7 +119,7 @@ class TheFileSetsWhatTheEnvironmentWould(SettingsIsolated):
         could not carry without a quoting trap; here it must arrive whole."""
         bare = _store(store_root(self))
         self.assertEqual(run_cli(bare, "relationships").returncode, 0)
-        for setting in (UMBRELLA, PATTERN):
+        for setting in (UMBRELLA, PATTERN, FORKS):
             from_env = _store(store_root(self))
             result = run_cli(from_env, "relationships", **setting)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -277,6 +296,7 @@ class TheAllowedKeysAreDerived(SettingsIsolated):
         keys = config.settings_keys()
         for known in (
             "KSB_UMBRELLA_REPOS",
+            "KSB_FORK_REPOS",
             "KSB_CHART_REPO_PATTERN",
             "KSB_GITHUB_ORG",
             "KSB_INDEX_WARN_MB",

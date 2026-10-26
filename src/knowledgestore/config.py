@@ -749,6 +749,10 @@ CHART_REPO_PATTERN = _lookup("KSB_CHART_REPO_PATTERN", "")
 # Repositories that bundle other repositories' charts. A chart they define resolves
 # to them only when no other clone defines it.
 UMBRELLA_REPOS = _env_set("KSB_UMBRELLA_REPOS", set())
+# Repositories that copy another repository and publish its Maven coordinates or
+# npm package names. A coordinate they define resolves to them only when no other
+# clone defines it.
+FORK_REPOS = _env_set("KSB_FORK_REPOS", set())
 # Example lines carried per edge. `references` is never capped by it.
 RELATIONSHIP_EXAMPLES = _env_int("KSB_RELATIONSHIP_EXAMPLES", 3)
 

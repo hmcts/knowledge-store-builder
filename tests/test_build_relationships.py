@@ -97,6 +97,7 @@ class _Store(SettingsIsolated):
             GITHUB_ORG="",
             CHART_REPO_PATTERN="",
             UMBRELLA_REPOS=set(),
+            FORK_REPOS=set(),
             RELATIONSHIP_EXAMPLES=3,
         )
 
@@ -115,7 +116,9 @@ class _Store(SettingsIsolated):
     def clones(self) -> list[Path]:
         return sorted(p for p in self.repos.iterdir() if (p / ".git").is_dir())
 
-    def build(self, kinds=relationships.BUILTIN, org="", pattern="", umbrellas=(), examples=3):
+    def build(
+        self, kinds=relationships.BUILTIN, org="", pattern="", umbrellas=(), examples=3, forks=()
+    ):
         urls = SourceUrls(
             {
                 "svc-a": "https://github.com/example-org/svc-a.git",
@@ -133,6 +136,7 @@ class _Store(SettingsIsolated):
             examples,
             urls,
             self.root / "knowledge" / "relationships" / "extra",
+            forks=set(forks),
         )
 
     def run_stage(self, *argv: str) -> tuple[int, str, str]:
@@ -581,13 +585,13 @@ class SelfRuleTest(_HelmStore):
             },
         )
         _write(self.repos / "a-shared", {"pom.xml": _pom("shared", "")})
-        layer = self.build(kinds=(_kind("maven_artifact"),))
+        # Declared a fork, so the coordinate resolves to `a-shared` (#478) and
+        # `multi`'s own use of it is the case under test.
+        layer = self.build(kinds=(_kind("maven_artifact"),), forks={"multi"})
         self.assertEqual(
             [e["repository"] for e in layer.by_repo["multi"]["depends_on"]], ["a-shared"]
         )
-        self.assertEqual(
-            layer.conflicts, {"maven_artifact": {"com.example:shared": ["a-shared", "multi"]}}
-        )
+        self.assertEqual(layer.unresolved_conflicts, {})
         self.assertEqual(layer.skipped["maven_artifact"], {})
 
 
@@ -676,20 +680,6 @@ class ChartPrecedenceTest(_HelmStore):
             layer.unresolved_conflicts, {"helm_chart": {"db": ["bundle-a", "bundle-b"]}}
         )
 
-    def test_a_coordinate_two_clones_publish_still_resolves_first_by_name(self):
-        """Break caught: the chart rule applied to every kind, so a Maven
-        coordinate two clones publish - out of #475's scope - stops resolving."""
-        self.repos.mkdir()
-        _write(self.repos / "b-lib", {"pom.xml": _pom("lib", "")})
-        _write(self.repos / "a-lib", {"pom.xml": _pom("lib", "")})
-        _write(self.repos / "user", {"pom.xml": _pom("user", "lib")})
-        layer = self.build(kinds=(_kind("maven_artifact"),))
-        self.assertEqual([e["repository"] for e in layer.by_repo["user"]["depends_on"]], ["a-lib"])
-        self.assertEqual(
-            layer.conflicts, {"maven_artifact": {"com.example:lib": ["a-lib", "b-lib"]}}
-        )
-        self.assertEqual(layer.unresolved_conflicts, {})
-
     def test_the_run_names_an_unresolved_chart_and_does_not_claim_a_choice(self):
         """Break caught: the report line still saying the chart was resolved to
         the first by name, when nothing was chosen."""
@@ -747,6 +737,188 @@ class NameOrderTest(_HelmStore):
             json.loads(before[dependencies])["unresolved_conflicts"],
             {"helm_chart": {"a": ["app-a", "app-m"], "z": ["app-m", "app-z"]}},
         )
+
+
+# A copy repository publishing its original's coordinates, per kind: `fork-of-lib`
+# sorts before `lib`, so the first definer by name is the fork - the guess #478
+# reports. `user` depends on the coordinate once.
+FORKED = {
+    "maven_artifact": (
+        "com.example:lib",
+        {
+            "fork-of-lib": {"pom.xml": _pom("lib", "")},
+            "lib": {"pom.xml": _pom("lib", "")},
+            "user": {"pom.xml": _pom("user", "lib")},
+        },
+    ),
+    "npm_package": (
+        "lib",
+        {
+            "fork-of-lib": {"package.json": '{"name": "lib"}\n'},
+            "lib": {"package.json": '{"name": "lib"}\n'},
+            "user": {"package.json": '{"name": "user", "dependencies": {"lib": "^1.0.0"}}\n'},
+        },
+    ),
+}
+
+
+class ForkTest(_Store):
+    """#478: a Maven coordinate or npm package several clones define resolves to
+    the one definer that is not a declared fork (`KSB_FORK_REPOS`), and otherwise
+    stays unresolved rather than going to the first by name - the chart rule."""
+
+    def forked(self, kind: str, clones: dict[str, dict[str, str]] | None = None, **kwargs):
+        if self.repos.exists():
+            shutil.rmtree(self.repos)
+        self.repos.mkdir()
+        for name, files in (clones or FORKED[kind][1]).items():
+            _write(self.repos / name, files)
+        return self.build(kinds=(_kind(kind),), **kwargs)
+
+    def test_a_declared_fork_loses_to_its_original(self):
+        """Break caught: the declaration ignored, so `user` depends on the fork,
+        which sorts first; or the coordinate still listed as a conflict nobody is
+        asked to settle."""
+        for kind in FORKED:
+            with self.subTest(kind=kind):
+                layer = self.forked(kind, forks={"fork-of-lib"})
+                self.assertEqual(
+                    [e["repository"] for e in layer.by_repo["user"]["depends_on"]], ["lib"]
+                )
+                self.assertEqual(layer.by_repo["fork-of-lib"]["depended_on_by"], [])
+                self.assertEqual(layer.conflicts, {})
+                self.assertEqual(layer.unresolved_conflicts, {})
+                self.assertEqual(layer.skipped[kind], {})
+
+    def test_an_undeclared_fork_leaves_the_coordinate_unresolved_and_listed(self):
+        """Break caught: name order guessing the fork, which sorts first, with
+        nothing marking the answer as a guess. The coordinate is listed under
+        `unresolved_conflicts` with both definers, and the reference is counted as
+        `ambiguous` - not as a target outside the estate, which it is not."""
+        for kind, (target, _) in FORKED.items():
+            with self.subTest(kind=kind):
+                layer = self.forked(kind)
+                self.assertEqual(layer.dependencies["edges"], [])
+                self.assertEqual(
+                    layer.unresolved_conflicts, {kind: {target: ["fork-of-lib", "lib"]}}
+                )
+                self.assertEqual(
+                    layer.dependencies["unresolved_conflicts"], layer.unresolved_conflicts
+                )
+                self.assertEqual(layer.conflicts, {})
+                self.assertEqual(layer.skipped[kind], {"ambiguous": 1})
+                self.assertEqual(layer.dependencies["unresolved_targets_outside_estate"][kind], {})
+
+    def test_two_unrelated_definers_are_unresolved(self):
+        """Break caught: the first by name taken when neither definer is a declared
+        fork, or when both are - the same guess one level down."""
+        clones = {
+            "a-lib": {"pom.xml": _pom("lib", "")},
+            "b-lib": {"pom.xml": _pom("lib", "")},
+            "user": {"pom.xml": _pom("user", "lib")},
+        }
+        for forks in (set(), {"elsewhere"}, {"a-lib", "b-lib"}):
+            with self.subTest(forks=forks):
+                layer = self.forked("maven_artifact", clones, forks=forks)
+                self.assertEqual(layer.dependencies["edges"], [])
+                self.assertEqual(
+                    layer.unresolved_conflicts,
+                    {"maven_artifact": {"com.example:lib": ["a-lib", "b-lib"]}},
+                )
+                self.assertEqual(layer.skipped["maven_artifact"], {"ambiguous": 1})
+
+    def test_a_coordinate_only_a_fork_defines_resolves_to_it(self):
+        """Break caught: a declared fork that is the only definer reported as
+        outside the estate, dropping a dependency the store does hold."""
+        layer = self.forked(
+            "maven_artifact",
+            {
+                "fork-of-lib": FORKED["maven_artifact"][1]["fork-of-lib"],
+                "user": FORKED["maven_artifact"][1]["user"],
+            },
+            forks={"fork-of-lib"},
+        )
+        self.assertEqual(
+            [e["repository"] for e in layer.by_repo["user"]["depends_on"]], ["fork-of-lib"]
+        )
+
+    def test_the_chart_pattern_does_not_settle_a_coordinate(self):
+        """Break caught: `KSB_CHART_REPO_PATTERN` applied to every kind's
+        conflicts, so a pattern of `{name}` drops the npm package `lib` from
+        `unresolved_conflicts` because a clone is called `lib` - and its reference
+        reads as outside the estate, although no rule chose a provider."""
+        layer = self.forked("npm_package", pattern="{name}")
+        self.assertEqual(
+            layer.unresolved_conflicts, {"npm_package": {"lib": ["fork-of-lib", "lib"]}}
+        )
+        self.assertEqual(layer.skipped["npm_package"], {"ambiguous": 1})
+        self.assertEqual(layer.dependencies["unresolved_targets_outside_estate"]["npm_package"], {})
+
+    def test_the_run_names_ksb_fork_repos_for_an_unresolved_coordinate(self):
+        """Break caught: the report line for a coordinate naming the chart settings,
+        which cannot settle it, or claiming a choice the first by name; or the
+        summary counting it as a chart."""
+        for kind, (target, clones) in FORKED.items():
+            with self.subTest(kind=kind):
+                if self.repos.exists():
+                    shutil.rmtree(self.repos)
+                self.repos.mkdir()
+                for name, files in clones.items():
+                    _write(self.repos / name, files)
+                code, out, err = self.run_stage()
+                self.assertEqual(code, 0, err)
+                self.assertIn(
+                    f"  conflict: {kind} {target} is defined by fork-of-lib, lib; left "
+                    "unresolved - declare the copies in KSB_FORK_REPOS\n",
+                    out,
+                )
+                self.assertIn("1 coordinate unresolved: declare KSB_FORK_REPOS\n", out)
+                self.assertNotIn("first by name", out)
+                self.assertNotIn("charts unresolved", out)
+                self.assertNotIn("chart unresolved", out)
+
+
+class ForkNameOrderTest(_Store):
+    """CLAUDE.md 1.3 and #478: renaming a fork so it sorts on the other side of its
+    original must not move a coordinate's resolution, declared or not."""
+
+    def layer_files(self, names: dict[str, str], forks: set[str]) -> dict[str, bytes]:
+        """The written layer for the forked Maven and npm estate with clones renamed
+        by `names`, each new name mapped back to the old, so two estates differing
+        only in names compare byte for byte."""
+        if self.repos.exists():
+            shutil.rmtree(self.repos)
+        self.repos.mkdir()
+        for _, clones in FORKED.values():
+            for name, files in clones.items():
+                _write(self.repos / names.get(name, name), files)
+        config.configure(FORK_REPOS={names.get(name, name) for name in forks})
+        code, _, err = self.run_stage()
+        self.assertEqual(code, 0, err)
+        found = {}
+        for rel, data in snapshot(self.root).items():
+            for old, new in names.items():
+                rel, data = rel.replace(new, old), data.replace(new.encode(), old.encode())
+            found[rel] = data
+        dependencies = "repository-dependencies.json"
+        body = json.loads(found[dependencies])
+        # The candidate list is sorted by name, so a rename reorders it; the set of
+        # candidates is what must not move.
+        for targets in body["unresolved_conflicts"].values():
+            for target, repos in targets.items():
+                targets[target] = sorted(repos)
+        found[dependencies] = relationships.dumps(body).encode()
+        return found
+
+    def test_renaming_the_fork_past_its_original_changes_nothing(self):
+        """Break caught: a coordinate resolved by name order. `fork-of-lib` and
+        `zz-fork` sort on opposite sides of `lib`, so a name-order rule sends `user`
+        to the fork in one estate and to the original in the other."""
+        for forks in (set(), {"fork-of-lib"}):
+            with self.subTest(forks=forks):
+                before = self.layer_files({}, forks)
+                after = self.layer_files({"fork-of-lib": "zz-fork"}, forks)
+                self.assertEqual(before, after)
 
 
 SUMMARY = "2 charts unresolved: declare KSB_UMBRELLA_REPOS or KSB_CHART_REPO_PATTERN"
@@ -975,7 +1147,13 @@ class PinMaskingTest(_Store):
                 },
             }
         )
-        layer = self.build(kinds=(_kind("terraform_module"), _kind("npm_package")))
+        # A store's kind still takes the first definer by name and lists the rest
+        # under `conflicts`; npm leaves the same name unresolved (#478). Both keys
+        # are written, so both are masked.
+        store_kind = relationships.Kind(
+            "store_package", "store", (), lambda *_: [], relationships.npm_publishes
+        )
+        layer = self.build(kinds=(_kind("terraform_module"), _kind("npm_package"), store_kind))
         pins = {e["repository"]: e["refs_pinned"] for e in layer.by_repo["svc-p"]["depends_on"]}
         self.assertEqual(
             pins,
@@ -984,10 +1162,9 @@ class PinMaskingTest(_Store):
                 "ui-kit": {"https://registry.example.test/ui.tgz?access_token=[masked]": 1},
             },
         )
-        self.assertEqual(
-            layer.conflicts,
-            {"npm_package": {"https://p.example.test/x?access_token=[masked]": ["pub-a", "pub-b"]}},
-        )
+        masked = {"https://p.example.test/x?access_token=[masked]": ["pub-a", "pub-b"]}
+        self.assertEqual(layer.conflicts, {"store_package": masked})
+        self.assertEqual(layer.unresolved_conflicts, {"npm_package": masked})
         for written in (layer.dependencies, layer.by_repo, layer.conflicts):
             self.assertNotIn(TOKEN, json.dumps(written))
             self.assertNotIn(GITHUB, json.dumps(written))
