@@ -475,7 +475,8 @@ merged graph**. Read the unresolved count in the report: `meta-schema` is
 expected, while the others (`external`, `ambiguous`, `no-such-pointer`,
 `unrecognised-target` and `malformed`) are references the store cannot follow, and `unresolved.json` lists each. Two clones that declare
 the same schema id are `ambiguous` unless one is the referring file's own
-repository. The [JSON Schema layer](how-it-works.md#the-json-schema-layer) lists
+repository or only one is outside `KSB_FORK_REPOS`, the setting `relationships`
+reads (below). The [JSON Schema layer](how-it-works.md#the-json-schema-layer) lists
 what it recognises and the resolution order.
 
 Write the relationships layer, which records which repositories depend on which:

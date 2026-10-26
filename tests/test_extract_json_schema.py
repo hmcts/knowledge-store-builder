@@ -701,6 +701,46 @@ class StageTest(SettingsIsolated):
         self.assertEqual(telemetry.read()["json_schema.files_recognised"], 3)
         self.assertEqual(telemetry.read()["json_schema.files_skipped"], 0)
 
+    def owner_edges(self) -> list[tuple[str, str]]:
+        return [
+            (e["source"], e["target"])
+            for e in self.graph()["links"]
+            if e.get("context") == "properties/owner"
+        ]
+
+    def add_fork_copy(self) -> None:
+        """A second repository declaring the person id, the shape a fork leaves."""
+        fork = self.root / "repositories" / "widgets-fork"
+        (fork / ".git").mkdir(parents=True)
+        copy = fork / "person.json"
+        copy.write_text(fixtures.PERSON, encoding="utf-8")
+        self.add_detect_entry(copy)
+
+    def test_declared_fork_settles_an_id_two_repositories_declare(self):
+        """Breaks if the stage ignores KSB_FORK_REPOS: the owner reference stays
+        ambiguous and writes no edge although the copy is declared a fork."""
+        self.add_fork_copy()
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("-> ambiguous", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.refs_unresolved"], 1)
+        self.assertEqual(self.owner_edges(), [])
+
+        config.configure(FORK_REPOS={"widgets-fork"})
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertNotIn("ambiguous", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.refs_unresolved"], 0)
+        self.assertEqual(
+            self.owner_edges(),
+            [
+                (
+                    "widgets::jsonschema:schemas/widget-created.json#/properties/owner",
+                    "common::jsonschema:person.json#",
+                )
+            ],
+        )
+
     def test_two_runs_are_byte_identical(self):
         """Breaks if output depends on run order, hash seed, or a gzip timestamp."""
         layer.main([])

@@ -11800,6 +11800,16 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "json-schema: the stage drops KSB_FORK_REPOS",
+        "extract_json_schema.py",
+        "    layer_report = add_layer(graph, owned, frozenset(config.FORK_REPOS))\n",
+        "    layer_report = add_layer(graph, owned, frozenset())\n",
+        "the setting read and never handed to the tie rule, so a store's declared fork leaves a shared schema id ambiguous and its cross-repository edge unwritten",
+        (
+            "test_extract_json_schema.StageTest.test_declared_fork_settles_an_id_two_repositories_declare",
+        ),
+    ),
+    Mutation(
         "json-schema: graphify's keyword nodes survive beside the layer",
         "extract_json_schema.py",
         '        if node.get("_origin") == "ast" and owned_key(node) in owned:',

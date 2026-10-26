@@ -509,8 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     owned, info = read_owned(groups, config.REPOSITORIES_DIR, arguments.max_bytes)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
-    # #478 will supply the fork set; until it merges, no repository is treated as a fork.
-    layer_report = add_layer(graph, owned, frozenset())
+    layer_report = add_layer(graph, owned, frozenset(config.FORK_REPOS))
 
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)

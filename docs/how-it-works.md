@@ -158,9 +158,9 @@ order, and never by name:
 5. otherwise the reference is `ambiguous`: no edge is written, and every
    candidate is listed as `repo:path`, sorted.
 
-Rule 4 is written for the fork set that #478 adds (`KSB_FORK_REPOS`), which does
-not exist yet. Until it lands the stage declares no forks, so copies that rule 3 does not
-settle are reported `ambiguous`. Linking to every copy was rejected: it would
+Rule 4 reads the fork set from `KSB_FORK_REPOS` (comma-separated repository
+names), the same setting `relationships` reads. With none declared, copies that
+rule 3 does not settle are reported `ambiguous`. Linking to every copy was rejected: it would
 assert several relationships where the evidence supports one, and make each
 widely copied schema a hub next to every repository that copies it.
 

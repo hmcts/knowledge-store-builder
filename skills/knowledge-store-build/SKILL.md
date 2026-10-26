@@ -809,9 +809,9 @@ the keyword nodes back and the next `json-schema` run removes them again. A
 schema id declared by several files is settled by a fixed order: the referring
 file itself, then the only declaring file, then the only one in the referring
 repository, then the only one outside a declared fork. Otherwise the reference
-is `ambiguous`: no edge is written and every candidate is listed. Until
-`KSB_FORK_REPOS` lands (#478) no repository counts as a fork, so such copies are
-reported `ambiguous`. **Read the unresolved count and its reasons**
+is `ambiguous`: no edge is written and every candidate is listed. A
+fork is a repository named in `KSB_FORK_REPOS` (comma-separated), the setting
+`relationships` reads; with none declared, such copies are reported `ambiguous`. **Read the unresolved count and its reasons**
 (`meta-schema` is expected; the rest, such as `external`, `ambiguous` and
 `no-such-pointer`, are the gaps), and pass `--unresolved PATH` to write the full list. Files it
 skipped, and files whose walk stopped at the depth limit, are named in the
