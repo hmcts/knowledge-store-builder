@@ -83,6 +83,7 @@ them; see
 ```bash
 knowledgestore discover        # config/repositories.txt from the GitHub org
 knowledgestore sync            # clone/update every repository
+knowledgestore apply-ignores   # write config/graphify-ignore.txt back into each clone
 knowledgestore export-history  # per-repository commit datasets
 knowledgestore context         # knowledge_context.md + manifest
 knowledgestore intent          # file -> ticket index, descriptions from commits
@@ -105,6 +106,24 @@ knowledgestore merge-inputs        # reconcile what the merge will read
 graphify merge-graphs repositories/*/graphify-out/graph.json \
   --out graphify-out/graph.json
 ```
+
+**`apply-ignores` comes straight after `sync`, every time.** `sync` ends in
+`git clean -fd -e graphify-out`, which deletes every clone's `.graphifyignore`, so
+the store's exclusions live in `config/graphify-ignore.txt` (one `.graphifyignore`
+line each; `name | pattern` for one repository) and this stage writes them back.
+It keeps a repository's own lines and is safe to re-run. Declaring nothing
+changes nothing.
+
+**The library's AST route is `knowledgestore extract-ast`**, in this order: `sync`,
+`apply-ignores`, the detect result and `content-set` (below), `check-grammars`,
+then `extract-ast`. It refuses, with exit 1 and nothing written, when a
+repository in `config/repositories.txt` has no clone - on a first run too - and
+when a clone's `.graphifyignore` lacks a declared exclusion; it names a declared
+repository with no parseable code as a warning. It writes its per-repository
+counts as each repository finishes, so an interrupted run keeps them. It exits 1
+on a content-set file that produced nodes last run and none now, naming it and
+its previous count (`declined by graphify` when graphify listed it in
+`skipped_sources`); pass `--allow-vanished` only when that loss is intended.
 
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`

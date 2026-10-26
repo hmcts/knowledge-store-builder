@@ -97,6 +97,10 @@ STAGES: dict[str, tuple[str, str]] = {
         "list the estate's repositories from GitHub into config/repositories.txt",
     ),
     "sync": ("sync_repositories", "clone or update every configured repository into repositories/"),
+    "apply-ignores": (
+        "apply_ignores",
+        "write config/graphify-ignore.txt back into each clone's .graphifyignore (after sync)",
+    ),
     "drift": (
         "drift",
         "measure which extracted files the sync made stale, from the recorded shas",

@@ -116,20 +116,61 @@ content that is not that repository's - whether the content set is symlink-aware
 is a property of the extractor's detection, and this stage's default inherits
 whatever that is rather than improving on it. A store relying on a per-repository
 ignore file for symlinked trees should note that `git clean -fd -e graphify-out`
-deletes it every sync, so it has to be re-applied before this stage runs and
-nothing here fails if it was not.
+deletes it every sync, so it has to be re-applied before this stage runs. A
+store that declares its exclusions in `config/graphify-ignore.txt` gets that from
+`apply-ignores`, and this stage refuses a clone whose ignore file lacks a declared
+line - see `unapplied_exclusions`.
+
+## Against the declared repositories, before anything runs
+
+Grouping the content set and comparing with the last run cannot see a repository
+that was never in the content set. On a first run there is no last run at all, so
+a declared repository `sync` never cloned was simply absent: no error, no name,
+and a layer that looked complete. So `config/repositories.txt` is read first. A
+declared repository with no clone refuses the run, naming each; one whose clone
+holds no parseable code is named as a warning, because a repository of documents
+alone is legitimate. A store with no `config/repositories.txt` is not reconciled.
+
+## Counts written as each repository finishes
+
+The sidecar is rewritten, atomically, after every repository, so an interrupted
+run keeps every count it measured: completed repositories carry this run's count,
+and the rest keep last run's. That replaces a completed repository's baseline
+before the end-of-run movement report prints, so its progress line names a
+decrease as it is measured - otherwise an interrupt would leave that decrease
+recorded nowhere.
+
+## A file that went to zero
+
+Beside the per-repository counts sits a per-file record, `<layer>_file_counts.json`:
+store-relative path to node count, sorted. A file that produced nodes last run and
+none now, while still in the content set, fails the run - unless `--allow-vanished`
+says the change is intended. That is a different event from a decrease, which is
+reported and never refused: the content is still there and the extractor stopped
+reading it. A consuming store met exactly that - graphify extracting nothing from
+JSON Schema files using `definitions` or `$defs`, with `failed_sources` empty - and
+nothing in the library noticed.
+
+graphify names files an extractor declined by design in `skipped_sources`, from
+0.9.94. Such a file is reported as declined rather than vanished, and fails all the
+same: declined is still lost data. Without `--allow-vanished` a vanished file keeps
+its previous count in the record, so the next run fails again rather than taking
+the zero as the new baseline.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import signal
 import sys
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from . import config, content_set, io
+from . import apply_ignores, config, content_set, export_git_history, io, store_paths
+from .build_store_manifest import write_atomically
 
 # The kinds `detect` classifies that hold parseable source. `paper`, `image` and
 # `video` are content the semantic layer reads and the AST parser cannot, so
@@ -298,7 +339,10 @@ def movement(before: "dict[str, int]", after: "dict[str, int]") -> "dict[str, li
 
 
 def carry_forward(
-    before: "dict[str, int]", counts: "dict[str, int]", failures: "list"
+    before: "dict[str, int]",
+    counts: "dict[str, int]",
+    failures: "list",
+    pending: "Iterable[str]" = (),
 ) -> "dict[str, int]":
     """Keep a failed repository's last known count rather than dropping it.
 
@@ -315,9 +359,13 @@ def carry_forward(
 
     A carried count is deliberately stale: comparing the next successful run
     against the last one that actually extracted is what a decrease check is for.
+
+    `pending` names the repositories a run has not reached yet, which keep their
+    count for the same reason: a checkpoint written mid-run that dropped them would
+    read as all of them absent if the run were interrupted there.
     """
-    failed = {label for label, _ in failures}
-    carried = {name: value for name, value in before.items() if name in failed}
+    kept = {label for label, _ in failures} | set(pending)
+    carried = {name: value for name, value in before.items() if name in kept}
     return {**carried, **counts}
 
 
@@ -343,10 +391,38 @@ def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     return groups
 
 
+def write_counts(path: Path, counts: "dict[str, int]") -> None:
+    """The sidecar, through a temporary file and a rename, in the form it always had.
+
+    Written after every repository, so a write interrupted part-way must leave the
+    previous whole file rather than a truncated one the next run cannot read.
+    """
+    write_atomically(path, json.dumps(counts, ensure_ascii=False))
+
+
+def declined_path(name: str, entry: str) -> str:
+    """A `skipped_sources` entry as a store-relative path, whichever form it arrived in.
+
+    graphify writes its source paths relative to `cache_root`, which here is the store
+    root; an entry relative to the repository instead is placed under it, so the
+    comparison with the per-file record cannot miss on spelling alone.
+    """
+    relative = store_paths.relative(entry)
+    if relative.startswith(f"{config.REPOSITORIES_DIR.name}/") or not name:
+        return relative
+    return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
+
+
 def extract_estate(
-    groups: "dict[str, list[Path]]", extractor, root: Path, timeout: int = 0
-) -> "tuple[dict, list, dict, list]":
-    """Extract each repository in turn: the layer, the failures, the counts, the unread.
+    groups: "dict[str, list[Path]]",
+    extractor,
+    root: Path,
+    timeout: int = 0,
+    before: "dict[str, int] | None" = None,
+    checkpoint: "Callable[[dict, list, list], None] | None" = None,
+) -> "tuple[dict, list, dict, list, set]":
+    """Extract each repository in turn: the layer, the failures, the counts, the unread,
+    and the files graphify declined by design.
 
     `extractor` is `graphify.extract.extract`, injected rather than imported here
     so the loop, the reporting and the isolation are testable without the parser
@@ -356,16 +432,24 @@ def extract_estate(
     afterwards, because a node need not carry a repository attribute - deriving
     them would make this measurement depend on a property of the extraction the
     rest of this stage does not require.
+
+    `checkpoint` is called after every repository, extracted or failed, with the
+    counts and failures so far and the labels not yet reached - which is what lets
+    an interrupted run keep what it measured.
     """
     nodes: list = []
     edges: list = []
     failures: list[tuple[str, str]] = []
     counts: dict[str, int] = {}
     skipped: list[str] = []
+    declined: set[str] = set()
     width = max((len(name) for name in groups), default=1)
     unbounded_reported = False
-    for name, files in sorted(groups.items()):
-        label = name or "(corpus root)"
+    ordered = sorted(groups.items())
+    labels = [name or "(corpus root)" for name, _ in ordered]
+    for position, (name, files) in enumerate(ordered):
+        label = labels[position]
+        pending = labels[position + 1 :]
         started = time.monotonic()
         try:
             with repository_time_limit(timeout) as bounded:
@@ -386,12 +470,16 @@ def extract_estate(
             # tell them apart at all is that the operator's next action differs.
             failures.append((label, f"TIMED OUT: {error}"))
             print(f"  {label:<{width}}  TIMED OUT  {error}", file=sys.stderr)
+            if checkpoint:
+                checkpoint(counts, failures, pending)
             continue
         except Exception as error:  # a parser raises whatever the grammar raises
             # Named and counted, never fatal: on a large estate one unparseable
             # repository must not cost the other several hundred.
             failures.append((label, str(error)))
             print(f"  {label:<{width}}  FAILED  {error}", file=sys.stderr)
+            if checkpoint:
+                checkpoint(counts, failures, pending)
             continue
         found = result.get("nodes") or []
         relations = result.get("edges") or []
@@ -402,16 +490,102 @@ def extract_estate(
         # of them was being reported.
         unread = [str(f) for f in (result.get("failed_sources") or [])]
         skipped.extend(unread)
+        declined.update(declined_path(name, str(f)) for f in result.get("skipped_sources") or [])
         nodes.extend(found)
         edges.extend(relations)
         counts[label] = len(found)
         elapsed = time.monotonic() - started
         note = f"  {len(unread):>4,} unread" if unread else ""
+        previous = (before or {}).get(label)
+        if previous is not None and len(found) < previous:
+            note += f"  down from {previous:,}"
         print(
             f"  {label:<{width}}  {len(files):>6,} files  {len(found):>7,} nodes  "
             f"{len(relations):>7,} edges  {elapsed:6.1f}s{note}"
         )
-    return {"nodes": nodes, "edges": edges}, failures, counts, skipped
+        if checkpoint:
+            checkpoint(counts, failures, pending)
+    return {"nodes": nodes, "edges": edges}, failures, counts, skipped, declined
+
+
+def file_counts_path(layer: Path) -> Path:
+    """Where the per-file node counts sit: beside the layer and its per-repository counts."""
+    return layer.with_name(f"{layer.stem}_file_counts.json")
+
+
+def nodes_per_file(
+    layer: dict, groups: "dict[str, list[Path]]", failures: list
+) -> "dict[str, int]":
+    """Each content-set file's node count, for the repositories that extracted.
+
+    Keyed by store-relative path, from each node's `source_file`. A file with no node
+    is recorded as 0, which is what lets the next run tell "went to zero" from "was
+    never there". A failed repository's files are left out: they did not extract,
+    and a 0 for them would read as every file vanishing.
+    """
+    found: dict[str, int] = {}
+    for node in layer["nodes"]:
+        source = node.get("source_file") if isinstance(node, dict) else None
+        if isinstance(source, str) and source:
+            key = store_paths.relative(source)
+            found[key] = found.get(key, 0) + 1
+    failed = {label for label, _ in failures}
+    counts: dict[str, int] = {}
+    for name, files in groups.items():
+        if (name or "(corpus root)") in failed:
+            continue
+        for path in files:
+            key = store_paths.relative(path)
+            counts[key] = found.get(key, 0)
+    return counts
+
+
+def vanished_files(before: "dict[str, int]", now: "dict[str, int]") -> "list[tuple[str, int]]":
+    """(path, previous count) for each file that had nodes last run and has none now.
+
+    Only files in this run's content set are compared, so a file removed from it is
+    not a loss.
+    """
+    return sorted(
+        (path, before[path])
+        for path, count in now.items()
+        if count == 0 and before.get(path, 0) > 0
+    )
+
+
+def file_record(
+    before: "dict[str, int]",
+    now: "dict[str, int]",
+    groups: "dict[str, list[Path]]",
+    failures: list,
+    keep: "list[tuple[str, int]]",
+) -> "dict[str, int]":
+    """The record to write: this run's counts, a failed repository's last ones, sorted.
+
+    `keep` are vanished files whose previous count stands, so an unaccepted loss
+    fails every run until someone passes `--allow-vanished`.
+    """
+    failed = {label for label, _ in failures}
+    carried = {
+        key: before[key]
+        for name, files in groups.items()
+        if (name or "(corpus root)") in failed
+        for key in (store_paths.relative(path) for path in files)
+        if key in before
+    }
+    merged = {**carried, **now, **dict(keep)}
+    return dict(sorted(merged.items()))
+
+
+def report_vanished(vanished: "list[tuple[str, int]]", declined: "set[str]") -> "list[str]":
+    """One line per lost file, naming why when graphify said, then the summary."""
+    lines = []
+    for path, previous in vanished:
+        kind = "declined by graphify" if path in declined else "VANISHED"
+        lines.append(f"  {kind}  {path}  ({previous:,} node(s) last run, 0 now)")
+    lost = sum(previous for _, previous in vanished)
+    lines.append(f"{len(vanished)} file(s) vanished, {lost:,} node(s) lost.")
+    return lines
 
 
 def report_unread(skipped: "list[str]", total: int) -> str:
@@ -468,6 +642,11 @@ def parse_args(argv: "list[str] | None") -> argparse.Namespace:
         help="a newline-delimited path list to extract instead of the content set",
     )
     parser.add_argument("--out", type=Path, help="destination layer (default: .graphify_ast.json)")
+    parser.add_argument(
+        "--allow-vanished",
+        action="store_true",
+        help="accept files that produced nodes last run and none now (an intended change)",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
@@ -529,6 +708,129 @@ def resolve_input(arguments, graph_directory: Path) -> "tuple[list[Path], Path]"
     return files, source
 
 
+def declared_repositories() -> "list[str] | None":
+    """Every repository `config/repositories.txt` names, or None when the store has none.
+
+    Read with the library's own parser. An unreadable declaration refuses rather than
+    reading as "declares nothing", which would switch the reconciliation off.
+    """
+    if not config.REPOSITORIES_CONFIG.is_file():
+        return None
+    try:
+        return [
+            r.name for r in export_git_history.read_repository_config(config.REPOSITORIES_CONFIG)
+        ]
+    except (OSError, ValueError) as error:
+        raise InputRefused(f"Cannot read the declared repositories: {error}") from None
+
+
+def reconcile(declared: "list[str]", groups: "dict[str, list[Path]]") -> "list[str]":
+    """Refuse a declared repository with no clone; return those with nothing to parse.
+
+    Both are invisible to the comparison with the last run, and on a first run there
+    is no last run: a repository that is not in the content set is not in anything
+    this stage would otherwise read.
+    """
+    where = store_paths.relative(config.REPOSITORIES_CONFIG)
+    missing = [name for name in declared if not (config.REPOSITORIES_DIR / name).is_dir()]
+    if missing:
+        named = "\n".join(f"  {name}" for name in missing)
+        raise InputRefused(
+            f"Refusing to extract: {len(missing)} repositor{'y' if len(missing) == 1 else 'ies'} "
+            f"declared in {where} {'has' if len(missing) == 1 else 'have'} no clone under "
+            f"{store_paths.relative(config.REPOSITORIES_DIR)}/:\n{named}\n"
+            "Run `knowledgestore sync`, or remove them from the declaration. A layer "
+            "without them would read as the whole estate."
+        )
+    return [name for name in declared if not groups.get(name)]
+
+
+def unapplied_exclusions(names: "list[str]") -> "list[tuple[str, str]]":
+    """(repository, pattern) for each declared exclusion a clone's ignore file lacks.
+
+    Empty when the store declares none, which is what keeps a store that never
+    opted in unchanged.
+    """
+    try:
+        declared = apply_ignores.read_declarations(config.GRAPHIFY_IGNORE_PATH)
+    except (OSError, ValueError) as error:
+        raise InputRefused(f"Cannot read the declared exclusions: {error}") from None
+    if not declared:
+        return []
+    found = []
+    for name in names:
+        clone = config.REPOSITORIES_DIR / name
+        if clone.is_dir():
+            patterns = apply_ignores.patterns_for(declared, name)
+            found += [(name, pattern) for pattern in apply_ignores.absent(clone, patterns)]
+    return found
+
+
+def check_declared(groups: "dict[str, list[Path]]") -> "list[str]":
+    """Every refusal the store's declarations raise, and the warnings they leave."""
+    declared = declared_repositories()
+    empty = reconcile(declared, groups) if declared is not None else []
+    names: "list[str]" = sorted({*(declared or []), *(name for name in groups if name)})
+    unapplied = unapplied_exclusions(names)
+    if unapplied:
+        listed = "\n".join(f"  {name}: {pattern}" for name, pattern in unapplied)
+        raise InputRefused(
+            f"Refusing to extract: {len(unapplied)} exclusion(s) declared in "
+            f"{store_paths.relative(config.GRAPHIFY_IGNORE_PATH)} are absent from the "
+            f"clone's .graphifyignore:\n{listed}\n"
+            "`sync` deletes those files. Run `knowledgestore apply-ignores`, then the "
+            "detect scan, then this stage."
+        )
+    return [
+        f"warning: {name} is declared in {store_paths.relative(config.REPOSITORIES_CONFIG)} "
+        "and has no parseable code in the content set, so it is absent from the layer."
+        for name in empty
+    ]
+
+
+def vanished_report(
+    destination: Path,
+    layer: dict,
+    groups: "dict[str, list[Path]]",
+    failures: list,
+    declined: "set[str]",
+    arguments,
+) -> bool:
+    """Compare and rewrite the per-file record; True when a lost file refuses the run."""
+    path = file_counts_path(destination)
+    stored = io.read_json(path, default=None)
+    previous = (
+        {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
+        if isinstance(stored, dict)
+        else None
+    )
+    now = nodes_per_file(layer, groups, failures)
+    vanished = vanished_files(previous or {}, now)
+    allowed = arguments.allow_vanished
+    write_counts(
+        path, file_record(previous or {}, now, groups, failures, [] if allowed else vanished)
+    )
+    if previous is None:
+        print(
+            f"\nno per-file record in {path.name}; wrote one, so a file going to zero "
+            "is caught from the next run."
+        )
+        return False
+    if not vanished:
+        print("\n0 file(s) vanished, 0 node(s) lost.")
+        return False
+    heading = (
+        "accepted by --allow-vanished" if allowed else "refusing: pass --allow-vanished if intended"
+    )
+    print(
+        f"\n{len(vanished)} file(s) produced nodes last run and none now ({heading}):",
+        file=sys.stderr,
+    )
+    for line in report_vanished(vanished, declined):
+        print(line, file=sys.stderr)
+    return not allowed
+
+
 def main(argv: "list[str] | None" = None) -> int:
     arguments = parse_args(argv)
     graph_directory = config.GRAPH_PATH.parent
@@ -536,9 +838,13 @@ def main(argv: "list[str] | None" = None) -> int:
 
     try:
         files, _source = resolve_input(arguments, graph_directory)
+        groups = by_repository(files, config.REPOSITORIES_DIR)
+        warnings = check_declared(groups)
     except InputRefused as refusal:
         print(str(refusal), file=sys.stderr)
         return 1
+    for line in warnings:
+        print(line, file=sys.stderr)
 
     try:
         from graphify.extract import extract
@@ -550,7 +856,6 @@ def main(argv: "list[str] | None" = None) -> int:
         )
         return 1
 
-    groups = by_repository(files, config.REPOSITORIES_DIR)
     # The extractor is imported in this process, so this interpreter is the one that
     # must hold the grammars - passed explicitly, not left to the stage's fallback.
     # Imported here because `check_grammars` reuses this module's input handling.
@@ -564,14 +869,18 @@ def main(argv: "list[str] | None" = None) -> int:
             print(f"Refusing to extract: {line}", file=sys.stderr)
         return 1
     # Read before anything is written: the sidecar is the only record of the last
-    # run, and writing the layer first would leave a half-updated pair if the
-    # write failed between them.
+    # run, and it is rewritten as each repository finishes.
     sidecar = counts_path(destination)
     before = previous_counts(sidecar)
 
+    def record(counts: "dict[str, int]", failures: list, pending: list) -> None:
+        # Mid-run, the sidecar and the layer are deliberately out of step: an
+        # interrupted run keeps its counts and leaves the previous layer standing.
+        write_counts(sidecar, carry_forward(before, counts, failures, pending))
+
     print(f"Extracting {len(files):,} file(s) across {len(groups):,} repository group(s):")
-    layer, failures, counts, skipped = extract_estate(
-        groups, extract, config.ROOT, arguments.timeout
+    layer, failures, counts, skipped, declined = extract_estate(
+        groups, extract, config.ROOT, arguments.timeout, before, record
     )
 
     # Written even when repositories failed: a layer covering the rest is worth
@@ -582,7 +891,7 @@ def main(argv: "list[str] | None" = None) -> int:
     # not write a 0 that the next run would read as a legitimate decrease to nothing -
     # and a failed repository keeps its previous one rather than vanishing from the
     # baseline, which would erase the record that shows what the failure cost.
-    io.write_json(sidecar, carry_forward(before, counts, failures))
+    write_counts(sidecar, carry_forward(before, counts, failures))
     print(
         f"\nnodes {len(layer['nodes']):,}  edges {len(layer['edges']):,}  "
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"
@@ -593,6 +902,7 @@ def main(argv: "list[str] | None" = None) -> int:
         print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
     else:
         print(f"\nno previous run recorded in {sidecar.name}; movement starts next run.")
+    refused = vanished_report(destination, layer, groups, failures, declined, arguments)
     if failures:
         print(
             f"\n{len(failures)} repository group(s) failed to extract and are absent from the "
@@ -602,7 +912,7 @@ def main(argv: "list[str] | None" = None) -> int:
         for label, error in failures:
             print(f"  {label}: {error}", file=sys.stderr)
         return 1
-    return 0
+    return 1 if refused else 0
 
 
 if __name__ == "__main__":

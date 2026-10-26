@@ -96,8 +96,9 @@ that sequence run in order, and each stage writes files the next one reads:
 ```bash
 knowledgestore discover        # list the estate's repositories
 knowledgestore sync            # clone or update them
-knowledgestore extract-ast     # the code layer, one repository at a time
+knowledgestore apply-ignores   # put back the exclusions sync deletes
 knowledgestore check-grammars  # refuse when graphify lacks the HCL or SQL grammar
+knowledgestore extract-ast     # the code layer, one repository at a time
 knowledgestore export-history  # per-repository commit history
 knowledgestore intent          # join files to the tickets that changed them
 knowledgestore relationships   # which repositories reference which

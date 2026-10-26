@@ -499,6 +499,9 @@ class CliTest(SettingsIsolated):
             [
                 "discover",
                 "sync",
+                # writes back the exclusions sync's clean deletes, before anything
+                # reads a clone through graphify's ignore rules
+                "apply-ignores",
                 # reads the provenance sync just wrote against the one before it
                 "drift",
                 "convert",

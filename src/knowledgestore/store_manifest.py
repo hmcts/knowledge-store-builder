@@ -135,6 +135,7 @@ NOT_A_LAYER: dict[str, str] = {
     "CONTENT_SET_ALLOWED_PATH": "a hand-maintained input: files ruled safe despite their format",
     "EXTERNAL_CONFIG": "a hand-maintained input: fetch-only repositories",
     "FILTERS_PATH": "a hand-maintained input: repository filters",
+    "GRAPHIFY_IGNORE_PATH": "a hand-maintained input: exclusions each clone's ignore file carries",
     "QUESTIONS_PATH": "a hand-maintained input: the questions a store is asked",
     "REPOSITORIES_CONFIG": "a hand-maintained input: the repositories to build from",
     "SETTINGS_FILE_PATH": "a hand-maintained input: the store's committed KSB_* settings",

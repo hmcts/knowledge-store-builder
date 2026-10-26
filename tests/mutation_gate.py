@@ -1672,6 +1672,8 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_a_failed_repository_is_not_recorded_as_zero",
             "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_first_run_keeps_the_counts_of_the_repositories_it_finished",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
         ),
     ),
     Mutation(
@@ -1692,6 +1694,176 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+        ),
+    ),
+    Mutation(
+        "a declared repository with no clone extracts",
+        "extract_ast.py",
+        "    if missing:\n        named =",
+        "    if False:\n        named =",
+        "the stage compared only with its own last run, so on a first run a repository "
+        "sync never cloned was absent from the content set and from everything the "
+        "stage printed - a layer missing a whole repository read as the whole estate. "
+        "A store's own driver failed on it; this did not (#492)",
+        (
+            "test_extract_ast_declared.DeclaredRepositoriesTest.test_a_declared_repository_with_no_clone_fails_on_a_first_run_and_writes_nothing",
+        ),
+    ),
+    Mutation(
+        "a declared repository with no code is unnamed",
+        "extract_ast.py",
+        "    return [name for name in declared if not groups.get(name)]",
+        "    return []",
+        "a clone whose content set holds no parseable file drops out of the layer, and "
+        "with no last run to compare against nothing named it (#492)",
+        (
+            "test_extract_ast_declared.DeclaredRepositoriesTest.test_a_declared_repository_with_nothing_parseable_is_warned_about_and_does_not_fail",
+        ),
+    ),
+    Mutation(
+        "the counts sidecar is written only at the end",
+        "extract_ast.py",
+        "        write_counts(sidecar, carry_forward(before, counts, failures, pending))",
+        "        pass",
+        "the sidecar was written after the loop, so a Ctrl-C lost every count the run "
+        "had measured - including the one showing a repository went backwards (#492)",
+        (
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_first_run_keeps_the_counts_of_the_repositories_it_finished",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
+        ),
+    ),
+    Mutation(
+        "a checkpoint drops the repositories not yet reached",
+        "extract_ast.py",
+        "    kept = {label for label, _ in failures} | set(pending)",
+        "    kept = {label for label, _ in failures}",
+        "a mid-run checkpoint holding only what the run measured erases the baseline of "
+        "every repository after an interrupt, so the next run reports them as new and "
+        "cannot show a decrease against the count it no longer has",
+        (
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
+        ),
+    ),
+    Mutation(
+        "a missing declared exclusion is not refused",
+        "extract_ast.py",
+        "    if unapplied:",
+        "    if False:",
+        "sync's clean deletes every clone's .graphifyignore, and nothing failed when a "
+        "store forgot to re-apply its exclusions: the vendored or symlinked tree was "
+        "parsed as source and the run reported healthy counts (#492)",
+        (
+            "test_extract_ast_declared.DeclaredExclusionsTest.test_a_declared_exclusion_absent_from_a_clone_refuses_and_names_it",
+        ),
+    ),
+    Mutation(
+        "apply-ignores replaces a repository's own ignore file",
+        "apply_ignores.py",
+        '    text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""',
+        '    text = ""',
+        "a repository may commit its own .graphifyignore, which sync restores; writing "
+        "the declared lines over it silently drops the repository's own exclusions",
+        ("test_apply_ignores.ApplyIgnoresTest.test_a_repositorys_own_ignore_lines_are_kept",),
+    ),
+    Mutation(
+        "apply-ignores appends on every run",
+        "apply_ignores.py",
+        "    present = set(_present(clone))",
+        "    present = set()",
+        "the stage runs after every sync, so one that re-appends lines already present "
+        "grows each ignore file without bound and is not safe to re-run",
+        (
+            "test_apply_ignores.ApplyIgnoresTest.test_after_syncs_clean_it_writes_every_declared_exclusion_and_is_idempotent",
+            "test_extract_ast_declared.DeclaredExclusionsTest.test_once_applied_the_same_store_extracts",
+        ),
+    ),
+    Mutation(
+        "a file that went to zero passes",
+        "extract_ast.py",
+        "        if count == 0 and before.get(path, 0) > 0\n",
+        "        if False\n",
+        "graphify extracted nothing from JSON Schema files using definitions or $defs, "
+        "with failed_sources empty, and the repository-level report saw only a decrease "
+        "- which it reports and never refuses. Nothing named the files (#492)",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+        ),
+    ),
+    Mutation(
+        "a vanished file is reported but never refused",
+        "extract_ast.py",
+        "    return not allowed\n",
+        "    return False\n",
+        "a loud report on a run that exits 0 is read by nobody in a chain; the files "
+        "the extractor stopped reading reach the committed layer as absent (#492)",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+        ),
+    ),
+    Mutation(
+        "a file graphify declined is reported as vanished",
+        "extract_ast.py",
+        'kind = "declined by graphify" if path in declined else "VANISHED"',
+        'kind = "VANISHED"',
+        "graphify 0.9.94 names files an extractor declines by design in skipped_sources; "
+        "calling them vanished sends an operator hunting a parser fault that is a "
+        "deliberate decision upstream",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+        ),
+    ),
+    Mutation(
+        "a file removed from the content set counts as vanished",
+        "extract_ast.py",
+        "        for path, count in now.items()\n        if count == 0 and before.get(path, 0) > 0\n",
+        "        for path, count in before.items()\n        if now.get(path, 0) == 0 and count > 0\n",
+        "comparing the record rather than this run's content set reads a deleted file as "
+        "lost data, so every legitimate removal fails the build and trains the operator "
+        "to pass --allow-vanished by reflex",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
+        ),
+    ),
+    Mutation(
+        "any per-file decrease fails the stage",
+        "extract_ast.py",
+        "        if count == 0 and before.get(path, 0) > 0\n",
+        "        if count < before.get(path, 0)\n",
+        "a shrinking file is the repository-level report's case, reported and never "
+        "refused because deleted code is legitimate; refusing on it makes the stage "
+        "unusable in a chain",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_shrank_but_kept_nodes_does_not_fail",
+        ),
+    ),
+    Mutation(
+        "the per-file record is never written",
+        "extract_ast.py",
+        "    write_counts(\n        path, file_record(",
+        "    (\n        path, file_record(",
+        "with no record the comparison has nothing to compare against, so the guard "
+        "reports a first run forever and never fails",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_shrank_but_kept_nodes_does_not_fail",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
+        ),
+    ),
+    Mutation(
+        "a refused vanish is taken as the new baseline",
+        "extract_ast.py",
+        "[] if allowed else vanished",
+        "[]",
+        "writing the zero after refusing makes the next run pass with nobody having "
+        "decided anything: re-running is then the way past the guard",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
         ),
     ),
     Mutation(
@@ -2077,6 +2249,7 @@ MUTATIONS = (
         (
             "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
         ),
     ),
     Mutation(
@@ -3595,6 +3768,10 @@ MUTATIONS = (
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",
         ),
