@@ -4714,6 +4714,8 @@ MUTATIONS = (
         "key-name rule it reaches the worker whole",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_a_planted_secret_is_reported_by_location_and_its_value_appears_nowhere",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_setting_name_beside_a_value_shaped_finding_is_absent",
+            "test_build_minimum_standard.TheEvidenceStage.test_setting_names_alone_are_not_determinable_and_keep_their_findings",
             "test_build_minimum_standard.TheEvidenceStage.test_two_runs_write_identical_bytes",
             "test_headless_workers.ExtractTests.test_a_path_with_a_space_is_masked_granted_and_mapped",
             "test_headless_workers.ExtractTests.test_a_repair_round_still_reads_the_masked_copy",
