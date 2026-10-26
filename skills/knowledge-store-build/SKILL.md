@@ -123,7 +123,10 @@ repository with no parseable code as a warning. It writes its per-repository
 counts as each repository finishes, so an interrupted run keeps them. It exits 1
 on a content-set file that produced nodes last run and none now, naming it and
 its previous count (`declined by graphify` when graphify listed it in
-`skipped_sources`); pass `--allow-vanished` only when that loss is intended.
+`skipped_sources`, `unread` when in `failed_sources`). Name only the losses that are
+intended, one path each: `--allow-vanished PATH [PATH...]`; any file not named
+still fails. A declared repository whose first clone failed blocks it until `sync`
+clones it or it is removed from `config/repositories.txt`.
 
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
