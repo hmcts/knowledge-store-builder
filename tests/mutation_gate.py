@@ -1917,7 +1917,6 @@ MUTATIONS = (
         "    if True:",
         "a source_file spelled other than the content set's matches nothing, so every file counts 0 and the first run records a baseline of zeros from which the guard can never fire - correct code answering a different question (CLAUDE.md 2.7)",
         (
-            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_source_file_join_that_misses_refuses_and_writes_no_record",
         ),
     ),
@@ -3857,7 +3856,6 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_gone_and_new_are_reported_as_different_things",
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
-            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",

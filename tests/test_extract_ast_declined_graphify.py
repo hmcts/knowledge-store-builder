@@ -176,6 +176,11 @@ _TEMP = Path(tempfile.gettempdir())
     "needs graphify, and a system temp directory reached through a symlink (as on macOS)",
 )
 class LossySpellingTest(_DeclaredStoreCase, unittest.TestCase):
+    """Runs only where the system temp directory is a symlink, so no mutation entry
+    names it: the gate runs on Linux, where it skips and so cannot fail. The same
+    refusal is observed on every platform by `test_extract_ast_vanished`, through a
+    stub spelling `source_file` the way graphify was seen to here."""
+
     def test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros(self):
         """Catches the guard writing zeros it would then trust: the reviewer's failure.
 
