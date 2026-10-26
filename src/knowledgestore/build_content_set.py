@@ -388,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     detect = io.read_json_dict(config.DETECT_PATH)
-    content = content_set.content_paths(detect)
+    content, duplicates = content_set.content_paths_counted(detect)
+    if duplicates:
+        print(f"{duplicates:,} duplicate path(s) in the input ignored", flush=True)
     if not content:
         # Refused rather than written empty. An empty path list makes every search
         # over it return no matches, and no matches reads as an answer about the

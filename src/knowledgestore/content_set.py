@@ -241,9 +241,18 @@ class NoiseRoot:
 def content_paths(detect: dict) -> list[str]:
     """Every file detect classified, store-relative, sorted and deduplicated.
 
+    See `content_paths_counted`; this is its list.
+    """
+    return content_paths_counted(detect)[0]
+
+
+def content_paths_counted(detect: dict) -> tuple[list[str], int]:
+    """`content_paths`, and how many entries were repeats of another.
+
     Sorted and deduplicated because the artefact this writes is committed: two
     runs on the same detect result must produce the same bytes, and detect can
-    name one path under two categories.
+    name one path under two categories. Deduplicated on the store-relative form,
+    so an absolute and a relative spelling of one file are one file.
 
     **Reads whatever categories detect reported**, rather than a list of the ones
     this library knows about. A closed list would drop a category a later graphify
@@ -252,12 +261,16 @@ def content_paths(detect: dict) -> list[str]:
     """
     files = detect.get("files") or {}
     if not isinstance(files, dict):
-        return []
+        return [], 0
     found: set[str] = set()
+    named = 0
     for paths in files.values():
         if isinstance(paths, list):
-            found.update(store_paths.relative(p) for p in paths if isinstance(p, str) and p)
-    return sorted(found)
+            for p in paths:
+                if isinstance(p, str) and p:
+                    named += 1
+                    found.add(os.path.normpath(store_paths.relative(p)))
+    return sorted(found), named - len(found)
 
 
 def read_allowed(path: Path) -> set[str]:

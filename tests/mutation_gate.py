@@ -11980,6 +11980,61 @@ MUTATIONS = (
             "test_json_schema.WalkTest.test_extends_as_a_string_or_a_list_of_strings_is_not_a_reference",
         ),
     ),
+    Mutation(
+        "content sets: a repeated file is read under both spellings",
+        "extract_ast.py",
+        "        key = os.path.normpath(store_paths.relative(path))\n        if key not in position:",
+        "        key = str(path)\n        if key not in position:",
+        "#509: a list naming one file as an absolute path and as a store-relative one counted it twice, parsed it twice and doubled its nodes",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_both_spellings_reach_the_parser_once_and_the_repeat_is_reported",
+            "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
+            "test_duplicate_input_paths.JsonSchemaTest.test_both_spellings_of_a_schema_count_once",
+        ),
+    ),
+    Mutation(
+        "content sets: dropped repeats are not reported",
+        "extract_ast.py",
+        "    if dropped:\n        print(duplicate_notice(dropped))\n",
+        "    if dropped:\n        pass\n",
+        "#509: a list generator emitting both spellings of a file went unnoticed because nothing said a repeat had been dropped",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_both_spellings_reach_the_parser_once_and_the_repeat_is_reported",
+            "test_duplicate_input_paths.JsonSchemaTest.test_both_spellings_of_a_schema_count_once",
+        ),
+    ),
+    Mutation(
+        "content sets: a relative spelling wins over the absolute one",
+        "extract_ast.py",
+        "        elif path.is_absolute() and not kept[position[key]].is_absolute():",
+        "        elif False:",
+        "#509: keeping a relative spelling reads it against the working directory, so the file is grouped as outside every repository",
+        (
+            "test_duplicate_input_paths.ExtractAstTest.test_the_absolute_spelling_is_kept_when_the_relative_one_comes_first",
+        ),
+    ),
+    Mutation(
+        "content-set: a repeat is not counted",
+        "content_set.py",
+        "    return sorted(found), named - len(found)\n",
+        "    return sorted(found), 0\n",
+        "#509: the content-set stage deduplicated silently, so a doubled list read as the corpus's own size",
+        (
+            "test_duplicate_input_paths.ContentSetTest.test_both_spellings_are_one_path_and_the_repeat_is_counted",
+            "test_duplicate_input_paths.ContentSetTest.test_the_stage_reports_the_repeat",
+        ),
+    ),
+    Mutation(
+        "content-set: spellings are not normalised before deduplicating",
+        "content_set.py",
+        "                    found.add(os.path.normpath(store_paths.relative(p)))\n",
+        "                    found.add(p)\n",
+        "#509: an absolute and a store-relative spelling of one file were two entries of the content set",
+        (
+            "test_duplicate_input_paths.ContentSetTest.test_both_spellings_are_one_path_and_the_repeat_is_counted",
+            "test_duplicate_input_paths.ContentSetTest.test_the_stage_reports_the_repeat",
+        ),
+    ),
 )
 
 
