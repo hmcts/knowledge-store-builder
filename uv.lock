@@ -363,7 +363,7 @@ semantic = [
 [package.metadata]
 requires-dist = [
     { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.9" },
-    { name = "graphifyy", extras = ["sql", "terraform"], marker = "extra == 'ast'", specifier = ">=0.9.94" },
+    { name = "graphifyy", extras = ["sql", "terraform"], marker = "extra == 'ast'", specifier = ">=0.9.93" },
     { name = "markitdown", marker = "extra == 'documents'", specifier = ">=0.1.8" },
     { name = "numpy", marker = "extra == 'semantic'", specifier = ">=2.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.414" },
