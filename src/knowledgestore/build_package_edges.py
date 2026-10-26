@@ -196,7 +196,7 @@ def _add_module_layer(
     reps = _representatives(graph)
     anchors = {
         repo: anchor
-        for repo in {node_repo for node_repo, _ in reps}
+        for repo in {key[0] for key in reps}
         if (anchor := _code_anchor(reps, repo)) is not None
     }
     estate = {clone.name for clone in clones}

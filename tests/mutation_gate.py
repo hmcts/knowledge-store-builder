@@ -2293,8 +2293,9 @@ MUTATIONS = (
         "        wanted = list({_identity(path): path for path in matching}.values())",
         "        wanted = matching",
         'a consuming store\'s detect file lists every code path twice, so the default mode reported roughly double the files that --clones did for the same store; "present for N file(s)" is a claim about files, and two modes disagreeing with no explanation reads as one of them being wrong',
+        # The content set's reader now drops a path listed twice before this count
+        # sees it (#509), so only the symlinked spelling still reaches this line.
         (
-            "test_check_grammars.CheckGrammarsTest.test_a_content_set_listing_a_path_twice_counts_the_file_once",
             "test_check_grammars.CheckGrammarsTest.test_a_symlinked_spelling_of_the_same_file_counts_once",
         ),
     ),
