@@ -454,6 +454,7 @@ mid-pipeline `graphify-out/graph.json`:
 # Stages that rewrite graphify-out/graph.json.gz
 knowledgestore gherkin
 knowledgestore packages
+knowledgestore json-schema
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore source-urls
 ```

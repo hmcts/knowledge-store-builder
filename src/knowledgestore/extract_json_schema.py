@@ -1,22 +1,33 @@
 """The JSON Schema layer of the merged graph: nodes, edges, and what they replace.
 
-Pure graph work: no filesystem, no configuration. The stage's `main` reads the
-files, builds `Owned` values, and calls `add_layer`, which rebuilds the layer
-from scratch each time (idempotence by reconstruction, as `packages` does).
+The graph functions are pure: no filesystem, no configuration. The stage's `main`
+reads the files, builds `Owned` values, and calls `add_layer`, which rebuilds the
+layer from scratch each time (idempotence by reconstruction, as `packages` does).
 """
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from knowledgestore import kinds
-from knowledgestore.json_schema import Entity
+from knowledgestore import config, extract_ast, graph_files, io, kinds, telemetry
+from knowledgestore.json_schema import (
+    Entity,
+    SchemaReadError,
+    load_with_lines,
+    recognise,
+    walk,
+)
 from knowledgestore.json_schema_refs import Index, Owned, Resolution, resolve
 
 FORMAT = "json-schema"
 _ORIGIN = FORMAT
 _STORE_PREFIX = "repositories/"
+_KIND_ORDER = (kinds.SCHEMA, kinds.DEFINITION, kinds.FIELD)
 _RESOLVED_HOW = ("local", "anchor", "by-id", "relative-id", "relative-path")
 
 
@@ -243,7 +254,7 @@ def add_layer(graph: dict, owned: list[Owned], forks: frozenset[str]) -> LayerRe
     report.cross_repository = sum(
         1 for e in edges if e["source"].split("::", 1)[0] != e["target"].split("::", 1)[0]
     )
-    report.nodes_by_kind = dict(sorted(kind_counts.items()))
+    report.nodes_by_kind = {k: kind_counts[k] for k in _KIND_ORDER if kind_counts[k]}
     report.edges_by_relation = dict(sorted(Counter(e["relation"] for e in edges).items()))
     report.resolved_by_how = {k: how_counts[k] for k in _RESOLVED_HOW if how_counts[k]}
     unresolved.sort(
@@ -251,3 +262,296 @@ def add_layer(graph: dict, owned: list[Owned], forks: frozenset[str]) -> LayerRe
     )
     report.unresolved = unresolved
     return report
+
+
+# --- the stage ------------------------------------------------------------
+
+DEFAULT_MAX_BYTES = 8 * 1024 * 1024
+REPORT_NOTE_MARKER = "<!-- knowledgestore: json-schema layer -->"
+UNRESOLVED_SHOWN = 20
+_MIB = 1024 * 1024
+_BASES = ("meta-schema", "schema-keywords", "declared-id")
+_SKIP_REASONS = ("malformed", "too-large", "outside-repositories")
+_REASONS = (*_SKIP_REASONS, "truncated", "not-a-schema")
+_UNRESOLVED_REASONS = (
+    "meta-schema",
+    "external",
+    "ambiguous",
+    "no-such-pointer",
+    "unrecognised-target",
+    "malformed",
+)
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="knowledgestore json-schema",
+        description="Read JSON Schema documents into schema, definition and field nodes "
+        "with resolved $ref edges, replacing graphify's keyword nodes for them.",
+    )
+    parser.add_argument(
+        "--detect",
+        type=Path,
+        help="the extractor's content set (default: graphify-out/.graphify_detect.json)",
+    )
+    parser.add_argument(
+        "--files",
+        type=Path,
+        help="a newline-delimited path list to read instead of the content set",
+    )
+    parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=DEFAULT_MAX_BYTES,
+        help="skip, by name, any file larger than this (default: 8 MiB)",
+    )
+    parser.add_argument(
+        "--unresolved",
+        type=Path,
+        help="write every unresolved $ref, sorted, to this JSON file",
+    )
+    return parser.parse_args(argv)
+
+
+def _repo_relative(path: Path, repo: str, corpus: Path) -> str:
+    """The POSIX path of `path` inside the clone `repo`."""
+    try:
+        base = corpus.resolve()
+    except OSError:  # pragma: no cover - an unresolvable corpus is caught upstream
+        base = corpus
+    return "/".join(path.resolve().relative_to(base).parts[1:]) if repo else path.as_posix()
+
+
+def read_owned(
+    groups: dict[str, list[Path]], corpus: Path, max_bytes: int
+) -> tuple[list[Owned], dict]:
+    """Read every file the layer might own; say what was skipped, and why.
+
+    The returned dict holds, per reason, `{"count": n, "names": [...]}` with the
+    names sorted, plus `"basis"`, the count of owned files by recognition basis.
+    Only `malformed`, `too-large` and `outside-repositories` are skips. A
+    `truncated` file stays in the layer (its walk stopped at the depth limit) and
+    a `not-a-schema` file is counted only: graphify keeps it.
+    """
+    names: dict[str, list[str]] = {reason: [] for reason in _REASONS}
+    bases: Counter[str] = Counter()
+    not_a_schema = 0
+    owned: list[Owned] = []
+    for repo in sorted(groups):
+        entries = sorted(
+            ((_repo_relative(p, repo, corpus), p) for p in groups[repo]),
+            key=lambda entry: (entry[0], str(entry[1])),
+        )
+        for rel, path in entries:
+            name = f"{repo}/{rel}" if repo else rel
+            if not repo:
+                names["outside-repositories"].append(name)
+                continue
+            try:
+                # Size first: an oversized file is never read.
+                if path.stat().st_size > max_bytes:
+                    names["too-large"].append(name)
+                    continue
+                text = path.read_bytes().decode("utf-8")
+                document, lines = load_with_lines(text)
+            except (OSError, UnicodeDecodeError, SchemaReadError):
+                names["malformed"].append(name)
+                continue
+            basis = recognise(document)
+            if basis is None:
+                not_a_schema += 1
+                continue
+            walked = walk(document, lines, rel)
+            if walked.truncated:
+                names["truncated"].append(name)
+            bases[basis] += 1
+            owned.append(Owned(repo, rel, basis, walked))
+    info: dict = {
+        reason: {"count": len(found), "names": sorted(found)} for reason, found in names.items()
+    }
+    info["not-a-schema"] = {"count": not_a_schema, "names": []}
+    info["basis"] = {basis: bases[basis] for basis in _BASES if bases[basis]}
+    return owned, info
+
+
+def _size_wording(max_bytes: int) -> str:
+    if max_bytes >= _MIB and max_bytes % _MIB == 0:
+        return f"over {max_bytes // _MIB:,} MiB"
+    return f"over {max_bytes:,} bytes"
+
+
+def _counts(pairs: dict[str, int]) -> str:
+    return ", ".join(f"{key} {value:,}" for key, value in pairs.items())
+
+
+def _unresolved_line(item: dict) -> str:
+    line = (
+        f"{item['repo']}:{item['source_file']} #{item['pointer']} {item['ref']} -> {item['reason']}"
+    )
+    if item["candidates"]:
+        line += f" [{', '.join(item['candidates'])}]"
+    return line
+
+
+def render_report(
+    total: int,
+    repositories: int,
+    info: dict,
+    owned: list[Owned],
+    layer_report: LayerReport,
+    max_bytes: int,
+) -> list[str]:
+    removed, _edges_removed, semantic_kept = layer_report.graphify_removed
+    by_basis = info["basis"]
+    skipped = {
+        ("over" in label and _size_wording(max_bytes) or label): info[reason]["count"]
+        for reason, label in (
+            ("malformed", "malformed"),
+            ("too-large", "over"),
+            ("outside-repositories", "outside-repositories"),
+        )
+        if info[reason]["count"]
+    }
+    skipped_total = sum(info[reason]["count"] for reason in _SKIP_REASONS)
+    lines = [
+        f"json-schema: {total:,} .json files in the content set across {repositories:,} "
+        "repositories",
+        f"  recognised as JSON Schema {len(owned):>7,}   ({_counts(by_basis) or 'none'})",
+        f"  not a schema              {info['not-a-schema']['count']:>7,}   (left to graphify)",
+        f"  skipped                   {skipped_total:>7,}   "
+        f"({_counts(skipped) or 'none'}){'  - named below' if skipped_total else ''}",
+    ]
+    if info["truncated"]["count"]:
+        lines.append(
+            f"  truncated at depth        {info['truncated']['count']:>7,}   "
+            "(kept in the layer; named below)"
+        )
+    lines += [
+        f"  graphify nodes removed    {removed:>7,} from {len(owned):,} owned files "
+        f"(keyword scaffolding); {semantic_kept:,} semantic nodes kept",
+        f"  added                     {sum(layer_report.nodes_by_kind.values()):>7,} nodes "
+        f"({_counts(layer_report.nodes_by_kind) or 'none'})",
+        f"                            {sum(layer_report.edges_by_relation.values()):>7,} edges "
+        f"({_counts(layer_report.edges_by_relation) or 'none'})",
+        f"  $ref resolved             {sum(layer_report.resolved_by_how.values()):>7,}   "
+        f"({_counts(layer_report.resolved_by_how) or 'none'})",
+        f"{'cross-repository':>45} {layer_report.cross_repository:,}",
+    ]
+    reasons = Counter(item["reason"] for item in layer_report.unresolved)
+    ordered = {
+        reason: reasons[reason]
+        for reason in _UNRESOLVED_REASONS
+        if reason == "meta-schema" or reasons[reason]
+    }
+    lines.append(
+        f"  $ref unresolved           {len(layer_report.unresolved):>7,}   ({_counts(ordered)})"
+    )
+    for reason in _REASONS[:3] + ("truncated",):
+        if info[reason]["names"]:
+            lines.append("")
+            heading = _size_wording(max_bytes) if reason == "too-large" else reason
+            lines.append(f"{reason} ({heading}):" if reason == "too-large" else f"{reason}:")
+            lines += [f"  {name}" for name in info[reason]["names"]]
+    shown = layer_report.unresolved[:UNRESOLVED_SHOWN]
+    if shown:
+        lines += ["", f"first {len(shown):,} of {len(layer_report.unresolved):,} unresolved:"]
+        lines += [f"  {_unresolved_line(item)}" for item in shown]
+    return lines
+
+
+def note_json_schema_layer(nodes: int, edges: int, layer_report: LayerReport) -> None:
+    """Record in graphify's report that the graph changed after it was written.
+
+    Bounded by a marker and replaced on every run, as the gherkin stage's note is.
+    Nothing is written when graphify left no report.
+    """
+    if not config.GRAPH_REPORT_PATH.is_file():
+        return
+    existing = config.GRAPH_REPORT_PATH.read_text(encoding="utf-8")
+    if REPORT_NOTE_MARKER in existing:
+        existing = existing.split(REPORT_NOTE_MARKER)[0].rstrip() + "\n"
+    removed = layer_report.graphify_removed[0]
+    note = (
+        f"\n{REPORT_NOTE_MARKER}\n"
+        "## Added after this report was written\n\n"
+        "The totals above describe the graph as `graphify` left it. The `json-schema` "
+        "stage ran afterwards, replaced graphify's keyword nodes for JSON Schema "
+        "documents with schema, definition and field nodes, and resolved their `$ref`s, "
+        "so the committed graph no longer matches this report:\n\n"
+        f"- graph now: **{nodes:,} nodes, {edges:,} edges**\n"
+        f"- removed here: {removed:,} graphify keyword nodes\n"
+        f"- added here: {sum(layer_report.nodes_by_kind.values()):,} nodes, "
+        f"{sum(layer_report.edges_by_relation.values()):,} edges\n\n"
+        "Later stages can move these figures again. Measure the graph itself when "
+        "the number matters; read this report for the commit it was built from.\n"
+    )
+    # Sonar S2083: a module constant from configuration, offline build tooling on a local clone.
+    config.GRAPH_REPORT_PATH.write_text(existing + note, encoding="utf-8")  # NOSONAR(S2083)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = parse_args(argv)
+    if not config.GRAPH_PATH.exists():
+        print(f"Graph not found: {config.GRAPH_PATH} (gunzip -k graph.json.gz first)")
+        return 1
+    refusal = graph_files.stale_refusal(config.GRAPH_PATH)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+    try:
+        files, _source = extract_ast.resolve_input(arguments, config.GRAPH_PATH.parent)
+    except extract_ast.InputRefused as refusal_message:
+        print(str(refusal_message), file=sys.stderr)
+        return 1
+
+    json_files = [path for path in files if path.suffix.lower() == ".json"]
+    groups = extract_ast.by_repository(json_files, config.REPOSITORIES_DIR)
+    owned, info = read_owned(groups, config.REPOSITORIES_DIR, arguments.max_bytes)
+
+    graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    # #478 will supply the fork set; until it merges, no repository is treated as a fork.
+    layer_report = add_layer(graph, owned, frozenset())
+
+    serialised = json.dumps(graph, ensure_ascii=False)
+    config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
+    with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:
+        out.write(serialised)
+
+    if arguments.unresolved:
+        io.checked_write_target(arguments.unresolved)
+        arguments.unresolved.parent.mkdir(parents=True, exist_ok=True)
+        arguments.unresolved.write_text(  # NOSONAR(S2083) - validated just above
+            json.dumps(layer_report.unresolved, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    repositories = len([name for name in groups if name])
+    print(
+        "\n".join(
+            render_report(
+                len(json_files), repositories, info, owned, layer_report, arguments.max_bytes
+            )
+        )
+    )
+    if arguments.unresolved:
+        print(f"-> {arguments.unresolved}")
+    note_json_schema_layer(len(graph["nodes"]), len(graph["links"]), layer_report)
+
+    skipped = sum(info[reason]["count"] for reason in _SKIP_REASONS)
+    telemetry.record(
+        {
+            "json_schema.files_recognised": len(owned),
+            "json_schema.files_skipped": skipped,
+            "json_schema.nodes": sum(layer_report.nodes_by_kind.values()),
+            "json_schema.edges": sum(layer_report.edges_by_relation.values()),
+            "json_schema.refs_resolved": sum(layer_report.resolved_by_how.values()),
+            "json_schema.refs_unresolved": len(layer_report.unresolved),
+            "json_schema.refs_cross_repository": layer_report.cross_repository,
+            "json_schema.graphify_nodes_removed": layer_report.graphify_removed[0],
+        }
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

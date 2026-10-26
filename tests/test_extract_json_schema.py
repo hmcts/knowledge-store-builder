@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import gzip
+import io
 import json
 import sys
+import tempfile
 import unittest.mock
 from pathlib import Path
 
@@ -14,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import json_schema_fixtures as fixtures  # noqa: E402
 from settings_isolation import SettingsIsolated  # noqa: E402
 
+from knowledgestore import config, telemetry  # noqa: E402
 from knowledgestore import extract_json_schema as layer  # noqa: E402
 from knowledgestore import json_schema, json_schema_refs as refs  # noqa: E402
 
@@ -435,3 +440,277 @@ class AddLayerAccountingTest(SettingsIsolated):
         expected = [{"id": "h1", "nodes": ["widgets::app_run"]}]
         self.assertEqual(graph["hyperedges"], expected)
         self.assertEqual(graph["graph"]["hyperedges"], expected)
+
+
+class Run:
+    def __init__(self, code: int, stdout: str, stderr: str):
+        self.code, self.stdout, self.stderr = code, stdout, stderr
+
+
+def run_capturing(main, argv: list[str]) -> Run:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(argv)
+    return Run(code, out.getvalue(), err.getvalue())
+
+
+class StageTest(SettingsIsolated):
+    """`main` against a real store on disk: clones, a content set, a graph."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        # Telemetry prints its movement and warnings; tests that do not read it stay quiet.
+        quiet = contextlib.ExitStack()
+        quiet.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        quiet.enter_context(contextlib.redirect_stderr(io.StringIO()))
+        self.addCleanup(quiet.close)
+        self.root = Path(self._tmp.name)
+        self.widgets = self.root / "repositories" / "widgets"
+        self.common = self.root / "repositories" / "common"
+        for clone in (self.widgets, self.common):
+            (clone / ".git").mkdir(parents=True)
+        (self.widgets / "schemas").mkdir()
+        self.widget_file = self.widgets / WIDGET_FILE
+        self.widget_file.write_text(fixtures.WIDGET_CREATED, encoding="utf-8")
+        self.person_file = self.common / "person.json"
+        self.person_file.write_text(fixtures.PERSON, encoding="utf-8")
+        (self.root / "graphify-out").mkdir()
+        config.configure(root=str(self.root))
+        config.GRAPH_PATH.write_text(json.dumps(graph_with_keyword_nodes()), encoding="utf-8")
+        self.detect: list[str] = []
+        self.add_detect_entry(self.widget_file)
+        self.add_detect_entry(self.person_file)
+
+    def add_detect_entry(self, path: Path) -> None:
+        self.detect.append(str(path))
+        config.DETECT_PATH.write_text(
+            json.dumps({"files": {"code": self.detect}}), encoding="utf-8"
+        )
+
+    def graph(self) -> dict:
+        return json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+
+    def test_main_writes_both_files_and_records_telemetry(self):
+        """Breaks if the plain graph and the committed archive diverge, or a metric
+        is recorded under another name or value (hand-counted: 8 nodes, 8 edges)."""
+        self.assertEqual(layer.main([]), 0)
+        plain = self.graph()
+        with gzip.open(config.GRAPH_PATH.with_suffix(".json.gz"), "rt", encoding="utf-8") as h:
+            self.assertEqual(json.load(h), plain)
+        self.assertEqual(
+            telemetry.read(),
+            {
+                "json_schema.files_recognised": 2,
+                "json_schema.files_skipped": 0,
+                "json_schema.nodes": 8,
+                "json_schema.edges": 8,
+                "json_schema.refs_resolved": 2,
+                "json_schema.refs_unresolved": 0,
+                "json_schema.refs_cross_repository": 1,
+                "json_schema.graphify_nodes_removed": 3,
+            },
+        )
+
+    def test_report_names_what_it_counted(self):
+        """Breaks if the printed report loses a line the operator reads: recognition
+        bases, nodes by kind, resolved by how, cross-repository."""
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        for expected in (
+            "json-schema: 2 .json files in the content set across 2 repositories",
+            "(meta-schema 2)",
+            "(schema 2, definition 1, field 5)",
+            "(contains 6, references 2)",
+            "(local 1, by-id 1)",
+            "cross-repository 1",
+            "0 semantic nodes kept",
+        ):
+            self.assertIn(expected, out.stdout)
+
+    def test_malformed_file_is_named_and_the_run_continues(self):
+        """Breaks if one broken file stops the estate, or goes unnamed."""
+        broken = self.widgets / "broken.json"
+        broken.write_text('{"$schema": ')
+        self.add_detect_entry(broken)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("widgets/broken.json", out.stdout)
+        self.assertIn("malformed 1", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_skipped"], 1)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 2)
+
+    def test_undecodable_file_is_named_and_the_run_continues(self):
+        """Breaks if a non-UTF-8 file raises UnicodeDecodeError out of the stage."""
+        latin = self.widgets / "latin.json"
+        latin.write_bytes(b'{"$schema": "\xff"}')
+        self.add_detect_entry(latin)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("widgets/latin.json", out.stdout)
+
+    def test_file_over_max_bytes_is_skipped_by_name(self):
+        """Breaks if the size cap is ignored or its wording hides the limit."""
+        out = run_capturing(layer.main, ["--max-bytes", "10"])
+        self.assertEqual(out.code, 0)
+        self.assertIn("over 10 bytes", out.stdout)
+        self.assertIn("widgets/schemas/widget-created.json", out.stdout)
+        self.assertIn("common/person.json", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 0)
+
+    def test_default_size_is_worded_in_mebibytes(self):
+        """Breaks if a whole-MiB limit is printed as a raw byte count."""
+        self.assertEqual(layer._size_wording(8 * 1024 * 1024), "over 8 MiB")
+        self.assertEqual(layer._size_wording(10), "over 10 bytes")
+
+    def test_input_from_graphify_out_is_refused(self):
+        """Breaks if the pipeline's own JSON can be read back as a schema."""
+        self.add_detect_entry(self.root / "repositories/widgets/graphify-out/graph.json")
+        before = config.GRAPH_PATH.read_bytes()
+        self.assertEqual(layer.main([]), 1)
+        self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
+
+    def test_unresolved_list_is_empty_for_a_fully_resolved_estate(self):
+        """Breaks if the flag writes something other than a JSON list for a clean estate."""
+        out_path = self.root / "unresolved.json"
+        layer.main(["--unresolved", str(out_path)])
+        self.assertEqual(json.loads(out_path.read_text()), [])
+
+    def test_unresolved_list_is_written_sorted(self):
+        """Breaks if the list is written in discovery order: zeta is met before alpha."""
+        externals = self.widgets / "externals.json"
+        externals.write_text(TWO_EXTERNALS, encoding="utf-8")
+        self.add_detect_entry(externals)
+        out_path = self.root / "unresolved.json"
+        layer.main(["--unresolved", str(out_path)])
+        text = out_path.read_text()
+        self.assertTrue(text.endswith("\n"))
+        self.assertEqual(
+            json.loads(text),
+            [
+                {
+                    "repo": "widgets",
+                    "source_file": "externals.json",
+                    "pointer": "/properties/alpha",
+                    "ref": "http://elsewhere.example/alpha.json",
+                    "reason": "external",
+                    "candidates": [],
+                },
+                {
+                    "repo": "widgets",
+                    "source_file": "externals.json",
+                    "pointer": "/properties/zeta",
+                    "ref": "http://elsewhere.example/zeta.json",
+                    "reason": "external",
+                    "candidates": [],
+                },
+            ],
+        )
+
+    def test_unresolved_references_are_printed_one_per_line(self):
+        """Breaks if the report names the count of unresolved references but not which."""
+        externals = self.widgets / "externals.json"
+        externals.write_text(TWO_EXTERNALS, encoding="utf-8")
+        self.add_detect_entry(externals)
+        out = run_capturing(layer.main, [])
+        lines = [line.strip() for line in out.stdout.splitlines()]
+        alpha = "widgets:externals.json #/properties/alpha http://elsewhere.example/alpha.json"
+        zeta = "widgets:externals.json #/properties/zeta http://elsewhere.example/zeta.json"
+        self.assertEqual(
+            lines.index(alpha + " -> external") + 1, lines.index(zeta + " -> external")
+        )
+        self.assertIn("meta-schema 0, external 2", out.stdout)
+
+    def test_graph_report_note_is_replaced_not_appended(self):
+        """Breaks if a re-run turns GRAPH_REPORT.md into a changelog."""
+        config.GRAPH_REPORT_PATH.write_text("# Report\n")
+        layer.main([])
+        layer.main([])
+        text = config.GRAPH_REPORT_PATH.read_text()
+        self.assertEqual(text.count(layer.REPORT_NOTE_MARKER), 1)
+        self.assertTrue(text.startswith("# Report\n"))
+
+    def test_no_graph_report_is_not_created(self):
+        """Breaks if the stage invents a GRAPH_REPORT.md graphify never wrote."""
+        layer.main([])
+        self.assertFalse(config.GRAPH_REPORT_PATH.exists())
+
+    def test_no_graph_exits_1(self):
+        """Breaks if the stage runs, or creates a graph, with nothing to add to."""
+        config.GRAPH_PATH.unlink()
+        self.assertEqual(run_capturing(layer.main, []).code, 1)
+        self.assertFalse(config.GRAPH_PATH.exists())
+
+    def test_no_content_set_exits_1(self):
+        """Breaks if a missing content set is read as an empty estate and the layer wiped."""
+        config.DETECT_PATH.unlink()
+        before = config.GRAPH_PATH.read_bytes()
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 1)
+        self.assertIn("Content set not found", out.stderr)
+        self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
+
+    def test_content_set_without_json_removes_the_layer_and_exits_0(self):
+        """Breaks if an estate with no schemas leaves the previous run's layer in the graph."""
+        layer.main([])
+        self.assertTrue(any(n.get("_origin") == "json-schema" for n in self.graph()["nodes"]))
+        config.DETECT_PATH.write_text(
+            json.dumps({"files": {"code": [str(self.widgets / "app.py")]}}), encoding="utf-8"
+        )
+        self.assertEqual(layer.main([]), 0)
+        self.assertFalse(any(n.get("_origin") == "json-schema" for n in self.graph()["nodes"]))
+        with gzip.open(config.GRAPH_PATH.with_suffix(".json.gz"), "rt", encoding="utf-8") as h:
+            self.assertEqual(json.load(h), self.graph())
+
+    def test_file_outside_repositories_is_named_and_skipped(self):
+        """Breaks if a file with no repository to namespace under is read or dropped unnamed."""
+        stray = self.root / "stray.json"
+        stray.write_text(fixtures.PERSON, encoding="utf-8")
+        self.add_detect_entry(stray)
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("outside-repositories 1", out.stdout)
+        self.assertIn(str(stray), out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 2)
+
+    def test_data_json_is_counted_but_not_named_or_skipped(self):
+        """Breaks if data JSON is skipped (hiding it from graphify) or named as a failure."""
+        data = self.widgets / "data.json"
+        data.write_text('{"colour": "red"}', encoding="utf-8")
+        self.add_detect_entry(data)
+        out = run_capturing(layer.main, [])
+        self.assertRegex(out.stdout, r"not a schema +1 +\(left to graphify\)")
+        self.assertNotIn("widgets/data.json", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_skipped"], 0)
+
+    def test_too_deep_file_is_kept_and_named_as_truncated(self):
+        """Breaks if a depth-truncated walk drops the file from the layer or hides it."""
+        depth = json_schema.MAX_DEPTH + 4
+        inner = '{"type": "string"}'
+        for _ in range(depth):
+            inner = '{"properties": {"a": ' + inner + "}}"
+        text = '{"$schema": "http://json-schema.org/draft-04/schema#", "properties": {"a": '
+        text += inner + "}}"
+        deep = self.widgets / "deep.json"
+        deep.write_text(text, encoding="utf-8")
+        self.add_detect_entry(deep)
+        out = run_capturing(layer.main, [])
+        self.assertIn("widgets/deep.json", out.stdout)
+        self.assertIn("truncated", out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 3)
+        self.assertEqual(telemetry.read()["json_schema.files_skipped"], 0)
+
+    def test_two_runs_are_byte_identical(self):
+        """Breaks if output depends on run order, hash seed, or a gzip timestamp."""
+        layer.main([])
+        first = (
+            config.GRAPH_PATH.read_bytes(),
+            config.GRAPH_PATH.with_suffix(".json.gz").read_bytes(),
+        )
+        layer.main([])
+        second = (
+            config.GRAPH_PATH.read_bytes(),
+            config.GRAPH_PATH.with_suffix(".json.gz").read_bytes(),
+        )
+        self.assertEqual(first, second)

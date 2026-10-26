@@ -789,6 +789,7 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
+knowledgestore json-schema
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore relationships   # knowledge/relationships/: which repositories reference which
 knowledgestore minimum-standard-settings  # knowledge/minimum-standard/github-settings.json: the settings the token can read
@@ -900,6 +901,7 @@ mid-pipeline `graphify-out/graph.json`:
 # Stages that rewrite graphify-out/graph.json.gz
 knowledgestore gherkin
 knowledgestore packages
+knowledgestore json-schema
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore source-urls
 ```
