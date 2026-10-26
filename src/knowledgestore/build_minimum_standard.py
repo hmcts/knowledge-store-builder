@@ -85,6 +85,7 @@ KEY_FILE_NAMES = (
 )
 
 ORG_DEFAULT = "organisation default security policy"
+NOT_PUBLIC = "not public, so GitHub applies no default from it"
 
 CLEAN_SCAN = "pattern scan found nothing; a scan cannot show absence"
 NAMES_ONLY = "only secret-looking setting names were found; no committed value was confirmed"
@@ -207,10 +208,23 @@ def _organisation_default(checked: list[dict], own: dict | None, settings: dict 
     entry = entries.get(org) if isinstance(entries, dict) else None
     if not isinstance(entry, dict):
         return minimum_standard.point("security_contact", "not_determinable", checked, NO_SNAPSHOT)
+    return _judge_default(org, entry, checked)
+
+
+def _judge_default(org: str, entry: dict, checked: list[dict]) -> dict:
+    """The contact point from the snapshot's record of one organisation's default.
+
+    A default counts only from a `.github` repository the snapshot reads as public,
+    because GitHub applies no other: one read as not public gives no default, and
+    one whose visibility is unknown leaves the point undetermined.
+    """
+    if entry.get("public") is False:
+        evidence = [*checked, {"path": f"{org}/.github", "reason": NOT_PUBLIC}]
+        return minimum_standard.point("security_contact", "absent", evidence, "no SECURITY.md")
     policy = entry.get("default_security_policy")
     if isinstance(policy, dict) and isinstance(policy.get("path"), str):
         cited = f"{org}/.github:{policy['path']}"
-        if policy.get("contact") is True:
+        if policy.get("contact") is True and entry.get("public") is True:
             evidence = [{"path": cited, "reason": ORG_DEFAULT}]
             return minimum_standard.point("security_contact", "present", evidence)
         if policy.get("contact") is False:

@@ -8906,6 +8906,8 @@ MUTATIONS = (
         '    return minimum_standard.point("security_contact", "absent", checked, "no SECURITY.md")\n',
         "a repository whose organisation supplies a default SECURITY.md with a contact would read as having no security contact, which is the false absent a real estate run found",
         (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_default_whose_repository_visibility_was_not_read_is_not_present",
+            "test_build_minimum_standard.TheEvidenceStage.test_a_github_repository_that_is_not_public_gives_no_default",
             "test_build_minimum_standard.TheEvidenceStage.test_an_organisation_default_with_a_contact_is_present_and_cited",
             "test_build_minimum_standard.TheEvidenceStage.test_an_organisation_default_without_a_contact_is_not_present",
             "test_build_minimum_standard.TheEvidenceStage.test_an_unreadable_organisation_default_is_not_determinable_with_no_access",
@@ -8927,8 +8929,8 @@ MUTATIONS = (
     Mutation(
         "minimum standard evidence: an organisation default without a contact counts",
         "build_minimum_standard.py",
-        '        if policy.get("contact") is True:\n',
-        '        if policy.get("contact") is not None:\n',
+        '        if policy.get("contact") is True and entry.get("public") is True:\n',
+        '        if policy.get("contact") is not None and entry.get("public") is True:\n',
         "a default policy with no mailbox or reporting URL would be recorded as a security contact merely by existing",
         (
             "test_build_minimum_standard.TheEvidenceStage.test_an_organisation_default_without_a_contact_is_not_present",
@@ -9041,6 +9043,56 @@ MUTATIONS = (
             "test_build_minimum_standard.TheEvidenceStage.test_a_key_file_is_found_when_the_content_set_is_empty",
             "test_build_minimum_standard.TheEvidenceStage.test_a_tracked_key_file_is_found_by_name_and_never_read",
             "test_build_minimum_standard.TheEvidenceStage.test_the_value_shaped_rules_are_every_rule_but_key_name",
+        ),
+    ),
+    Mutation(
+        "minimum standard settings: a private .github repository's files are read as the default",
+        "build_minimum_standard_settings.py",
+        '    if public is not True:\n        return {DEFAULT_POLICY: None, "public": public, "unreadable": []}\n',
+        '    if public is None:\n        return {DEFAULT_POLICY: None, "public": public, "unreadable": []}\n',
+        "the SECURITY.md of a private or internal `.github` repository would be recorded as the organisation's default, though GitHub applies only a public one's, and every repository relying on it would read as having a contact it does not",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_a_private_or_internal_github_repository_gives_no_default",
+        ),
+    ),
+    Mutation(
+        "minimum standard settings: an unread .github visibility reads as public",
+        "build_minimum_standard_settings.py",
+        "    return public, public is not None\n",
+        "    return (True if public is None else public), True\n",
+        "a `.github` repository whose visibility could not be read would be taken as public, so a private one's SECURITY.md could become the organisation's default",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_unread_github_repository_visibility_is_unreadable",
+        ),
+    ),
+    Mutation(
+        "minimum standard settings: a 404 on the .github repository reads as unreadable",
+        "build_minimum_standard_settings.py",
+        "        return None, _not_found(error)\n",
+        "        return None, False\n",
+        "an organisation with no `.github` repository would read as unreadable, so every repository in it without a SECURITY.md would lose its `absent` to `no access`",
+        (
+            "test_build_minimum_standard_settings.TheSettingsSnapshot.test_a_github_repository_that_does_not_exist_gives_no_default",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a default from a .github that is not public counts",
+        "build_minimum_standard.py",
+        '    if entry.get("public") is False:\n',
+        "    if False:\n",
+        "a default policy in a private or internal `.github` repository would not be cited as not public, and the point would lose its `absent`",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_github_repository_that_is_not_public_gives_no_default",
+        ),
+    ),
+    Mutation(
+        "minimum standard evidence: a default counts without its .github read as public",
+        "build_minimum_standard.py",
+        '        if policy.get("contact") is True and entry.get("public") is True:\n',
+        '        if policy.get("contact") is True:\n',
+        "a default with a contact would be `present` when the snapshot does not say its `.github` repository is public, a false present for a private one",
+        (
+            "test_build_minimum_standard.TheEvidenceStage.test_a_default_whose_repository_visibility_was_not_read_is_not_present",
         ),
     ),
     Mutation(

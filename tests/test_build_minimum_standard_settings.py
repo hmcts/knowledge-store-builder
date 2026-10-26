@@ -47,7 +47,11 @@ def contents(text: str) -> dict:
     return {"type": "file", "encoding": "base64", "path": "SECURITY.md", "content": wrapped}
 
 
-ORG_CONTENTS = "repos/example-org/.github/contents/"
+ORG_REPO = "repos/example-org/.github"
+ORG_CONTENTS = ORG_REPO + "/contents/"
+
+# What `gh api repos/<org>/.github` answers, in the fields read: a public repository.
+PUBLIC_REPO = {"name": ".github", "private": False, "visibility": "public"}
 
 
 class Gh:
@@ -60,9 +64,13 @@ class Gh:
     def __call__(self, arguments: list[str]) -> str:
         path = arguments[1]
         self.paths.append(path)
-        # An organisation's `.github` repository a test does not mention has no
-        # SECURITY.md: GitHub's answer for that is a 404.
-        default = refused("Not Found") if "/.github/contents/" in path else None
+        # An organisation's `.github` repository a test does not mention is public and
+        # has no SECURITY.md: GitHub's answer for a missing file is a 404.
+        default: object = None
+        if path == ORG_REPO:
+            default = PUBLIC_REPO
+        elif path.startswith(ORG_CONTENTS):
+            default = refused("Not Found")
         answer = self.answers[path] if default is None else self.answers.get(path, default)
         if isinstance(answer, BaseException):
             raise answer
@@ -243,7 +251,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         )
         # No branch is known, so no protection call; the alerts call needs only the name.
         self.assertEqual(
-            [path for path in gh.paths if not path.startswith(ORG_CONTENTS)],
+            [path for path in gh.paths if not path.startswith(ORG_REPO)],
             ["repos/example-org/repo-a", "repos/example-org/repo-a/vulnerability-alerts"],
         )
 
@@ -318,17 +326,20 @@ class TheSettingsSnapshot(SettingsIsolated):
 
     # -- the organisation's default security policy -----------------------------
 
-    def organisation(self, answers: dict[str, object]) -> dict:
-        """The snapshot's record for example-org, with `.github` answering as given."""
+    def organisation(self, answers: dict[str, object], repo: object = PUBLIC_REPO) -> dict:
+        """The snapshot's record for example-org, with `.github` answering as given:
+        `repo` for the repository itself, `answers` for its files."""
         self.declare("repo-a")
         gh = Gh(
             {
                 "repos/example-org/repo-a": REPO_BODY,
                 "repos/example-org/repo-a/vulnerability-alerts": "",
                 "repos/example-org/repo-a/branches/main": {"name": "main", "protected": True},
+                ORG_REPO: repo,
                 **{ORG_CONTENTS + path: answer for path, answer in answers.items()},
             }
         )
+        self.gh = gh
         body = self.run_stage(gh)
         self.assertEqual(body["repositories"]["repo-a"]["organisation"], "example-org")
         self.assertEqual(list(body["organisations"]), ["example-org"])
@@ -344,7 +355,11 @@ class TheSettingsSnapshot(SettingsIsolated):
         )
         self.assertEqual(
             found,
-            {"default_security_policy": {"contact": True, "path": "SECURITY.md"}, "unreadable": []},
+            {
+                "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+                "public": True,
+                "unreadable": [],
+            },
         )
 
     def test_an_organisation_default_without_a_contact_records_no_contact(self):
@@ -363,7 +378,7 @@ class TheSettingsSnapshot(SettingsIsolated):
         unreadable: every repository in an organisation without a default would then
         lose its `absent` to `no access`."""
         found = self.organisation({})
-        self.assertEqual(found, {"default_security_policy": None, "unreadable": []})
+        self.assertEqual(found, {"default_security_policy": None, "public": True, "unreadable": []})
 
     def test_a_refused_or_undecodable_default_is_unreadable(self):
         """Breaks if a failure other than a 404 - a 403, a body that is not a file - is
@@ -379,7 +394,62 @@ class TheSettingsSnapshot(SettingsIsolated):
                 found = self.organisation({".github/SECURITY.md": answer})
                 self.assertEqual(
                     found,
-                    {"default_security_policy": None, "unreadable": ["default_security_policy"]},
+                    {
+                        "default_security_policy": None,
+                        "public": True,
+                        "unreadable": ["default_security_policy"],
+                    },
+                )
+
+    def test_a_private_or_internal_github_repository_gives_no_default(self):
+        """Breaks if the SECURITY.md of a `.github` repository that is not public is
+        recorded as the organisation's default - a false present, because GitHub
+        applies default community health files only from a public `.github`. Its
+        files are not read at all."""
+        policy = {"SECURITY.md": contents("Report a vulnerability to security@example.com.\n")}
+        for name, repo in (
+            ("private", {"private": True, "visibility": "private"}),
+            ("internal", {"private": True, "visibility": "internal"}),
+            ("internal, private unset", {"private": False, "visibility": "internal"}),
+            ("private, no visibility", {"private": True}),
+        ):
+            with self.subTest(case=name):
+                found = self.organisation(policy, repo=repo)
+                self.assertEqual(
+                    found, {"default_security_policy": None, "public": False, "unreadable": []}
+                )
+                self.assertEqual(
+                    [path for path in self.gh.paths if path.startswith(ORG_CONTENTS)], []
+                )
+
+    def test_a_github_repository_that_does_not_exist_gives_no_default(self):
+        """Breaks if a 404 on the `.github` repository - none exists, or the token
+        cannot see a private one - reads as unreadable, or is followed by reads of
+        files that cannot be there."""
+        found = self.organisation({}, repo=refused("Not Found (HTTP 404)"))
+        self.assertEqual(found, {"default_security_policy": None, "public": None, "unreadable": []})
+        self.assertEqual([path for path in self.gh.paths if path.startswith(ORG_CONTENTS)], [])
+
+    def test_unread_github_repository_visibility_is_unreadable(self):
+        """Breaks if a `.github` repository whose visibility was not read - a refused
+        call, or a body naming neither `private` nor `visibility` - has its
+        SECURITY.md taken as the default: a false present when the repository is
+        private."""
+        policy = {"SECURITY.md": contents("Report a vulnerability to security@example.com.\n")}
+        for name, repo in (
+            ("a 403", refused("Resource not accessible by integration (HTTP 403)")),
+            ("no visibility fields", {"name": ".github"}),
+            ("a body that is not an object", "[]"),
+        ):
+            with self.subTest(case=name):
+                found = self.organisation(policy, repo=repo)
+                self.assertEqual(
+                    found,
+                    {
+                        "default_security_policy": None,
+                        "public": None,
+                        "unreadable": ["default_security_policy"],
+                    },
                 )
 
     def test_the_stage_is_registered(self):

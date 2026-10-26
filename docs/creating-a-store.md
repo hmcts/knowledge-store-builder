@@ -465,8 +465,9 @@ writes and the resolution order.
 To record the GitHub settings the build's token can read for the minimum-standard
 layer, run the command below. It records archived, default branch, branch
 protection, secret scanning, Dependabot alerts and organisation for each repository.
-For each organisation it records the default `SECURITY.md` in its `.github`
-repository, and whether that file carries a contact.
+For each organisation it records whether its `.github` repository is public and,
+when it is, the default `SECURITY.md` there and whether that file carries a contact.
+GitHub applies the default only from a public `.github` repository.
 
 ```bash
 knowledgestore minimum-standard-settings

@@ -13,9 +13,10 @@ refused look alike from outside, and the layer must not turn the second into the
 first.
 
 Each organisation's default security policy is read once, under `organisations`:
-GitHub applies a SECURITY.md in an organisation's `.github` repository to every
-repository there that has none of its own, so a repository can have a security
-contact that its clone does not show.
+GitHub applies a SECURITY.md in an organisation's public `.github` repository to
+every repository there that has none of its own, so a repository can have a
+security contact that its clone does not show. A private or internal `.github`
+repository supplies no default, so its files are not read.
 
 Run:
 
@@ -141,10 +142,60 @@ def _file_text(text: str) -> str | None:
     return raw.decode("utf-8", errors="replace")
 
 
+def _is_public(body: object) -> bool | None:
+    """Whether GitHub reports a repository public: False when `visibility` says
+    private or internal or `private` is true, True when either says public, and None
+    when the body says neither."""
+    if not isinstance(body, dict):
+        return None
+    visibility, private = body.get("visibility"), body.get("private")
+    if visibility in ("private", "internal") or private is True:
+        return False
+    if visibility == "public" or private is False:
+        return True
+    return None
+
+
+def _visibility(runner, org: str) -> tuple[bool | None, bool]:
+    """Whether `<org>/.github` is public, and whether that was read.
+
+    A 404 counts as read: there is no `.github` repository the token can see, and a
+    private one hidden from the token supplies no default either. Any other failure,
+    or a body naming no visibility, is not read.
+    """
+    try:
+        text = runner(["api", f"repos/{org}/.github"])
+    except subprocess.CalledProcessError as error:
+        return None, _not_found(error)
+    except OSError:
+        return None, False
+    try:
+        public = _is_public(json.loads(text))
+    except json.JSONDecodeError:
+        public = None
+    return public, public is not None
+
+
 def read_organisation(runner, org: str) -> dict:
-    """The organisation's default SECURITY.md: the first its `.github` repository holds,
-    in the order the evidence stage reads a repository's own, and whether it carries
-    a contact. Only the path and that judgement are kept, never the text.
+    """The organisation's default security policy, and whether its `.github`
+    repository is public.
+
+    GitHub applies default community health files only from a public `.github`, so
+    the files of one that is not public are never read: it has no default. For a
+    public one, see `_read_default`.
+    """
+    public, read = _visibility(runner, org)
+    if not read:
+        return {DEFAULT_POLICY: None, "public": None, "unreadable": [DEFAULT_POLICY]}
+    if public is not True:
+        return {DEFAULT_POLICY: None, "public": public, "unreadable": []}
+    return {**_read_default(runner, org), "public": True}
+
+
+def _read_default(runner, org: str) -> dict:
+    """The default SECURITY.md in a public `.github` repository: the first found, in
+    the order the evidence stage reads a repository's own, and whether it carries a
+    contact. Only the path and that judgement are kept, never the text.
 
     A 404 is the one answer that shows a file is not there. Any other failure, before
     a file is found, leaves the default unknown, because the file not read may be the

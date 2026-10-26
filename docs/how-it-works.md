@@ -381,11 +381,15 @@ same contact rule:
 
 - the repository's own SECURITY.md, wherever found, is judged and the default is not
   consulted, because GitHub shows the repository's own;
+- GitHub applies a default only from a public `.github` repository. A private or
+  internal one gives no default, so the point is `absent`, citing `<org>/.github` as
+  "not public, so GitHub applies no default from it". Its files are never read;
 - a default with a contact is `present`, citing `<org>/.github:<path>`, reason
   "organisation default security policy";
 - a default without a contact, or no default at all, is `absent`, citing the paths
   checked and the `.github` repository;
-- a default the token could not read is `not_determinable`, "no access"; with no
+- a default the token could not read, or a `.github` repository whose visibility it
+  could not read, is `not_determinable`, "no access"; with no
   snapshot, or none for the repository or its organisation, it is
   `not_determinable`, "no settings snapshot";
 - a repository not on github.com has no organisation default, so without its own
@@ -425,8 +429,9 @@ which GitHub returns only to a repository admin, an organisation owner or a
 security manager, so expect `no access` there unless the store supplies such a
 token. With no snapshot at all, the settings items read `not_determinable` with the
 reason `no settings snapshot`. The organisation's default SECURITY.md is read from
-`repos/<org>/.github/contents/<path>`, once per organisation. A 404 at every path
-means there is no default. Any other failure before a file is found is recorded
+`repos/<org>/.github/contents/<path>`, once per organisation, after
+`repos/<org>/.github` says the repository is public (`private` and `visibility`). A
+404 on the repository, or at every path, means there is no default. Any other failure before a file is found is recorded
 as unreadable, because the file not read may be the one GitHub applies.
 
 **Archived repositories are not in the store.** The repository list excludes them,
@@ -439,7 +444,9 @@ after it was cloned.
 
 - `github-settings.json`: the snapshot, with the time it was read. Per repository,
   its settings and its `organisation`; under `organisations`, each one's
-  `default_security_policy` (`{path, contact}`, or `null`) and `unreadable`. Written
+  `default_security_policy` (`{path, contact}`, or `null`), `public` (whether its
+  `.github` repository is public, `null` when there is none or it was not read) and
+  `unreadable`. Written
   by `minimum-standard-settings` only.
 - `by-repo/<repo>.json`: the seven points with their evidence, `as_of` (the commit
   and its date) and `settings_read_at`.

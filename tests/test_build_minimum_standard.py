@@ -75,7 +75,7 @@ SECURITY_PATHS = [".github/SECURITY.md", "SECURITY.md", "docs/SECURITY.md"]
 
 # An organisation whose `.github` repository holds no SECURITY.md, as the settings
 # stage records one when every path answers 404.
-NO_DEFAULT = {"default_security_policy": None, "unreadable": []}
+NO_DEFAULT = {"default_security_policy": None, "public": True, "unreadable": []}
 
 # Fake key material, split so this file does not read as a key to a secret scanner.
 PLANTED_KEY_FILE = "plantedKeyFileMarker" + "Q9x7Zk2"
@@ -305,12 +305,14 @@ class TheEvidenceStage(SettingsIsolated):
 
     # -- the organisation's default security policy -----------------------------
 
-    def contact_with_default(self, default: dict, files: dict[str, str] | None = None) -> dict:
-        """repo-a's security_contact, under an example-org whose record is `default`."""
-        self.clone("repo-a", files or {"README.md": "# repo-a\n"})
-        self.snapshot({"repo-a": FULL_ACCESS}, organisations={"example-org": default})
+    def contact_with_default(
+        self, default: dict, files: dict[str, str] | None = None, name: str = "repo-a"
+    ) -> dict:
+        """A clone's security_contact, under an example-org whose record is `default`."""
+        self.clone(name, files or {"README.md": f"# {name}\n"})
+        self.snapshot({name: FULL_ACCESS}, organisations={"example-org": default})
         self.run_stage()
-        return self.record("repo-a")["points"]["security_contact"]
+        return self.record(name)["points"]["security_contact"]
 
     def test_an_organisation_default_with_a_contact_is_present_and_cited(self):
         """Breaks if a repository with no SECURITY.md of its own reads as absent when its
@@ -318,6 +320,7 @@ class TheEvidenceStage(SettingsIsolated):
         that policy on the repository, so the contact is there."""
         default = {
             "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+            "public": True,
             "unreadable": [],
         }
         contact = self.contact_with_default(default)
@@ -332,12 +335,50 @@ class TheEvidenceStage(SettingsIsolated):
             ],
         )
 
+    def test_a_github_repository_that_is_not_public_gives_no_default(self):
+        """Breaks if a SECURITY.md in a private or internal `.github` repository counts
+        as the organisation's default - a false present, because GitHub applies only a
+        public one's files. The record cites the repository as not public."""
+        default = {
+            "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+            "public": False,
+            "unreadable": [],
+        }
+        contact = self.contact_with_default(default)
+        self.assertEqual(contact["state"], "absent")
+        self.assertEqual(contact["reason"], "no SECURITY.md")
+        self.assertEqual(
+            contact["evidence"],
+            [{"path": path, "reason": "not found"} for path in SECURITY_PATHS]
+            + [
+                {
+                    "path": "example-org/.github",
+                    "reason": "not public, so GitHub applies no default from it",
+                }
+            ],
+        )
+
+    def test_a_default_whose_repository_visibility_was_not_read_is_not_present(self):
+        """Breaks if a default with a contact counts when the snapshot does not say its
+        `.github` repository is public - a false present for a private one."""
+        for name, public in (("repo-a", None), ("repo-b", "true")):
+            with self.subTest(public=public):
+                default = {
+                    "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+                    "public": public,
+                    "unreadable": [],
+                }
+                contact = self.contact_with_default(default, name=name)
+                self.assertEqual(contact["state"], "not_determinable")
+                self.assertEqual(contact["reason"], "no access")
+
     def test_the_repositorys_own_security_md_wins_over_the_organisation_default(self):
         """Breaks if the organisation's default is consulted for a repository that has
         its own SECURITY.md: GitHub shows the repository's own, so its own is judged,
         and its lack of a contact is not covered by the organisation's."""
         default = {
             "default_security_policy": {"contact": True, "path": "SECURITY.md"},
+            "public": True,
             "unreadable": [],
         }
         contact = self.contact_with_default(
@@ -351,6 +392,7 @@ class TheEvidenceStage(SettingsIsolated):
         same contact rule as a repository's own."""
         default = {
             "default_security_policy": {"contact": False, "path": "docs/SECURITY.md"},
+            "public": True,
             "unreadable": [],
         }
         contact = self.contact_with_default(default)
