@@ -79,12 +79,16 @@ def owned_key(node: dict) -> tuple[str, str] | None:
     source_file = node.get("source_file")
     if not isinstance(source_file, str) or not source_file:
         return None
+    repo = node.get("repo")
+    has_repo = isinstance(repo, str) and bool(repo)
     if source_file.startswith(_STORE_PREFIX):
         name, _, rest = source_file[len(_STORE_PREFIX) :].partition("/")
-        return (name, rest) if name and rest else None
-    repo = node.get("repo")
-    if isinstance(repo, str) and repo:
-        return (repo, source_file)
+        # A node that names its repository is store-relative only when the path names the
+        # same one: otherwise `repositories/foo/...` is a directory inside that repository.
+        if name and rest and (not has_repo or name == repo):
+            return (name, rest)
+    if has_repo:
+        return (str(repo), source_file)
     return None
 
 
@@ -111,9 +115,34 @@ def remove_graphify_nodes(graph: dict, owned: set[tuple[str, str]]) -> tuple[int
         survivors.append(node)
     links = [e for e in graph["links"] if e["source"] not in removed and e["target"] not in removed]
     edges_removed = len(graph["links"]) - len(links)
+    _prune_hyperedges(graph, removed)
     graph["nodes"] = survivors
     graph["links"] = links
     return len(removed), edges_removed, kept
+
+
+def _prune_hyperedges(graph: dict, removed: set[str]) -> None:
+    """Drop removed ids from hyperedges, and a hyperedge left with no member.
+
+    graphify keeps hyperedges in two slots, `graph.hyperedges` and a top-level
+    `hyperedges`, and drops a hyperedge none of whose members survive.
+    """
+    if not removed:
+        return
+    holders = [graph, graph.get("graph")]
+    for holder in holders:
+        if not isinstance(holder, dict) or not isinstance(holder.get("hyperedges"), list):
+            continue
+        kept = []
+        for hyperedge in holder["hyperedges"]:
+            members = hyperedge.get("nodes") if isinstance(hyperedge, dict) else None
+            if isinstance(members, list):
+                survivors = [m for m in members if not (isinstance(m, str) and m in removed)]
+                if not survivors:
+                    continue
+                hyperedge = {**hyperedge, "nodes": survivors}
+            kept.append(hyperedge)
+        holder["hyperedges"] = kept
 
 
 @dataclass

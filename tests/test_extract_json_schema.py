@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -24,6 +26,13 @@ SELF_REFERENCE = (
     ' "definitions": {"Node": {"type": "object",'
     ' "properties": {"next": {"$ref": "#/definitions/Node"}}}},'
     ' "$ref": "#", "properties": {"head": {"$ref": "#/definitions/Node"}}}'
+)
+
+TWO_EXTERNALS = (
+    '{"$schema": "http://json-schema.org/draft-04/schema#",'
+    ' "id": "http://schemas.example/widgets/externals.json",'
+    ' "properties": {"zeta": {"$ref": "http://elsewhere.example/zeta.json"},'
+    ' "alpha": {"$ref": "http://elsewhere.example/alpha.json"}}}'
 )
 
 DATE_FIELD = (
@@ -310,3 +319,119 @@ class AddLayerTest(SettingsIsolated):
                 (root + "/properties/head", root + "/definitions/Node"),
             ],
         )
+
+
+class OwnedKeyTest(unittest.TestCase):
+    def test_repository_relative_path_that_looks_store_relative_stays_in_its_repository(self):
+        """Breaks if `repositories/foo/bar.json` inside repo `widgets` is read as repo `foo`."""
+        node = {"id": "n", "repo": "widgets", "source_file": "repositories/foo/bar.json"}
+        self.assertEqual(layer.owned_key(node), ("widgets", "repositories/foo/bar.json"))
+
+    def test_store_relative_path_naming_the_nodes_own_repository_is_unwrapped(self):
+        """Breaks if a store-relative path on a node that also carries `repo` keeps its prefix."""
+        node = {"id": "n", "repo": "widgets", "source_file": "repositories/widgets/a/b.json"}
+        self.assertEqual(layer.owned_key(node), ("widgets", "a/b.json"))
+
+    def test_the_wrong_repository_is_not_touched_by_a_look_alike_path(self):
+        """Breaks if owning (`foo`, `bar.json`) deletes a node of repo `widgets`, or misses its own."""
+        graph = {
+            "nodes": [
+                {
+                    "id": "widgets::x",
+                    "repo": "widgets",
+                    "_origin": "ast",
+                    "source_file": "repositories/foo/bar.json",
+                }
+            ],
+            "links": [],
+        }
+        self.assertEqual(layer.remove_graphify_nodes(graph, {("foo", "bar.json")}), (0, 0, 0))
+        self.assertEqual(
+            layer.remove_graphify_nodes(graph, {("widgets", "repositories/foo/bar.json")}),
+            (1, 0, 0),
+        )
+
+
+class AddLayerAccountingTest(SettingsIsolated):
+    def test_a_repeated_reference_from_one_owner_writes_one_edge(self):
+        """Breaks if the same (source, target, relation, context) is written twice."""
+        item = make_owned("widgets", WIDGET_FILE, fixtures.WIDGET_CREATED)
+        first = item.walked.refs[0]
+        item.walked.refs.append(dataclasses.replace(first, line=first.line + 40))
+        graph = graph_with_keyword_nodes()
+        layer.add_layer(graph, [item, P], NO_FORKS)
+        owner_edges = [e for e in graph["links"] if e.get("context") == "properties/owner"]
+        self.assertEqual(len(owner_edges), 1)
+        self.assertEqual(owner_edges[0]["source_location"], "L8")
+
+    def test_a_landing_outside_the_layer_is_unresolved_and_writes_no_edge(self):
+        """Breaks if a resolution onto an id with no node becomes a dangling edge.
+
+        Unreachable through real inputs, since the index and the nodes both come from
+        the same walk, so the resolver is the seam that is replaced.
+        """
+        stray = refs.Resolution(refs.Target("widgets", "gone.json", "", ""), "by-id")
+        graph = graph_with_keyword_nodes()
+        with unittest.mock.patch.object(layer, "resolve", lambda *_a: stray):
+            report = layer.add_layer(graph, [W], NO_FORKS)
+        self.assertEqual(
+            [(u["pointer"], u["reason"]) for u in report.unresolved],
+            [("/properties/owner", "no-such-pointer"), ("/properties/parts", "no-such-pointer")],
+        )
+        self.assertEqual([e for e in graph["links"] if e["relation"] == "references"], [])
+
+    def test_unresolved_are_listed_in_repo_file_pointer_order(self):
+        """Breaks if the report lists unresolved references in discovery order."""
+        graph = graph_with_keyword_nodes()
+        report = layer.add_layer(
+            graph,
+            [make_owned("widgets", "externals.json", TWO_EXTERNALS), W],
+            NO_FORKS,
+        )
+        self.assertEqual(
+            report.unresolved,
+            [
+                {
+                    "repo": "widgets",
+                    "source_file": "externals.json",
+                    "pointer": "/properties/alpha",
+                    "ref": "http://elsewhere.example/alpha.json",
+                    "reason": "external",
+                    "candidates": [],
+                },
+                {
+                    "repo": "widgets",
+                    "source_file": "externals.json",
+                    "pointer": "/properties/zeta",
+                    "ref": "http://elsewhere.example/zeta.json",
+                    "reason": "external",
+                    "candidates": [],
+                },
+                {
+                    "repo": "widgets",
+                    "source_file": "schemas/widget-created.json",
+                    "pointer": "/properties/owner",
+                    "ref": "http://schemas.example/common/person.json",
+                    "reason": "external",
+                    "candidates": [],
+                },
+            ],
+        )
+
+    def test_resolved_references_are_counted_by_how(self):
+        """Breaks if the report miscounts how references resolved (one local, one by-id)."""
+        report = layer.add_layer(graph_with_keyword_nodes(), [W, P], NO_FORKS)
+        self.assertEqual(report.resolved_by_how, {"local": 1, "by-id": 1})
+        self.assertEqual(report.unresolved, [])
+
+    def test_hyperedge_members_removed_with_their_nodes_in_both_slots(self):
+        """Breaks if a hyperedge keeps naming a removed node, or a memberless one survives."""
+        graph = graph_with_keyword_nodes()
+        he_mixed = {"id": "h1", "nodes": ["widgets::widget_created", "widgets::app_run"]}
+        he_gone = {"id": "h2", "nodes": ["widgets::widget_created_properties"]}
+        graph["hyperedges"] = [he_mixed, he_gone]
+        graph["graph"]["hyperedges"] = [he_mixed, he_gone]
+        layer.add_layer(graph, [W], NO_FORKS)
+        expected = [{"id": "h1", "nodes": ["widgets::app_run"]}]
+        self.assertEqual(graph["hyperedges"], expected)
+        self.assertEqual(graph["graph"]["hyperedges"], expected)
