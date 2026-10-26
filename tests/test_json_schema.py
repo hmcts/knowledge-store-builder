@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import sys
 import time
 import unittest
 
 import json_schema_fixtures as fixtures
 from knowledgestore import json_schema
+
+
+@contextlib.contextmanager
+def python_default_recursion_limit():
+    """Run at Python's default recursion limit, as the stage's own process does.
+
+    graphify's extractor raises the process-wide limit to 10,000 and leaves it
+    there, so a test that ran it earlier in the suite would otherwise decide how
+    deep the pure-Python scanner can parse here.
+    """
+    before = sys.getrecursionlimit()
+    sys.setrecursionlimit(1_000)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(before)
 
 
 class LoadWithLinesTest(unittest.TestCase):
@@ -62,7 +80,7 @@ class LoadWithLinesTest(unittest.TestCase):
         """Breaks if nesting past the recursion limit raises RecursionError, which
         `read_owned` does not catch, so one such file stops the whole stage."""
         deep = '{"a": ' * 5_000 + "1" + "}" * 5_000
-        with self.assertRaises(json_schema.SchemaReadError):
+        with python_default_recursion_limit(), self.assertRaises(json_schema.SchemaReadError):
             json_schema.load_with_lines(deep)
         array = "[" * 100_000 + "]" * 100_000
         with self.assertRaises(json_schema.SchemaReadError):

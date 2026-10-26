@@ -49,6 +49,22 @@ DATE_FIELD = (
 )
 
 
+@contextlib.contextmanager
+def python_default_recursion_limit():
+    """Run at Python's default recursion limit, as the stage's own process does.
+
+    graphify's extractor raises the process-wide limit to 10,000 and leaves it
+    there, so a test that ran it earlier in the suite would otherwise decide how
+    deep the pure-Python scanner can parse here.
+    """
+    before = sys.getrecursionlimit()
+    sys.setrecursionlimit(1_000)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(before)
+
+
 def make_owned(repo: str, rel: str, text: str) -> refs.Owned:
     document, lines = json_schema.load_with_lines(text)
     basis = json_schema.recognise(document)
@@ -815,7 +831,8 @@ class StageTest(StoreCase):
         deep = self.widgets / "deep-data.json"
         deep.write_text('{"a": ' * 2_000 + "1" + "}" * 2_000, encoding="utf-8")
         self.add_detect_entry(deep)
-        out = run_capturing(layer.main, [])
+        with python_default_recursion_limit():
+            out = run_capturing(layer.main, [])
         self.assertEqual(out.code, 0)
         self.assertRegex(out.stdout, r"not a schema +1 +\(left to graphify\)")
         self.assertNotIn("malformed", out.stdout)
@@ -848,7 +865,8 @@ class StageTest(StoreCase):
             encoding="utf-8",
         )
         self.add_detect_entry(deep)
-        out = run_capturing(layer.main, [])
+        with python_default_recursion_limit():
+            out = run_capturing(layer.main, [])
         self.assertEqual(out.code, 0)
         self.assertIn("malformed 1", out.stdout)
         self.assertIn("  widgets/deep-schema.json", out.stdout)
