@@ -9,6 +9,7 @@ import time
 import unittest
 
 import json_schema_fixtures as fixtures
+import tool_config_fixtures as tool_configs
 from knowledgestore import json_schema
 
 
@@ -166,7 +167,7 @@ class RecogniseTest(unittest.TestCase):
         """
         evil = "https://evil.example/json-schema.org/x"
         self.assertEqual(
-            json_schema.recognise({"$schema": evil, "type": "object"}), "schema-keywords"
+            json_schema.recognise({"$schema": evil, "properties": {"a": {}}}), "schema-keywords"
         )
         self.assertIsNone(json_schema.recognise({"$schema": evil, "formatter": {}}))
 
@@ -177,13 +178,87 @@ class RecogniseTest(unittest.TestCase):
 
     def test_an_unparseable_schema_uri_is_judged_on_its_keywords(self):
         """Breaks if a `$schema` that cannot be parsed as a URI raises out of recognition."""
-        doc = {"$schema": "http://[json-schema.org", "type": "object"}
+        doc = {"$schema": "http://[json-schema.org", "properties": {"a": {}}}
         self.assertEqual(json_schema.recognise(doc), "schema-keywords")
 
     def test_list_valued_type_counts_as_schema_keyword(self):
         """Breaks if `type: ["object", "null"]` is not read as a schema type."""
-        doc = {"$schema": "urn:example:x", "type": ["object", "null"]}
+        doc = {"$schema": "urn:example:x", "type": ["object", "null"], "items": {}}
         self.assertEqual(json_schema.recognise(doc), "schema-keywords")
+
+    def test_real_tool_configs_declaring_a_schema_are_not_schemas(self):
+        """Breaks if a `$schema` naming a tool's own schema, plus a key that shares a
+        JSON Schema keyword's name (`extends` above all), makes the config a schema.
+
+        Each is a public format in its real layout. Claiming one removes graphify's
+        nodes for it and replaces them with a bare `schema` node.
+        """
+        for path, text in tool_configs.FILES.items():
+            with self.subTest(path=path):
+                self.assertIsNone(json_schema.recognise(json.loads(text)))
+
+    def test_a_foreign_schema_needs_a_defining_keyword(self):
+        """Breaks if a bare `extends`, `$ref`, `items`, combinator or `type` is enough
+        under a `$schema` that does not name json-schema.org."""
+        for bare in (
+            {"extends": {"$ref": "other.json"}},
+            {"extends": [{"$ref": "other.json"}]},
+            {"$ref": "other.json"},
+            {"items": {"type": "string"}},
+            {"allOf": [{"properties": {}}]},
+            {"type": "object"},
+            {"type": "array"},
+        ):
+            with self.subTest(bare=bare):
+                self.assertIsNone(
+                    json_schema.recognise({"$schema": "https://tool.example/c.json", **bare})
+                )
+
+    def test_a_foreign_schema_with_a_defining_keyword_is_a_schema(self):
+        """Breaks if the narrowing drops schemas written against a custom meta-schema:
+        `properties`, `definitions` or `$defs`, or a JSON `type` beside `properties`
+        or `items`."""
+        for defining in (
+            {"properties": {"a": {}}},
+            {"definitions": {"A": {}}},
+            {"$defs": {"A": {}}},
+            {"type": "object", "properties": {"a": {}}},
+            {"type": "array", "items": {"type": "string"}},
+            {"type": ["object", "null"], "properties": {}},
+        ):
+            with self.subTest(defining=defining):
+                self.assertEqual(
+                    json_schema.recognise({"$schema": "urn:example:meta", **defining}),
+                    "schema-keywords",
+                )
+
+    def test_a_type_that_is_not_a_json_type_does_not_make_items_a_schema(self):
+        """Breaks if `type` beside `items` counts without being a JSON type: a
+        package manifest's `"type": "module"` and an `items` list are data."""
+        doc = {"$schema": "urn:example:x", "type": "module", "items": ["a"]}
+        self.assertIsNone(json_schema.recognise(doc))
+
+    def test_the_meta_schema_and_declared_id_bases_do_not_need_a_defining_keyword(self):
+        """Breaks if the narrowing leaks past a foreign `$schema`: a document on
+        json-schema.org is a schema whatever its root holds, and a declared id keeps
+        its own rule."""
+        self.assertEqual(
+            json_schema.recognise({"$schema": "http://json-schema.org/draft-07/schema#"}),
+            "meta-schema",
+        )
+        self.assertEqual(
+            json_schema.recognise(
+                {
+                    "$schema": "http://json-schema.org/draft-03/schema#",
+                    "extends": ["preset:a", "preset:b"],
+                }
+            ),
+            "meta-schema",
+        )
+        self.assertEqual(
+            json_schema.recognise({"$id": "https://schemas.example/x.json", "$defs": {}}),
+            "declared-id",
+        )
 
 
 class WalkTest(unittest.TestCase):
@@ -342,14 +417,34 @@ class WalkTest(unittest.TestCase):
             [("", "person.json", "extends", "extends")],
         )
 
-    def test_extends_as_a_string_is_an_extends_ref(self):
-        """Breaks if the string form of `extends` is dropped."""
-        doc = {"$schema": "http://json-schema.org/draft-03/schema#", "extends": "person.json"}
-        w = json_schema.walk(doc, {}, "x.json")
+    def test_extends_as_an_object_or_a_list_of_objects_is_read(self):
+        """Breaks if the narrowing of `extends` drops the schema forms: an object, and
+        each member of a list of objects, each an `extends` ref at its own context."""
+        draft03 = "http://json-schema.org/draft-03/schema#"
+        w = json_schema.walk({"$schema": draft03, "extends": {"$ref": "a.json"}}, {}, "x.json")
+        self.assertEqual(
+            [(r.value, r.relation, r.context) for r in w.refs], [("a.json", "extends", "extends")]
+        )
+        listed = {"$schema": draft03, "extends": [{"$ref": "a.json"}, {"$ref": "b.json"}]}
+        w = json_schema.walk(listed, {}, "x.json")
         self.assertEqual(
             [(r.value, r.relation, r.context) for r in w.refs],
-            [("person.json", "extends", "extends")],
+            [("a.json", "extends", "extends/0"), ("b.json", "extends", "extends/1")],
         )
+
+    def test_extends_as_a_string_or_a_list_of_strings_is_not_a_reference(self):
+        """Breaks if preset names under `extends` are emitted as `extends` refs: they
+        reach the unresolved list as `unrecognised-target` whatever the file is."""
+        draft03 = "http://json-schema.org/draft-03/schema#"
+        cases = (
+            ("person.json", []),
+            (["preset:a", "preset:b"], []),
+            (["a.json", {"$ref": "b.json"}], [("b.json", "extends", "extends/1")]),
+        )
+        for value, expected in cases:
+            with self.subTest(value=value):
+                w = json_schema.walk({"$schema": draft03, "extends": value}, {}, "x.json")
+                self.assertEqual([(r.value, r.relation, r.context) for r in w.refs], expected)
 
     def test_dynamic_refs_are_recorded(self):
         """Breaks if `$dynamicRef` and `$recursiveRef` vanish instead of being counted later."""

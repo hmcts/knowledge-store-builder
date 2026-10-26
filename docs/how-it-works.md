@@ -129,11 +129,13 @@ recognises, whatever graphify did with it:
 | Basis | Rule |
 |---|---|
 | `meta-schema` | `$schema` is a URI on json-schema.org (that host or a subdomain), any draft; a URI that only mentions it elsewhere is any other `$schema` |
-| `schema-keywords` | any other `$schema`, and the root has a schema keyword such as `properties`, `definitions`, `items` or a combinator |
+| `schema-keywords` | any other `$schema`, and the root has `properties`, `definitions` or `$defs`, or a JSON `type` beside `properties` or `items` |
 | `declared-id` | no `$schema`, an absolute `id` or `$id`, and `properties`, `definitions` or `$defs` |
 
-A tool configuration whose `$schema` points at the tool's own schema carries
-none of those keywords at its root, so it is left to graphify. A file with no
+A tool configuration whose `$schema` points at the tool's own schema is an
+instance of that schema, not a schema. It carries none of those keywords at its
+root (a bare `extends`, `$ref` or `items` is not enough, and an `extends` that
+holds preset names is not a schema at all), so it is left to graphify. A file with no
 `$schema` and no absolute id cannot be told from data and is not read.
 
 A file is named by its path as the content set gives it, which is how graphify

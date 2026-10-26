@@ -11950,6 +11950,36 @@ MUTATIONS = (
         "CLAUDE.md 1.3: two runs over the same estate in a different order must give identical bytes",
         ("test_extract_json_schema.AddLayerTest.test_layer_edges_are_written_in_key_order",),
     ),
+    Mutation(
+        "json-schema: a bare extends makes a tool config a schema",
+        "json_schema.py",
+        '    return _has_schema_type(document.get("type")) and (\n        "properties" in document or "items" in document\n    )\n',
+        '    return _has_schema_type(document.get("type")) or "extends" in document\n',
+        "#508: an instance document whose `$schema` names its tool's schema, with `extends` presets, was claimed as a schema; graphify's nodes for it were removed and its presets reported as unresolved refs",
+        (
+            "test_json_schema.RecogniseTest.test_a_foreign_schema_needs_a_defining_keyword",
+            "test_json_schema.RecogniseTest.test_real_tool_configs_declaring_a_schema_are_not_schemas",
+            "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_tool_configs_declaring_a_schema_keep_graphifys_nodes",
+        ),
+    ),
+    Mutation(
+        "json-schema: a bare type makes a foreign-schema document a schema",
+        "json_schema.py",
+        '    return _has_schema_type(document.get("type")) and (\n        "properties" in document or "items" in document\n    )\n',
+        '    return _has_schema_type(document.get("type"))\n',
+        "#508: a root `type` alone, which instance documents carry, was enough under a `$schema` that does not name json-schema.org",
+        ("test_json_schema.RecogniseTest.test_a_foreign_schema_needs_a_defining_keyword",),
+    ),
+    Mutation(
+        "json-schema: a string under extends is walked as a reference",
+        "json_schema.py",
+        "        if isinstance(sub, dict):\n            ctx.plain(sub,",
+        '        if isinstance(sub, str):\n            ctx.walked.refs.append(Ref(f.owner, sub, "extends", "extends", ctx.line, ctx.base))\n        elif isinstance(sub, dict):\n            ctx.plain(sub,',
+        "#508: preset names under `extends` were emitted as `extends` refs and reached the unresolved list as `unrecognised-target`",
+        (
+            "test_json_schema.WalkTest.test_extends_as_a_string_or_a_list_of_strings_is_not_a_reference",
+        ),
+    ),
 )
 
 
