@@ -346,8 +346,8 @@ say a repository meets the standard.
 | Point | Reads | Notes |
 |---|---|---|
 | `owner` | `CODEOWNERS` at `.github/`, the root or `docs/`; the first found is judged | `present` when the last rule for `*` or `/`, the repository root, names an owner (`@user`, `@org/team` or an email); rules for subdirectories alone are `absent` |
-| `security_contact` | `SECURITY.md` at the same three places | `present` when it carries a `mailto:` or email address, or a URL on a line that mentions reporting, security, a vulnerability or disclosure (a badge is not a contact); whether the mailbox is monitored is not recorded |
-| `no_secrets` | the content-file list, whole files, current tree | never `present`, below |
+| `security_contact` | `SECURITY.md` at the same three places; without one, the organisation's default from the snapshot | `present` when it carries a `mailto:` or email address, or a URL on a line that mentions reporting, security, a vulnerability or disclosure (a badge is not a contact); whether the mailbox is monitored is not recorded. The organisation default is below |
+| `no_secrets` | the content-file list, whole files, current tree; and the names of every tracked file | never `present`, below |
 | `secure_by_design` | a tracked file named `threat-model`, `threat_model` or `threatmodel` (any case, any extension), or any file under `docs/threat-model*/` | `present` or `not_determinable`, never `absent`: code does not show that design was not considered |
 | `hygiene` | six sub-items making five requirements, below | `present` only when every requirement is; `absent` when any is definitely absent; otherwise `not_determinable` |
 | `patching` | nothing | always `not_determinable`: timelines are not recorded in a repository |
@@ -373,15 +373,50 @@ secrets: it is `present` when either is, `absent` only when the setting is
 disabled and no workflow exists, and otherwise `not_determinable`. The other four
 items are a requirement each.
 
+**The organisation's default security policy.** GitHub shows a repository that has
+no SECURITY.md of its own the one in its organisation's public `.github` repository,
+as a default community health file. So a repository with no SECURITY.md is judged
+on that default, read by the settings stage at the same three paths and under the
+same contact rule:
+
+- the repository's own SECURITY.md, wherever found, is judged and the default is not
+  consulted, because GitHub shows the repository's own;
+- GitHub applies a default only from a public `.github` repository. A private or
+  internal one gives no default, so the point is `absent`, citing `<org>/.github` as
+  "not public, so GitHub applies no default from it". Its files are never read;
+- a default with a contact is `present`, citing `<org>/.github:<path>`, reason
+  "organisation default security policy";
+- a default without a contact, or no default at all, is `absent`, citing the paths
+  checked and the `.github` repository;
+- a default the token could not read, or a `.github` repository whose visibility it
+  could not read, is `not_determinable`, "no access"; with no
+  snapshot, or none for the repository or its organisation, it is
+  `not_determinable`, "no settings snapshot";
+- a repository not on github.com has no organisation default, so without its own
+  file it is `absent`.
+
+CODEOWNERS is not inherited this way, so `owner` reads only the clone.
+
 **Why `no_secrets` is never `present`.** A pattern scan finding nothing cannot show
 that nothing is committed. A clean scan is therefore `not_determinable`, with the
-reason "pattern scan found nothing; a scan cannot show absence". Findings make the
-point `absent`, with `{rule, path, line}` for each and **never the value or the
-line**, so nothing the scan finds can reach the layer. The scan masks whole files,
+reason "pattern scan found nothing; a scan cannot show absence". Each finding is
+recorded as `{rule, path, line}` and **never the value or the line**, so nothing the
+scan finds can reach the layer. A finding from a rule that matches a value makes the
+point `absent`. A `key-name` finding, a setting named for a secret, shows no value was
+committed: most are configuration names in YAML and Terraform. When every finding is
+a `key-name` one, the point is `not_determinable`, reason "only secret-looking setting
+names were found; no committed value was confirmed", with the findings still listed.
+`value_shaped_rules()` in the stage names the rules that count.
+
+The scan also walks every tracked file's name, whether or not it is in the content
+set, for key files: `*.pem`, `*.key`, `*.priv`, `*.p12`, `*.pfx`, `*.jks`,
+`*.keystore`, `id_rsa*`, `id_ecdsa*` and `id_ed25519*`, in any case, but not `*.pub`.
+Each is recorded as `{rule: "key-file", path}`, with no line, and makes the point
+`absent`. A key file is never opened, so nothing in it can reach the layer. The scan masks whole files,
 so a secret that spans lines, such as a private-key block, is found; every line
 masking changed is reported. A finding's `rule` is a rule that masked that file, not
 necessarily the only one that matches the line. The scan covers the current tree of
-the store's content set. Git history is not scanned, and sensitive operational
+the store's content set, and the names of the tracked files. Git history is not scanned, and sensitive operational
 detail such as hostnames is not looked for.
 
 **Access, and `no access`.** The settings stage reads only what the token the build
@@ -393,7 +428,11 @@ access. Secret scanning comes from the repository's `security_and_analysis` fiel
 which GitHub returns only to a repository admin, an organisation owner or a
 security manager, so expect `no access` there unless the store supplies such a
 token. With no snapshot at all, the settings items read `not_determinable` with the
-reason `no settings snapshot`.
+reason `no settings snapshot`. The organisation's default SECURITY.md is read from
+`repos/<org>/.github/contents/<path>`, once per organisation, after
+`repos/<org>/.github` says the repository is public (`private` and `visibility`). A
+404 on the repository, or at every path, means there is no default. Any other failure before a file is found is recorded
+as unreadable, because the file not read may be the one GitHub applies.
 
 **Archived repositories are not in the store.** The repository list excludes them,
 so they are never cloned. The summary says so in its `notes`. The layer therefore
@@ -403,8 +442,12 @@ after it was cloned.
 
 **Outputs**, under `knowledge/minimum-standard/`:
 
-- `github-settings.json`: the snapshot, with the time it was read. Written by
-  `minimum-standard-settings` only.
+- `github-settings.json`: the snapshot, with the time it was read. Per repository,
+  its settings and its `organisation`; under `organisations`, each one's
+  `default_security_policy` (`{path, contact}`, or `null`), `public` (whether its
+  `.github` repository is public, `null` when there is none or it was not read) and
+  `unreadable`. Written
+  by `minimum-standard-settings` only.
 - `by-repo/<repo>.json`: the seven points with their evidence, `as_of` (the commit
   and its date) and `settings_read_at`.
 - `summary.json`: one row of states and `as_of` per repository, `notes`,

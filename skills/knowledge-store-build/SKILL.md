@@ -816,7 +816,10 @@ malformed or names a repository the store does not hold, or git cannot read a
 clone. **Read what the states mean before reporting them.** `absent` means the
 practice is not evidenced in the repository, never that the team does not do it.
 `no_secrets` is never `present`: a clean scan is `not_determinable`, and findings
-are `absent` with a rule, a path and a line, never the value. A setting the token
+are listed with a rule, a path and a line, never the value. A committed key file is
+found by name, with no line. Only a finding that matches a value, a key file
+included, makes the point `absent`. Secret-looking setting names alone (`key-name`)
+leave it `not_determinable`. A setting the token
 could not read gives `not_determinable`, "no access". Archived repositories are not
 in the store. Never summarise the layer as a pass or a score; see
 [the layer](../../docs/how-it-works.md#the-minimum-standard-layer).
