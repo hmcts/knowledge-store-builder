@@ -64,7 +64,10 @@ still wanted — the library states what it knows and stops.
 - **An extractor.** [graphify](https://github.com/safishamsi/graphify) parses
   the code and owns that. This library prepares its inputs and enriches its
   output, and re-implementing extraction here would fork a problem somebody
-  else is already solving.
+  else is already solving. One exception, deliberately narrow: the
+  `json-schema` stage reads JSON Schema documents itself, because graphify
+  declines or keyword-walks them; it covers that one format only and retires
+  when graphify extracts schemas semantically.
 - **A service.** No daemon, no query-time index, no endpoint. If an answer
   needs a process running to exist, it is out of scope.
 - **A model or a harness.** The explorer answers with no LLM at all. Where

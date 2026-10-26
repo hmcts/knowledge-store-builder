@@ -789,7 +789,7 @@ export GRAPHIFY_MAX_GRAPH_BYTES=4GB   # default is 512 MB
 ```bash
 knowledgestore gherkin         # features, scenarios, ticket links into the graph
 knowledgestore packages        # cross-repository package nodes and import edges
-knowledgestore json-schema
+knowledgestore json-schema     # schema, definition and field nodes, with resolved $ref edges
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore relationships   # knowledge/relationships/: which repositories reference which
 knowledgestore minimum-standard-settings  # knowledge/minimum-standard/github-settings.json: the settings the token can read
@@ -797,6 +797,25 @@ knowledgestore minimum-standard           # per-repository evidence against the 
 knowledgestore source-urls     # a `url` on each node: its file at the build commit
 knowledgestore manifest        # the relationships are a layer: re-run it
 ```
+
+`json-schema` reads JSON Schema documents itself, the one format this library
+extracts, and owns every file it recognises as one. **That is an output change
+you will see:** graphify's keyword nodes for those files are removed from the
+merged graph (a node whose origin is the AST pass; semantic-pass nodes on the
+same file are kept and counted), and the stage's own nodes replace them, with a
+`$ref` that resolves to a definition in another file written as an edge. A
+repository's own `graph.json` is untouched, so re-running `merge-graphs` brings
+the keyword nodes back and the next `json-schema` run removes them again. A
+schema id declared by several files is settled by a fixed order: the referring
+file itself, then the only declaring file, then the only one in the referring
+repository, then the only one outside a declared fork. Otherwise the reference
+is `ambiguous`: no edge is written and every candidate is listed. Until
+`KSB_FORK_REPOS` lands (#478) no repository counts as a fork, so such copies are
+reported `ambiguous`. **Read the unresolved count and its reasons**
+(`meta-schema` is expected; `external`, `ambiguous` and `no-such-pointer` are
+the gaps), and pass `--unresolved PATH` to write the full list. Files it
+skipped, and files whose walk stopped at the depth limit, are named in the
+report. See [docs/how-it-works.md](../../docs/how-it-works.md#the-json-schema-layer).
 
 `relationships` reads the clones and `knowledge/provenance.json`, never the
 graph. It prints one line per kind: edges, references, unresolved targets and
@@ -844,7 +863,7 @@ could not read gives `not_determinable`, "no access". Archived repositories are 
 in the store. Never summarise the layer as a pass or a score; see
 [the layer](../../docs/how-it-works.md#the-minimum-standard-layer).
 
-`source-urls` runs after `gherkin`, `packages` and `deployments`, so the nodes
+`source-urls` runs after `gherkin`, `packages`, `json-schema` and `deployments`, so the nodes
 they add are linked too. It reads `config/repositories.txt` and
 `knowledge/provenance.json`, and reports every node it could not link, by
 reason. **Read that report.** It links each node it can, and removes any `url`
@@ -894,7 +913,7 @@ Stages are independent and idempotent — re-run one without repeating the rest.
 
 ### Run local extractors before the stages that rewrite the archive
 
-Four stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+Five stages rewrite the committed archive `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`:
 
 ```bash
@@ -907,7 +926,7 @@ knowledgestore source-urls
 ```
 
 A store with extractors of its own has one ordering to keep: **run them before
-those four, or remove the archive between them.** Nodes written into
+those five, or remove the archive between them.** Nodes written into
 `graph.json` after the archive was last built leave the two files describing
 different graphs, and neither outcome from there is the one you want: either the
 stage refuses, in a message about communities and clustered nodes, or it
