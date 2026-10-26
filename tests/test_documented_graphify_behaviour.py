@@ -386,3 +386,78 @@ class ClusteringResolvesEdgeEndpointsTest(unittest.TestCase):
             "the clustered path now leaves dangling endpoints as well, so dropping "
             "`--no-cluster` no longer buys a resolved graph",
         )
+
+
+def _graphify_version() -> tuple[int, ...]:
+    """The installed graphifyy version as integers, or () when it cannot be read."""
+    from importlib import metadata
+
+    try:
+        text = metadata.version("graphifyy")
+    except metadata.PackageNotFoundError:
+        return ()
+    parts: list[int] = []
+    for piece in text.split("."):
+        digits = "".join(character for character in piece if character.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+@needs_graphify
+class JsonSchemaHandlingTest(unittest.TestCase):
+    """The json-schema layer's retirement tripwire (spec, *Scope*).
+
+    The layer exists because of what these tests pin. When one fails, graphify
+    changed: reassess whether the layer is still needed, rather than fixing the
+    test.
+    """
+
+    def _extract(self, name: str, text: str) -> dict:
+        from graphify.extract import extract
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        path = root / name
+        path.write_text(text, encoding="utf-8")
+        return extract([path], root=root)
+
+    def test_a_schema_with_defs_yields_no_nodes(self):
+        """Catches graphify starting to model schemas with `$defs` itself.
+
+        The layer owns schemas graphify declines. If graphify begins emitting
+        nodes for one, the layer and graphify would describe the same file twice.
+        """
+        import json_schema_fixtures as fixtures
+
+        result = self._extract("base.json", fixtures.BASE_2020)
+        self.assertEqual(result["nodes"], [])
+
+    @unittest.skipUnless(
+        _graphify_version() >= (0, 9, 94),
+        "the skipped_sources key arrived in graphify 0.9.94",
+    )
+    def test_a_declined_schema_is_listed_in_skipped_sources(self):
+        """Catches graphify dropping the record of a file it declined (measured on 0.9.94).
+
+        The layer does not read this key; the pin records that graphify still
+        reports the decline, which is part of why the layer owns the file.
+        """
+        import json_schema_fixtures as fixtures
+
+        result = self._extract("base.json", fixtures.BASE_2020)
+        self.assertEqual([Path(p).name for p in result["skipped_sources"]], ["base.json"])
+
+    def test_a_plain_draft04_id_schema_is_keyword_walked(self):
+        """Catches graphify ceasing to emit keyword nodes for a draft-04 `id` schema.
+
+        This is why the layer owns every schema, not only the declined ones: a
+        schema with `$schema` and `id` but no definitions reaches the graph as
+        keyword scaffolding, and the layer has to replace it.
+        """
+        import json_schema_fixtures as fixtures
+
+        labels = {n["label"] for n in self._extract("plain.json", fixtures.PLAIN_DRAFT04)["nodes"]}
+        self.assertLessEqual({"$schema", "properties", "type"}, labels)

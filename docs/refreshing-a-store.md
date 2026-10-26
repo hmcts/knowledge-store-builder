@@ -447,19 +447,20 @@ input. `status` prints the same lines, capped, and never fails.
 
 ## Run local extractors before the stages that rewrite the archive
 
-Four stages rewrite the committed archive `graphify-out/graph.json.gz` from the
+Five stages rewrite the committed archive `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`:
 
 ```bash
 # Stages that rewrite graphify-out/graph.json.gz
 knowledgestore gherkin
 knowledgestore packages
+knowledgestore json-schema
 knowledgestore deployments     # opt-in: does nothing unless KSB_DEPLOY_REPOS is set
 knowledgestore source-urls
 ```
 
 So a store with extractors of its own has one ordering to keep: **run them
-before those four, or remove the archive between them.** Nodes written into
+before those five, or remove the archive between them.** Nodes written into
 `graph.json` after the archive was last built leave the two files describing
 different graphs, and neither outcome from there is the one you want: either the
 stage refuses, in a message about communities and clustered nodes, or it

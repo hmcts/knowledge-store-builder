@@ -395,6 +395,8 @@ def _write_merged_summaries(
 #     only reads, and the layer's own writes are validated by checked_write_target
 #   S8707 policy site: apply_ignores.py - read_declarations, _present and apply,
 #     citing merge; its one write is validated by checked_write_target
+#   S8707 policy site: extract_json_schema.py - main's --unresolved write, validated by
+#     checked_write_target; its --detect and --files reads go through extract_ast and io
 def _take_batches(
     paths: list[str], known_ids: set[str], merged: dict[str, str]
 ) -> tuple[int, list[str], list[str]]:

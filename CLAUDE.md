@@ -540,7 +540,12 @@ it, and it now says which one that is.
   them as field separators, so stripping whitespace silently drops
   empty-body commits. Strip `"\n"` explicitly. There is a regression test.
 - `graphify` is a peer CLI, not a dependency. The library prepares its inputs
-  and enriches its output; it does not re-implement extraction.
+  and enriches its output; it does not re-implement extraction. **One
+  exception, deliberately narrow:** the `json-schema` stage reads JSON Schema
+  documents itself, because graphify declines or keyword-walks them (measured
+  on 0.9.94). It reads that one format only, and it retires when graphify
+  extracts schemas semantically. Do not widen it to another format without the
+  maintainer's decision.
 - Very large graphs need `GRAPHIFY_VIZ_NODE_LIMIT` raised, or the HTML
   visualisation export refuses to run.
 

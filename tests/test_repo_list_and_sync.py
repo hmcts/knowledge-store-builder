@@ -552,6 +552,7 @@ class CliTest(SettingsIsolated):
                 "merge-layers",
                 "gherkin",
                 "packages",
+                "json-schema",
                 # before clustering, so deployment nodes join communities
                 "deployments",
                 # reads clones and provenance, never the graph; beside the stages

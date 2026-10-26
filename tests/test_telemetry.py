@@ -152,7 +152,7 @@ class TelemetryRecordTest(SettingsIsolated):
     def test_another_stage_s_measurements_survive_this_stage_s_record(self):
         """Breaks if a stage's record replaces the document instead of merging.
 
-        Four stages write this file in one refresh. A replace would leave each
+        Several stages write this file in one refresh. A replace would leave each
         stage's record surviving only until the next stage ran, so every
         comparison would be against nothing - a mechanism that reads green and
         measures nothing.

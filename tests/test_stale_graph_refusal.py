@@ -166,6 +166,29 @@ class StaleRefusalTest(SettingsIsolated):
 
         self._assert_stage_refuses(build_package_edges.main)
 
+    def test_json_schema_refuses_and_writes_nothing(self):
+        """Breaks if the json-schema stage rewrites the archive from a stale graph.
+
+        The clones directory and a content set naming a real schema are laid out first,
+        so that the refusal is the only thing between the stage and the write: without
+        it the stage reads the schema and rewrites both files.
+        """
+        self.write_pair(agree=False)
+        clone = config.REPOSITORIES_DIR / "widgets"
+        (clone / ".git").mkdir(parents=True)
+        schema = clone / "widget.json"
+        schema.write_text(
+            '{"$schema": "http://json-schema.org/draft-04/schema#", "type": "object"}',
+            encoding="utf-8",
+        )
+        config.DETECT_PATH.write_text(
+            json.dumps({"files": {"code": [str(schema)]}}), encoding="utf-8"
+        )
+        from knowledgestore import extract_json_schema
+
+        self._assert_stage_refuses(lambda: extract_json_schema.main([]))
+        self.assertEqual(self.plain.read_text(encoding="utf-8"), json.dumps(_graph(["a", "b"])))
+
     def test_gherkin_refuses_and_writes_nothing(self):
         """Breaks if the third call site is missed. Three stages share one defect,
         and a two-of-three fix reads as done while the third still loses data."""

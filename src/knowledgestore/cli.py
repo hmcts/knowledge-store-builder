@@ -53,6 +53,7 @@ SELF_PARSING = frozenset(
         "answers",
         "relationships",
         "answers-layer",
+        "json-schema",
     }
 )
 
@@ -178,6 +179,11 @@ STAGES: dict[str, tuple[str, str]] = {
     "packages": (
         "build_package_edges",
         "add cross-repository package nodes and import edges (npm layer)",
+    ),
+    "json-schema": (
+        "extract_json_schema",
+        "read JSON Schema documents into schema, definition and field nodes with resolved "
+        "$ref edges",
     ),
     "deployments": (
         "build_deployments",

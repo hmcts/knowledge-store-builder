@@ -94,6 +94,114 @@ shatter a stable community into fragments, and prose attached to the whole
 does not describe a part. The measured cost of that, and the economics of
 refreshing generally, are in the operator guide §7.
 
+## The JSON Schema layer
+
+graphify declines some JSON Schema documents and keyword-walks the rest into
+nodes named after keywords (`type`, `properties`), with no `$ref` followed. The
+`json-schema` stage reads them itself (`src/knowledgestore/extract_json_schema.py`),
+the one stage that replaces graphify's own output for a format graphify does
+read. It reads JSON Schema and no other format, and it retires when graphify extracts schemas semantically;
+`CLAUDE.md` §9 states the exception.
+
+It reads the merged graph and the extractor's content set, adds a layer under
+the origin `json-schema`, and rebuilds that layer from scratch on every run, as
+`packages` does. Nodes have the kinds `schema` (one per file), `definition` (one
+per entry under `definitions` or `$defs`) and `field` (one per property), joined
+by `contains`. A `$ref` becomes `references`, except that a `$ref` directly under
+an `allOf` member, and a `$ref` under the `extends` keyword, become `extends`. Each
+reference edge carries the keyword path it came from as `context`. A property's
+own JSON Schema `format` keyword is stored as `schema_format`, because `format`
+on a node says which parser wrote it.
+
+A property is a field where it describes the shape of an instance: at the root,
+in a field or a definition, and through `items`, `prefixItems` or a
+combinator. Beneath `not`, `if`, `then`, `else`, `dependencies`,
+`dependentSchemas`, `additionalProperties`, `patternProperties`, `contains`,
+`propertyNames`, `additionalItems`, `unevaluatedItems` or
+`unevaluatedProperties`, a property belongs to a negation, a condition, a
+dependency or the value of an unnamed key, so it creates no field and no `required` is read there. A `$ref`
+anywhere beneath them is still a `references` edge from the enclosing node, and a
+definition beneath them is still a definition.
+
+**Which files it owns.** Every `.json` file in the content set that it
+recognises, whatever graphify did with it:
+
+| Basis | Rule |
+|---|---|
+| `meta-schema` | `$schema` is a URI on json-schema.org (that host or a subdomain), any draft; a URI that only mentions it elsewhere is any other `$schema` |
+| `schema-keywords` | any other `$schema`, and the root has a schema keyword such as `properties`, `definitions`, `items` or a combinator |
+| `declared-id` | no `$schema`, an absolute `id` or `$id`, and `properties`, `definitions` or `$defs` |
+
+A tool configuration whose `$schema` points at the tool's own schema carries
+none of those keywords at its root, so it is left to graphify. A file with no
+`$schema` and no absolute id cannot be told from data and is not read.
+
+A file is named by its path as the content set gives it, which is how graphify
+names it, so a symlink keeps its own name. A symlink to another content-set file
+in the same repository is read once, as that file, and takes its outcome: when
+the target is a schema, graphify's nodes on the link's path are removed with the
+target's, and the report counts the link as `symlinked to an owned file`. A
+symlink whose target is outside every repository is named
+`outside-repositories` and never read.
+
+**What it removes.** graphify's nodes for an owned file, when their origin is
+the AST pass, together with their edges. Nodes from any other pass on that file
+are kept and counted. Only the merged graph changes: re-running `merge-graphs`
+restores the keyword nodes and the next run removes them again.
+
+**Resolving `$ref`.** The stage reads every owned file, builds an index of
+declared ids (the root's `$id`, or `id` in draft-04 and earlier or where the
+dialect is unknown, nested ids, and `$anchor` or `#name` anchors), then resolves
+in this order, the first rule that applies settling it:
+
+1. `#` or `#/pointer`: the pointer in the same document.
+2. `#name`: an anchor in the same document.
+3. An absolute URI: looked up in the id index, then the fragment resolved in
+   the file it found.
+4. A relative reference: joined to the nearest declared base URI and looked up
+   as in 3; failing that, a path relative to the referring file in the same
+   repository, which must be an owned file.
+
+A pointer that lands inside a definition without being a node resolves to the
+nearest enclosing node, and the edge records the full pointer as
+`target_pointer`.
+
+**An id declared by more than one file** (a copied schema) is settled in this
+order, and never by name:
+
+1. the referring file declares it itself;
+2. exactly one file declares it;
+3. exactly one declaring file is in the referring file's repository;
+4. exactly one declaring file is in a repository that is not a declared fork;
+5. otherwise the reference is `ambiguous`: no edge is written, and every
+   candidate is listed as `repo:path`, sorted.
+
+Rule 4 reads the fork set from `KSB_FORK_REPOS` (comma-separated repository
+names), the same setting `relationships` reads. With none declared, copies that
+rule 3 does not settle are reported `ambiguous`. Linking to every copy was rejected: it would
+assert several relationships where the evidence supports one, and make each
+widely copied schema a hub next to every repository that copies it.
+
+**What it cannot resolve** is counted by reason: `meta-schema` (a json-schema.org
+meta-schema, expected), `external` (an absolute URI no file declares),
+`ambiguous`, `no-such-pointer` (the file was found and the pointer names nothing
+in it), `unrecognised-target` (a relative path to a missing file, to a file that
+is not a schema, or one that escapes the repository) and `malformed` (a `$ref`
+that is not a string or cannot be parsed, and any `$dynamicRef` or
+`$recursiveRef`, which are never resolved). The report prints the first 20, and
+`--unresolved PATH` writes all of them as JSON. **A reference that is not in the
+graph is not a reference that does not exist**: read the unresolved count before
+reading an absence.
+
+**What it skips.** A file that is not valid UTF-8 JSON, a file over `--max-bytes`
+(8 MiB by default) and a file outside the repositories are named and left out.
+A file whose walk stopped at the depth limit of 32 stays in the layer and is
+named. The run exits 1 with no graph, a stale graph, no content set, a content set
+that names no files, or input from inside `graphify-out`, and 0 otherwise.
+
+It records `json_schema.*` measurements in `knowledge/telemetry.json` and adds a
+marker-bounded note to `GRAPH_REPORT.md`, as `gherkin` does.
+
 ## The relationships layer
 
 Which repositories depend on which others is answered from their own

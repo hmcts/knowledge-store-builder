@@ -1,6 +1,6 @@
 """An operator must be told that local extractors run before the archive is rewritten.
 
-Four stages rewrite the committed `graphify-out/graph.json.gz` from the
+Five stages rewrite the committed `graphify-out/graph.json.gz` from the
 mid-pipeline `graphify-out/graph.json`. A store whose own extractors add nodes
 after one of them leaves the two files describing different graphs, and the next
 of those stages refuses — in a message that counts communities and clustered
@@ -24,8 +24,8 @@ The break this catches has two halves, and the second is the one worth having:
    writes the summaries snapshot, the intent index and the ticket descriptions,
    and a gate that counted those would name the wrong stages.
 
-Both directions of that comparison fail. A fifth module starting to write the
-archive is drift the documents have not caught up with; one of the four ceasing
+Both directions of that comparison fail. A sixth module starting to write the
+archive is drift the documents have not caught up with; one of the five ceasing
 to write it leaves a warning that costs an operator time for nothing.
 
 The code side asserts its own discriminating power in the same run, over forged
@@ -98,7 +98,7 @@ REQUIRED = (
     # the mechanism the constraint follows from
     "rewrite the committed archive",
     # the constraint itself, in both of its permitted orders
-    "before those four, or remove the archive",
+    "before those five, or remove the archive",
     # who it applies to
     "extractors of its own",
     # the symptom, and that it is not what it appears to be
@@ -313,9 +313,9 @@ class ArchiveWriterOrderingGuidanceTest(unittest.TestCase):
     def test_the_documented_stage_set_is_the_set_that_writes_the_archive(self):
         """The gate that matters. Breaks in both directions.
 
-        A fourth module writing `config.GRAPH_PATH.with_suffix(".json.gz")` is a
+        A sixth module writing `config.GRAPH_PATH.with_suffix(".json.gz")` is a
         stage an operator has to order their extractors around and no document
-        names. One of the three ceasing to write it leaves a warning that sends
+        names. One of the five ceasing to write it leaves a warning that sends
         somebody looking for a constraint that is no longer there.
         """
         writers = writing_stages()
@@ -338,7 +338,7 @@ class ArchiveWriterOrderingGuidanceTest(unittest.TestCase):
 
         A write reaching the archive by a route `WRITE_SINKS` does not list would
         otherwise read as a module that merely mentions it, and the stage set
-        would stay green while a fourth writer shipped.
+        would stay green while a sixth writer shipped.
         """
         writers, mentioners = _classified()
         unclassified = sorted(mentioners - writers - ARCHIVE_READERS)

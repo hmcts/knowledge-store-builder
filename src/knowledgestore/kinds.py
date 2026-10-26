@@ -16,6 +16,9 @@ from __future__ import annotations
 FEATURE = "feature"
 SCENARIO = "scenario"
 TICKET = "ticket"
+SCHEMA = "schema"
+DEFINITION = "definition"
+FIELD = "field"
 
 # kind as written now -> every kind that has ever meant it
 _ALIASES: dict[str, frozenset[str]] = {
