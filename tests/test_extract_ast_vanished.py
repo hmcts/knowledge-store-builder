@@ -193,12 +193,14 @@ class VanishedFilesTest(_DeclaredStoreCase, unittest.TestCase):
     def test_a_source_file_join_that_misses_refuses_and_writes_no_record(self):
         """Catches the instrument measuring a neighbour: an all-zero record never fires.
 
-        Every node names a `source_file` spelled by a rule the content set does not
-        use, so every file would count 0. The stage refuses and writes no record.
+        Every node names a `source_file` spelled as the bare file name - what graphify
+        0.9.80 and 0.9.94 were observed to write for a store under a doubly-symlinked
+        path - which no rule can map back to a content-set path, so every file would
+        count 0. The stage refuses and writes no record.
         """
         detect = self._store("schema.json", "main.py")
         code, out, err = self._run(
-            _PerFile(self.root, {"schema.json": 3, "main.py": 2}, spell=lambda r: f"elsewhere/{r}"),
+            _PerFile(self.root, {"schema.json": 3, "main.py": 2}, spell=lambda r: Path(r).name),
             ["--detect", str(detect)],
         )
         self.assertEqual(code, 1, out + err)

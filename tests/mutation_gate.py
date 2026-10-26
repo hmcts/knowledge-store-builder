@@ -1674,6 +1674,7 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
             "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_first_run_keeps_the_counts_of_the_repositories_it_finished",
             "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
         ),
     ),
     Mutation(
@@ -1694,6 +1695,7 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
         ),
     ),
     Mutation(
@@ -2363,7 +2365,10 @@ MUTATIONS = (
         "doing so, and this stage dropped that field on the floor. A repository that "
         "parsed none of its files reported as extracted with a node count of zero and "
         "no explanation - the information existed, was handed over, and was not read",
-        ("test_extract_ast.UnreadFilesTest.test_files_the_extractor_could_not_read_are_named",),
+        (
+            "test_extract_ast.UnreadFilesTest.test_files_the_extractor_could_not_read_are_named",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
+        ),
     ),
     Mutation(
         "the bound is swallowed by the extractor's own error handling",
