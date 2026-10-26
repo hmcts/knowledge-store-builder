@@ -113,6 +113,16 @@ reference edge carries the keyword path it came from as `context`. A property's
 own JSON Schema `format` keyword is stored as `schema_format`, because `format`
 on a node says which parser wrote it.
 
+A property is a field where it describes the shape of an instance: at the root,
+in a field or a definition, and through `items`, `prefixItems` or a
+combinator. Beneath `not`, `if`, `then`, `else`, `dependencies`,
+`dependentSchemas`, `additionalProperties`, `patternProperties`, `contains`,
+`propertyNames`, `additionalItems`, `unevaluatedItems` or
+`unevaluatedProperties`, a property belongs to a negation, a condition, a
+dependency or the value of an unnamed key, so it creates no field and no `required` is read there. A `$ref`
+anywhere beneath them is still a `references` edge from the enclosing node, and a
+definition beneath them is still a definition.
+
 **Which files it owns.** Every `.json` file in the content set that it
 recognises, whatever graphify did with it:
 
@@ -125,6 +135,14 @@ recognises, whatever graphify did with it:
 A tool configuration whose `$schema` points at the tool's own schema carries
 none of those keywords at its root, so it is left to graphify. A file with no
 `$schema` and no absolute id cannot be told from data and is not read.
+
+A file is named by its path as the content set gives it, which is how graphify
+names it, so a symlink keeps its own name. A symlink to another content-set file
+in the same repository is read once, as that file, and takes its outcome: when
+the target is a schema, graphify's nodes on the link's path are removed with the
+target's, and the report counts the link as `symlinked to an owned file`. A
+symlink whose target is outside every repository is named
+`outside-repositories` and never read.
 
 **What it removes.** graphify's nodes for an owned file, when their origin is
 the AST pass, together with their edges. Nodes from any other pass on that file

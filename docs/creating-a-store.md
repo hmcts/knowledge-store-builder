@@ -473,10 +473,10 @@ It adds a node per schema, definition and property with an edge for each `$ref`
 it can resolve, and **removes graphify's keyword nodes for those files from the
 merged graph**. Read the unresolved count in the report: `meta-schema` is
 expected, while the others (`external`, `ambiguous`, `no-such-pointer`,
-`unrecognised-target` and `malformed`) are references the store cannot follow, and `unresolved.json` lists each. Two clones that declare
-the same schema id are `ambiguous` unless one is the referring file's own
-repository or only one is outside `KSB_FORK_REPOS`, the setting `relationships`
-reads (below). The [JSON Schema layer](how-it-works.md#the-json-schema-layer) lists
+`unrecognised-target` and `malformed`) are references the store cannot follow, and `unresolved.json` lists each. Files that declare
+the same schema id are `ambiguous` unless exactly one of them is in the referring
+file's own repository, or exactly one is in a repository outside `KSB_FORK_REPOS`,
+the setting `relationships` reads (below). The [JSON Schema layer](how-it-works.md#the-json-schema-layer) lists
 what it recognises and the resolution order.
 
 Write the relationships layer, which records which repositories depend on which:
