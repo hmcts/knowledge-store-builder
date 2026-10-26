@@ -29,6 +29,9 @@ from collections.abc import Mapping
 from . import config, graph_files, io, relationships
 
 FORMAT = "packages"
+# The `_origin` the json-schema stage writes; named here rather than imported, as
+# that stage imports the graph readers this one does.
+JSON_SCHEMA_ORIGIN = "json-schema"
 MANIFEST = relationships.NPM_MANIFEST
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 
@@ -71,11 +74,16 @@ def _importing_files(repo_dir, package: str) -> list[str]:
 
 
 def _representatives(graph: dict) -> dict[tuple[str, str], str]:
-    """(repo, source_file) -> one deterministic node id: the file's lowest id."""
+    """(repo, source_file) -> one deterministic node id: the file's lowest id.
+
+    A node the `json-schema` stage owns is not a representative: that stage rebuilds
+    its layer on every run, so an edge anchored on one is gone or captured depending
+    on which stage ran last.
+    """
     best: dict[tuple[str, str], str] = {}
     for node in graph["nodes"]:
         repo, src = node.get("repo"), node.get("source_file")
-        if not (repo and src):
+        if not (repo and src) or node.get("_origin") == JSON_SCHEMA_ORIGIN:
             continue
         key = (repo, src)
         if key not in best or node["id"] < best[key]:
@@ -83,14 +91,28 @@ def _representatives(graph: dict) -> dict[tuple[str, str], str]:
     return best
 
 
-def _anchor_under(graph_reps: dict, repo: str, prefix: str) -> str | None:
-    """The provider-side anchor: lowest node id under the package's directory."""
+def _code_anchor(graph_reps: dict, repo: str, prefix: str = "") -> str | None:
+    """The lowest node id among a repository's non-JSON source files under `prefix`.
+
+    JSON is left out because a schema file's graphify nodes are removed by the
+    `json-schema` stage, taking any edge anchored on them, and its own nodes sort
+    before most graphify ids.
+    """
     candidates = [
         node_id
         for (node_repo, src), node_id in graph_reps.items()
-        if node_repo == repo and src.startswith(prefix)
+        if node_repo == repo and src.startswith(prefix) and not src.lower().endswith(".json")
     ]
     return min(candidates) if candidates else None
+
+
+def _anchor_under(graph_reps: dict, repo: str, prefix: str, manifest_rel: str) -> str | None:
+    """The provider-side anchor: the manifest's own node, else the package's code.
+
+    The manifest is the file the package is declared in, so its node is the one the
+    edge is about; failing that, the lowest id among the directory's non-JSON files.
+    """
+    return graph_reps.get((repo, manifest_rel)) or _code_anchor(graph_reps, repo, prefix)
 
 
 def _strip_layer(graph: dict) -> None:
@@ -171,11 +193,12 @@ def _add_module_layer(
     """
     # One pass over the representatives, not one per pair: a large graph has
     # hundreds of thousands of them and there are hundreds of pairs.
-    anchors: dict[str, str] = {}
-    for (node_repo, _), node_id in _representatives(graph).items():
-        current = anchors.get(node_repo)
-        if current is None or node_id < current:
-            anchors[node_repo] = node_id
+    reps = _representatives(graph)
+    anchors = {
+        repo: anchor
+        for repo in {node_repo for node_repo, _ in reps}
+        if (anchor := _code_anchor(reps, repo)) is not None
+    }
     estate = {clone.name for clone in clones}
     existing = {n["id"] for n in graph["nodes"]}
     references = _module_references(clones, orgs)
@@ -252,7 +275,7 @@ def _ensure_package_node(
     node = _package_node(name, provider_repo, manifest_rel)
     package_nodes[name] = node
     graph["nodes"].append(node)
-    anchor = _anchor_under(reps, provider_repo, manifest_rel.rsplit(MANIFEST, 1)[0])
+    anchor = _anchor_under(reps, provider_repo, manifest_rel.rsplit(MANIFEST, 1)[0], manifest_rel)
     if anchor:
         graph["links"].append(_edge(node["id"], anchor, "provided_by", manifest_rel))
         return node, 1

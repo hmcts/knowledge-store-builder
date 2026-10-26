@@ -12077,6 +12077,37 @@ MUTATIONS = (
             "test_duplicate_input_paths.ContentSetTest.test_the_stage_reports_the_repeat",
         ),
     ),
+    Mutation(
+        "packages: a json-schema node can be the anchor",
+        "build_package_edges.py",
+        '        if not (repo and src) or node.get("_origin") == JSON_SCHEMA_ORIGIN:\n',
+        "        if not (repo and src):\n",
+        "#510: with the json-schema layer in the graph, ids sort before most graphify ids, so `provided_by` landed on a schema node",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_a_manifest_the_json_schema_stage_owns_is_not_the_anchor",
+        ),
+    ),
+    Mutation(
+        "packages: a JSON file's node can be the anchor",
+        "build_package_edges.py",
+        '        if node_repo == repo and src.startswith(prefix) and not src.lower().endswith(".json")\n',
+        "        if node_repo == repo and src.startswith(prefix)\n",
+        "#510: the lowest id under the package directory was a graphify keyword node from a schema file, which the json-schema stage removes with its edges, so the package lost its `provided_by` edge",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_without_a_manifest_node_the_edge_lands_on_a_code_node",
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_a_code_node_in_both_stage_orders",
+        ),
+    ),
+    Mutation(
+        "packages: the manifest's own node is not preferred",
+        "build_package_edges.py",
+        "    return graph_reps.get((repo, manifest_rel)) or _code_anchor(graph_reps, repo, prefix)\n",
+        "    return _code_anchor(graph_reps, repo, prefix)\n",
+        "#510: the edge is about the manifest that declares the package, so its node is the anchor when the graph has one",
+        (
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_edge_lands_on_the_manifest_node_in_both_stage_orders",
+        ),
+    ),
 )
 
 
