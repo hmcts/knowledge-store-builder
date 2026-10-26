@@ -505,13 +505,14 @@ class CliTest(SettingsIsolated):
                 # reads the provenance sync just wrote against the one before it
                 "drift",
                 "convert",
+                # the grammar probe, before anything parses: the documented AST
+                # route runs it ahead of extract-ast, which repeats it, and a store
+                # whose own driver extracts runs it as that driver's first step
+                "check-grammars",
                 # produces the AST layer `merge-layers` consumes, and runs after
                 # `convert` because conversion is what makes an Office document
                 # visible to a parser at all
                 "extract-ast",
-                # the same grammar probe extract-ast runs first, for a store whose
-                # own driver extracts instead
-                "check-grammars",
                 "export-history",
                 "context",
                 "intent",

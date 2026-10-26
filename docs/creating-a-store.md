@@ -575,6 +575,11 @@ This is a behaviour change: a store that declares a repository it has not cloned
 used to get a layer without it and exit 0, and now fails `extract-ast`. Run
 `knowledgestore sync`, or remove the repository from the declaration.
 
+That includes a repository whose first clone failed. `sync` reports the failure and
+carries on, but the repository is still declared and still has no clone, so
+`extract-ast` stays blocked until a later `sync` clones it or you remove it from
+`config/repositories.txt`.
+
 **It refuses a clone missing a declared exclusion.** When
 `config/graphify-ignore.txt` exists, every clone's `.graphifyignore` must hold
 each line declared for it; otherwise the run exits 1 naming the repository and
@@ -612,18 +617,32 @@ A file that produced nodes last run and produces none now, while still in the
 content set, is named with its previous count, and the run exits 1:
 
 ```text
-  VANISHED  repositories/service-a/schema/order.json  (12 node(s) last run, 0 now)
+  VANISHED  repositories/service-a/schema/order.json  (12 node(s) last run, 0 now; refused)
 1 file(s) vanished, 12 node(s) lost.
 ```
 
-A file graphify declined by design, which it lists in `skipped_sources` from
-0.9.94, is named `declined by graphify` instead, and fails the same way: declined is
-still lost data. Pass `--allow-vanished` when the change is intended, such as a
-file whose content legitimately emptied; the zero then becomes the record.
-Without it the previous count stands, so the next run fails again. A file removed
-from the content set is not a vanished one, and a file that shrank but kept nodes
-is left to the per-repository report above. The first run says it has no record
-and writes one.
+The label says why when graphify did: `declined by graphify` for a file it lists in
+`skipped_sources` (from 0.9.94), and `unread` for one in `failed_sources`. Both fail
+the same way, because a lost file is lost whatever the reason.
+
+When a loss is intended, such as a file whose content legitimately emptied, name it:
+
+```bash
+knowledgestore extract-ast --allow-vanished repositories/service-a/schema/order.json
+```
+
+Each named file is accepted and recorded as 0. Any other file that went to zero
+still fails the run and keeps its previous count, so the next run fails again. A
+file removed from the content set is not a vanished one, and a file that shrank
+but kept nodes is left to the per-repository report above. The first run says it
+has no record and writes one.
+
+The record is only as good as the match between each node's `source_file` and a
+content-set path. When fewer than half of the nodes that carry a `source_file`
+match one, the stage refuses with `instrument mismatch` and writes no record. A
+record of zeros would otherwise read as a clean baseline from which the guard could
+never fire. A store root reached through a symlink is handled: graphify spells
+those paths against the resolved root, and the stage rebuilds them.
 
 **It refuses before extracting when graphify cannot parse a file type the content
 set holds.** graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` files as nothing

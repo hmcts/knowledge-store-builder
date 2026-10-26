@@ -1786,28 +1786,31 @@ MUTATIONS = (
         "with failed_sources empty, and the repository-level report saw only a decrease "
         "- which it reports and never refuses. Nothing named the files (#492)",
         (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
-            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
         ),
     ),
     Mutation(
         "a vanished file is reported but never refused",
         "extract_ast.py",
-        "    return not allowed\n",
+        "    return bool(refused)\n",
         "    return False\n",
         "a loud report on a run that exits 0 is read by nobody in a chain; the files "
         "the extractor stopped reading reach the committed layer as absent (#492)",
         (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
         ),
     ),
     Mutation(
         "a file graphify declined is reported as vanished",
         "extract_ast.py",
-        'kind = "declined by graphify" if path in declined else "VANISHED"',
-        'kind = "VANISHED"',
+        '    if path in declined:\n        return "declined by graphify"',
+        '    if False:\n        return "declined by graphify"',
         "graphify 0.9.94 names files an extractor declines by design in skipped_sources; "
         "calling them vanished sends an operator hunting a parser fault that is a "
         "deliberate decision upstream",
@@ -1824,6 +1827,7 @@ MUTATIONS = (
         "lost data, so every legitimate removal fails the build and trains the operator "
         "to pass --allow-vanished by reflex",
         (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
         ),
     ),
@@ -1842,28 +1846,111 @@ MUTATIONS = (
     Mutation(
         "the per-file record is never written",
         "extract_ast.py",
-        "    write_counts(\n        path, file_record(",
-        "    (\n        path, file_record(",
+        "    write_counts(path, file_record(previous or {}, now, groups, failures, refused))",
+        "    (path, file_record(previous or {}, now, groups, failures, refused))",
         "with no record the comparison has nothing to compare against, so the guard "
         "reports a first run forever and never fails",
         (
+            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_removed_from_the_content_set_does_not_count",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_shrank_but_kept_nodes_does_not_fail",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
-            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_the_file_it_names_and_records_zero",
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
         ),
     ),
     Mutation(
         "a refused vanish is taken as the new baseline",
         "extract_ast.py",
-        "[] if allowed else vanished",
-        "[]",
+        "now, groups, failures, refused))",
+        "now, groups, failures, []))",
         "writing the zero after refusing makes the next run pass with nobody having "
         "decided anything: re-running is then the way past the guard",
         (
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
+        ),
+    ),
+    Mutation(
+        "graphify's declined path is not converted",
+        "extract_ast.py",
+        "    relative = store_paths.relative(entry)\n",
+        "    relative = entry\n",
+        "graphify 0.9.94 reports skipped_sources as the absolute path it was handed, "
+        "while the per-file record is keyed store-relative; compared unconverted, no "
+        "declined file ever matches and each is reported as vanished, sending an "
+        "operator after a parser fault that is a deliberate decision upstream",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+        ),
+    ),
+    Mutation(
+        "a failed repository's files read as vanished",
+        "extract_ast.py",
+        '        if (name or "(corpus root)") in failed:\n            continue\n        for path in files:\n            key = store_paths.relative(path)\n            counts[key] = found.get(key, 0)',
+        "        if False:\n            continue\n        for path in files:\n            key = store_paths.relative(path)\n            counts[key] = found.get(key, 0)",
+        "a repository that raised has no nodes; counting its files as 0 reports every one as vanished and buries the real failure under a list of false losses",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
+        ),
+    ),
+    Mutation(
+        "a failed repository's per-file baseline is dropped",
+        "extract_ast.py",
+        "    merged = {**carried, **now, **dict(keep)}",
+        "    merged = {**now, **dict(keep)}",
+        "dropping a failed repository's files from the record erases the counts its recovery is compared against, so a file that vanished during the outage is never caught",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
+        ),
+    ),
+    Mutation(
+        "a missed source_file join records zeros",
+        "extract_ast.py",
+        "    if matched >= sourced * MATCHED_SHARE:",
+        "    if True:",
+        "a source_file spelled other than the content set's matches nothing, so every file counts 0 and the first run records a baseline of zeros from which the guard can never fire - correct code answering a different question (CLAUDE.md 2.7)",
+        (
+            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_source_file_join_that_misses_refuses_and_writes_no_record",
+        ),
+    ),
+    Mutation(
+        "--allow-vanished accepts every loss at once",
+        "extract_ast.py",
+        "    refused = [(file, count) for file, count in vanished if file not in accepted]",
+        "    refused = []",
+        "the first version took no paths, so passing it for one intended loss accepted every other file that vanished in the same run, unnamed",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
+        ),
+    ),
+    Mutation(
+        "an unread file is reported as vanished",
+        "extract_ast.py",
+        '    if path in unread:\n        return "unread"',
+        '    if False:\n        return "unread"',
+        "a file graphify named in failed_sources reported as VANISHED sends an operator after a parser decision instead of a read failure",
+        (
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
+        ),
+    ),
+    Mutation(
+        "a symlinked store root's source_file is keyed as spelled",
+        "extract_ast.py",
+        "    rebuilt = os.path.normpath(os.path.join(config.ROOT.resolve(), source))\n    return store_paths.relative(rebuilt)",
+        "    return store_paths.relative(source)",
+        "graphify spells source_file relative to the resolved root, so under a symlinked store root a file comes back as ../<link>/repositories/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
+        (
+            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_source_file_join_that_misses_refuses_and_writes_no_record",
         ),
     ),
     Mutation(
@@ -3766,11 +3853,15 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_gone_and_new_are_reported_as_different_things",
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
+            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
-            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_source_file_join_that_misses_refuses_and_writes_no_record",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_the_file_it_names_and_records_zero",
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",

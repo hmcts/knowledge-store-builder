@@ -109,13 +109,13 @@ STAGES: dict[str, tuple[str, str]] = {
         "convert_documents",
         "convert Office documents to Markdown so extraction can read them",
     ),
-    "extract-ast": (
-        "extract_ast",
-        "extract the AST layer one repository at a time (needs the `ast` extra)",
-    ),
     "check-grammars": (
         "check_grammars",
         "refuse when the interpreter that runs graphify lacks the HCL or SQL grammar",
+    ),
+    "extract-ast": (
+        "extract_ast",
+        "extract the AST layer one repository at a time (needs the `ast` extra)",
     ),
     "export-history": ("export_git_history", "export per-repository commit history datasets"),
     "context": (
