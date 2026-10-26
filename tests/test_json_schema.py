@@ -112,6 +112,15 @@ class WalkTest(unittest.TestCase):
             ],
         )
 
+    def test_ref_records_the_keyword_it_was_found_under(self):
+        """Breaks if `$dynamicRef` and `$recursiveRef` read as plain `$ref`, so resolve treats a dynamic reference as static."""
+        w = self.walked(
+            '{"properties": {"a": {"$ref": "#/x"}, "b": {"$dynamicRef": "#y"},'
+            ' "c": {"$recursiveRef": "#"}}}',
+            "k.json",
+        )
+        self.assertEqual([r.keyword for r in w.refs], ["$ref", "$dynamicRef", "$recursiveRef"])
+
     def test_widget_created_refs(self):
         """Breaks if a ref loses its owner, context, line or base, or the wrong ones are kept."""
         w = self.walked(fixtures.WIDGET_CREATED, "widget-created.json")

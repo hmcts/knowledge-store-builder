@@ -175,6 +175,8 @@ class Ref:
     context: str
     line: int
     base: str | None
+    # The keyword the value was found under; only `$ref` is resolved statically.
+    keyword: str = "$ref"
 
 
 @dataclass
@@ -308,7 +310,9 @@ def _visit(
     relation = "extends" if frame.extends else "references"
     for keyword in _REF_KEYWORDS:
         if keyword in node:
-            walked.refs.append(Ref(frame.owner, node[keyword], relation, context, line, base))
+            walked.refs.append(
+                Ref(frame.owner, node[keyword], relation, context, line, base, keyword)
+            )
     ctx = _Expansion(frame, node, base, line, walked)
     for keyword, value in node.items():
         handler = _HANDLERS.get(keyword)
