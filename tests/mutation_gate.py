@@ -1637,7 +1637,10 @@ MUTATIONS = (
         "clone sync deliberately preserves and every repository in the corpus can "
         "hold one. A refusal anchored at the store root alone passes the corpus copies "
         "through, which is where most of them are",
-        ("test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",),
+        (
+            "test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",
+            "test_extract_json_schema.StageTest.test_input_from_graphify_out_is_refused",
+        ),
     ),
     Mutation(
         "the pipeline parses its own output again",
@@ -1654,6 +1657,7 @@ MUTATIONS = (
             "test_extract_ast.ExtractAstTest.test_a_per_clone_output_directory_is_refused_too",
             "test_extract_ast.ExtractAstTest.test_the_pipelines_own_output_is_refused",
             "test_extract_ast.ExtractAstTest.test_the_refusal_covers_an_explicit_file_list_too",
+            "test_extract_json_schema.StageTest.test_input_from_graphify_out_is_refused",
         ),
     ),
     Mutation(
@@ -3772,8 +3776,23 @@ MUTATIONS = (
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
             "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
+            "test_extract_json_schema.StageTest.test_content_set_without_json_removes_the_layer_and_exits_0",
+            "test_extract_json_schema.StageTest.test_data_json_is_counted_but_not_named_or_skipped",
+            "test_extract_json_schema.StageTest.test_file_outside_repositories_is_named_and_skipped",
+            "test_extract_json_schema.StageTest.test_file_over_max_bytes_is_skipped_by_name",
+            "test_extract_json_schema.StageTest.test_graph_report_note_is_replaced_not_appended",
+            "test_extract_json_schema.StageTest.test_main_writes_both_files_and_records_telemetry",
+            "test_extract_json_schema.StageTest.test_malformed_file_is_named_and_the_run_continues",
+            "test_extract_json_schema.StageTest.test_report_names_what_it_counted",
+            "test_extract_json_schema.StageTest.test_too_deep_file_is_kept_and_named_as_truncated",
+            "test_extract_json_schema.StageTest.test_two_runs_are_byte_identical",
+            "test_extract_json_schema.StageTest.test_undecodable_file_is_named_and_the_run_continues",
+            "test_extract_json_schema.StageTest.test_unresolved_list_is_empty_for_a_fully_resolved_estate",
+            "test_extract_json_schema.StageTest.test_unresolved_list_is_written_sorted",
+            "test_extract_json_schema.StageTest.test_unresolved_references_are_printed_one_per_line",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",
+            "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_the_layer_replaces_keyword_nodes_and_links_across_repositories",
         ),
     ),
     Mutation(
@@ -11768,6 +11787,42 @@ MUTATIONS = (
         (
             "test_mutation_gate_parallel.BudgetIsWallTimeTest.test_workers_divide_the_entries_a_module_is_run_under",
         ),
+    ),
+    Mutation(
+        "json-schema: a declared fork is treated as an owner",
+        "json_schema_refs.py",
+        "    non_forks = [c for c in candidates if c[0] not in forks]",
+        "    non_forks = list(candidates)",
+        "the tie rule must pass over a declared fork, or a copied schema becomes ambiguous and its cross-repository edge vanishes",
+        (
+            "test_json_schema_refs.TieRuleTest.test_declared_fork_is_passed_over",
+            "test_json_schema_refs.TieRuleTest.test_resolve_passes_forks_to_the_rule",
+        ),
+    ),
+    Mutation(
+        "json-schema: graphify's keyword nodes survive beside the layer",
+        "extract_json_schema.py",
+        '        if node.get("_origin") == "ast" and owned_key(node) in owned:',
+        "        if False:",
+        "an owned schema file would be represented twice, once as keyword scaffolding",
+        (
+            "test_extract_json_schema.AddLayerAccountingTest.test_hyperedge_members_removed_with_their_nodes_in_both_slots",
+            "test_extract_json_schema.AddLayerTest.test_keyword_nodes_of_owned_files_are_removed_with_their_edges",
+            "test_extract_json_schema.AddLayerTest.test_removes_keyword_nodes_in_the_store_relative_form",
+            "test_extract_json_schema.AddLayerTest.test_semantic_nodes_on_owned_files_are_kept_and_counted",
+            "test_extract_json_schema.OwnedKeyTest.test_the_wrong_repository_is_not_touched_by_a_look_alike_path",
+            "test_extract_json_schema.StageTest.test_main_writes_both_files_and_records_telemetry",
+            "test_extract_json_schema.StageTest.test_report_names_what_it_counted",
+            "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_the_layer_replaces_keyword_nodes_and_links_across_repositories",
+        ),
+    ),
+    Mutation(
+        "json-schema: layer edges keep input order",
+        "extract_json_schema.py",
+        '    added.sort(key=lambda e: (e["source"], e["target"], e["relation"], e.get("context") or ""))',
+        "    pass",
+        "CLAUDE.md 1.3: two runs over the same estate in a different order must give identical bytes",
+        ("test_extract_json_schema.AddLayerTest.test_layer_edges_are_written_in_key_order",),
     ),
 )
 
