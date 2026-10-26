@@ -1647,6 +1647,8 @@ MUTATIONS = (
             "test_extract_ast.MovementTest.test_a_failed_repository_is_not_recorded_as_zero",
             "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_first_run_keeps_the_counts_of_the_repositories_it_finished",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
         ),
     ),
     Mutation(
@@ -2222,6 +2224,7 @@ MUTATIONS = (
         (
             "test_extract_ast.MovementTest.test_a_failure_does_not_erase_the_baseline_it_would_be_measured_against",
             "test_extract_ast.MovementTest.test_a_run_where_everything_fails_leaves_the_baseline_standing",
+            "test_extract_ast_declared.CountsAsYouGoTest.test_an_interrupted_run_keeps_the_baseline_of_the_repositories_it_never_reached",
         ),
     ),
     Mutation(
@@ -3732,6 +3735,10 @@ MUTATIONS = (
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
+            "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
+            "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_and_accepts_the_new_count",
+            "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_both_input_routes_are_still_the_only_two",
             "test_file_list_route_guidance.TheStageTakesAListRatherThanWalking.test_the_module_never_walks_a_directory",
         ),
