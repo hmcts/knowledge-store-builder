@@ -22,11 +22,13 @@ This module is the pure part: no graph, no filesystem.
 
 from __future__ import annotations
 
+import bisect
 import json
 import json.decoder
 import json.scanner
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -62,22 +64,46 @@ _ABSOLUTE_URI = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 
 
 class SchemaReadError(ValueError):
-    """The text is not valid JSON."""
+    """The text cannot be decoded: not valid JSON, or beyond what the parser accepts."""
+
+
+# Valid JSON can still fail to decode: nesting past the recursion limit raises
+# RecursionError, and an integer over Python's digit limit a plain ValueError.
+# Either is a file this stage cannot read, not a reason to stop the estate.
+_DECODE_ERRORS = (ValueError, RecursionError)
+
+
+def _without_bom(text: str) -> str:
+    return text[1:] if text.startswith("\ufeff") else text
+
+
+def load(text: str) -> object:
+    """Decode `text` with the C parser, without line numbers.
+
+    Recognition needs only the value, and most `.json` in a content set is data,
+    so a file is parsed with line tracking only once it is known to be a schema.
+    """
+    try:
+        return json.loads(_without_bom(text))
+    except _DECODE_ERRORS as exc:
+        raise SchemaReadError(str(exc)) from exc
 
 
 def load_with_lines(text: str) -> tuple[object, dict[int, int]]:
     """Decode `text`; also map `id(obj)` to the 1-based line of each object's `{`."""
-    if text.startswith("\ufeff"):
-        text = text[1:]
+    text = _without_bom(text)
+    # Newline offsets once, searched per object: counting from the start of the
+    # text for every object made the mapping quadratic in the file's size.
+    newlines = [match.start() for match in re.finditer("\n", text)]
     starts: dict[int, int] = {}
     decoder: Any = json.JSONDecoder()
 
     def parse_object(s_and_end, strict, scan_once, object_hook, object_pairs_hook, memo):
-        s, after_brace = s_and_end
+        _s, after_brace = s_and_end
         result = _decoder_module.JSONObject(
             s_and_end, strict, scan_once, object_hook, object_pairs_hook, memo
         )
-        starts[id(result[0])] = s.count("\n", 0, after_brace - 1) + 1
+        starts[id(result[0])] = bisect.bisect_left(newlines, after_brace - 1) + 1
         return result
 
     decoder.parse_object = parse_object
@@ -85,7 +111,7 @@ def load_with_lines(text: str) -> tuple[object, dict[int, int]]:
     decoder.scan_once = _scanner_module.py_make_scanner(decoder)
     try:
         value = decoder.decode(text)
-    except json.JSONDecodeError as exc:
+    except _DECODE_ERRORS as exc:
         raise SchemaReadError(str(exc)) from exc
     return value, starts
 
@@ -135,6 +161,31 @@ _DESCRIPTION_LIMIT = 500
 _ENUM_LIMIT = 20
 _COMBINATORS = ("allOf", "oneOf", "anyOf")
 _REF_KEYWORDS = ("$ref", "$dynamicRef", "$recursiveRef")
+
+# Keywords whose subschemas constrain an instance without describing its shape:
+# a negation, a condition, a dependency, or the values of keys not named. A
+# `properties` beneath one names no field the instance has, so nothing beneath
+# creates a field and no `required` is read there; a `$ref` beneath one is
+# still a `references` edge from the enclosing node. The mode holds for the
+# whole subtree, except inside a definition, which is a named schema in its own
+# right (definitions are read at any depth).
+_REFS_ONLY = frozenset(
+    {
+        "not",
+        "if",
+        "then",
+        "else",
+        "dependencies",
+        "dependentSchemas",
+        "additionalProperties",
+        "patternProperties",
+        "contains",
+        "propertyNames",
+        "additionalItems",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
 
 
 def escape_pointer(token: str) -> str:
@@ -188,6 +239,11 @@ class Walked:
     document: object
     truncated: bool
 
+    @cached_property
+    def entity_pointers(self) -> frozenset[str]:
+        """Every entity's pointer, so a reference lands without a scan of the file."""
+        return frozenset(entity.pointer for entity in self.entities)
+
 
 @dataclass(frozen=True)
 class _EntityInfo:
@@ -213,6 +269,8 @@ class _Frame:
     entity: _EntityInfo | None
     # Names required by the enclosing node and, for allOf, by sibling members.
     inherited: tuple = ()
+    # Beneath a `_REFS_ONLY` keyword: refs are kept, fields are not created.
+    refs_only: bool = False
 
 
 def _reads_id(root_schema: object, keyword: str) -> bool:
@@ -307,7 +365,7 @@ def _visit(
         return
     base = _enter_declarations(node, declared, frame.base, pointer, walked)
     context = "/".join(str(t) for t in frame.own + frame.rel)
-    relation = "extends" if frame.extends else "references"
+    relation = "extends" if frame.extends and not frame.refs_only else "references"
     for keyword in _REF_KEYWORDS:
         if keyword in node:
             walked.refs.append(
@@ -336,13 +394,17 @@ class _Expansion:
         self, sub: object, key: tuple, via: str | None, extends: bool = False, inherited: tuple = ()
     ) -> None:
         f = self.frame
+        refs_only = f.refs_only or key[0] in _REFS_ONLY
         self.children.append(
             _Frame(sub, f.tokens + key, f.owner, f.own, f.rel + key, self.base,
-                   f.depth, via, extends, self.line, None, inherited)
+                   f.depth, via, extends, self.line, None, inherited, refs_only)
         )  # fmt: skip
 
     def entity(self, sub: object, key: tuple, kind: str, name: str, required: bool | None) -> None:
         f = self.frame
+        if f.refs_only and kind == kinds.FIELD:
+            self.plain(sub, key, f.via)
+            return
         if f.depth + 1 > MAX_DEPTH:
             self.walked.truncated = True
             return
@@ -418,7 +480,8 @@ def _on_extends(ctx: _Expansion, keyword: str, value: object) -> None:
         key = ("extends", i) if isinstance(value, list) else ("extends",)
         if isinstance(sub, str):
             context = "/".join(str(t) for t in f.own + f.rel + key)
-            ctx.walked.refs.append(Ref(f.owner, sub, "extends", context, ctx.line, ctx.base))
+            relation = "references" if f.refs_only else "extends"
+            ctx.walked.refs.append(Ref(f.owner, sub, relation, context, ctx.line, ctx.base))
         else:
             ctx.plain(sub, key, f.via, True)
 
@@ -435,8 +498,9 @@ _HANDLERS = {
     "additionalProperties": _on_single,
     "patternProperties": _on_pattern_properties,
     # Further schema-valued keywords. A `$ref` under any of them is a
-    # `references` edge; none creates a node. `dependencies` also holds arrays
-    # of property names, which are not schemas and are skipped on visit.
+    # `references` edge; only `prefixItems` members can hold fields, the rest
+    # are `_REFS_ONLY`. `dependencies` also holds arrays of property names,
+    # which are not schemas and are skipped on visit.
     "prefixItems": _on_tuple,
     "if": _on_single,
     "then": _on_single,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 
 import json_schema_fixtures as fixtures
@@ -230,6 +231,34 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(
             (r.how, r.target.repo, r.target.pointer), ("by-id", "common", "/properties/name")
         )
+
+    def test_landing_in_a_large_single_file_schema_is_not_quadratic(self):
+        """Breaks if each reference scans every entity in its target file: 4,000
+        definitions took 34 s that way. Linear work here is well under a second;
+        the bound is generous so a slow runner cannot flake it.
+
+        Each definition `d<i>` holds field `a` referring to `d<i+1>`, so every
+        reference lands on a definition, hand-derived from the layout."""
+        count = 3_000
+        definitions = {
+            f"d{i}": {"properties": {"a": {"$ref": f"#/definitions/d{(i + 1) % count}"}}}
+            for i in range(count)
+        }
+        document = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "definitions": definitions,
+        }
+        big = refs.Owned(
+            "widgets", "big.json", "meta-schema", json_schema.walk(document, {}, "big.json")
+        )
+        index = refs.Index.build([big])
+        started = time.monotonic()
+        landed = [refs.resolve(index, big, r, NO_FORKS) for r in big.walked.refs]
+        elapsed = time.monotonic() - started
+        self.assertEqual(len(landed), count)
+        self.assertEqual(landed[0].target.pointer, "/definitions/d1")
+        self.assertEqual(landed[-1].target.pointer, "/definitions/d0")
+        self.assertLess(elapsed, 5.0)
 
 
 class IndexTest(unittest.TestCase):

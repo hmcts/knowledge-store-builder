@@ -185,13 +185,12 @@ def _land(owner: Owned, base_pointer: str, fragment: str, how: str, rule: str) -
         found, node = _step(node, token)
         if not found:
             return Resolution(None, "no-such-pointer")
-    best: str | None = None
-    best_length = -1
-    for entity in owner.walked.entities:
-        entity_tokens = _tokens(entity.pointer)
-        if tokens[: len(entity_tokens)] == entity_tokens and len(entity_tokens) > best_length:
-            best, best_length = entity.pointer, len(entity_tokens)
-    if best is None:
-        return Resolution(None, "no-such-pointer")
-    target = Target(owner.repo, owner.rel, best, _pointer(tokens))
-    return Resolution(target, how, rule)
+    # The nearest enclosing entity is the longest prefix of the target that is
+    # one. Looked up per prefix, not found by scanning every entity in the file,
+    # which made a large single-file schema quadratic in its definitions.
+    for end in range(len(tokens), -1, -1):
+        enclosing = _pointer(tokens[:end])
+        if enclosing in owner.walked.entity_pointers:
+            target = Target(owner.repo, owner.rel, enclosing, _pointer(tokens))
+            return Resolution(target, how, rule)
+    return Resolution(None, "no-such-pointer")

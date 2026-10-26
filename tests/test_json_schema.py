@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 
 import json_schema_fixtures as fixtures
@@ -32,6 +33,59 @@ class LoadWithLinesTest(unittest.TestCase):
         """Breaks if a UTF-8 BOM makes a valid file read as malformed."""
         value, _ = json_schema.load_with_lines("\ufeff" + fixtures.PERSON)
         self.assertEqual(value["id"], "http://schemas.example/common/person.json")
+
+    def test_lines_hold_across_a_large_document_in_linear_time(self):
+        """Breaks if a line is miscounted far into a file, or if each object's line
+        is found by rescanning from the start, which made a 1.4 MB file take 8 s.
+
+        The layout puts property `p<i>` on line 4 + i: line 1 is `{`, line 2 the
+        `$schema`, line 3 opens `properties`. About 2.6 MB; linear work takes well
+        under a second, and the bound is generous so a slow runner cannot flake it.
+        """
+        count = 60_000
+        text = (
+            '{\n"$schema": "http://json-schema.org/draft-07/schema#",\n"properties": {\n'
+            + ",\n".join(f'"p{i}": {{"type": "string", "title": "t"}}' for i in range(count))
+            + "\n}\n}\n"
+        )
+        started = time.monotonic()
+        value, lines = json_schema.load_with_lines(text)
+        elapsed = time.monotonic() - started
+        properties = value["properties"]
+        self.assertEqual(lines[id(value)], 1)
+        self.assertEqual(lines[id(properties)], 3)
+        for i in (0, 1, 2, 9_999, 30_000, count - 1):
+            self.assertEqual(lines[id(properties[f"p{i}"])], 4 + i)
+        self.assertLess(elapsed, 5.0)
+
+    def test_deep_nesting_is_a_read_error_not_a_crash(self):
+        """Breaks if nesting past the recursion limit raises RecursionError, which
+        `read_owned` does not catch, so one such file stops the whole stage."""
+        deep = '{"a": ' * 5_000 + "1" + "}" * 5_000
+        with self.assertRaises(json_schema.SchemaReadError):
+            json_schema.load_with_lines(deep)
+        array = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(json_schema.SchemaReadError):
+            json_schema.load(array)
+
+    def test_integer_past_the_digit_limit_is_a_read_error_not_a_crash(self):
+        """Breaks if an integer over Python's 4,300-digit conversion limit raises a
+        plain ValueError out of the parse, which `read_owned` does not catch."""
+        text = '{"a": ' + "1" * 5_000 + "}"
+        with self.assertRaises(json_schema.SchemaReadError):
+            json_schema.load_with_lines(text)
+        with self.assertRaises(json_schema.SchemaReadError):
+            json_schema.load(text)
+
+    def test_load_accepts_a_bom_and_matches_json_loads(self):
+        """Breaks if the fast parse used to decide recognition rejects a BOM, or
+        decodes differently from the line-tracking parse it stands in for."""
+        self.assertEqual(
+            json_schema.load("\ufeff" + fixtures.WIDGET_CREATED),
+            json.loads(fixtures.WIDGET_CREATED),
+        )
+        with self.assertRaises(json_schema.SchemaReadError):
+            json_schema.load('{"a": ')
 
 
 class RecogniseTest(unittest.TestCase):
@@ -429,6 +483,172 @@ class WalkTest(unittest.TestCase):
                 ("#/$defs/F", "dependentSchemas/x"),
                 ("#/$defs/G", "dependencies/y"),
             ],
+        )
+
+    def shape(self, doc: dict) -> tuple[list, list]:
+        w = json_schema.walk(doc, {}, "x.json")
+        entities = sorted((e.pointer, e.kind, e.metadata.get("required")) for e in w.entities)
+        return entities, sorted((r.owner, r.ref, r.relation, r.context) for r in w.refs)
+
+    def test_properties_under_not_are_not_fields(self):
+        """Breaks if `not: {properties, required}` turns the forbidden name into a
+        field of the schema, marked required, which says the opposite of the schema."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "properties": {"name": {}},
+            "not": {
+                "properties": {"forbidden": {"$ref": "#/definitions/F"}},
+                "required": ["forbidden"],
+            },
+            "definitions": {"F": {}},
+        }
+        self.assertEqual(
+            self.shape(doc),
+            (
+                [("", "schema", None), ("/definitions/F", "definition", None),
+                 ("/properties/name", "field", False)],
+                [("", "#/definitions/F", "references", "not/properties/forbidden")],
+            ),
+        )  # fmt: skip
+
+    def test_properties_under_a_conditional_are_not_fields(self):
+        """Breaks if the `if` test's properties, or a `then` branch's, become fields
+        of the schema: they describe a case, not the shape every instance has."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "if": {"properties": {"kind": {"const": "card"}}, "required": ["kind"]},
+            "then": {"properties": {"card": {"$ref": "#/definitions/Card"}}},
+            "else": {"properties": {"iban": {}}},
+            "definitions": {"Card": {}},
+        }
+        self.assertEqual(
+            self.shape(doc),
+            (
+                [("", "schema", None), ("/definitions/Card", "definition", None)],
+                [("", "#/definitions/Card", "references", "then/properties/card")],
+            ),
+        )
+
+    def test_properties_of_a_map_value_schema_are_not_fields_of_the_map(self):
+        """Breaks if `additionalProperties` on a map field contributes the value
+        schema's properties as fields: the map's keys are not those names."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "properties": {
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "properties": {"text": {"$ref": "#/definitions/Text"}},
+                        "required": ["text"],
+                    },
+                }
+            },
+            "definitions": {"Text": {}},
+        }
+        self.assertEqual(
+            self.shape(doc),
+            (
+                [("", "schema", None), ("/definitions/Text", "definition", None),
+                 ("/properties/labels", "field", False)],
+                [("/properties/labels", "#/definitions/Text", "references",
+                  "properties/labels/additionalProperties/properties/text")],
+            ),
+        )  # fmt: skip
+
+    def test_properties_under_dependencies_are_not_fields(self):
+        """Breaks if a dependency schema's properties become fields, required ones
+        included: they apply only when the named property is present."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "properties": {"card": {}},
+            "dependencies": {
+                "card": {
+                    "properties": {"billing": {"$ref": "#/definitions/Address"}},
+                    "required": ["billing"],
+                }
+            },
+            "definitions": {"Address": {}},
+        }
+        self.assertEqual(
+            self.shape(doc),
+            (
+                [("", "schema", None), ("/definitions/Address", "definition", None),
+                 ("/properties/card", "field", False)],
+                [("", "#/definitions/Address", "references",
+                  "dependencies/card/properties/billing")],
+            ),
+        )  # fmt: skip
+
+    def test_every_refs_only_keyword_creates_no_field_and_keeps_its_ref(self):
+        """Breaks if any keyword ruled refs-only creates a field beneath it, or loses
+        a `$ref` beneath it, or the mode stops at the first level of nesting."""
+        for keyword in (
+            "not", "if", "then", "else", "contains", "propertyNames",
+            "additionalItems", "unevaluatedItems", "unevaluatedProperties",
+            "additionalProperties",
+        ):  # fmt: skip
+            with self.subTest(keyword=keyword):
+                doc = {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    keyword: {"items": {"properties": {"a": {"$ref": "#/definitions/A"}}}},
+                }
+                self.assertEqual(
+                    self.shape(doc),
+                    (
+                        [("", "schema", None)],
+                        [("", "#/definitions/A", "references", f"{keyword}/items/properties/a")],
+                    ),
+                )
+        for keyword in ("dependentSchemas", "patternProperties"):
+            with self.subTest(keyword=keyword):
+                doc = {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    keyword: {"k": {"properties": {"a": {"$ref": "#/definitions/A"}}}},
+                }
+                self.assertEqual(
+                    self.shape(doc),
+                    (
+                        [("", "schema", None)],
+                        [("", "#/definitions/A", "references", f"{keyword}/k/properties/a")],
+                    ),
+                )
+
+    def test_an_all_of_ref_under_not_is_a_reference_not_an_extension(self):
+        """Breaks if `not: {allOf: [{$ref}]}` is written as `extends`: a schema that
+        must not match the base does not extend it."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "not": {"allOf": [{"$ref": "#/definitions/Base"}]},
+        }
+        self.assertEqual(
+            self.shape(doc)[1], [("", "#/definitions/Base", "references", "not/allOf/0")]
+        )
+
+    def test_a_definition_under_a_refs_only_keyword_is_still_a_definition(self):
+        """Breaks if a definition nested under `not` is dropped (definitions are read
+        at any depth), or if its own properties are not its fields."""
+        doc = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "not": {"definitions": {"N": {"properties": {"x": {}}, "required": ["x"]}}},
+        }
+        self.assertEqual(
+            self.shape(doc)[0],
+            [("", "schema", None), ("/not/definitions/N", "definition", None),
+             ("/not/definitions/N/properties/x", "field", True)],
+        )  # fmt: skip
+
+    def test_tuple_and_combinator_members_still_create_fields(self):
+        """Breaks if `prefixItems`, `items` or a combinator is made refs-only: their
+        members describe the instance, so their properties are fields."""
+        doc = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "prefixItems": [{"properties": {"a": {}}}],
+            "items": {"properties": {"b": {}}},
+            "anyOf": [{"properties": {"c": {}}}],
+        }
+        self.assertEqual(
+            [p for p, kind, _ in self.shape(doc)[0] if kind == "field"],
+            ["/anyOf/0/properties/c", "/items/properties/b", "/prefixItems/0/properties/a"],
         )
 
     def test_id_is_read_under_an_unknown_schema_uri(self):
