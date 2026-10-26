@@ -99,15 +99,16 @@ refreshing generally, are in the operator guide §7.
 graphify declines some JSON Schema documents and keyword-walks the rest into
 nodes named after keywords (`type`, `properties`), with no `$ref` followed. The
 `json-schema` stage reads them itself (`src/knowledgestore/extract_json_schema.py`),
-the one place this library extracts rather than enriches. It reads JSON Schema
-and no other format, and it retires when graphify extracts schemas semantically;
+the one stage that replaces graphify's own output for a format graphify does
+read. It reads JSON Schema and no other format, and it retires when graphify extracts schemas semantically;
 `CLAUDE.md` §9 states the exception.
 
 It reads the merged graph and the extractor's content set, adds a layer under
 the origin `json-schema`, and rebuilds that layer from scratch on every run, as
 `packages` does. Nodes have the kinds `schema` (one per file), `definition` (one
 per entry under `definitions` or `$defs`) and `field` (one per property), joined
-by `contains`; `$ref` becomes `references`, and `extends` becomes `extends`. Each
+by `contains`. A `$ref` becomes `references`, except that a `$ref` directly under
+an `allOf` member, and a `$ref` under the `extends` keyword, become `extends`. Each
 reference edge carries the keyword path it came from as `context`. A property's
 own JSON Schema `format` keyword is stored as `schema_format`, because `format`
 on a node says which parser wrote it.
@@ -157,8 +158,8 @@ order, and never by name:
 5. otherwise the reference is `ambiguous`: no edge is written, and every
    candidate is listed as `repo:path`, sorted.
 
-Rule 4 honours the fork set `relationships` uses once `KSB_FORK_REPOS` lands
-(#478). Until then the stage declares no forks, so copies that rule 3 does not
+Rule 4 is written for the fork set that #478 adds (`KSB_FORK_REPOS`), which does
+not exist yet. Until it lands the stage declares no forks, so copies that rule 3 does not
 settle are reported `ambiguous`. Linking to every copy was rejected: it would
 assert several relationships where the evidence supports one, and make each
 widely copied schema a hub next to every repository that copies it.
@@ -166,8 +167,10 @@ widely copied schema a hub next to every repository that copies it.
 **What it cannot resolve** is counted by reason: `meta-schema` (a json-schema.org
 meta-schema, expected), `external` (an absolute URI no file declares),
 `ambiguous`, `no-such-pointer` (the file was found and the pointer names nothing
-in it), `unrecognised-target` (a relative path to a missing file, or one that is
-not a schema) and `malformed`. The report prints the first 20, and
+in it), `unrecognised-target` (a relative path to a missing file, to a file that
+is not a schema, or one that escapes the repository) and `malformed` (a `$ref`
+that is not a string or cannot be parsed, and any `$dynamicRef` or
+`$recursiveRef`, which are never resolved). The report prints the first 20, and
 `--unresolved PATH` writes all of them as JSON. **A reference that is not in the
 graph is not a reference that does not exist**: read the unresolved count before
 reading an absence.
@@ -175,8 +178,8 @@ reading an absence.
 **What it skips.** A file that is not valid UTF-8 JSON, a file over `--max-bytes`
 (8 MiB by default) and a file outside the repositories are named and left out.
 A file whose walk stopped at the depth limit of 32 stays in the layer and is
-named. The run exits 1 with no graph, a stale graph, no content set, or input
-from inside `graphify-out`, and 0 otherwise.
+named. The run exits 1 with no graph, a stale graph, no content set, a content set
+that names no files, or input from inside `graphify-out`, and 0 otherwise.
 
 It records `json_schema.*` measurements in `knowledge/telemetry.json` and adds a
 marker-bounded note to `GRAPH_REPORT.md`, as `gherkin` does.

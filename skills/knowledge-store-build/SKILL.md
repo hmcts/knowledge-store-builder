@@ -798,8 +798,8 @@ knowledgestore source-urls     # a `url` on each node: its file at the build com
 knowledgestore manifest        # the relationships are a layer: re-run it
 ```
 
-`json-schema` reads JSON Schema documents itself, the one format this library
-extracts, and owns every file it recognises as one. **That is an output change
+`json-schema` reads JSON Schema documents itself, replacing graphify's output
+for a format graphify does read, and owns every file it recognises as one. **That is an output change
 you will see:** graphify's keyword nodes for those files are removed from the
 merged graph (a node whose origin is the AST pass; semantic-pass nodes on the
 same file are kept and counted), and the stage's own nodes replace them, with a
@@ -812,8 +812,8 @@ repository, then the only one outside a declared fork. Otherwise the reference
 is `ambiguous`: no edge is written and every candidate is listed. Until
 `KSB_FORK_REPOS` lands (#478) no repository counts as a fork, so such copies are
 reported `ambiguous`. **Read the unresolved count and its reasons**
-(`meta-schema` is expected; `external`, `ambiguous` and `no-such-pointer` are
-the gaps), and pass `--unresolved PATH` to write the full list. Files it
+(`meta-schema` is expected; the rest, such as `external`, `ambiguous` and
+`no-such-pointer`, are the gaps), and pass `--unresolved PATH` to write the full list. Files it
 skipped, and files whose walk stopped at the depth limit, are named in the
 report. See [docs/how-it-works.md](../../docs/how-it-works.md#the-json-schema-layer).
 

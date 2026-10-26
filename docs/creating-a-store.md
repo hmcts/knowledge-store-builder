@@ -468,12 +468,12 @@ Add JSON Schema documents, which graphify declines or keyword-walks:
 knowledgestore json-schema --unresolved unresolved.json
 ```
 
-It reads the content set, so write `graphify-out/.graphify_detect.json` first.
+It reads the content set, so [write the detect result](#write-the-detect-result-then-expose-the-content-set) first.
 It adds a node per schema, definition and property with an edge for each `$ref`
 it can resolve, and **removes graphify's keyword nodes for those files from the
 merged graph**. Read the unresolved count in the report: `meta-schema` is
-expected, while `external`, `ambiguous` and `no-such-pointer` are references the
-store cannot follow, and `unresolved.json` lists each. Two clones that declare
+expected, while the others (`external`, `ambiguous`, `no-such-pointer`,
+`unrecognised-target` and `malformed`) are references the store cannot follow, and `unresolved.json` lists each. Two clones that declare
 the same schema id are `ambiguous` unless one is the referring file's own
 repository. The [JSON Schema layer](how-it-works.md#the-json-schema-layer) lists
 what it recognises and the resolution order.
