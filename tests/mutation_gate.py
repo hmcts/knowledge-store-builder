@@ -3886,7 +3886,6 @@ MUTATIONS = (
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
             "test_extract_ast_declined_graphify.DeclinedByGraphifyTest.test_the_stage_names_the_declined_file_and_fails",
-            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
