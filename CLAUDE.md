@@ -484,7 +484,10 @@ study.
   extraction with a path like `repositories/<name>` prefixes every
   `source_file` with `repositories/<name>/`, which silently breaks the
   file-to-ticket join — the intent index is keyed on repo-relative paths. The
-  only symptom is that nodes lose their tickets.
+  only symptom is that nodes lose their tickets. `extract-ast` obeys this: it
+  roots the extractor at each clone and writes the per-repository route's shape
+  (`<repo>::<id>` ids, repo-relative `source_file`, `repo` set), so the two routes
+  are interchangeable. Anything that drives the extractor itself must do the same.
 - **6.3 Community ids are not stable across re-clustering.** Community summaries
   are keyed by id, so re-clustering strands them. Remap or regenerate; never
   assume the old file still applies. The shipped criterion is

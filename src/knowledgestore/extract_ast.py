@@ -38,6 +38,24 @@ it is written even when repositories failed - and the exit code is still
 non-zero, because a partial layer that reports success is how a store commits a
 hole.
 
+## The shape it writes: the per-repository route's (#512)
+
+Each repository is extracted with its clone as the extractor's root, which is
+CLAUDE.md 6.2's rule, so ids and `source_file` come back repository-relative, exactly
+as `graphify update .` inside the clone writes them. The stage then adds what
+`graphify merge-graphs` adds: `<repo>::<id>` ids and edge endpoints, `repo`, and
+`local_id` holding the un-prefixed id. It does not rewrite graphify's strings after
+the fact; the one rewrite is that prefix, over ids graphify already made.
+
+The consequence is that every consumer reads one shape whichever route built the
+graph. The earlier form - store-relative `source_file`, ids derived from the store
+path, `repo` unset - matched nothing in `intent[repo][source_file]`, so every node
+lost its tickets. A store switching routes re-keys nothing.
+
+The per-file record is unchanged on disk: its keys stay store-relative
+(`repositories/<repo>/<path>`), so an existing baseline stays valid. The join from a
+node to its content-set file is `(repo, source_file)` to that key, in `node_key`.
+
 ## Nodes per repository, against the last run
 
 Reconciling this stage's own count against the content set it was handed catches
@@ -172,6 +190,7 @@ import argparse
 import contextlib
 import json
 import os
+import posixpath
 import signal
 import sys
 import time
@@ -457,6 +476,17 @@ def declined_path(name: str, entry: str) -> str:
     return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
 
 
+def unread_path(name: str, entry: str) -> str:
+    """A `failed_sources` entry as the store-relative path the record is keyed by.
+
+    graphify spells it relative to its root, which is now the clone, so a relative entry
+    is placed under `repositories/<repo>/`; an absolute one already names its place.
+    """
+    if not name or Path(entry).is_absolute():
+        return entry
+    return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{name}/{entry}")
+
+
 @dataclass
 class _EstateRun:
     """What `extract_estate` accumulates across repositories, in the order it returns it."""
@@ -468,6 +498,81 @@ class _EstateRun:
     skipped: "list[str]" = field(default_factory=list)
     declined: "set[str]" = field(default_factory=set)
     unbounded_reported: bool = False
+
+
+def namespace_repository(result: dict, name: str) -> dict:
+    """One repository's extraction in the shape `graphify merge-graphs` gives it (#512).
+
+    The extractor ran with the clone as its root, so ids and `source_file` are already
+    repository-relative - what `graphify update .` inside the clone writes. What remains
+    is what `merge-graphs` adds: the `<repo>::` prefix on every node id and both edge
+    endpoints, the `repo` attribute, and `local_id` holding the un-prefixed id. Without
+    them a node names `repositories/<repo>/...` and no repository, and the file-to-ticket
+    join (`intent[repo][source_file]`) matches nothing. The corpus-root group has no
+    repository, so nothing is added.
+    """
+    if not name:
+        return result
+    prefix = f"{name}::"
+    nodes = []
+    for node in result.get("nodes") or []:
+        moved = dict(node)
+        moved["id"] = f"{prefix}{node.get('id')}"
+        moved["local_id"] = node.get("id")
+        moved["repo"] = name
+        nodes.append(moved)
+    edges = []
+    for edge in result.get("edges") or []:
+        moved = dict(edge)
+        moved["source"] = f"{prefix}{edge.get('source')}"
+        moved["target"] = f"{prefix}{edge.get('target')}"
+        edges.append(moved)
+    return {**result, "nodes": nodes, "edges": edges}
+
+
+def clone_root(name: str, root: Path) -> Path:
+    """The directory the extractor treats as its root for one group.
+
+    A repository's own clone, so that ids and `source_file` come out repository-relative
+    (CLAUDE.md 6.2); the corpus-root group keeps the store root.
+    """
+    return config.REPOSITORIES_DIR / name if name else root
+
+
+def under_clone(path: Path, clone: Path) -> Path:
+    """`path` spelled under `clone`, lexically, whichever spelling of the store it arrived in.
+
+    The content set can name a file through a symlink to the store, while the extractor
+    resolves its root: a file it cannot place under that root is spelled `../<link>/...`,
+    which is no repository-relative path at all. Re-rooting the path onto the clone, and
+    never resolving the file itself, keeps a symlinked file as the file it is.
+    """
+    for base in (clone, clone.resolve()):
+        for candidate in (path, path.parent.resolve() / path.name):
+            try:
+                return clone / candidate.relative_to(base)
+            except ValueError:
+                continue
+    return path
+
+
+def file_key(name: str, path: Path) -> str:
+    """A content-set file's store-relative key, built from its repository and its place in it.
+
+    Not `store_paths.relative(path)` alone, which cuts a path at the first `repositories/`
+    segment and so mis-keys a store kept under a directory of that name, or reached
+    through a link. Built as `node_key` builds it - `repositories/<repo>/<path in the
+    clone>` - so a file and the nodes extracted from it meet on one spelling.
+    """
+    if not name:
+        return store_paths.relative(path)
+    clone = config.REPOSITORIES_DIR / name
+    placed = under_clone(path, clone)
+    try:
+        inside = placed.relative_to(clone).as_posix()
+    except ValueError:
+        return store_paths.relative(path)
+    return f"{config.REPOSITORIES_DIR.name}/{name}/{inside}"
 
 
 def _bounded_extract(extractor, files: "list[Path]", root: Path, timeout: int, run: _EstateRun):
@@ -504,7 +609,7 @@ def _absorb(result: dict, name: str, label: str, run: _EstateRun) -> "tuple[int,
     # so "extracted" and "extracted anything" are different facts and only one
     # of them was being reported.
     unread = [str(f) for f in (result.get("failed_sources") or [])]
-    run.skipped.extend(unread)
+    run.skipped.extend(unread_path(name, entry) for entry in unread)
     run.declined.update(declined_path(name, str(f)) for f in result.get("skipped_sources") or [])
     run.nodes.extend(found)
     run.edges.extend(relations)
@@ -544,7 +649,11 @@ def extract_estate(
         label = labels[position]
         started = time.monotonic()
         try:
-            result = _bounded_extract(extractor, files, root, timeout, run)
+            clone = clone_root(name, root)
+            handed = [under_clone(path, clone) for path in files] if name else files
+            result = namespace_repository(
+                _bounded_extract(extractor, handed, clone, timeout, run), name
+            )
         except RepositoryTimeout as error:
             # A timeout is a failure, not a separate outcome: named, counted, the
             # partial layer kept, and the exit code carries it. The only reason to
@@ -599,13 +708,28 @@ def file_counts_path(layer: Path) -> Path:
     return layer.with_name(f"{layer.stem}_file_counts.json")
 
 
+def node_key(node: dict) -> str:
+    """A node's content-set key, or "" when it names no file.
+
+    A node with `repo` set has a repository-relative `source_file`, so the store-relative
+    key the record uses is that path under `repositories/<repo>/`. One without is a
+    corpus-root node, spelled relative to the store.
+    """
+    source = node.get("source_file")
+    if not isinstance(source, str) or not source:
+        return ""
+    repo = node.get("repo")
+    if isinstance(repo, str) and repo and not Path(source).is_absolute():
+        return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{repo}/{source}")
+    return source_key(source)
+
+
 def _nodes_by_source(layer: dict) -> "dict[str, int]":
     """Nodes per content-set key, from each node's `source_file`; nodes without one skipped."""
     found: dict[str, int] = {}
     for node in layer["nodes"]:
-        source = node.get("source_file") if isinstance(node, dict) else None
-        if isinstance(source, str) and source:
-            key = source_key(source)
+        key = node_key(node) if isinstance(node, dict) else ""
+        if key:
             found[key] = found.get(key, 0) + 1
     return found
 
@@ -630,7 +754,7 @@ def nodes_per_file(
         if (name or CORPUS_ROOT) in failed:
             continue
         for path in files:
-            key = store_paths.relative(path)
+            key = file_key(name, path)
             counts[key] = found.get(key, 0)
     sourced = sum(found.values())
     matched = sum(n for key, n in found.items() if key in counts)
@@ -668,7 +792,7 @@ def file_record(
         key: before[key]
         for name, files in groups.items()
         if (name or CORPUS_ROOT) in failed
-        for key in (store_paths.relative(path) for path in files)
+        for key in (file_key(name, path) for path in files)
         if key in before
     }
     merged = {**carried, **now, **dict(keep)}

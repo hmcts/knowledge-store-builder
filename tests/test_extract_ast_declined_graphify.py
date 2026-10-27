@@ -167,6 +167,29 @@ class SymlinkedStoreRootTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertEqual(len(record), 1, record)
         self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
 
+    def test_a_corpus_root_file_matches_content_set_keys_under_a_symlinked_root(self):
+        """Catches a corpus-root node keyed on graphify's `../<link>/...` spelling.
+
+        A file outside every clone is extracted with the store root as graphify's root,
+        so it is the case that still arrives spelled relative to the resolved root. Keyed
+        as it arrives it matches no content-set path, counts 0, and the stage refuses an
+        instrument mismatch; a passing run that counted the file is the evidence the
+        keys met.
+        """
+        tools = self.root / "tools"
+        tools.mkdir()
+        (tools / "helper.py").write_text(CODE, encoding="utf-8")
+        detect = self._detect([self.link / "tools" / "helper.py"])
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = extract_ast.main(["--detect", str(detect)])
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        record = json.loads(
+            (self.root / "graphify-out" / ".graphify_ast_file_counts.json").read_text("utf-8")
+        )
+        self.assertEqual(len(record), 1, record)
+        self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
+
 
 _TEMP = Path(tempfile.gettempdir())
 
@@ -181,14 +204,16 @@ class LossySpellingTest(_DeclaredStoreCase, unittest.TestCase):
     refusal is observed on every platform by `test_extract_ast_vanished`, through a
     stub spelling `source_file` the way graphify was seen to here."""
 
-    def test_a_spelling_graphify_cannot_round_trip_refuses_rather_than_record_zeros(self):
-        """Catches the guard writing zeros it would then trust: the reviewer's failure.
+    def test_a_store_behind_two_links_is_still_counted_rather_than_recorded_as_zeros(self):
+        """Catches the record going all-zero, or refusing, behind a doubly-linked store.
 
         Observed in graphify 0.9.80 and 0.9.94: with the store's link sitting under a
-        temp directory that is itself a link (`/var` to `/private/var`), graphify
-        spells `source_file` as the bare file name, `app.py`. No path can be rebuilt
-        from that. The stage must refuse as an instrument mismatch and write no
-        record, because a record of zeros would read as a clean baseline.
+        temp directory that is itself a link (`/var` to `/private/var`) and the
+        extractor rooted at the store, `source_file` came back as the bare file name,
+        `app.py`, from which no path could be rebuilt, so the stage had to refuse. The
+        extractor is now rooted at the clone and handed paths under it, so the same
+        file comes back repository-relative and is counted: a record naming it with
+        a non-zero count is the evidence the join held.
         """
         holder = tempfile.TemporaryDirectory()
         self.addCleanup(holder.cleanup)
@@ -202,9 +227,12 @@ class LossySpellingTest(_DeclaredStoreCase, unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             code = extract_ast.main(["--detect", str(detect)])
-        self.assertEqual(code, 1, out.getvalue() + err.getvalue())
-        self.assertIn("instrument mismatch", err.getvalue())
-        self.assertFalse((self.root / "graphify-out" / ".graphify_ast_file_counts.json").exists())
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        record = json.loads(
+            (self.root / "graphify-out" / ".graphify_ast_file_counts.json").read_text("utf-8")
+        )
+        self.assertEqual(list(record), ["repositories/orders-svc/app.py"])
+        self.assertGreater(record["repositories/orders-svc/app.py"], 0)
 
 
 if __name__ == "__main__":

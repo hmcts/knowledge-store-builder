@@ -26,8 +26,8 @@ from test_extract_ast_declared import _DeclaredStoreCase  # noqa: E402
 class _PerFile:
     """graphify's extract call: `nodes[name]` nodes for each file whose name is listed.
 
-    Nodes carry `source_file` store-relative, as graphify writes it with the store
-    root as `cache_root`. `declined` names files to report in `skipped_sources`,
+    Nodes carry `source_file` relative to `cache_root`, which the stage sets to the
+    clone, as graphify writes it. `declined` names files to report in `skipped_sources`,
     the key graphify 0.9.94 added for files an extractor declines by design, in the
     spelling observed from it: the absolute path it was given.
     """
@@ -50,14 +50,14 @@ class _PerFile:
             raise RuntimeError("unparseable grammar")
         found = []
         for path in files:
-            relative = Path(path).relative_to(self.root).as_posix()
+            relative = Path(path).relative_to(cache_root).as_posix()
             for n in range(self.nodes.get(Path(path).name, 0)):
                 found.append({"id": f"{relative}#{n}", "source_file": self.spell(relative)})
         # The absolute path the extractor was handed, verbatim: what graphify 0.9.94
         # was observed to return, whether `cache_root` is the store or the clone.
         skipped = [str(path) for path in files if Path(path).name in self.declined]
         unread = [
-            Path(path).relative_to(self.root).as_posix()
+            Path(path).relative_to(cache_root).as_posix()
             for path in files
             if Path(path).name in self.unread
         ]
@@ -210,14 +210,18 @@ class VanishedFilesTest(_DeclaredStoreCase, unittest.TestCase):
     def test_a_source_file_join_that_misses_refuses_and_writes_no_record(self):
         """Catches the instrument measuring a neighbour: an all-zero record never fires.
 
-        Every node names a `source_file` spelled as the bare file name - what graphify
+        Every node names a `source_file` spelled outside its clone - the shape graphify
         0.9.80 and 0.9.94 were observed to write for a store under a doubly-symlinked
         path - which no rule can map back to a content-set path, so every file would
         count 0. The stage refuses and writes no record.
         """
         detect = self._store("schema.json", "main.py")
         code, out, err = self._run(
-            _PerFile(self.root, {"schema.json": 3, "main.py": 2}, spell=lambda r: Path(r).name),
+            _PerFile(
+                self.root,
+                {"schema.json": 3, "main.py": 2},
+                spell=lambda r: f"../elsewhere/{Path(r).name}",
+            ),
             ["--detect", str(detect)],
         )
         self.assertEqual(code, 1, out + err)

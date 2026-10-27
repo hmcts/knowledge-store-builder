@@ -566,7 +566,13 @@ knowledgestore extract-ast
 ```
 
 `extract-ast` writes `graphify-out/.graphify_ast.json`, the file `merge-layers`
-reads. The `[ast]` extra installs the third-party parser; the stage refuses to
+reads. It extracts each repository from inside its clone and writes the shape the
+per-repository `graphify update .` and `merge-graphs` route writes: node ids as
+`<repo>::<id>`, a repository-relative `source_file`, and `repo` set, so the
+file-to-ticket join matches and a store can switch routes without re-keying. A layer an
+earlier release wrote carried store-relative paths and no `repo`; re-run `extract-ast`
+to replace it. The per-file record `.graphify_ast_file_counts.json` keeps its
+store-relative keys, so its baseline stays valid. The `[ast]` extra installs the third-party parser; the stage refuses to
 run without it. It reads the content set from
 `graphify-out/.graphify_detect.json`, so write that first, as above.
 

@@ -36,7 +36,10 @@ SQL = "CREATE TABLE accounts (id INT PRIMARY KEY, name TEXT);\n"
 @needs_graphify
 class GrammarsTest(_StoreCase, unittest.TestCase):
     def _extract(self, *names: str) -> set[str]:
-        """Run the real stage over one repository holding `names`; the layer's source files."""
+        """Run the real stage over one repository holding `names`; the layer's source files.
+
+        Repository-relative, as graphify writes them from inside the clone.
+        """
         files = []
         for name in names:
             path = self._repo_file("repo-a", name)
@@ -59,12 +62,12 @@ class GrammarsTest(_StoreCase, unittest.TestCase):
     def test_terraform_yields_nodes(self):
         """Catches `tree-sitter-hcl` missing: a `.tf` file then extracts to no nodes."""
         sources = self._extract("main.tf")
-        self.assertIn("repositories/repo-a/main.tf", sources)
+        self.assertIn("main.tf", sources)
 
     def test_sql_yields_nodes(self):
         """Catches `tree-sitter-sql` missing: a `.sql` file then extracts to no nodes."""
         sources = self._extract("schema.sql")
-        self.assertIn("repositories/repo-a/schema.sql", sources)
+        self.assertIn("schema.sql", sources)
 
 
 if __name__ == "__main__":
