@@ -138,6 +138,21 @@ class TheTwoGreenStatesAreNotTheSameStateTest(unittest.TestCase):
         self.assertNotIn(summary.NOT_LOOKED_AT, text)
         self.assertNotIn("did not run", text)
 
+    def test_a_verified_run_says_where_an_under_described_entry_was_reported(self):
+        """Catches the verified verdict hiding that legs may have warned.
+
+        A leg that finds only an under-described entry exits 0, so the summary sees
+        `success` and cannot know whether any leg warned. It must say where to look,
+        or a green run is read as "every entry names everything that observes it" -
+        a claim about an artefact the summary never read. The pointer is a property
+        of the verified verdict only; the other two have no legs to have warned.
+        """
+        verified = rendered(summary.state("true", "success"))
+
+        self.assertIn("MAPPING WARNING", verified)
+        self.assertIn("annotations", verified)
+        self.assertNotIn("MAPPING WARNING", rendered(summary.state("false", "skipped")))
+
     def test_the_three_verdicts_cannot_be_confused(self):
         """What stops the two checks above going vacuous. They separate the states by
         their words, so a rewording that made one word a substring of another -

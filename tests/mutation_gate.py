@@ -39,8 +39,10 @@ only named module was the one holding them (#274). Those guards are named in
 
 The three slow modes are what keep the mapping honest, and none runs in the
 `tests` job: `--derive-mapping` fills in a new entry from a full suite run,
-`--verify-mapping` applies every entry against the whole suite and refuses a
-named set that does not match the tests that failed, and `--isolate` re-runs
+`--verify-mapping` applies every entry against the whole suite, refuses a named
+set that claims a test which did not fail (or that nothing observes) and only
+warns of one that omits a test which did - the defect is observed either way, so
+that loses no protection - and `--isolate` re-runs
 each named observer by itself. The `tests` workflow runs the second one on its
 schedule and on `workflow_dispatch`, sharded over four runners with
 `--shard N/M` and summarised by one job that fails if any of them did: it costs
@@ -140,6 +142,7 @@ import io
 import json
 import os
 import queue
+import shlex
 import shutil
 import signal
 import socket
@@ -3742,6 +3745,69 @@ MUTATIONS = (
         "turn the nightly `--verify-mapping` red for days after the merge",
         (
             "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_that_stopped_observing_fails_the_sweep_beside_one_that_did",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_the_fast_sweep_reads_a_skipped_named_test_the_same_way",
+        ),
+    ),
+    Mutation(
+        "an under-described mapping fails the run",
+        "tests/mutation_gate.py",
+        "        return self.survivor " + "or bool(self.silent)",
+        "        return self.survivor " + "or bool(self.silent) or bool(self.unnamed)",
+        "a test that fails under an entry and is not named leaves the defect observed, so "
+        "failing the run over it turned 26 entries red after two merges added tests to "
+        "existing modules while nothing was unprotected",
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_test_that_observes_and_is_not_named_warns_and_still_passes",
+        ),
+    ),
+    Mutation(
+        "an over-claimed observer stops failing the run",
+        "tests/mutation_gate.py",
+        "        silent=tuple(sorted(quiet " + "- excused)),",
+        "        silent=(),",
+        "a named test that does not fail is protection the entry claims and nothing gives; "
+        "softening it with the under-description warning hides a lost observer",
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_skipped_here_with_nothing_else_failing_is_still_a_failure",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_that_stopped_observing_fails_the_sweep_beside_one_that_did",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_an_entry_naming_a_test_that_does_not_fail_is_an_overclaim_and_fails",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_the_verifier_disagrees_when_a_named_test_stops_failing_inside_a_module_that_does",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_the_verifier_refuses_a_mapping_that_names_a_test_which_does_not_observe",
+        ),
+    ),
+    Mutation(
+        "a skipped observer excuses an entry nothing observed",
+        "tests/mutation_gate.py",
+        "excused = quiet & skipped_set if named_set " + "& failed_set else set()",
+        "excused = quiet & skipped_set",
+        "a skip means not asked here, so an entry whose every named test was skipped was "
+        "observed by nothing; excusing it lets a mapping go unchecked on any runner that "
+        "skips its tests",
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_skipped_here_with_nothing_else_failing_is_still_a_failure",
+        ),
+    ),
+    Mutation(
+        "a skipped observer fails every runner that skips it",
+        "tests/mutation_gate.py",
+        "excused = quiet & skipped_set if named_set " + "& failed_set else set()",
+        "excused = set()",
+        "a platform-gated observer is skipped on a runner without the platform; two entries "
+        "went red from a macOS-only test that CI skips although another named test failed",
+        (
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_a_named_test_skipped_here_beside_one_that_fails_is_a_note_and_passes",
+            "test_mutation_gate_mapping.MutationGateMappingTest.test_the_fast_sweep_reads_a_skipped_named_test_the_same_way",
+        ),
+    ),
+    Mutation(
+        "a settled stale entry fails the pull request",
+        "tests/observer_staleness.py",
+        "    return 1 if refuse and report.verdict != CLEAN else 0",
+        "    return 1 if report.verdict == STALE or (refuse and report.verdict != CLEAN) else 0",
+        "an arrived test observing an entry that does not name it is an under-description: the "
+        "entry is still caught by its named tests, so blocking the pull request is churn",
+        (
+            "test_observer_staleness.SettlingReadsWhatTheArrivalsObserveTest.test_an_arrived_observer_the_entry_does_not_name_warns_and_exits_zero",
         ),
     ),
     Mutation(
@@ -12379,7 +12445,13 @@ loader = unittest.TestLoader()
 suite = loader.loadTestsFromNames(names) if names else loader.discover(".")
 result = unittest.TextTestRunner(stream=sys.stderr, verbosity=0).run(suite)
 failed = {observer_of(test) for test, _ in result.failures + result.errors} - {""}
-print(marker + json.dumps({"passed": result.wasSuccessful(), "observers": sorted(failed)}))
+skipped = {observer_of(test) for test, _ in result.skipped} - {""}
+print(
+    marker
+    + json.dumps(
+        {"passed": result.wasSuccessful(), "observers": sorted(failed), "skipped": sorted(skipped)}
+    )
+)
 """
 
 
@@ -12389,6 +12461,10 @@ class SuiteRun:
 
     passed: bool
     observers: tuple[str, ...]
+    # Tests that did not run here - a platform or dependency gate. Kept apart from
+    # `observers` because a skipped test neither observed a mutation nor failed to:
+    # it was not asked, which `judge_mapping` reads differently from a pass.
+    skipped: tuple[str, ...] = ()
 
 
 def _run(names: tuple[str, ...] | None) -> SuiteRun:
@@ -12430,7 +12506,9 @@ def _run(names: tuple[str, ...] | None) -> SuiteRun:
             f"{os.linesep.join(completed.stderr.splitlines()[-20:])}"
         )
     parsed = json.loads(reported[-1].partition(REPORT_MARKER)[2])
-    return SuiteRun(bool(parsed["passed"]), tuple(parsed["observers"]))
+    return SuiteRun(
+        bool(parsed["passed"]), tuple(parsed["observers"]), tuple(parsed.get("skipped", ()))
+    )
 
 
 # Asked of a child spawned where the suite is spawned, because the question is
@@ -13169,7 +13247,12 @@ class _Worker:
         if "error" in answer:
             return Measured(error=str(answer["error"]))
         return Measured(
-            tuple(SuiteRun(bool(run["passed"]), tuple(run["observers"])) for run in answer["runs"])
+            tuple(
+                SuiteRun(
+                    bool(run["passed"]), tuple(run["observers"]), tuple(run.get("skipped", ()))
+                )
+                for run in answer["runs"]
+            )
         )
 
     def finish(self, interrupted: bool) -> None:
@@ -13369,8 +13452,13 @@ def measuring(
     judge: Callable[[Mutation, tuple[tuple[str, ...], ...]], None],
     unrun: list[str],
     pool: Workers | None,
+    skipped: dict[str, tuple[str, ...]] | None = None,
 ) -> int | None:
     """Apply each entry, make `runs(entry)` under it, and give `judge` what failed.
+
+    `skipped`, when given, is filled with the tests each entry's runs skipped, keyed
+    by entry name and before `judge` is called for it. A side channel rather than a
+    wider `judge`, because only `--verify-mapping` reads it.
 
     Serially through `each_mutation`, making exactly the runs the modes made before
     workers existed, in the same order. Through the pool otherwise, where `judge`
@@ -13379,11 +13467,20 @@ def measuring(
     that died - is added to `unrun` against its name rather than dropped, so a count
     over the answers cannot read as a count over the table.
     """
+
+    def record(mutation: Mutation, reported: Iterable[SuiteRun]) -> tuple[tuple[str, ...], ...]:
+        reported = tuple(reported)
+        if skipped is not None:
+            skipped[mutation.name] = tuple(
+                sorted({test for run in reported for test in run.skipped})
+            )
+        return tuple(run.observers for run in reported)
+
     if pool is None:
         return each_mutation(
             mutations,
             lambda mutation: judge(
-                mutation, tuple(_run(selection).observers for selection in runs(mutation))
+                mutation, record(mutation, (_run(selection) for selection in runs(mutation)))
             ),
         )
 
@@ -13393,7 +13490,7 @@ def measuring(
             unrun.append(f"{mutation.name}: {measured.error}")
             print(f"  NOT RUN  {mutation.name}", file=sys.stderr, flush=True)
         else:
-            judge(mutation, tuple(run.observers for run in measured.runs))
+            judge(mutation, record(mutation, measured.runs))
 
     pool.measure([(mutation, runs(mutation)) for mutation in mutations], consume)
     return None
@@ -13442,7 +13539,12 @@ def _measure(request: dict) -> dict | int:
                 return interrupted
     except SystemExit as refused:
         return {"error": str(refused.code)}
-    return {"runs": [{"passed": run.passed, "observers": list(run.observers)} for run in reports]}
+    return {
+        "runs": [
+            {"passed": run.passed, "observers": list(run.observers), "skipped": list(run.skipped)}
+            for run in reports
+        ]
+    }
 
 
 def serve(specification: str) -> int:
@@ -13479,11 +13581,71 @@ def serve(specification: str) -> int:
     return 0
 
 
+def derive_command(name: str) -> str:
+    """The command that prints an entry's corrected observer set."""
+    return f"python3 tests/mutation_gate.py --derive-mapping --only {shlex.quote(name)}"
+
+
+@dataclass(frozen=True)
+class MappingJudgement:
+    """What one entry's named set and the tests that failed under it say together.
+
+    Three of these are findings and they are not the same size. `survivor` and
+    `silent` are lost or never-had protection: nothing now observes the behaviour,
+    or the entry claims a test that does not. `unnamed` is the reverse - tests that
+    do observe it and that the entry has not been told about - which loses no
+    protection, so it is a warning and not a failure. `skipped` is a note.
+    """
+
+    survivor: bool
+    unnamed: tuple[str, ...]
+    silent: tuple[str, ...]
+    skipped: tuple[str, ...]
+
+    @property
+    def fails(self) -> bool:
+        return self.survivor or bool(self.silent)
+
+
+def judge_mapping(
+    named: Iterable[str], failed: Iterable[str], skipped: Iterable[str]
+) -> MappingJudgement:
+    """Compare an entry's named observers with what failed under it, and what was skipped.
+
+    A named test that did not fail is excused as skipped only when another named test
+    did fail: a skip means "not asked here", which is no evidence the entry is wrong
+    on a machine where the test runs - but an entry whose every named test is skipped
+    or passed was observed by nothing, and excusing it would let a whole mapping go
+    unasked in an environment that skips it.
+    """
+    named_set, failed_set, skipped_set = set(named), set(failed), set(skipped)
+    quiet = named_set - failed_set
+    excused = quiet & skipped_set if named_set & failed_set else set()
+    return MappingJudgement(
+        survivor=not failed_set,
+        unnamed=tuple(sorted(failed_set - named_set)),
+        silent=tuple(sorted(quiet - excused)),
+        skipped=tuple(sorted(excused)),
+    )
+
+
+def annotate(title: str, message: str) -> None:
+    """Also say it as a GitHub annotation, which Actions lists on the run's summary page.
+
+    A shard that exits 0 shows nothing on the checks list, and each shard is its own
+    job, so the warnings would be readable only by opening every log. One line each,
+    because an annotation ends at a newline.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title={title}::{message}", file=sys.stderr, flush=True)
+
+
 def sweep(mutations: Sequence[Mutation]) -> int:
     """Apply each entry and check that the tests it names failed. The gate proper."""
     check_mapping(mutations)
     survived: list[Mutation] = []
     silent: list[str] = []
+    skipped: list[str] = []
 
     def observe(mutation: Mutation) -> None:
         observed = run_observers(mutation.observers)
@@ -13491,13 +13653,30 @@ def sweep(mutations: Sequence[Mutation]) -> int:
         if not observed:
             survived.append(mutation)
         elif len(observed) < len(mutation.observers):
-            quiet = sorted(set(mutation.observers) - set(observed))
-            silent.append(f"{mutation.name}: {', '.join(quiet)} is named and did not fail")
+            # Asked only here, where a named test did not fail: the common case has
+            # none, and the question costs a second run of the entry's modules.
+            judgement = judge_mapping(
+                mutation.observers, observed, skipped_among(mutation.observers)
+            )
+            skipped.extend(f"{mutation.name}: {test}" for test in judgement.skipped)
+            if judgement.silent:
+                silent.append(
+                    f"{mutation.name}: {', '.join(judgement.silent)} is named and did not fail"
+                )
 
     interrupted = each_mutation(mutations, observe)
     if interrupted is not None:
         return interrupted
+    for note in skipped:
+        print(f"  skipped here: {note.partition(': ')[2]} (named by {note.partition(': ')[0]})")
     return _sweep_verdict(mutations, survived, silent)
+
+
+def skipped_among(observers: Sequence[str]) -> tuple[str, ...]:
+    """The named observers that were skipped, from a run of the modules holding them."""
+    modules = tuple(dict.fromkeys(module_of(observer) for observer in observers))
+    skipped = set(_run(modules).skipped)
+    return tuple(observer for observer in observers if observer in skipped)
 
 
 def _sweep_verdict(
@@ -13510,7 +13689,11 @@ def _sweep_verdict(
     to print `caught` here and go red only in the nightly `--verify-mapping`, after
     the merge. That half of the mapping check needs no whole-suite run, so it runs
     on every pull request. The other half - a test that fails and is not named -
-    does, and stays with `--verify-mapping` and `observer_staleness.py`.
+    does, and stays with `--verify-mapping` and `observer_staleness.py` - as a
+    warning there, because a test the entry has not named loses nothing.
+
+    A named test skipped in this environment is not "did not fail" while another
+    named test fails: `sweep` reports it as skipped here instead.
     """
 
     print(f"\n{len(mutations) - len(survived)} of {len(mutations)} mutations caught.")
@@ -13595,52 +13778,83 @@ def verify_mapping(mutations: Sequence[Mutation], pool: Workers | None = None) -
     A wrong name is invisible to a normal run, which is the cost of running only
     what an entry names: the gate would print `caught` either way. So the claim
     each entry makes - these tests and no others observe this defect - is checked
-    here in both directions. A test that failed and is not named means the entry
-    under-describes what protects it; a named test that did not fail means the
-    entry describes protection that is not there. The table guards are subtracted
-    from what failed, so an entry whose behavioural observer was deleted
-    disagrees here instead of agreeing with a guard (#274).
+    here in both directions, and the two directions are not the same size. A named
+    test that did not fail means the entry describes protection that is not there,
+    and an entry nothing observes has none: both fail the run. A test that failed
+    and is not named means the entry under-describes what protects it - the defect
+    is observed all the same - so that is a warning with the command that
+    re-derives the set, and the run still passes. A named test that was skipped in
+    this environment is a note while another named test fails, and a failure when
+    none does. The table guards are subtracted from what failed, so an entry whose
+    behavioural observer was deleted disagrees here instead of agreeing with a
+    guard (#274).
     """
     check_mapping(mutations)
     wrong: list[str] = []
+    warnings: list[tuple[str, str]] = []
+    notes: list[str] = []
     disagreed: set[str] = set()
+    warned: set[str] = set()
     unrun: list[str] = []
+    skipped: dict[str, tuple[str, ...]] = {}
 
     def observe(mutation: Mutation, reported: tuple[tuple[str, ...], ...]) -> None:
-        complaints = len(wrong)
-        failed = set(behavioural(reported[0]))
-        named = set(mutation.observers)
-        if not failed:
+        judgement = judge_mapping(
+            mutation.observers, behavioural(reported[0]), skipped.get(mutation.name, ())
+        )
+        if judgement.survivor:
             wrong.append(f"{mutation.name}: nothing observes it, so it is a survivor")
-        if failed - named:
+        if judgement.silent:
             wrong.append(
-                f"{mutation.name}: {', '.join(sorted(failed - named))} failed and is not named"
+                f"{mutation.name}: {', '.join(judgement.silent)} is named and did not fail"
             )
-        if named - failed:
-            wrong.append(
-                f"{mutation.name}: {', '.join(sorted(named - failed))} is named and did not fail"
-            )
-        if len(wrong) > complaints:
+        notes.extend(f"{test} (named by {mutation.name})" for test in judgement.skipped)
+        if judgement.unnamed:
+            warnings.append((mutation.name, ", ".join(judgement.unnamed)))
+            warned.add(mutation.name)
+        if judgement.fails:
             disagreed.add(mutation.name)
-        print(f"  {'agrees  ' if failed == named else 'DIFFERS '} {mutation.name}", flush=True)
+        verdict = "DIFFERS " if judgement.fails else "WARNS   " if judgement.unnamed else "agrees  "
+        print(f"  {verdict} {mutation.name}", flush=True)
 
-    interrupted = measuring(mutations, lambda mutation: (None,), observe, unrun, pool)
+    interrupted = measuring(mutations, lambda mutation: (None,), observe, unrun, pool, skipped)
     if interrupted is not None:
         return interrupted
 
     # `wrong` holds messages and one entry can raise three of them, so counting it
     # here would answer a different question than the sentence asks - it printed
     # `-1 of 1` for a single entry that disagreed in both directions at once. An
-    # entry no worker answered for agrees with nothing: it was not asked.
-    agreeing = len(mutations) - len(disagreed) - len(unrun)
+    # entry no worker answered for agrees with nothing: it was not asked. An entry
+    # that only warns names a subset of what observes it, so it is not counted as
+    # naming what observes it either - it is counted on its own line below.
+    agreeing = len(mutations) - len(disagreed | warned) - len(unrun)
     print(f"\n{agreeing} of {len(mutations)} entries name what observes them.")
+    for test in notes:
+        print(f"  skipped here: {test}", file=sys.stderr)
+    for entry, unnamed in warnings:
+        message = f"{entry}: {unnamed} failed and is not named - re-derive with: " + (
+            derive_command(entry)
+        )
+        print(f"  MAPPING WARNING: {message}", file=sys.stderr)
+        annotate("Mapping under-describes an entry", message)
+    if warnings:
+        print(
+            f"\n{len(warnings)} entry(s) under-describe what observes them. That loses no "
+            "protection - a test that is not named still fails under the mutation, so the "
+            "defect is observed - and so it does not fail this run. It means the next "
+            "reader is told less than is true, and a later change to the unnamed test "
+            "would not be checked against the entry. Take the set from the command beside "
+            "each entry.",
+            file=sys.stderr,
+        )
     for entry in wrong:
         print(f"  WRONG MAPPING: {entry}", file=sys.stderr)
     if wrong:
         print(
             "\nEvery run of this gate concluded from only the tests named above, so a "
-            "mapping that disagrees with the suite means those runs proved less than they "
-            "reported. Take the set from `--derive-mapping` rather than editing by hand.",
+            "mapping that overclaims, or that nothing observes, means those runs proved "
+            "less than they reported. Take the set from `--derive-mapping` rather than "
+            "editing by hand.",
             file=sys.stderr,
         )
     not_run = report_unrun(unrun)

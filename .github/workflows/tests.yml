@@ -95,8 +95,9 @@ jobs:
       # `--derive-mapping` for it.
       #
       # `--verify-mapping` is the check for that. It applies every entry against
-      # the whole suite and refuses a set that disagrees with what actually
-      # failed, in both directions. That costs what this gate cost before the
+      # the whole suite and refuses a set that names a test which did not fail,
+      # or that nothing observes; a test that fails and is not named is a warning,
+      # because the defect is observed all the same. That costs what this gate cost before the
       # mapping existed - 1683 seconds measured here - so it runs on the schedule
       # and on `workflow_dispatch`, in the `mapping` job below, over sixteen runners
       # at a time (#285).
@@ -195,8 +196,9 @@ jobs:
   #
   # `--settle` reads which test ids arrived since the last verified commit, then runs
   # the modules holding them once unmutated and once under each entry. An arrived
-  # test that fails under an entry that does not name it is STALE and fails this
-  # job, with the `--derive-mapping` command for the corrected set. The id
+  # test that fails under an entry that does not name it is STALE: a warning, exit
+  # 0, with the `--derive-mapping` command for the corrected set - the entry is
+  # still caught by the tests it names, so nothing is unprotected. The id
   # comparison alone reported SUSPECT and stayed green, and its lists named two of
   # the eight entries three merges staled: it cannot know which entries a test in a
   # module no entry names observes, and running it is how to find out. It runs the
@@ -387,6 +389,9 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
+        # Exits 0 when the only finding is an entry that under-describes what
+        # observes it: that is printed as `MAPPING WARNING` and annotated on the run,
+        # and does not fail the leg. An over-claim or a survivor still does.
         run: python3 tests/mutation_gate.py --verify-mapping --shard "$SHARD/$SHARDS"
 
   # One verdict over the legs. GitHub reports each of them as its own check, so a

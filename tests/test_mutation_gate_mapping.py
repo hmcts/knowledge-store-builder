@@ -54,6 +54,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import mutation_gate as gate
 
@@ -190,6 +191,22 @@ class NeedsASibling(unittest.TestCase):
         self.assertEqual(self.prepared, ["ready"], "no sibling ran first")
 """
 
+# A test that would observe the mutation and is skipped here, the way one gated on a
+# platform or an optional dependency is on a runner that lacks it. It is skipped
+# rather than absent so that it is collected, named, and reported as not run.
+SKIPPER = """
+import unittest
+from pathlib import Path
+
+TARGET = Path(__file__).resolve().parent.parent / "source" / "target.py"
+
+
+class Skips(unittest.TestCase):
+    @unittest.skip("only runs on a platform this is not")
+    def test_the_target_is_unmutated_where_it_runs(self):
+        self.assertIn("ORIGINAL", TARGET.read_text(encoding="utf-8"))
+"""
+
 ORIGINAL = 'VALUE = "ORIGINAL"\n'
 
 # The tests in the fixtures above, named the way an entry names an observer:
@@ -203,6 +220,7 @@ WATCHES_IN_SUBTESTS = (
 QUIET_IN_A_NOISY_MODULE = "test_noisy.Noisy.test_nothing_about_the_target"
 NOISE = "test_noisy.Noisy.test_red_for_its_own_reasons"
 GUARDS_THE_TABLE = "test_guard.Guard.test_the_entry_still_names_one_site"
+SKIPPED_HERE = "test_skipper.Skips.test_the_target_is_unmutated_where_it_runs"
 FAILS_ONLY_BESIDE_A_SIBLING = (
     "test_interfering.SharesAClassCache.test_b_nothing_cached_holds_the_mutation"
 )
@@ -218,6 +236,7 @@ class MutationGateMappingTest(unittest.TestCase):
         guard: bool = False,
         interfering: bool = False,
         needs_a_sibling: bool = False,
+        skipper: bool = False,
     ) -> Path:
         """A repository the gate can be pointed at: one source file, two test modules.
 
@@ -226,7 +245,7 @@ class MutationGateMappingTest(unittest.TestCase):
         reasons; `guard` adds one standing in for a table guard, and points
         `TABLE_GUARDS` at it; `interfering` adds one whose two tests share a
         mutable class attribute, and `needs_a_sibling` one whose second test
-        fails unless the first ran. All five are opt-in because a module added
+        fails unless the first ran; `skipper` one whose only test is skipped. All six are opt-in because a module added
         here fails for every test that builds this tree, and the verifier checks
         the named set against everything that failed - so adding one
         unconditionally makes the other checks disagree about what should have
@@ -250,6 +269,8 @@ class MutationGateMappingTest(unittest.TestCase):
             (root / "tests" / "test_guard.py").write_text(GUARD, encoding="utf-8")
             self.addCleanup(setattr, gate, "TABLE_GUARDS", gate.TABLE_GUARDS)
             gate.TABLE_GUARDS = (GUARDS_THE_TABLE,)
+        if skipper:
+            (root / "tests" / "test_skipper.py").write_text(SKIPPER, encoding="utf-8")
         if interfering:
             (root / "tests" / "test_interfering.py").write_text(INTERFERING, encoding="utf-8")
         if needs_a_sibling:
@@ -628,6 +649,139 @@ class MutationGateMappingTest(unittest.TestCase):
         self.assertEqual(code, 0, f"a mapping that matches the failures was refused: {reported}")
         self.assertIn("agrees", printed)
         self.assertIn("1 of 1 entries name what observes them", printed)
+
+    def test_a_test_that_observes_and_is_not_named_warns_and_still_passes(self):
+        """Catches an under-description failing the run again.
+
+        The entry names `test_watcher` and the subtest watcher fails under the same
+        mutation without being named. The defect is observed either way, so no
+        protection is missing and the verdict is a warning that names the entry, the
+        unnamed test and the command that re-derives the set - with exit 0. Restore
+        `return 1 if wrong ...` over the unnamed list and the exit code is 1; drop
+        the warning and the three assertions on its text fail.
+        """
+        self._tree(subtest_watcher=True)
+
+        code, printed, reported = self._verify(self._entry(WATCHES))
+
+        self.assertEqual(code, 0, f"an under-description failed the run: {reported}")
+        self.assertIn("WARNS", printed)
+        self.assertNotIn("DIFFERS", printed)
+        self.assertIn(
+            f"MAPPING WARNING: the target loses its value: {WATCHES_IN_SUBTESTS}", reported
+        )
+        self.assertIn(
+            "python3 tests/mutation_gate.py --derive-mapping --only 'the target loses its value'",
+            reported,
+        )
+        self.assertNotIn("WRONG MAPPING", reported)
+        self.assertIn("0 of 1 entries name what observes them", printed)
+
+    def test_a_warning_is_also_an_annotation_under_github_actions(self):
+        """Catches the warning being readable only by opening every shard's log.
+
+        A shard that exits 0 shows nothing on the checks list, so the warning also goes
+        out as a workflow command, which Actions lists on the run's summary page.
+        """
+        self._tree(subtest_watcher=True)
+        with mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}):
+            code, _, reported = self._verify(self._entry(WATCHES))
+        self.assertEqual(code, 0)
+        self.assertIn("::warning title=Mapping under-describes an entry::", reported)
+
+        with mock.patch.dict("os.environ", {"GITHUB_ACTIONS": ""}):
+            _, _, quiet = self._verify(self._entry(WATCHES))
+        self.assertNotIn("::warning", quiet)
+
+    def test_an_entry_naming_a_test_that_does_not_fail_is_an_overclaim_and_fails(self):
+        """Catches over-claiming being softened along with under-description.
+
+        The entry names the watcher, which fails, and the bystander, which passes: it
+        claims protection nothing gives. Nothing is unnamed, so this is the over-claim
+        alone, and it must fail the run with no warning in it. Make the named-did-not-fail
+        branch a warning and this returns 0.
+        """
+        self._tree()
+
+        code, printed, reported = self._verify(self._entry(WATCHES, IGNORES))
+
+        self.assertEqual(code, 1, f"an over-claiming entry passed: {reported}")
+        self.assertIn("DIFFERS", printed)
+        self.assertIn(f"WRONG MAPPING: the target loses its value: {IGNORES} is named", reported)
+        self.assertNotIn("MAPPING WARNING", reported)
+
+    def test_an_entry_nothing_observes_is_a_survivor_and_fails(self):
+        """Catches a survivor being read as an under-description or an agreement.
+
+        The mutation rewrites a file no test reads, so nothing fails under it and the
+        behaviour it describes could be removed with the suite green. Delete the
+        `survivor` branch and this passes the run.
+        """
+        root = self._tree()
+        (root / "source" / "unread.py").write_text('VALUE = "UNREAD"\n', encoding="utf-8")
+        entry = gate.Mutation(
+            "the unread file changes",
+            "unread.py",
+            "UNREAD",
+            "CHANGED",
+            "nothing reads it",
+            (IGNORES,),
+        )
+
+        code, printed, reported = self._verify(entry)
+
+        self.assertEqual(code, 1, f"a survivor passed the verifier: {reported}")
+        self.assertIn("WRONG MAPPING: the unread file changes: nothing observes it", reported)
+
+    def test_a_named_test_skipped_here_with_nothing_else_failing_is_still_a_failure(self):
+        """Catches "skipped" excusing an entry that nothing observed.
+
+        The only named test is skipped, so it neither passed nor failed: it was not
+        asked. With no other named test failing, excusing it would let a mapping go
+        unchecked on any machine that skips its tests. `test_watcher` fails unnamed, so
+        the entry is not a survivor of the suite - it is an entry whose named
+        protection was never run. Make the excusal unconditional and this returns 0.
+        """
+        self._tree(skipper=True)
+
+        code, printed, reported = self._verify(self._entry(SKIPPED_HERE))
+
+        self.assertEqual(code, 1, f"an entry with only skipped observers passed: {reported}")
+        self.assertIn(f"{SKIPPED_HERE} is named and did not fail", reported)
+        self.assertNotIn("skipped here", reported)
+
+    def test_a_named_test_skipped_here_beside_one_that_fails_is_a_note_and_passes(self):
+        """Catches a platform-gated observer failing every runner that lacks the platform.
+
+        Two entries were red from a macOS-only test CI skips. Here `test_watcher` fails
+        under the mutation and the skipped test is named beside it: the entry is
+        observed, and the skipped name is reported as skipped here rather than as one
+        that did not fail. Remove the skip handling and the entry reads as an over-claim.
+        """
+        self._tree(skipper=True)
+
+        code, _, reported = self._verify(self._entry(WATCHES, SKIPPED_HERE))
+
+        self.assertEqual(code, 0, f"a skipped named test failed the run: {reported}")
+        self.assertIn(f"skipped here: {SKIPPED_HERE}", reported)
+        self.assertNotIn("did not fail", reported)
+
+    def test_the_fast_sweep_reads_a_skipped_named_test_the_same_way(self):
+        """Catches the pull-request sweep failing on a test the mapping shards excuse.
+
+        `sweep` is the gate every pull request runs, and it reports a named test that did
+        not fail. A skipped one beside one that failed is a note there too; a skipped one
+        alone is a survivor. Both directions, so neither half can be dropped alone.
+        """
+        self._tree(skipper=True)
+
+        code, printed = self._sweep(self._entry(WATCHES, SKIPPED_HERE))
+        self.assertEqual(code, 0, f"a skipped named test failed the sweep: {printed}")
+        self.assertIn(f"skipped here: {SKIPPED_HERE}", printed)
+
+        alone_code, alone_printed = self._sweep(self._entry(SKIPPED_HERE))
+        self.assertEqual(alone_code, 1, f"a skipped-only entry passed the sweep: {alone_printed}")
+        self.assertIn("SURVIVED", alone_printed)
 
     def test_a_table_guard_is_left_out_of_a_derived_observer_set(self):
         """Catches the exclusion being dropped from `derive_mapping`. `test_guard`

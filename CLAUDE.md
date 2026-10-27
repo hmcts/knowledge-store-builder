@@ -115,6 +115,19 @@ not name it, and nothing about the entry changed. The fast gate runs only the
 modules an entry names, so an unnamed observer is by construction not run, and
 `--verify-mapping`, which does notice, costs a whole-suite run per entry.
 
+**Under-description warns; over-claiming and survival fail.** The two directions
+of a wrong mapping are not the same size. A test that fails under an entry and is
+not named leaves the defect observed - the entry is still caught by the tests it
+names - so `--verify-mapping` and `--settle` report it as a warning (an Actions
+annotation in CI) and exit 0. A named test that does *not* fail means the entry
+claims protection nothing gives, and an entry no test fails under is a survivor:
+protection is lost, so both still fail the run. A named test that is *skipped* in
+the environment (a platform or dependency gate) is reported as `skipped here`
+and is not an over-claim, provided another named test fails; if every named test
+is skipped or passes, nothing observed the entry and it fails. A warning
+is not permission to leave it: re-derive the set with the command it prints, so
+the next reader is told what is true.
+
 The first command reads test ids. It names suspect entries in seconds, but it
 cannot say which entries a test in a **brand-new module** observes, because no
 entry names that module — and that is where most staleness arrives. One night
@@ -122,7 +135,8 @@ staled eight entries and its suspect lists named two.
 
 `--settle` answers the question instead of inferring it: it runs only the
 arrived tests under every entry's mutation, and an arrived test that fails
-without being named is **STALE**, which fails the run. The pull-request
+without being named is **STALE**: a warning that names the entry, the test and
+the `--derive-mapping` command, and exits 0. The pull-request
 `observer-staleness` job runs it. It is bounded by `--budget` (minutes): each
 arrived module is timed once unmutated, the cheapest are settled first, and a
 module that would not fit is reported **UNSETTLED** with its projected cost —
