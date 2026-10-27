@@ -1,60 +1,111 @@
 # knowledge-store-builder
 
-Ask questions about a software estate and get answers that cite the code,
-the commits and the tickets behind them.
+Answers about your organisation's code, with a source for every answer. This
+library builds a **knowledge store**: a Git repository of facts about a set of
+repositories (their code structure, commit history, the tickets behind each
+change, and reviewed written summaries). People then ask it questions in Claude
+Code, GitHub Copilot or a browser.
+
+- **Every answer cites its evidence:** a repository, a file path, a commit or a
+  ticket id. Where the store has no evidence, the answer says so.
+- **It answers across repositories:** which services implement something, who
+  uses a component, and what a change could affect.
+- **Askers need no build tools:** the store is committed files. The browser page
+  works offline, with no licence and no server.
 
 <img src="docs/images/explorer-answering-a-question.png" alt="The explorer page answering 'how are addresses validated?'. A headline verdict reads: each application formats addresses with its own copy of AddressPipe; there is no shared implementation. Below it, sections headed How it works, Where it lives, and What this is NOT, then the business features in the area and the commits that changed them, each citing a repository, a file path or a ticket id." width="580">
 
-That is `explorer.html`: one file, opened from disk, answering with no server,
-no network and no LLM. `python3 tests/explorer/fixture.py` builds it.
+That is a real answer from the explorer page this repository's test store builds.
+Two applications each have their own `AddressPipe`, and nothing links them, so the
+store reports two separate implementations rather than guessing they are shared.
 
-## Ask
+## Try it in two minutes
 
-| Where | How |
-|---|---|
-| Claude Code | install the plugin: [Asking questions](docs/asking-questions.md) |
-| GitHub Copilot or another MCP client | the same server and tools: [Use another assistant](docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent) |
-| A browser | open the store's `explorer.html` |
-| A terminal | `graphify query` against the committed graph |
+You need Python 3.10 or later and Git.
 
-Every answer names the evidence it came from, and says so when the store cannot
-support one. Two components that share a name and have no edge between them are
-reported as separate implementations, not guessed to be one.
+```bash
+git clone https://github.com/hmcts/knowledge-store-builder
+cd knowledge-store-builder
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e .
+python3 tests/explorer/fixture.py
+open .fixture-store/graphify-out/explorer.html   # xdg-open on Linux
+```
 
-## Build
+Then ask the page: *how are addresses validated?*
 
-The `knowledgestore` command builds a store from a GitHub organisation's
-repositories, one stage at a time, using
-[graphify](https://github.com/safishamsi/graphify) for extraction. The output is
-static files committed with the store: the graph, the explorer page, commit
-history, the tickets behind each file, and reviewed prose. Nothing is computed
-when someone asks.
+## Ask questions of a store
 
-Start at [Creating a knowledge store](docs/creating-a-store.md).
-`knowledgestore` with no arguments lists the stages.
+**In Claude Code.** You need Claude Code, [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
+and a store that someone has built. Run:
 
-## Design
+```
+/plugin marketplace add hmcts/knowledge-store-builder
+/plugin install knowledge-store@knowledge-store-builder
+/reload-plugins
+```
 
-- **The store is the product.** Committed static files; consumers clone and read.
-- **No LLM at query time in the browser.** Prose an LLM writes during the build is
-  reviewed and committed.
-- **Deterministic.** Two runs on the same inputs produce byte-identical output.
-- **Absence of evidence is a finding**, reported rather than filled in.
+Without `/reload-plugins`, the plugin is installed but inactive. Then install the
+store's own plugin, as that store's README describes, and ask in plain English:
+*which services call the payments API?*
+
+**In GitHub Copilot or another MCP client.** The same server and tools; see
+[Use another assistant](docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent).
+
+**In a browser.** Open the store's `graphify-out/explorer.html`.
+
+The full guide is [Asking questions](docs/asking-questions.md).
+
+## Build a store
+
+You need Python 3.10 or later, Git 2.48 or later, the GitHub CLI, and access to
+the repositories. The `knowledgestore` command runs a build one stage at a time:
+it lists an organisation's repositories, clones them, extracts their code with
+[graphify](https://github.com/safishamsi/graphify), joins files to the tickets
+that changed them, and writes the page and indexes. `knowledgestore` with no
+arguments lists the stages.
+
+Start with [Creating a knowledge store](docs/creating-a-store.md), which takes
+you from an empty repository to a published store.
+
+## How it works
+
+- A build writes static files, and the store commits them. Nothing is computed
+  when someone asks, so answers come from evidence a person can open and check.
+- The browser page runs no AI. Text an AI wrote during the build is reviewed and
+  committed like any other file.
+- Two builds from the same inputs produce identical files, so a store's changes
+  can be reviewed as a diff.
+- Commit history is kept beside the code graph rather than inside it, which keeps
+  the graph small enough to load.
+
+[How it works](docs/how-it-works.md) explains each mechanism and where its
+behaviour is tested.
 
 ## Documentation
 
-| Document | For |
-|---|---|
-| [Asking questions](docs/asking-questions.md) | asking a store someone built |
-| [Creating a knowledge store](docs/creating-a-store.md) | building one for your estate |
-| [Refreshing a store](docs/refreshing-a-store.md) | keeping one current |
-| [`CHEATSHEET.md`](CHEATSHEET.md) | every command, nothing around it |
-| [Configuring a store](docs/configuring-a-store.md) | settings and stage outputs |
-| [Building a knowledge store](docs/building-a-knowledge-store.md) | the operator's judgement and the traps |
-| [Grounding and verification](docs/grounding-and-verification.md) | whether answers are fact-based |
-| [Retrieval architecture](docs/retrieval-architecture.md) | how this differs from vector RAG |
-| [How it works](docs/how-it-works.md) | each mechanism and where it is proven |
-| [`CLAUDE.md`](CLAUDE.md) | working on this repository |
+**Asking**
+
+- [Asking questions](docs/asking-questions.md): Claude Code, Copilot, the browser, the terminal
+- [`CHEATSHEET.md`](CHEATSHEET.md): every command, with nothing around it
+
+**Building and running a store**
+
+- [Creating a knowledge store](docs/creating-a-store.md): the step-by-step build
+- [Refreshing a store](docs/refreshing-a-store.md): keeping one current
+- [Configuring a store](docs/configuring-a-store.md): settings and stage outputs
+- [Operator's notes](docs/building-a-knowledge-store.md): choosing what to include, costs, and known traps
+
+**Background**
+
+- [Grounding and verification](docs/grounding-and-verification.md): how answers stay tied to evidence
+- [Retrieval architecture](docs/retrieval-architecture.md): how this differs from vector search
+- [How it works](docs/how-it-works.md): each mechanism, its settings and its tests
+
+## Contributing
+
+[`CLAUDE.md`](CLAUDE.md) covers the development install, the checks a pull
+request must pass, and the traps found so far.
 
 ## Licence
 
