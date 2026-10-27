@@ -275,8 +275,8 @@ class ExtractAstTest(_StoreCase, unittest.TestCase):
         code, out, err = self._run(extractor, ["--detect", str(detect)])
         self.assertIn("repo-bad", err, "the failing repository was not named")
         labels = {node["id"] for node in self._layer()["nodes"]}
-        self.assertIn(f"{good}#0", labels)
-        self.assertIn(f"{other}#0", labels)
+        self.assertIn(f"repo-a::{good}#0", labels)
+        self.assertIn(f"repo-c::{other}#0", labels)
         self.assertIn("repo-c", out, "extraction stopped at the failure instead of continuing")
         self.assertEqual(code, 1)
 

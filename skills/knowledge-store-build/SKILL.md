@@ -129,8 +129,12 @@ still fails. A declared repository whose first clone failed blocks it until `syn
 clones it or it is removed from `config/repositories.txt`.
 
 Extracting from inside the repository is what keeps `source_file` repo-relative,
-which is what the file-to-ticket join is keyed on; `merge-graphs` adds the `repo`
-attribute.
+which is what the file-to-ticket join is keyed on. `extract-ast` does that itself,
+rooting the extractor at each clone and then adding what `merge-graphs` adds: node ids
+as `<repo>::<id>`, and the `repo` attribute. Its output has the same shape as the
+per-repository route's, so a store can use either and the join, `explorer` and
+`deepdive` work on both. A layer written by an earlier `extract-ast` carried
+store-relative paths and no `repo`; re-run `extract-ast` rather than reuse it.
 
 **Run `merge-inputs` before every merge, and read its output.** Extraction is
 driven by `config/repositories.txt`; the merge is driven by a shell glob, and
