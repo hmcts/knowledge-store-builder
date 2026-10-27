@@ -2079,9 +2079,9 @@ MUTATIONS = (
         "extract_ast.py",
         "    rebuilt = os.path.normpath(os.path.join(config.ROOT.resolve(), source))\n    return store_paths.relative(rebuilt)",
         "    return store_paths.relative(source)",
-        "graphify spells source_file relative to the resolved root, so under a symlinked store root a file comes back as ../<link>/repositories/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
+        "graphify spells source_file relative to the resolved root, so under a symlinked store root a corpus-root file (the one extracted with the store as its root; repository files are rooted at their clone and no longer reach this) comes back as ../<link>/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
         (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
+            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_root_file_matches_content_set_keys_under_a_symlinked_root",
         ),
     ),
     Mutation(

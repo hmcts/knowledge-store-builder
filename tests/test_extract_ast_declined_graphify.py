@@ -167,6 +167,29 @@ class SymlinkedStoreRootTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertEqual(len(record), 1, record)
         self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
 
+    def test_a_corpus_root_file_matches_content_set_keys_under_a_symlinked_root(self):
+        """Catches a corpus-root node keyed on graphify's `../<link>/...` spelling.
+
+        A file outside every clone is extracted with the store root as graphify's root,
+        so it is the case that still arrives spelled relative to the resolved root. Keyed
+        as it arrives it matches no content-set path, counts 0, and the stage refuses an
+        instrument mismatch; a passing run that counted the file is the evidence the
+        keys met.
+        """
+        tools = self.root / "tools"
+        tools.mkdir()
+        (tools / "helper.py").write_text(CODE, encoding="utf-8")
+        detect = self._detect([self.link / "tools" / "helper.py"])
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = extract_ast.main(["--detect", str(detect)])
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        record = json.loads(
+            (self.root / "graphify-out" / ".graphify_ast_file_counts.json").read_text("utf-8")
+        )
+        self.assertEqual(len(record), 1, record)
+        self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
+
 
 _TEMP = Path(tempfile.gettempdir())
 
