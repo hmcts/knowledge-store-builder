@@ -439,10 +439,15 @@ source. Two hard rules from it:
   undeclared. The same gate resolves every relative link and in-page anchor
   across `README.md`, `docs/` and `skills/`. Run it alone with
   `python3 tests/docs_integrity.py`.
-- **4.2 Install detail lives in the guides, not the README.** `docs/asking-questions.md`
-  owns the plugin install and `docs/creating-a-store.md` owns the library
-  install. The README routes to them and carries no install commands of its own,
-  so there is one copy of each to keep correct.
+- **4.2 Install detail lives in the guides; the README carries only the first
+  commands.** `docs/asking-questions.md` owns the plugin install and
+  `docs/creating-a-store.md` owns the library install. The README may carry the
+  asker's three `/plugin` commands and the local try-it block, because a reader
+  given 30 seconds should be able to act on the first screen; everything else -
+  scopes, the IDE route, troubleshooting, the builder's install - stays in the
+  guides. The README once kept its own install steps after the guides moved on,
+  so its `/plugin` lines are held to the guide's by `tests/test_readme_commands.py`:
+  change a command in the guide and the README together.
 - **4.3 Docs and skills must not disagree.** The README once kept `graphify .` at
   the store root long after the build skill documented why that cannot work.
   When a skill changes an instruction, grep the docs for the old one — and
