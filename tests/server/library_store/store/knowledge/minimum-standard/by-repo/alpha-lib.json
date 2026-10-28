@@ -1,0 +1,139 @@
+{
+  "as_of": {
+    "commit": "ebfe7220750b4663a617ee03d5ebd3d2549530f7",
+    "date": "2026-10-04T09:00:00Z"
+  },
+  "format": {
+    "layer": "minimum_standard",
+    "major": 1,
+    "minor": 0
+  },
+  "points": {
+    "hygiene": {
+      "evidence": [
+        {
+          "item": "branch_protection",
+          "reason": "the default branch is protected",
+          "setting": "branch_protection",
+          "state": "present"
+        },
+        {
+          "checked": [
+            ".github/workflows/"
+          ],
+          "item": "code_scanning_workflow",
+          "paths": [],
+          "reason": "no code-scanning workflow; default setup is not visible",
+          "state": "not_determinable"
+        },
+        {
+          "checked": [
+            ".github/dependabot.yaml",
+            ".github/dependabot.yml",
+            ".github/renovate.json",
+            ".renovaterc*",
+            "renovate.json"
+          ],
+          "item": "dependency_updates",
+          "paths": [],
+          "reason": "no dependency update config",
+          "state": "absent"
+        },
+        {
+          "item": "secret_scanning_setting",
+          "reason": "secret scanning is enabled",
+          "setting": "secret_scanning",
+          "state": "present"
+        },
+        {
+          "checked": [
+            ".github/workflows/"
+          ],
+          "item": "secret_scanning_workflow",
+          "paths": [],
+          "reason": "no secret-scanning workflow",
+          "state": "absent"
+        },
+        {
+          "item": "vulnerability_alerts",
+          "reason": "Dependabot alerts are enabled",
+          "setting": "dependabot_alerts",
+          "state": "present"
+        }
+      ],
+      "state": "absent"
+    },
+    "no_secrets": {
+      "evidence": [],
+      "reason": "pattern scan found nothing; a scan cannot show absence",
+      "state": "not_determinable"
+    },
+    "owner": {
+      "evidence": [
+        {
+          "path": ".github/CODEOWNERS",
+          "reason": "not found"
+        },
+        {
+          "path": "CODEOWNERS",
+          "reason": "not found"
+        },
+        {
+          "path": "docs/CODEOWNERS",
+          "reason": "not found"
+        }
+      ],
+      "reason": "no CODEOWNERS file names an owner",
+      "state": "absent"
+    },
+    "patching": {
+      "evidence": [],
+      "reason": "patching timelines are not recorded in a repository",
+      "state": "not_determinable"
+    },
+    "secure_by_design": {
+      "evidence": [],
+      "reason": "no threat model found; secure-by-design is not judged from code",
+      "state": "not_determinable"
+    },
+    "security_contact": {
+      "evidence": [
+        {
+          "path": ".github/SECURITY.md",
+          "reason": "not found"
+        },
+        {
+          "path": "SECURITY.md",
+          "reason": "not found"
+        },
+        {
+          "path": "docs/SECURITY.md",
+          "reason": "not found"
+        },
+        {
+          "path": "example-org/.github",
+          "reason": "not public, so GitHub applies no default from it"
+        }
+      ],
+      "reason": "no SECURITY.md",
+      "state": "absent"
+    },
+    "unmaintained": {
+      "evidence": [
+        {
+          "commit": "ebfe7220750b4663a617ee03d5ebd3d2549530f7",
+          "date": "2026-10-04T09:00:00Z",
+          "reason": "last commit"
+        },
+        {
+          "reason": "not archived",
+          "setting": "archived"
+        }
+      ],
+      "reason": "not archived; maintenance and a patching route are not judged from the repository",
+      "state": "not_determinable"
+    }
+  },
+  "repository": "alpha-lib",
+  "settings_read_at": "2026-10-20T00:00:00+00:00"
+}

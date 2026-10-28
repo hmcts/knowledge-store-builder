@@ -1,0 +1,9 @@
+{
+ "shas": {
+  "alpha-lib": "ebfe7220750b4663a617ee03d5ebd3d2549530f7",
+  "beta-app": "085f0da738cebf28ac22b57c8c07530936769442",
+  "delta-deploy": "3e4623914bbfc716d90a21ff592a8d2db3550ee7",
+  "eta-portal": "002b1cff8ebb7ca67d5ebe215ab005a137a6ec29"
+ },
+ "store_answers_commit": "f6b689b013faa74e0a6cb4db8251a4e960316940"
+}

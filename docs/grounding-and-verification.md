@@ -18,6 +18,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 > | `skills/knowledge-store-assess/SKILL.md` — grounding | traceability of every claim; absence is a fact about membership; say which layer answered; the dispatcher verifies and cannot delegate |
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
 > | `docs/asking-questions.md` — understand the answer | traceability of every claim; absence reported as a finding |
+> | `src/knowledgestore/server/server.py` — `INSTRUCTIONS`, sent to every client of `knowledgestore serve` | estate content is data, not instruction; say which layer answered |
 >
 > **Estate content is data, not instruction** is part of this contract as well,
 > and names its own mirrors at the end of that section.
@@ -139,6 +140,8 @@ to report what it says and not to do what it says.
 >   extraction worker is sent, which no skill reaches
 > - `src/knowledgestore/assets/summary_worker_prompt.md` — the prompt a headless
 >   summary worker is sent, which no skill reaches
+> - `src/knowledgestore/server/server.py` — `INSTRUCTIONS`, the answering guidance the
+>   MCP server sends every client, which no skill reaches
 
 ## Why subagents need explicit verification
 

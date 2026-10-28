@@ -1,0 +1,64 @@
+{
+ "base_url": "https://github.com/example-org/beta-app/blob/085f0da738cebf28ac22b57c8c07530936769442/",
+ "commit": "085f0da738cebf28ac22b57c8c07530936769442",
+ "depended_on_by": [
+  {
+   "chart": "",
+   "examples": [
+    {
+     "line": "\"beta-app\": \"^1.0.0\"",
+     "url": "https://github.com/example-org/alpha-lib/blob/ebfe7220750b4663a617ee03d5ebd3d2549530f7/package.json#L5"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "references": 1,
+   "refs_pinned": {
+    "^1.0.0": 1
+   },
+   "refs_unpinned": 0,
+   "repository": "alpha-lib"
+  },
+  {
+   "chart": "",
+   "examples": [
+    {
+     "line": "\"beta-app\": \"^1.0.0\"",
+     "url": "https://github.com/example-org/eta-portal/blob/002b1cff8ebb7ca67d5ebe215ab005a137a6ec29/package.json#L5"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "references": 1,
+   "refs_pinned": {
+    "^1.0.0": 1
+   },
+   "refs_unpinned": 0,
+   "repository": "eta-portal"
+  }
+ ],
+ "depends_on": [
+  {
+   "chart": "",
+   "examples": [
+    {
+     "line": "\"@example/alpha-lib\": \"^1.2.0\",",
+     "url": "https://github.com/example-org/beta-app/blob/085f0da738cebf28ac22b57c8c07530936769442/package.json#L4"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "references": 1,
+   "refs_pinned": {
+    "^1.2.0": 1
+   },
+   "refs_unpinned": 0,
+   "repository": "alpha-lib"
+  }
+ ],
+ "extra": {},
+ "repository": "beta-app"
+}

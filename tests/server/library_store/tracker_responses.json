@@ -1,0 +1,77 @@
+{
+ "https://tracker.example.invalid/rest/api/2/search?jql=key+in+%28DEMO-1%2CDEMO-2%2CDEMO-3%2CDEMO-4%29&fields=summary%2Cissuetype%2Cstatus%2Cresolution%2Ccreated%2Cresolutiondate%2Cparent%2Cdescription%2Ccomment&maxResults=4": {
+  "status": 200,
+  "body": {
+   "startAt": 0,
+   "maxResults": 4,
+   "total": 2,
+   "issues": [
+    {
+     "key": "DEMO-1",
+     "fields": {
+      "summary": "Refund customers",
+      "issuetype": {
+       "name": "Story"
+      },
+      "status": {
+       "name": "Done"
+      },
+      "resolution": {
+       "name": "Fixed"
+      },
+      "created": "2026-09-28T10:00:00.000+0000",
+      "resolutiondate": "2026-10-05T16:00:00.000+0000",
+      "parent": null,
+      "description": "Let staff refund a payment.",
+      "comment": {
+       "startAt": 0,
+       "maxResults": 1,
+       "total": 1,
+       "comments": [
+        {
+         "body": "Refunds over the daily limit need a second approver."
+        }
+       ]
+      }
+     }
+    },
+    {
+     "key": "DEMO-3",
+     "fields": {
+      "summary": "Ready beta-app for production",
+      "issuetype": {
+       "name": "Task"
+      },
+      "status": {
+       "name": "In Progress"
+      },
+      "resolution": null,
+      "created": "2026-10-06T08:00:00.000+0000",
+      "resolutiondate": null,
+      "parent": null,
+      "description": null,
+      "comment": {
+       "startAt": 0,
+       "maxResults": 1,
+       "total": 3,
+       "comments": [
+        {
+         "body": "The production values live in delta-deploy."
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "https://tracker.example.invalid/rest/api/2/search?jql=key+in+%28DEMO-5%2CDEMO-6%2CDEMO-7%29&fields=summary%2Cissuetype%2Cstatus%2Cresolution%2Ccreated%2Cresolutiondate%2Cparent%2Cdescription%2Ccomment&maxResults=3": {
+  "status": 403,
+  "body": {
+   "errorMessages": [
+    "You do not have permission to browse issues in this project."
+   ],
+   "errors": {}
+  }
+ }
+}

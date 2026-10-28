@@ -1,0 +1,20 @@
+{
+ "alpha-lib": {
+  "title": "Deep dive: alpha-lib",
+  "html": "<h2><a href=\"https://github.com/example-org/alpha-lib\" target=\"_blank\" rel=\"noopener\">alpha-lib</a></h2><p>Measured at <a href=\"https://github.com/example-org/alpha-lib\" target=\"_blank\" rel=\"noopener\">alpha-lib</a> <code>ebfe7220</code>.</p><p><b><a href=\"https://github.com/example-org/alpha-lib\" target=\"_blank\" rel=\"noopener\">alpha-lib</a> is the estate's refund library.</b> It publishes the <code>@example/alpha-lib</code> npm package, which <a href=\"https://github.com/example-org/beta-app\" target=\"_blank\" rel=\"noopener\">beta-app</a> depends on, and it holds the refund schema.</p><h3>What it holds</h3><ul><li><code>src/refund.ts</code>: the <code>refund</code> function and the <code>RefundHandler</code> class whose <code>handle</code> method calls it.</li><li><code>schemas/refund.schema.json</code>: the Refund JSON Schema, with a <code>money</code> definition that the <code>total</code> property refers to and the <code>credit</code> definition extends.</li><li><code>package.json</code>: the package name, version 1.2.0 and a dependency on <a href=\"https://github.com/example-org/beta-app\" target=\"_blank\" rel=\"noopener\">beta-app</a>.</li><li><code>index.ts</code>: the package's entry point, whose <code>currency</code> function names the currency, GBP.</li></ul><h3>History</h3><p>Four commits on <code>main</code>. DEMO-1 added the handler and the package manifest on 1 October 2026; DEMO-2 added the schema the next day, DEMO-1 returned on 3 October with a note on rounding, and DEMO-7 added the dependency on <a href=\"https://github.com/example-org/beta-app\" target=\"_blank\" rel=\"noopener\">beta-app</a> and the entry point on 4 October. Nothing has changed it since.</p><h3>Who depends on it</h3><p><a href=\"https://github.com/example-org/beta-app\" target=\"_blank\" rel=\"noopener\">beta-app</a> declares <code>@example/alpha-lib</code> in its <code>package.json</code> and imports <code>refund</code> in <code>src/pay.ts</code>. No other repository in the estate refers to it.</p><h3>Limits</h3><p>This dossier describes the code at the commit above and says nothing about how the package is released or who maintains it.</p>",
+  "source": "docs/deep-dives/alpha-lib.md",
+  "sha": "ebfe7220"
+ },
+ "_metadata": {
+  "prose_digests": [
+   "84dc1df5eef165c335948336e13ea4edd76bf8303c970947ee646f5babd60606"
+  ],
+  "authored": {
+   "alpha-lib": {
+    "authored_as_of": "2026-10-08T09:00:00Z",
+    "authored_commit": "3e4623914bbfc716d90a21ff592a8d2db3550ee7",
+    "source_sha256": "b04b4610e492da02bd243817ae95a11bba7c170a1d7615fb407db302406290a0"
+   }
+  }
+ }
+}

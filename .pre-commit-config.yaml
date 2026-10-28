@@ -22,6 +22,9 @@ repos:
         name: Check for merge conflict markers
       - id: end-of-file-fixer
         name: Fix missing end-of-file newline
+        # The MCP server's committed stores are written by the pipeline, which ends
+        # its JSON without a newline; adding one changes bytes the tests read.
+        exclude: ^tests/server/library_store/
       - id: trailing-whitespace
         name: Trim trailing whitespace
 

@@ -285,6 +285,13 @@ STAGES: dict[str, tuple[str, str]] = {
 }
 
 
+# `serve` is a command, not a pipeline stage: it writes nothing, belongs to no run
+# order, and takes the server's own arguments. It stays out of STAGES so that every
+# check that reads STAGES as "the stages a build runs" keeps meaning that.
+SERVE = "serve"
+SERVE_HELP = "serve a built store to an MCP client over stdio (read-only; needs the `server` extra)"
+
+
 def usage() -> str:
     width = max(len(name) for name in STAGES)
     lines = [
@@ -295,6 +302,8 @@ def usage() -> str:
     ]
     lines += [f"  {name:<{width}}  {help_}" for name, (_, help_) in STAGES.items()]
     lines += [
+        "",
+        f"Command, outside the pipeline:  knowledgestore {SERVE}  {SERVE_HELP}",
         "",
         "Stages that both extract evidence and merge written prose back in",
         "(summaries, topics, deepdive) take a sub-command:",
@@ -314,22 +323,9 @@ def usage() -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("-h", "--help", "help"):
-        print(usage())
-        return 0 if argv else 1
-
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--root")
-    known, rest = parser.parse_known_args(argv)
-    if known.root:
-        try:
-            config.configure(root=known.root)
-        except config.SettingsFileError as error:
-            print(f"knowledgestore: {error}", file=sys.stderr)
-            return 1
-
+def _command(rest: Sequence[str]) -> int | None:
+    """Run what is not a stage - `--version` and `serve` - and say so by returning an
+    exit code; `None` means the first argument is a stage (or nothing) for `main`."""
     if rest[:1] in (["--version"], ["-V"]):
         # Askable, because it was not. The skills are distributed separately from
         # this library - skills through the plugin cache, the library through pip -
@@ -363,6 +359,30 @@ def main(argv: list[str] | None = None) -> int:
         # whether the store's own settings reached the run. Never a value.
         print(f"settings {config.describe_settings_file()}")
         return 0
+    if rest[:1] == [SERVE]:
+        return _serve(rest[1:])
+    return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(usage())
+        return 0 if argv else 1
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--root")
+    known, rest = parser.parse_known_args(argv)
+    if known.root:
+        try:
+            config.configure(root=known.root)
+        except config.SettingsFileError as error:
+            print(f"knowledgestore: {error}", file=sys.stderr)
+            return 1
+
+    handled = _command(rest)
+    if handled is not None:
+        return handled
 
     stage = rest[0] if rest else ""
     if stage not in STAGES:
@@ -417,6 +437,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     return _run_stage(stage, rest[1:])
+
+
+def _serve(arguments: Sequence[str]) -> int:
+    """Run the MCP server with exactly the arguments and environment it always took."""
+    try:
+        from .server.cli import main as serve_main
+    except ModuleNotFoundError as missing:
+        if missing.name is None or missing.name.split(".")[0] not in ("mcp", "mcp_types"):
+            raise
+        print(
+            "knowledgestore serve needs the MCP SDK, which is not installed: "
+            "pip install 'hmcts-knowledge-store-builder[server]'",
+            file=sys.stderr,
+        )
+        return 1
+    return serve_main(list(arguments))
 
 
 def _run_stage(stage: str, arguments: Sequence[str]) -> int:

@@ -1,0 +1,50 @@
+{
+ "repos/example-org/alpha-lib": {
+  "status": 200,
+  "body": {
+   "name": "alpha-lib",
+   "archived": false,
+   "default_branch": "main",
+   "security_and_analysis": {"secret_scanning": {"status": "enabled"}}
+  }
+ },
+ "repos/example-org/alpha-lib/vulnerability-alerts": {"status": 204},
+ "repos/example-org/alpha-lib/branches/main": {
+  "status": 200,
+  "body": {"name": "main", "protected": true}
+ },
+ "repos/example-org/beta-app": {
+  "status": 200,
+  "body": {
+   "name": "beta-app",
+   "archived": false,
+   "default_branch": "main",
+   "security_and_analysis": {"secret_scanning": {"status": "enabled"}}
+  }
+ },
+ "repos/example-org/beta-app/vulnerability-alerts": {"status": 204},
+ "repos/example-org/beta-app/branches/main": {
+  "status": 200,
+  "body": {"name": "main", "protected": false}
+ },
+ "repos/example-org/delta-deploy": {"status": 404},
+ "repos/example-org/delta-deploy/vulnerability-alerts": {"status": 404},
+ "repos/example-org/eta-portal": {
+  "status": 200,
+  "body": {
+   "name": "eta-portal",
+   "archived": false,
+   "default_branch": "main",
+   "security_and_analysis": {"secret_scanning": {"status": "enabled"}}
+  }
+ },
+ "repos/example-org/eta-portal/vulnerability-alerts": {"status": 204},
+ "repos/example-org/eta-portal/branches/main": {
+  "status": 200,
+  "body": {"name": "main", "protected": true}
+ },
+ "repos/example-org/.github": {
+  "status": 200,
+  "body": {"name": ".github", "private": true, "visibility": "private"}
+ }
+}

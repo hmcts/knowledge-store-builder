@@ -41,8 +41,12 @@ documents = ["markitdown>=0.1.8"]
 # calls, and because extraction is the one part of this pipeline that is not
 # standard library by nature.
 ast = ["graphifyy[terraform,sql]>=0.9.93"]
-# Lint, format and type-check tooling, pinned to what CI runs.
-dev = ["ruff==0.16.10", "pyright==1.1.414"]
+# Only `knowledgestore serve` needs the MCP SDK: a read-only server that answers
+# questions from a built store. Pinned exactly, as the server always was.
+server = ["mcp==2.3.0"]
+# Lint, format and type-check tooling, pinned to what CI runs. `mcp` is here so
+# contributors and CI run the server tests rather than skip them.
+dev = ["ruff==0.16.10", "pyright==1.1.414", "mcp==2.3.0"]
 
 [project.scripts]
 knowledgestore = "knowledgestore.cli:main"
@@ -64,7 +68,9 @@ raw-options = { local_scheme = "node-and-date" }
 packages = ["src/knowledgestore"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/knowledgestore", "tests", "examples", "README.md", "LICENSE"]
+# Tests and their committed stores stay in the repository: nothing installed needs
+# them, and the server's stores alone are several MB.
+include = ["src/knowledgestore", "examples", "/README.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 100
@@ -95,6 +101,7 @@ include = [
     "tests/test_docs_integrity.py",
     "tests/documented_flags.py",
     "tests/test_documented_flags.py",
+    "tests/server",
 ]
 # Stage modules read module-level path constants that tests and configure()
 # rebind, so inferred types are deliberately loose in places.

@@ -186,9 +186,11 @@ class DocumentedStagesExist(unittest.TestCase):
             for match in INVOCATION.finditer(text):
                 stage = match.group(1)
                 with self.subTest(file=str(path.relative_to(ROOT)), stage=stage):
+                    # `serve` is a command, not a pipeline stage, so it is not in
+                    # STAGES; it is still held to being something this release has.
                     self.assertIn(
                         stage,
-                        cli.STAGES,
+                        {*cli.STAGES, cli.SERVE},
                         f"{path.relative_to(ROOT)} documents `knowledgestore {stage}`, "
                         "which is not a stage in this release - a reader following it "
                         "gets `unknown stage`",

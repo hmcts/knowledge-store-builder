@@ -115,7 +115,9 @@ _NOT_IN_SLUG = re.compile(r"[^\w\- ]", re.UNICODE)
 # master declares its mirrors twice - a table for the contract, a bullet list
 # for the section on estate content - and both are blockquotes, so this reads
 # either without knowing which.
-_MIRROR_PATH = re.compile(r"`([^`]+\.md)`")
+# A mirror is a Markdown file or, for the text the MCP server sends every client,
+# the Python module that holds it.
+_MIRROR_PATH = re.compile(r"`([^`]+\.(?:md|py))`")
 # What a command token may sit against without being that command. A retired
 # instruction has to be bounded at both ends or `graphify .` matches
 # `graphify ...`, which is a different command and a legitimate one.
