@@ -167,28 +167,19 @@ class SymlinkedStoreRootTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertEqual(len(record), 1, record)
         self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
 
-    def test_a_corpus_root_file_matches_content_set_keys_under_a_symlinked_root(self):
-        """Catches a corpus-root node keyed on graphify's `../<link>/...` spelling.
+    def test_a_source_spelled_through_the_link_is_keyed_as_the_content_set_is(self):
+        """Catches `source_key` keying a `../<link>/...` spelling as it arrives.
 
-        A file outside every clone is extracted with the store root as graphify's root,
-        so it is the case that still arrives spelled relative to the resolved root. Keyed
-        as it arrives it matches no content-set path, counts 0, and the stage refuses an
-        instrument mismatch; a passing run that counted the file is the evidence the
-        keys met.
+        The spelling graphify gives a file reached through the store's link, relative to
+        the resolved root. The content set names the same file by its path through the
+        link, which this store's layout keys as `repositories/link-store/...` (derived by
+        hand: the link sits in a directory named `repositories`), so the two must meet
+        there. Left as it arrives the key keeps its `../` and matches nothing.
         """
-        tools = self.root / "tools"
-        tools.mkdir()
-        (tools / "helper.py").write_text(CODE, encoding="utf-8")
-        detect = self._detect([self.link / "tools" / "helper.py"])
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = extract_ast.main(["--detect", str(detect)])
-        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
-        record = json.loads(
-            (self.root / "graphify-out" / ".graphify_ast_file_counts.json").read_text("utf-8")
+        self.assertEqual(
+            extract_ast.source_key(f"../{self.link.name}/tools/helper.py"),
+            "repositories/link-store/tools/helper.py",
         )
-        self.assertEqual(len(record), 1, record)
-        self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
 
 
 _TEMP = Path(tempfile.gettempdir())

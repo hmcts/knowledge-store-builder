@@ -136,6 +136,15 @@ per-repository route's, so a store can use either and the join, `explorer` and
 `deepdive` work on both. A layer written by an earlier `extract-ast` carried
 store-relative paths and no `repo`; re-run `extract-ast` rather than reuse it.
 
+**`extract-ast` extracts the declared repositories, nothing else.** Every other file the
+detect scan found - fetch-only clones under `external/`, the store's own `.claude/`,
+`tests/`, `scripts/` and generated `knowledge/`, and any clone the declaration does not
+name - is printed as `N file(s) outside scope, skipped` (first five paths, then a
+count) and is never extracted. `json-schema` uses the same cut. A store with no
+`config/repositories.txt` keeps every clone under `repositories/` in scope. The first
+run after upgrading reports the old `(corpus root)` group as absent from the last run:
+that is the change.
+
 **Run `merge-inputs` before every merge, and read its output.** Extraction is
 driven by `config/repositories.txt`; the merge is driven by a shell glob, and
 nothing else reconciles them. A repository cloned and extracted during a refresh

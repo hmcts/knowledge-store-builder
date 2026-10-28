@@ -53,7 +53,8 @@ class ExtractAstTest(_StoreCase, unittest.TestCase):
 
     def test_the_absolute_spelling_is_kept_when_the_relative_one_comes_first(self):
         """Break caught: the first spelling kept whatever it is, so a relative one is
-        read against the working directory and the file lands outside every repository."""
+        read against the working directory and the file lands outside every repository,
+        which the stage now reports as outside its scope rather than extracting."""
         only = self._repo_file("repo-a", "src/a.py")
         listing = self.root / "files.txt"
         listing.write_text("\n".join(reversed(self.spellings(only))) + "\n", encoding="utf-8")
@@ -62,7 +63,7 @@ class ExtractAstTest(_StoreCase, unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(extractor.calls, [[only]])
         self.assertIn("repo-a", out)
-        self.assertNotIn(extract_ast.CORPUS_ROOT, out)
+        self.assertNotIn("outside scope", out)
 
     def test_a_list_without_repeats_says_nothing_about_duplicates(self):
         """Break caught: the notice printed unconditionally."""

@@ -1688,8 +1688,8 @@ MUTATIONS = (
     Mutation(
         "a partial layer reports success",
         "extract_ast.py",
-        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 1',
-        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 0',
+        "        report_failures(failures)\n        return 1",
+        "        report_failures(failures)\n        return 0",
         "the layer is written even when repositories failed, on purpose, so the exit "
         "code is the only thing carrying the failure. Returning 0 takes a CI build "
         "green over a layer missing whole repositories - the shape of every escape "
@@ -1745,8 +1745,8 @@ MUTATIONS = (
     Mutation(
         "extract-ast roots the extractor at the store again",
         "extract_ast.py",
-        "    return config.REPOSITORIES_DIR / name if name else root",
-        "    return root",
+        "    return config.REPOSITORIES_DIR / name",
+        "    return config.ROOT",
         "the layer carried `repositories/<repo>/<path>` as `source_file` with no `repo`, so the file-to-ticket join matched nothing and every node lost its tickets, silently: the graph, the index and every count were valid (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
@@ -1779,6 +1779,7 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
             "test_extract_ast_ticket_join.ExtractAstTicketJoin.test_a_node_extract_ast_wrote_carries_its_files_tickets",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
@@ -2035,7 +2036,7 @@ MUTATIONS = (
     Mutation(
         "a failed repository's files read as vanished",
         "extract_ast.py",
-        "        if (name or CORPUS_ROOT) in failed:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
+        "        if name in failed:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
         "        if False:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
         "a repository that raised has no nodes; counting its files as 0 reports every one as vanished and buries the real failure under a list of false losses",
         (
@@ -2092,9 +2093,50 @@ MUTATIONS = (
         "extract_ast.py",
         "    rebuilt = os.path.normpath(os.path.join(config.ROOT.resolve(), source))\n    return store_paths.relative(rebuilt)",
         "    return store_paths.relative(source)",
-        "graphify spells source_file relative to the resolved root, so under a symlinked store root a corpus-root file (the one extracted with the store as its root; repository files are rooted at their clone and no longer reach this) comes back as ../<link>/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
+        "graphify spells source_file relative to the resolved root, so under a symlinked store root a path (repository files are rooted at their clone, so this is the unread-file spelling and any node with no repository) comes back as ../<link>/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
         (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_root_file_matches_content_set_keys_under_a_symlinked_root",
+            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_source_spelled_through_the_link_is_keyed_as_the_content_set_is",
+        ),
+    ),
+    Mutation(
+        "a file outside the declared repositories is extracted",
+        "extract_ast.py",
+        '    outside: list[Path] = list(groups.pop("", []))',
+        "    outside: list[Path] = []",
+        "#525: the detect command scans the store root, so a fetch-only clone under external/, the store's own scripts/ and its generated knowledge/ layers were extracted as nodes with no repository, while json-schema skipped the same files as outside-repositories",
+        (
+            "test_extract_ast_scope.ScopeTest.test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones",
+        ),
+    ),
+    Mutation(
+        "a clone the store does not declare is extracted",
+        "extract_ast.py",
+        "    if declared is not None:\n        for name in [name for name in groups if name not in declared]:",
+        "    if False:\n        for name in [name for name in groups if name not in declared]:",
+        "the per-repository route extracts what config/repositories.txt declares, and merge-inputs names a graph it does not declare as an anomaly; extracting every directory under repositories/ puts an abandoned refresh's clone into the layer with nothing to date it",
+        (
+            "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
+        ),
+    ),
+    Mutation(
+        "json-schema reads a clone the store does not declare",
+        "extract_json_schema.py",
+        "        groups, outside = extract_ast.in_scope(json_files, extract_ast.declared_repositories())",
+        "        groups, outside = extract_ast.in_scope(json_files, None)",
+        "#525: extract-ast and json-schema disagreed about scope - json-schema never read config/repositories.txt, so it read schemas in a clone extract-ast skipped, and the layer held nodes for files the AST layer did not",
+        (
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
+        ),
+    ),
+    Mutation(
+        "the out-of-scope list is printed in full",
+        "extract_ast.py",
+        '    shown = [f"  {store_paths.relative(path)}" for path in outside[:5]]',
+        '    shown = [f"  {store_paths.relative(path)}" for path in outside]',
+        "a store whose content set holds thousands of out-of-scope files (vendored clones, generated layers) buried the run's own counts under one line each, as the unread report would without its cap",
+        (
+            "test_extract_ast_scope.ScopeTest.test_a_long_out_of_scope_list_is_capped_like_the_unread_report",
         ),
     ),
     Mutation(
@@ -2216,8 +2258,8 @@ MUTATIONS = (
     Mutation(
         "extract-ast ignores a missing grammar",
         "extract_ast.py",
-        "    if missing:\n        for line in missing:",
-        "    if False:\n        for line in missing:",
+        "    return None if missing else (groups, extract)",
+        "    return groups, extract",
         "the pre-flight inside extract-ast exists so the check cannot be forgotten; without the refusal the stage extracts .tf files to nothing and reports a healthy run",
         (
             "test_check_grammars.CheckGrammarsTest.test_extract_ast_refuses_before_extracting_when_the_grammar_is_missing",
@@ -4070,6 +4112,11 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_a_long_out_of_scope_list_is_capped_like_the_unread_report",
+            "test_extract_ast_scope.ScopeTest.test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones",
+            "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
+            "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
+            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
@@ -4078,6 +4125,7 @@ MUTATIONS = (
             "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
             "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_the_file_it_names_and_records_zero",
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
             "test_extract_json_schema.StageTest.test_a_large_data_file_is_left_to_graphify_without_a_line_parse",
             "test_extract_json_schema.StageTest.test_an_integer_past_the_digit_limit_is_named_malformed",
             "test_extract_json_schema.StageTest.test_content_set_without_json_removes_the_layer_and_exits_0",
