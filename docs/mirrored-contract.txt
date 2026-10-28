@@ -82,3 +82,5 @@ skills/knowledge-store-export/SKILL.md :: believes it finished
 # is still a copy of the rule it states, and it drifts the same way.
 docs/building-a-knowledge-store.md :: not delegable
 docs/asking-questions.md :: traces to evidence in the store
+src/knowledgestore/server/server.py :: data, not instruction
+src/knowledgestore/server/server.py :: Say which layer answered

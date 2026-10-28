@@ -12516,6 +12516,118 @@ MUTATIONS = (
             "test_build_minimum_standard.TheEvidenceStage.test_the_value_shaped_rules_are_every_rule_but_key_name",
         ),
     ),
+    Mutation(
+        "server: a module gains a way to start a process",
+        "src/knowledgestore/server/tools_graph.py",
+        "import sqlite3\nfrom collections.abc import Callable\nfrom contextlib import closing\n",
+        "import subprocess\nimport sqlite3\nfrom collections.abc import Callable\nfrom contextlib import closing\n",
+        "the MCP server's read-only claim (SECURITY.md, The MCP server): a runtime sweep "
+        "shows one run started no process, but a tool that gains `subprocess` and only "
+        "uses it on a path the sweep never takes would pass it. Only a read of the "
+        "source can say the package has no way to write, spawn or reach a network",
+        (
+            "server.test_security_invariants.ReadOnlyByConstructionTest.test_no_module_of_the_server_can_write_spawn_or_reach_a_network",
+        ),
+    ),
+    Mutation(
+        "server: an answer names the store root",
+        "src/knowledgestore/server/results.py",
+        '            "index": _index_state(store),\n',
+        '            "index": _index_state(store),\n            "root": str(store.root),\n',
+        "the MCP server's no-host-path claim (SECURITY.md, The MCP server): an added "
+        "field in the envelope every tool answer carries tells the client where the "
+        "store is on this machine, and no tool's own literals notice a field they do "
+        "not name",
+        (
+            "server.test_library_graph.GraphContractWithIndex.test_find_repo_answers_a_target_outside_the_estate",
+            "server.test_library_graph.GraphContractWithIndex.test_find_repo_knows_each_clone",
+            "server.test_library_graph.GraphContractWithIndex.test_node_by_its_merged_id",
+            "server.test_library_graph.GraphContractWithIndex.test_search_finds_a_class_with_its_file_and_link",
+            "server.test_library_graph.GraphContractWithIndex.test_store_info_reports_the_library_store",
+            "server.test_library_graph.GraphContractWithoutIndex.test_find_repo_answers_a_target_outside_the_estate",
+            "server.test_library_graph.GraphContractWithoutIndex.test_find_repo_knows_each_clone",
+            "server.test_library_graph.GraphContractWithoutIndex.test_node_by_its_merged_id",
+            "server.test_library_graph.GraphContractWithoutIndex.test_search_finds_a_class_with_its_file_and_link",
+            "server.test_library_graph.GraphContractWithoutIndex.test_store_info_reports_the_library_store",
+            "server.test_library_tickets.TicketsContractWithIndex.test_a_key_no_layer_holds",
+            "server.test_library_tickets.TicketsContractWithIndex.test_an_answer_query_nothing_matches",
+            "server.test_library_tickets.TicketsContractWithIndex.test_answers_from_every_library_answer_layer",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_an_unresolved_tracker_record",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_has_its_files_record_and_tracker_record",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_that_never_landed",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_the_tracker_denied",
+            "server.test_library_tickets.TicketsContractWithIndex.test_tickets_for_a_file_list_the_landed_ticket",
+            "server.test_library_tickets.TicketsContractWithIndex.test_tickets_keep_a_branch_only_ticket_apart_with_its_branch",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_a_key_no_layer_holds",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_an_answer_query_nothing_matches",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_answers_from_every_library_answer_layer",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_an_unresolved_tracker_record",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_has_its_files_record_and_tracker_record",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_that_never_landed",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_the_tracker_denied",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_tickets_for_a_file_list_the_landed_ticket",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_tickets_keep_a_branch_only_ticket_apart_with_its_branch",
+            "server.test_results.EnvelopeTest.test_the_envelope_states_the_store_and_the_layers_used",
+            "server.test_security.ContainmentTest.test_a_reload_that_meets_an_escaping_layer_says_so",
+            "server.test_security_invariants.NoHostPathTest.test_no_tool_answer_or_refusal_names_a_host_path",
+            "server.test_served_copy.SourceAndIdentityTest.test_a_manifest_without_a_digest_is_identified_by_its_bytes",
+            "server.test_served_copy.StdioSourcesTest.test_a_clone_registered_after_start_replaces_the_plugin_copy",
+            "server.test_served_copy.StdioSourcesTest.test_store_info_says_which_rule_chose_the_store_and_which_copy_it_is",
+            "server.test_served_copy.SwitchSafetyTest.test_a_clone_that_fails_to_open_leaves_the_plugin_copy_answering",
+            "server.test_server.ErrorMappingTest.test_an_unwritable_cache_is_reported_without_its_path",
+            "server.test_server.ErrorMappingTest.test_an_unwritable_cache_whose_path_has_spaces_names_none_of_it",
+            "server.test_tools_graph.CommunityTest.test_a_community_carries_its_label_summary_and_members",
+            "server.test_tools_graph.FindRepoTest.test_the_three_answers_in_both_modes",
+            "server.test_tools_graph.NeighboursTest.test_depth_one_lists_each_neighbour_once_with_how_it_was_reached",
+            "server.test_tools_graph.NodeTest.test_a_node_carries_its_url",
+            "server.test_tools_graph.RepositoryListTest.test_a_repository_only_provenance_records_is_in_the_estate_with_no_nodes",
+            "server.test_tools_graph.RepositoryListTest.test_a_repository_only_the_ticket_layer_names_is_listed_in_both_modes",
+            "server.test_tools_graph.SearchTest.test_a_label_is_found_with_its_pinned_url",
+            "server.test_tools_graph.StoreInfoTest.test_store_info_with_the_index",
+            "server.test_tools_graph.StoreInfoTest.test_store_info_without_the_index_says_why_the_graph_answers",
+            "server.test_tools_minimum_standard.ScopeTest.test_a_product_scopes_to_the_repositories_the_summary_declares",
+            "server.test_tools_minimum_standard.ScopeTest.test_named_repositories_return_their_points_citations_and_as_of",
+            "server.test_tools_relationships.DependentsTest.test_a_target_outside_the_estate_is_reported_per_kind",
+            "server.test_tools_relationships.DependentsTest.test_direct_dependents_are_the_by_repo_file_whole",
+            "server.test_tools_relationships.DependentsTest.test_the_three_hop_chain_with_paths_and_the_cycle_once",
+            "server.test_tools_relationships.EscapingLinkTest.test_a_by_repo_link_outside_the_store_is_skipped_and_counted",
+            "server.test_tools_relationships.UnknownNameTest.test_a_repository_with_only_a_by_repo_file_is_in_the_estate",
+            "server.test_tools_relationships.UnknownNameTest.test_every_tool_answers_an_unknown_name_with_near_misses",
+            "server.test_tools_tickets.AnswersTest.test_answers_find_the_extra_layer_entry",
+            "server.test_tools_tickets.TicketTest.test_a_proposed_ticket_is_proposed_with_its_branch_and_its_file",
+            "server.test_tools_tickets.TicketsTest.test_landed_and_proposed_are_two_lists_and_the_proposed_ticket_is_only_proposed",
+            "server.test_tools_tickets.TrackerTest.test_an_unrecognised_tracker_layer_reads_as_absent",
+            "server.test_tools_tickets.TrackerTest.test_without_a_tracker_the_field_is_null_and_the_rest_unchanged",
+        ),
+    ),
+    Mutation(
+        "server: ticket text composed into a sentence field",
+        "src/knowledgestore/server/tools_tickets.py",
+        '        "key": key,\n        "proposed": record.get("proposed") is True,\n',
+        '        "key": key,\n        "note": f"description: {record.get(\'d\')}",\n        "proposed": record.get("proposed") is True,\n',
+        "the MCP server's store-text claim (SECURITY.md, The MCP server): instruction-"
+        "shaped store text belongs in a named data field and nowhere the server composes "
+        "a sentence, which is where an agent reads it as the server's own words",
+        (
+            "server.test_library_tickets.TicketsContractWithIndex.test_a_ticket_lists_every_file_its_commit_landed",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_an_unresolved_tracker_record",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_has_its_files_record_and_tracker_record",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_that_never_landed",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_the_tracker_denied",
+            "server.test_library_tickets.TicketsContractWithIndex.test_ticket_the_tracker_records_absent",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_a_ticket_lists_every_file_its_commit_landed",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_an_unresolved_tracker_record",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_has_its_files_record_and_tracker_record",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_that_never_landed",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_the_tracker_denied",
+            "server.test_library_tickets.TicketsContractWithoutIndex.test_ticket_the_tracker_records_absent",
+            "server.test_security_invariants.StoreTextFieldsTest.test_store_text_is_returned_only_under_explicit_text_fields",
+            "server.test_tools_tickets.HostileTextTest.test_store_text_is_only_in_text_summary_or_description",
+            "server.test_tools_tickets.HostileTextTest.test_the_hostile_description_comes_back_verbatim_in_description_only",
+            "server.test_tools_tickets.TicketTest.test_a_proposed_ticket_is_proposed_with_its_branch_and_its_file",
+            "server.test_tools_tickets.TicketTest.test_branch_only_text_on_a_landed_ticket_is_kept_apart",
+        ),
+    ),
 )
 
 
@@ -12874,8 +12986,16 @@ def module_of(observer: str) -> str:
     An observer is `module.Class.test` for a failure inside a test, and the
     module alone for one that is not inside a test at all - an import that
     raised, or a `setUpModule`. Both name their module the same way.
+
+    A module in a package under `tests/` (the MCP server's, in `tests/server/`)
+    is `package.test_module`: the module is everything up to and including the
+    first `test_*` component, so the package is not mistaken for it.
     """
-    return observer.partition(".")[0]
+    parts = observer.split(".")
+    for index, part in enumerate(parts):
+        if part.startswith("test_"):
+            return ".".join(parts[: index + 1])
+    return parts[0]
 
 
 def isolable(observer: str) -> bool:
@@ -12952,7 +13072,7 @@ def behavioural(observers: Iterable[str]) -> tuple[str, ...]:
 
 def observer_path(observer: str) -> Path:
     """The file holding an entry's observer."""
-    return ROOT / "tests" / f"{module_of(observer)}.py"
+    return ROOT / "tests" / Path(*module_of(observer).split(".")).with_suffix(".py")
 
 
 @contextmanager
