@@ -1171,16 +1171,19 @@ def scoped_input(
     return groups, outside, check_declared(groups, declared)
 
 
-def main(argv: "list[str] | None" = None) -> int:
-    arguments = parse_args(argv)
-    graph_directory = config.GRAPH_PATH.parent
-    destination = arguments.out or (graph_directory / ".graphify_ast.json")
+def prepare_run(
+    arguments, graph_directory: Path
+) -> "tuple[dict[str, list[Path]], Callable] | None":
+    """The groups to extract and the extractor to drive, or None after printing why not.
 
+    Everything that can refuse before a parser runs, in the order an operator meets it:
+    the scope and the declarations, the `ast` extra, then the grammars.
+    """
     try:
         groups, outside, warnings = scoped_input(arguments, graph_directory)
     except InputRefused as refusal:
         print(str(refusal), file=sys.stderr)
-        return 1
+        return None
     for line in outside_scope_report(outside):
         print(line)
     for line in warnings:
@@ -1194,7 +1197,7 @@ def main(argv: "list[str] | None" = None) -> int:
             "with `pip install 'hmcts-knowledge-store-builder[ast]'` and re-run.",
             file=sys.stderr,
         )
-        return 1
+        return None
 
     # The extractor is imported in this process, so this interpreter is the one that
     # must hold the grammars - passed explicitly, not left to the stage's fallback.
@@ -1204,10 +1207,30 @@ def main(argv: "list[str] | None" = None) -> int:
     _report, missing = check_grammars.check(
         groups, lambda _name: (sys.executable, "extract-ast's own interpreter")
     )
-    if missing:
-        for line in missing:
-            print(f"Refusing to extract: {line}", file=sys.stderr)
+    for line in missing:
+        print(f"Refusing to extract: {line}", file=sys.stderr)
+    return None if missing else (groups, extract)
+
+
+def report_failures(failures: list) -> None:
+    """Name each repository group that failed to extract, on stderr."""
+    print(
+        f"\n{len(failures)} repository group(s) failed to extract and are absent from the layer:",
+        file=sys.stderr,
+    )
+    for label, error in failures:
+        print(f"  {label}: {error}", file=sys.stderr)
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    arguments = parse_args(argv)
+    graph_directory = config.GRAPH_PATH.parent
+    destination = arguments.out or (graph_directory / ".graphify_ast.json")
+
+    prepared = prepare_run(arguments, graph_directory)
+    if prepared is None:
         return 1
+    groups, extract = prepared
     # Read before anything is written: the sidecar is the only record of the last
     # run, and it is rewritten as each repository finishes.
     sidecar = counts_path(destination)
@@ -1248,13 +1271,7 @@ def main(argv: "list[str] | None" = None) -> int:
         destination, layer, groups, failures, (declined, unread), arguments.allow_vanished
     )
     if failures:
-        print(
-            f"\n{len(failures)} repository group(s) failed to extract and are absent from the "
-            "layer:",
-            file=sys.stderr,
-        )
-        for label, error in failures:
-            print(f"  {label}: {error}", file=sys.stderr)
+        report_failures(failures)
         return 1
     return 1 if refused else 0
 

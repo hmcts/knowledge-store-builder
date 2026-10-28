@@ -1688,8 +1688,8 @@ MUTATIONS = (
     Mutation(
         "a partial layer reports success",
         "extract_ast.py",
-        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 1',
-        '            print(f"  {label}: {error}", file=sys.stderr)\n        return 0',
+        "        report_failures(failures)\n        return 1",
+        "        report_failures(failures)\n        return 0",
         "the layer is written even when repositories failed, on purpose, so the exit "
         "code is the only thing carrying the failure. Returning 0 takes a CI build "
         "green over a layer missing whole repositories - the shape of every escape "
@@ -2257,8 +2257,8 @@ MUTATIONS = (
     Mutation(
         "extract-ast ignores a missing grammar",
         "extract_ast.py",
-        "    if missing:\n        for line in missing:",
-        "    if False:\n        for line in missing:",
+        "    return None if missing else (groups, extract)",
+        "    return groups, extract",
         "the pre-flight inside extract-ast exists so the check cannot be forgotten; without the refusal the stage extracts .tf files to nothing and reports a healthy run",
         (
             "test_check_grammars.CheckGrammarsTest.test_extract_ast_refuses_before_extracting_when_the_grammar_is_missing",
