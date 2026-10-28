@@ -56,6 +56,19 @@ The per-file record is unchanged on disk: its keys stay store-relative
 (`repositories/<repo>/<path>`), so an existing baseline stays valid. The join from a
 node to its content-set file is `(repo, source_file)` to that key, in `node_key`.
 
+## Scope: the declared repositories and the knowledge corpus (#525)
+
+The detect scan covers the store root, so its content set also holds fetch-only
+clones under `external/` and the store's own `.claude/`, `tests/` and `scripts/`.
+Extracted, those arrive as nodes with no repository, and `json-schema` skips the same
+files as `outside-repositories`. So this stage extracts what the per-repository route
+hands `merge-graphs` - each repository `config/repositories.txt` declares, and the
+store's `knowledge/` directory as a group of its own tagged `knowledge` - and reports
+every other file as `N file(s) outside scope, skipped`, listing each, without
+extracting it. `by_repository` is the grouping both stages share; `in_scope` is the
+cut this stage adds to it. A store declaring no repositories has nothing to filter
+by, so every clone under `repositories/` stays in scope.
+
 ## Nodes per repository, against the last run
 
 Reconciling this stage's own count against the content set it was handed catches
@@ -204,6 +217,38 @@ from .build_store_manifest import write_atomically
 # How a file outside every repository is grouped and labelled: as a group of its own
 # rather than dropped, so the stage's count still reconciles with its input.
 CORPUS_ROOT = "(corpus root)"
+
+
+# The knowledge corpus: the one directory outside `repositories/` this stage extracts, as a
+# group of its own. Not a `config` path on purpose: `config` paths are the store's
+# artefacts, each a layer or named as not one, and this directory holds all of them.
+CORPUS_DIRNAME = "knowledge"
+
+
+def corpus_name() -> str:
+    """The tag the knowledge corpus carries: its directory's name, as a repository's is."""
+    return CORPUS_DIRNAME
+
+
+def corpus_dir() -> Path:
+    return config.ROOT / CORPUS_DIRNAME
+
+
+def group_dir(name: str) -> Path:
+    """The directory a group is extracted from: its clone, the corpus, or the store root."""
+    if not name:
+        return config.ROOT
+    if name == corpus_name():
+        return corpus_dir()
+    return config.REPOSITORIES_DIR / name
+
+
+def group_prefix(name: str) -> str:
+    """The store-relative directory a group's files are keyed under in the per-file record."""
+    if name == corpus_name():
+        return CORPUS_DIRNAME
+    return f"{config.REPOSITORIES_DIR.name}/{name}"
+
 
 # The kinds `detect` classifies that hold parseable source. `paper`, `image` and
 # `video` are content the semantic layer reads and the AST parser cannot, so
@@ -451,6 +496,60 @@ def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     return groups
 
 
+def _under(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def in_scope(
+    files: "list[Path]", declared: "list[str] | None"
+) -> "tuple[dict[str, list[Path]], list[Path]]":
+    """Split the content set into what this stage extracts and what is outside its scope.
+
+    In scope is the declared repositories (`config/repositories.txt`) plus the knowledge
+    corpus: the same set the per-repository route hands `merge-graphs`, one graph per
+    repository and the corpus's own. Everything else the detect scan found - a fetch-only
+    clone under `external/`, the store's own `scripts/` - is returned in the second half,
+    to be named and never extracted. A store declaring nothing has no declaration to
+    filter by, so every clone under `repositories/` stays in scope, as it did.
+
+    `by_repository` is the grouping `json-schema` uses too, so the two stages cannot
+    disagree about which clone a file belongs to.
+    """
+    groups = by_repository(files, config.REPOSITORIES_DIR)
+    strays = groups.pop("", [])
+    outside: list[Path] = []
+    if corpus_name() in groups:
+        raise InputRefused(
+            f"Refusing to extract: a repository named {corpus_name()!r} would share its tag "
+            "with the knowledge corpus, so `<tag>::<id>` could name files from either. "
+            "Rename the repository or the corpus directory."
+        )
+    if declared is not None:
+        for name in [name for name in groups if name not in declared]:
+            outside.extend(groups.pop(name))
+    corpus = []
+    for path in strays:
+        (corpus if _under(path, corpus_dir()) else outside).append(path)
+    if corpus:
+        groups[corpus_name()] = corpus
+    return groups, sorted(outside, key=str)
+
+
+def outside_scope_report(outside: "list[Path]") -> "list[str]":
+    """The count line and one line per path left out, store-relative; empty when none."""
+    if not outside:
+        return []
+    return [
+        f"{len(outside):,} file(s) outside scope, skipped (not a declared repository or the "
+        f"{corpus_name()} corpus):",
+        *(f"  {store_paths.relative(path)}" for path in outside),
+    ]
+
+
 def write_counts(path: Path, counts: "dict[str, int]") -> None:
     """The sidecar, through a temporary file and a rename, in the form it always had.
 
@@ -471,9 +570,10 @@ def declined_path(name: str, entry: str) -> str:
     change of spelling upstream cannot silently undo the distinction.
     """
     relative = store_paths.relative(entry)
-    if relative.startswith(f"{config.REPOSITORIES_DIR.name}/") or not name:
+    root = group_prefix(name).partition("/")[0]
+    if relative.startswith(f"{root}/") or not name:
         return relative
-    return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
+    return f"{group_prefix(name)}/{relative}"
 
 
 def unread_path(name: str, entry: str) -> str:
@@ -484,7 +584,7 @@ def unread_path(name: str, entry: str) -> str:
     """
     if not name or Path(entry).is_absolute():
         return entry
-    return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{name}/{entry}")
+    return posixpath.normpath(f"{group_prefix(name)}/{entry}")
 
 
 @dataclass
@@ -536,7 +636,7 @@ def clone_root(name: str, root: Path) -> Path:
     A repository's own clone, so that ids and `source_file` come out repository-relative
     (CLAUDE.md 6.2); the corpus-root group keeps the store root.
     """
-    return config.REPOSITORIES_DIR / name if name else root
+    return group_dir(name) if name else root
 
 
 def under_clone(path: Path, clone: Path) -> Path:
@@ -566,13 +666,13 @@ def file_key(name: str, path: Path) -> str:
     """
     if not name:
         return store_paths.relative(path)
-    clone = config.REPOSITORIES_DIR / name
+    clone = group_dir(name)
     placed = under_clone(path, clone)
     try:
         inside = placed.relative_to(clone).as_posix()
     except ValueError:
         return store_paths.relative(path)
-    return f"{config.REPOSITORIES_DIR.name}/{name}/{inside}"
+    return f"{group_prefix(name)}/{inside}"
 
 
 def _bounded_extract(extractor, files: "list[Path]", root: Path, timeout: int, run: _EstateRun):
@@ -720,7 +820,7 @@ def node_key(node: dict) -> str:
         return ""
     repo = node.get("repo")
     if isinstance(repo, str) and repo and not Path(source).is_absolute():
-        return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{repo}/{source}")
+        return posixpath.normpath(f"{group_prefix(repo)}/{source}")
     return source_key(source)
 
 
@@ -1010,11 +1110,12 @@ def unapplied_exclusions(names: "list[str]") -> "list[tuple[str, str]]":
     return found
 
 
-def check_declared(groups: "dict[str, list[Path]]") -> "list[str]":
+def check_declared(groups: "dict[str, list[Path]]", declared: "list[str] | None") -> "list[str]":
     """Every refusal the store's declarations raise, and the warnings they leave."""
-    declared = declared_repositories()
     empty = reconcile(declared, groups) if declared is not None else []
-    names: "list[str]" = sorted({*(declared or []), *(name for name in groups if name)})
+    names: "list[str]" = sorted(
+        {*(declared or []), *(name for name in groups if name and name != corpus_name())}
+    )
     unapplied = unapplied_exclusions(names)
     if unapplied:
         listed = "\n".join(f"  {name}: {pattern}" for name, pattern in unapplied)
@@ -1120,12 +1221,21 @@ def main(argv: "list[str] | None" = None) -> int:
     destination = arguments.out or (graph_directory / ".graphify_ast.json")
 
     try:
-        files, _source = resolve_input(arguments, graph_directory)
-        groups = by_repository(files, config.REPOSITORIES_DIR)
-        warnings = check_declared(groups)
+        files, source = resolve_input(arguments, graph_directory)
+        declared = declared_repositories()
+        groups, outside = in_scope(files, declared)
+        if not groups:
+            raise InputRefused(
+                f"Refusing to extract: none of the {len(files):,} file(s) in {source} is in "
+                f"scope. In scope is a declared repository or the {corpus_name()} corpus; "
+                f"{len(outside):,} file(s) outside scope, first: {outside[0] if outside else ''}."
+            )
+        warnings = check_declared(groups, declared)
     except InputRefused as refusal:
         print(str(refusal), file=sys.stderr)
         return 1
+    for line in outside_scope_report(outside):
+        print(line)
     for line in warnings:
         print(line, file=sys.stderr)
 
@@ -1161,7 +1271,8 @@ def main(argv: "list[str] | None" = None) -> int:
         # interrupted run keeps its counts and leaves the previous layer standing.
         write_counts(sidecar, carry_forward(before, counts, failures, pending))
 
-    print(f"Extracting {len(files):,} file(s) across {len(groups):,} repository group(s):")
+    in_scope_files = sum(len(group) for group in groups.values())
+    print(f"Extracting {in_scope_files:,} file(s) across {len(groups):,} repository group(s):")
     layer, failures, counts, skipped, declined = extract_estate(
         groups, extract, config.ROOT, arguments.timeout, before, record
     )
@@ -1180,7 +1291,7 @@ def main(argv: "list[str] | None" = None) -> int:
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"
     )
     print(f"-> {destination}")
-    print(report_unread(skipped, len(files)), end="" if not skipped else "\n")
+    print(report_unread(skipped, in_scope_files), end="" if not skipped else "\n")
     if before:
         print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
     else:
