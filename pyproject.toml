@@ -68,7 +68,9 @@ raw-options = { local_scheme = "node-and-date" }
 packages = ["src/knowledgestore"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/knowledgestore", "tests", "examples", "README.md", "LICENSE"]
+# Tests and their committed stores stay in the repository: nothing installed needs
+# them, and the server's stores alone are several MB.
+include = ["src/knowledgestore", "examples", "/README.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 100
