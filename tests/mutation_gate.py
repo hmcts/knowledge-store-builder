@@ -2116,6 +2116,7 @@ MUTATIONS = (
         "the per-repository route extracts what config/repositories.txt declares, and merge-inputs names a graph it does not declare as an anomaly; extracting every directory under repositories/ puts an abandoned refresh's clone into the layer with nothing to date it",
         (
             "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
         ),
     ),
     Mutation(
@@ -4111,6 +4112,7 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_a_long_out_of_scope_list_is_capped_like_the_unread_report",
             "test_extract_ast_scope.ScopeTest.test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones",
             "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
             "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
@@ -4123,6 +4125,7 @@ MUTATIONS = (
             "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_does_not_pass_a_file_it_does_not_name",
             "test_extract_ast_vanished.VanishedFilesTest.test_allow_vanished_passes_the_file_it_names_and_records_zero",
             "test_extract_ast_vanished.VanishedFilesTest.test_the_first_run_says_there_is_no_record_and_writes_one",
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
             "test_extract_json_schema.StageTest.test_a_large_data_file_is_left_to_graphify_without_a_line_parse",
             "test_extract_json_schema.StageTest.test_an_integer_past_the_digit_limit_is_named_malformed",
             "test_extract_json_schema.StageTest.test_content_set_without_json_removes_the_layer_and_exits_0",
