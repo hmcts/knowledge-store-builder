@@ -16,13 +16,18 @@ extra. Three invariants hold for it, and each is a test that fails when it break
 
 - No module under `src/knowledgestore/server/` imports `subprocess`, a socket or
   HTTP client, `shutil`, or any library module (so none of `knowledgestore.io`'s
-  writers). None opens a file for writing, creates, renames or removes a path, or
-  calls `os.system` and its kin. The one exception is `index.py`, which writes the
-  decompressed query index to a temp file and renames it into
+  writers), `importlib` (bar `importlib.metadata`) or `ctypes`, and none calls
+  `exec`, `eval` or `__import__`. None opens a file for writing, creates, renames or
+  removes a path (by `os`, by a `Path` method or by a name imported from `os`), or
+  calls `os.system` and its kin. The one exception is four functions of `index.py`
+  (`_discard`, `_write`, `_write_digest`, `_remove_others`), which write the
+  decompressed query index to a temp file and rename it into
   `${XDG_CACHE_HOME:-~/.cache}/knowledge-store/<store.id>/`, outside the store; if
   the cache cannot be written the server reads the graph instead.
   Held by `tests/server/test_security_invariants.py` (`ReadOnlyByConstructionTest`),
-  a static read of the package's source.
+  a static read of every module in the package, subpackages included, and
+  (`CacheWritesStayInTheCacheTest`) at runtime: a sweep with `XDG_CACHE_HOME` at a
+  temp directory writes nothing outside it.
 - A full tool sweep over a store made read-only changes no file under it, in every
   index mode, and completes with sockets and processes made to raise. Held by
   `tests/server/test_security.py` (`ReadOnlyTest`, `NoNetworkNoSubprocessTest`).
