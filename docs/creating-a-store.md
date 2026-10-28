@@ -29,7 +29,7 @@ Install the Knowledge Store plugin by following
 clustering procedure and authoring checks. The plugin is instructions; the
 library and command-line tools run the pipeline on your machine.
 
-You need Python 3.10 or later, Git 2.48 or later and the GitHub CLI. On macOS,
+You need Python 3.13 or later, Git 2.48 or later and the GitHub CLI. On macOS,
 install them with [Homebrew](https://brew.sh/):
 
 ```bash
