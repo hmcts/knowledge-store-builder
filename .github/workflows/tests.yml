@@ -73,6 +73,10 @@ jobs:
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          # The MCP SDK, pinned to what the `server` extra declares, so the server's
+          # tests under tests/server run instead of skipping. The default-install run
+          # above skips them with a reason that names the extra.
+          pip install --only-binary :all: 'mcp==2.3.0'
 
       # And again with the extras present, so the stages behind them are actually
       # exercised. Without this the deployments stage would be skipped in CI and
@@ -258,6 +262,10 @@ jobs:
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          # The MCP SDK, pinned to what the `server` extra declares, so the server's
+          # tests under tests/server run instead of skipping. The default-install run
+          # above skips them with a reason that names the extra.
+          pip install --only-binary :all: 'mcp==2.3.0'
 
       - name: Settle which observer sets this branch's merges have staled
         env:
@@ -374,6 +382,10 @@ jobs:
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          # The MCP SDK, pinned to what the `server` extra declares, so the server's
+          # tests under tests/server run instead of skipping. The default-install run
+          # above skips them with a reason that names the extra.
+          pip install --only-binary :all: 'mcp==2.3.0'
 
       # The divisor is the number of legs rather than a literal four, so adding
       # or removing one cannot leave a quarter of the table unchecked with every

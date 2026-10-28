@@ -18,6 +18,22 @@ updates:
           - "minor"
           - "patch"
 
+  # The lock file records the optional extras too, including the `server` extra's
+  # exact `mcp` pin, so Dependabot reads it as a uv project as well.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "main"
+    open-pull-requests-limit: 10
+    groups:
+      uv-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # ===================
   # GitHub Actions
   # ===================

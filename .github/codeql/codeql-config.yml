@@ -5,3 +5,10 @@ paths-ignore:
   - "**/__pycache__/**"
   - "dist/**"
   - "build/**"
+
+# This repository pins actions to exact release tags (v7.0.1, not v7 and not a
+# commit SHA), and Dependabot moves them. actions/unpinned-tag asks for a SHA on
+# every third-party action, so it would fire on each one by policy.
+query-filters:
+  - exclude:
+      id: actions/unpinned-tag
