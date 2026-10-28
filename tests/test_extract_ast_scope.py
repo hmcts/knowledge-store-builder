@@ -75,6 +75,24 @@ class ScopeTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertIn("4 file(s) outside scope, skipped", out)
         self.assertIn("repositories/repo-extra/src/two.py", out)
 
+    def test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones(self):
+        self._clone("repo-a", "src/one.py")
+        stray = self.root / "scripts" / "run.py"
+        stray.parent.mkdir(parents=True)
+        stray.write_text("x = 1\n", encoding="utf-8")
+        files = [self.root / "repositories" / "repo-a" / "src" / "one.py", stray]
+        extractor = _Extractor()
+        code, out, _err = self._run(extractor, ["--detect", str(self._detect(files))])
+
+        # Break caught: with no declaration to filter by, the cut between a clone and a
+        # stray is lost, and the stray is extracted as a node with no repository.
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            sorted(Path(p).relative_to(self.root).as_posix() for p in extractor.files_seen),
+            ["repositories/repo-a/src/one.py"],
+        )
+        self.assertIn("1 file(s) outside scope, skipped", out)
+
     def test_nothing_in_scope_is_refused(self):
         self._clone("repo-a", "src/one.py")
         self._declare("repo-a")

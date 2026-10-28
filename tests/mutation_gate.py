@@ -1779,6 +1779,7 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
             "test_extract_ast_ticket_join.ExtractAstTicketJoin.test_a_node_extract_ast_wrote_carries_its_files_tickets",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
@@ -2104,8 +2105,7 @@ MUTATIONS = (
         "    outside: list[Path] = []",
         "#525: the detect command scans the store root, so a fetch-only clone under external/, the store's own scripts/ and its generated knowledge/ layers were extracted as nodes with no repository, while json-schema skipped the same files as outside-repositories",
         (
-            "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
-            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
+            "test_extract_ast_scope.ScopeTest.test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones",
         ),
     ),
     Mutation(
@@ -4091,6 +4091,9 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
+            "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
+            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",
