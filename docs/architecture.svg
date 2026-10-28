@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="780" viewBox="0 0 1120 780" role="img" aria-label="The library, with its serve command and [server] extra, the generic plugin and the fixture store all come from one repository, knowledge-store-builder; store data and the store plugin come from each store repository. A maintainer builds store data with the library. On the asker's runtime, the store plugin launches knowledgestore serve, which uvx installs from the pinned library tag with the [server] extra; the server reads a local clone of the store and talks to the agent over stdio, with no network or credentials.">
+        <style>
+  svg { --bg:#f6f7f9; --panel:#ffffff; --ink:#1b2330; --muted:#5b6676; --line:#9aa4b2; --accent:#0b6e69; --accent-soft:#e2f1ef;
+        font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  @media (prefers-color-scheme: dark) {
+    svg { --bg:#12161c; --panel:#1a2029; --ink:#e4e8ee; --muted:#9aa5b4; --line:#5a6576; --accent:#4fc2b8; --accent-soft:#15302e; }
+  }
+  .ground { fill: var(--panel); }
+  .zone { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .box { fill: var(--panel); stroke: var(--ink); stroke-width: 1.2; }
+  .box-new { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .sandbox { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; }
+  .edge { fill: none; stroke: var(--ink); stroke-width: 1.3; }
+  .edge-new { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+  .head { fill: var(--ink); } .head-new { fill: var(--accent); }
+  .mask { fill: var(--bg); }
+  .t-zone { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
+  .t-vis, .t-sub { font-size: 11px; fill: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .t-title { font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .t-edge { font-size: 11px; fill: var(--ink); }
+  .t-edge-new { font-size: 11px; fill: var(--accent); font-weight: 500; }
+  .t-mono { font-size: 11px; fill: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .t-note { font-size: 12px; fill: var(--muted); }
+  .chip { fill: var(--panel); stroke: var(--line); }
+</style>
+        <rect class="ground" width="1120" height="780"/>
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="arr-new" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-new" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+
+        <!-- Build side: the library repository and the store repository -->
+        <rect class="zone" x="20" y="24" width="680" height="210" rx="6"/>
+        <text class="t-zone" x="36" y="46">knowledge-store-builder</text>
+        <text class="t-vis" x="684" y="46" text-anchor="end">public</text>
+
+        <rect class="zone" x="720" y="24" width="380" height="210" rx="6"/>
+        <text class="t-zone" x="736" y="46">Store repository</text>
+        <text class="t-vis" x="1084" y="46" text-anchor="end">one per estate · internal</text>
+
+        <!-- ① library -->
+        <rect class="box" x="40" y="96" width="410" height="126" rx="4"/>
+        <text class="t-title" x="52" y="120">① Library</text>
+        <text class="t-sub" x="52" y="140">knowledgestore · one tag</text>
+        <text class="t-sub" x="52" y="160">build stages</text>
+        <!-- ② generic plugin -->
+        <rect class="box" x="470" y="96" width="210" height="60" rx="4"/>
+        <text class="t-title" x="482" y="120">② Generic plugin</text>
+        <text class="t-sub" x="482" y="140">skills · from main</text>
+        <!-- ③ fixture store -->
+        <rect class="box" x="470" y="170" width="210" height="52" rx="4"/>
+        <text class="t-title" x="482" y="192">③ Fixture store</text>
+        <text class="t-sub" x="482" y="210">per release · tests ⑥ too</text>
+
+        <!-- ⑥ MCP server: a command and an extra of ①, same tag -->
+        <rect class="box-new" x="230" y="140" width="200" height="60" rx="4"/>
+        <text class="t-title" x="242" y="164">⑥ MCP server</text>
+        <text class="t-sub" x="242" y="184">serve · [server] extra</text>
+
+        <!-- ④ store data -->
+        <rect class="box" x="740" y="96" width="160" height="60" rx="4"/>
+        <text class="t-title" x="752" y="120">④ Store data</text>
+        <text class="t-sub" x="752" y="140">graph · knowledge/</text>
+        <!-- ⑤ store plugin -->
+        <rect class="box" x="920" y="96" width="160" height="60" rx="4"/>
+        <text class="t-title" x="932" y="120">⑤ Store plugin</text>
+        <text class="t-sub" x="932" y="140">skill + mcpServers</text>
+
+        <!-- build edge: ① builds ④ -->
+        <polyline class="edge" points="120,96 120,72 780,72 780,94" marker-end="url(#arr)"/>
+        <rect x="290" y="62" width="320" height="18" class="mask"/>
+        <text class="t-edge" x="450" y="75" text-anchor="middle">builds ④ · maintainer or CI runs the stages</text>
+
+        <!-- Ask side -->
+        <rect class="zone" x="20" y="290" width="1080" height="470" rx="6"/>
+        <text class="t-zone" x="36" y="314">Asker's runtime</text>
+        <text class="t-vis" x="1084" y="314" text-anchor="end">one per agent session</text>
+
+        <!-- deliveries from the build side -->
+        <polyline class="edge-new" points="330,222 330,440 560,440 560,498" marker-end="url(#arr-new)"/>
+        <rect x="334" y="326" width="160" height="40" class="mask"/>
+        <text class="t-edge-new" x="338" y="340">uvx installs the ① tag</text>
+        <text class="t-edge-new" x="338" y="358">with the [server] extra</text>
+
+        <line class="edge" x1="820" y1="156" x2="820" y2="498" marker-end="url(#arr)"/>
+        <rect x="826" y="330" width="88" height="18" class="mask"/>
+        <text class="t-edge" x="830" y="343">sparse clone</text>
+
+        <line class="edge" x1="1005" y1="156" x2="1005" y2="358" marker-end="url(#arr)"/>
+        <rect x="1011" y="250" width="80" height="18" class="mask"/>
+        <text class="t-edge" x="1013" y="263">/plugin install</text>
+
+        <!-- installed store plugin -->
+        <rect class="box" x="920" y="360" width="170" height="60" rx="4"/>
+        <text class="t-title" x="932" y="384">⑤ Store plugin</text>
+        <text class="t-sub" x="932" y="404">installed</text>
+
+        <!-- sandbox: server + clone -->
+        <rect class="sandbox" x="440" y="476" width="475" height="110" rx="6"/>
+        <text class="t-edge-new" x="905" y="578" text-anchor="end">no network · no credentials · read-only</text>
+
+        <rect class="box-new" x="460" y="500" width="200" height="60" rx="4"/>
+        <text class="t-title" x="472" y="524">⑥ Server process</text>
+        <text class="t-sub" x="472" y="544">serve · stdio</text>
+
+        <rect class="box" x="740" y="500" width="160" height="60" rx="4"/>
+        <text class="t-title" x="752" y="524">④ Store clone</text>
+        <text class="t-sub" x="752" y="544">manifest · index</text>
+
+        <!-- ⑥ reads ④ -->
+        <line class="edge-new" x1="660" y1="530" x2="738" y2="530" marker-end="url(#arr-new)"/>
+        <text class="t-edge-new" x="699" y="522" text-anchor="middle">reads</text>
+
+        <!-- ⑤ launches ⑥ -->
+        <polyline class="edge-new" points="960,420 960,620 630,620 630,562" marker-end="url(#arr-new)"/>
+        <text class="t-edge-new" x="795" y="612" text-anchor="middle">launches · --store-id</text>
+
+        <!-- agent -->
+        <rect class="box" x="460" y="660" width="630" height="60" rx="4"/>
+        <text class="t-title" x="472" y="686">Agent</text>
+        <text class="t-sub" x="472" y="706">Claude Code, Copilot or any MCP client</text>
+
+        <line class="edge-new" x1="530" y1="658" x2="530" y2="562" marker-start="url(#arr-new)" marker-end="url(#arr-new)"/>
+        <text class="t-edge-new" x="522" y="614" text-anchor="end">MCP tool calls</text>
+        <text class="t-edge-new" x="522" y="628" text-anchor="end">over stdio</text>
+        <text class="t-edge-new" x="522" y="642" text-anchor="end">+ answering instructions</text>
+
+        <line class="edge" x1="1040" y1="658" x2="1040" y2="422" marker-end="url(#arr)"/>
+        <text class="t-edge" x="1048" y="545">loads</text>
+
+        <!-- left column: where the runtime lives -->
+        <text class="t-note" x="40" y="352">The same three pieces, wherever it runs:</text>
+        <rect class="chip" x="40" y="368" width="200" height="34" rx="17"/>
+        <text class="t-title" x="58" y="390">Laptop</text>
+        <rect class="chip" x="40" y="412" width="200" height="34" rx="17"/>
+        <text class="t-title" x="58" y="434">Hosted agent pod</text>
+        <rect class="chip" x="40" y="456" width="200" height="34" rx="17"/>
+        <text class="t-title" x="58" y="478">Bedrock container</text>
+
+        <text class="t-note" x="40" y="526">The asker installs nothing by hand.</text>
+        <text class="t-note" x="40" y="544">uvx fetches the pinned ① tag with</text>
+        <text class="t-note" x="40" y="562">only mcp added. The build stages</text>
+        <text class="t-note" x="40" y="580">are present but never run.</text>
+
+        <text class="t-note" x="40" y="610">Updating means three moves:</text>
+        <text class="t-mono" x="40" y="630">/plugin marketplace update</text>
+        <text class="t-mono" x="40" y="648">git pull  (the store clone)</text>
+        <text class="t-mono" x="40" y="666">a new tag in ⑤'s mcpServers pin</text>
+      </svg>

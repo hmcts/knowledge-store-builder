@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GUIDE = ROOT / "docs/creating-a-store.md"
 DECLARED = ROOT / "docs/mcp-server.txt"
 FENCE = re.compile(r"```json\n(.*?)```", re.DOTALL)
-PIN = re.compile(r"knowledge-store-mcp@(\S+?)(?=[\"'\s)\],]|$)")
+PIN = re.compile(r"knowledge-store-builder@(\S+?)(?=[\"'\s)\],]|$)")
 
 
 def declared_tag() -> str:
@@ -53,10 +53,14 @@ class McpJsonExample(unittest.TestCase):
         for example in examples:
             args = example["mcpServers"]["knowledge-store"]["args"]
             source = args[args.index("--from") + 1]
-            self.assertTrue(source.endswith("@" + declared_tag()), source)
+            self.assertEqual(
+                source,
+                "hmcts-knowledge-store-builder[server] @ "
+                "git+https://github.com/hmcts/knowledge-store-builder@" + declared_tag(),
+            )
 
     def test_the_example_runs_the_server_for_the_store_id(self):
-        """Catches an example that drops the entry point or `--store-id`.
+        """Catches an example that drops `knowledgestore serve` or `--store-id`.
 
         Without `--store-id` the server cannot resolve a clone through the
         locations file, so the plugin launches a server that serves nothing.
@@ -65,7 +69,7 @@ class McpJsonExample(unittest.TestCase):
         self.assertTrue(examples, "creating-a-store.md carries no mcpServers example")
         for example in examples:
             args = example["mcpServers"]["knowledge-store"]["args"]
-            self.assertIn("knowledge-store-mcp", args)
+            self.assertEqual(args[args.index("knowledgestore") + 1], "serve")
             self.assertIn("--store-id", args)
             self.assertEqual(args[args.index("--store-id") + 1], "example-store")
 

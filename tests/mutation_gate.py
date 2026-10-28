@@ -11957,6 +11957,24 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "check-plugin stops requiring `knowledgestore serve` after --from",
+        "check_plugin.py",
+        "    if not _runs_serve(args):",
+        "    if False:",
+        "a correct pin launching `knowledgestore status`, or the retired knowledge-store-mcp entry point, passes, and uvx starts nothing an asker's assistant can talk to",
+        ("test_check_plugin.PluginGateTest.test_a_launch_that_does_not_run_serve_fails",),
+    ),
+    Mutation(
+        "check-plugin fails a plugin pinned to the archived knowledge-store-mcp repository instead of warning",
+        "check_plugin.py",
+        '        warnings.append(\n            f"--from pins',
+        '        failures.append(\n            f"--from pins',
+        "stores whose pins keep working from the archived repository are told their plugin is broken, when they only need telling that a newer form exists",
+        (
+            "test_check_plugin.PluginGateTest.test_the_archived_server_form_warns_naming_the_new_form_and_passes",
+        ),
+    ),
+    Mutation(
         "check-plugin reads --store-id=value as absent",
         "check_plugin.py",
         'elif isinstance(argument, str) and argument.startswith(flag + "="):',

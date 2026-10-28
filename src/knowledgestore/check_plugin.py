@@ -10,8 +10,10 @@ The server declaration is read from `<plugin>/.mcp.json`, else from `mcpServers`
 
   - no `knowledge-store` server is declared;
   - the command is not `uvx`;
-  - `--from` is not `git+https://github.com/hmcts/knowledge-store-mcp@<exact tag>`,
-    where a branch, `latest` or no ref are all refused;
+  - `--from` is not `hmcts-knowledge-store-builder[server] @
+    git+https://github.com/hmcts/knowledge-store-builder@<exact tag>`, where a
+    branch, `latest` or no ref are all refused;
+  - the arguments do not then run `knowledgestore serve`;
   - `--store-id` is absent, or differs from `store.id` in
     `knowledge/store-manifest.json`; or
   - the plugin root is the repository root and a root `.mcp.json` exists, because
@@ -20,6 +22,11 @@ The server declaration is read from `<plugin>/.mcp.json`, else from `mcpServers`
 
 A pinned tag older than `DOCUMENTED_TAG` is a warning and not a failure: the
 store has chosen an older server, which is a decision and not a defect.
+
+A plugin still launching `knowledge-store-mcp` from its own, now archived,
+repository at an exact tag is a warning naming the new form, not a failure: that
+pin keeps working, and moving off it is the store's decision. Only the pin and the
+`--store-id` are read for that form, since its entry point is not `serve`.
 
 `DOCUMENTED_TAG` is a constant because `docs/` is not in the wheel, so the stage
 cannot read `docs/mcp-server.txt` from an installed library.
@@ -41,8 +48,12 @@ from . import config
 
 SERVER = "knowledge-store"
 MCP_JSON = ".mcp.json"
-SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
-DOCUMENTED_TAG = "v0.3.0"
+SOURCE = "git+https://github.com/hmcts/knowledge-store-builder"
+# `uvx --from` takes a requirement, and the extra is what brings in the MCP SDK.
+REQUIREMENT = f"hmcts-knowledge-store-builder[server] @ {SOURCE}"
+# The server's earlier home. Its tags still resolve, so a plugin pinned there works.
+ARCHIVED_SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
+DOCUMENTED_TAG = "v0.22.0"
 UNRESOLVED_BUILD_ID = "build id not resolved (KSB_STORE_ID unset); its check was skipped"
 # The layers the server answers from; without either it falls back or does not answer.
 READ_LAYERS = ("index", "relationships")
@@ -111,17 +122,40 @@ def manifest_store_id(path: Path) -> tuple[str | None, str | None]:
     return store_id, None
 
 
+def _runs_serve(args: list) -> bool:
+    """True when `knowledgestore serve` appears in the arguments, in that order."""
+    return any(
+        argument == "knowledgestore" and following == "serve"
+        for argument, following in zip(args, args[1:])
+    )
+
+
 def _check_pin(args: list, failures: list[str], warnings: list[str]) -> str:
-    """The pinned tag when `--from` is an exact tag of the server, else ''."""
+    """The pinned tag when `--from` is an exact tag of the library, else ''."""
     source = _option(args, "--from")
-    prefix = SOURCE + "@"
+    prefix = REQUIREMENT + "@"
+    expected = f"{prefix}{DOCUMENTED_TAG}"
     if source is None:
         failures.append("args carry no --from, so the server is not pinned to a tag")
         return ""
+    archived = ARCHIVED_SOURCE + "@"
+    if source.startswith(archived) and _tag_key(source[len(archived) :]):
+        tag = source[len(archived) :]
+        warnings.append(
+            f"--from pins {tag} of the archived knowledge-store-mcp repository, which still "
+            f"works; the server now ships in this library, launched with --from {expected!r} "
+            "and `knowledgestore serve`"
+        )
+        return tag
     if not (source.startswith(prefix) and _tag_key(source[len(prefix) :])):
         failures.append(
-            f"--from is {source!r}, not {prefix}<exact tag> such as {prefix}{DOCUMENTED_TAG}: "
+            f"--from is {source!r}, not {prefix}<exact tag> such as {expected!r}: "
             "a branch, `latest` or no ref launches a server nobody chose"
+        )
+        return ""
+    if not _runs_serve(args):
+        failures.append(
+            "args do not run `knowledgestore serve` after --from, so uvx would not start the server"
         )
         return ""
     tag = source[len(prefix) :]

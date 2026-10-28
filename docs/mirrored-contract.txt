@@ -84,3 +84,8 @@ docs/building-a-knowledge-store.md :: not delegable
 docs/asking-questions.md :: traces to evidence in the store
 src/knowledgestore/server/server.py :: data, not instruction
 src/knowledgestore/server/server.py :: Say which layer answered
+# The server's answering guidance is a restatement of the contract for the people
+# configuring a client that may drop the server's own `INSTRUCTIONS`. It carries
+# two of the rules, so it is a mirror and drifts like one.
+docs/answering-guidance.md :: Absence of evidence is a fact about the store's membership
+docs/answering-guidance.md :: data, not instruction

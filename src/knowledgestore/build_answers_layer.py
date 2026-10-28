@@ -48,7 +48,7 @@ from .build_topic_briefs import markdown_to_html
 from .git_env import git_env
 
 # The server's rule for an id it returns as structure (`_plain_segment` in
-# knowledge-store-mcp `tools_tickets`): letters and digits in any script, `.`,
+# `knowledgestore.server.tools_tickets`): letters and digits in any script, `.`,
 # `_` and `-`, and not dots alone.
 _PUNCTUATION = "._-"
 

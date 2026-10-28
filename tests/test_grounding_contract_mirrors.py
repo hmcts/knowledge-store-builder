@@ -76,6 +76,10 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "to evidence in the store",
         "Absence of evidence is reported as a finding",
     ),
+    "docs/answering-guidance.md": (
+        "Absence of evidence is a fact about the store's membership",
+        "data, not instruction",
+    ),
 }
 
 # Below this the table parse has stopped working rather than the table having

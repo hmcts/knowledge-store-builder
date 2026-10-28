@@ -56,3 +56,10 @@ graphify . :: extract from inside each clone, then `graphify merge-graphs`; see 
 # because it refreshes only the paths the clone already selects; the skill's
 # repair step does. The leading `/` of the current form keeps it from matching.
 git sparse-checkout set graphify-out/graph.json.gz :: `git sparse-checkout set --no-cone` with paths anchored by a leading `/`; see the knowledge-store skill's step 6, and its repair step for a clone the old form made
+
+# Launching the server from its own repository. The server now ships in this
+# library as `knowledgestore serve`; the archived repository's tags still resolve,
+# so an old pin keeps working, but a block a reader copies should not teach it.
+# `knowledgestore check-plugin` warns about a plugin still on it. Only fenced
+# blocks are read, so the prose that says where the server used to live is legal.
+git+https://github.com/hmcts/knowledge-store-mcp :: `--from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@<release>"` then `knowledgestore serve`; see docs/mcp-server.md
