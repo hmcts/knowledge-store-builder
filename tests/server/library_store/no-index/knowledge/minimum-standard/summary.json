@@ -1,0 +1,79 @@
+{
+  "format": {
+    "layer": "minimum_standard",
+    "major": 1,
+    "minor": 0
+  },
+  "notes": [
+    "archived repositories are not in the store"
+  ],
+  "products": {
+    "payments": [
+      "alpha-lib",
+      "beta-app"
+    ]
+  },
+  "repositories": {
+    "alpha-lib": {
+      "as_of": {
+        "commit": "ebfe7220750b4663a617ee03d5ebd3d2549530f7",
+        "date": "2026-10-04T09:00:00Z"
+      },
+      "points": {
+        "hygiene": "absent",
+        "no_secrets": "not_determinable",
+        "owner": "absent",
+        "patching": "not_determinable",
+        "secure_by_design": "not_determinable",
+        "security_contact": "absent",
+        "unmaintained": "not_determinable"
+      }
+    },
+    "beta-app": {
+      "as_of": {
+        "commit": "085f0da738cebf28ac22b57c8c07530936769442",
+        "date": "2026-10-06T09:00:00Z"
+      },
+      "points": {
+        "hygiene": "absent",
+        "no_secrets": "not_determinable",
+        "owner": "present",
+        "patching": "not_determinable",
+        "secure_by_design": "not_determinable",
+        "security_contact": "present",
+        "unmaintained": "not_determinable"
+      }
+    },
+    "delta-deploy": {
+      "as_of": {
+        "commit": "3e4623914bbfc716d90a21ff592a8d2db3550ee7",
+        "date": "2026-10-08T09:00:00Z"
+      },
+      "points": {
+        "hygiene": "absent",
+        "no_secrets": "absent",
+        "owner": "absent",
+        "patching": "not_determinable",
+        "secure_by_design": "not_determinable",
+        "security_contact": "absent",
+        "unmaintained": "not_determinable"
+      }
+    },
+    "eta-portal": {
+      "as_of": {
+        "commit": "002b1cff8ebb7ca67d5ebe215ab005a137a6ec29",
+        "date": "2026-10-05T12:00:00Z"
+      },
+      "points": {
+        "hygiene": "absent",
+        "no_secrets": "not_determinable",
+        "owner": "absent",
+        "patching": "not_determinable",
+        "secure_by_design": "not_determinable",
+        "security_contact": "absent",
+        "unmaintained": "not_determinable"
+      }
+    }
+  },
+  "settings_read_at": "2026-10-20T00:00:00+00:00"
+}

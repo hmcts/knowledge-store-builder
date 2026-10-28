@@ -1,0 +1,34 @@
+{
+ "helm_chart": {
+  "edges": 0,
+  "origin": "builtin",
+  "pins": "chart versions",
+  "references": 0,
+  "skipped": {},
+  "unresolved": 0
+ },
+ "maven_artifact": {
+  "edges": 0,
+  "origin": "builtin",
+  "pins": "version specs",
+  "references": 0,
+  "skipped": {},
+  "unresolved": 0
+ },
+ "npm_package": {
+  "edges": 3,
+  "origin": "builtin",
+  "pins": "version specs",
+  "references": 3,
+  "skipped": {},
+  "unresolved": 1
+ },
+ "terraform_module": {
+  "edges": 0,
+  "origin": "builtin",
+  "pins": "git refs",
+  "references": 0,
+  "skipped": {},
+  "unresolved": 0
+ }
+}

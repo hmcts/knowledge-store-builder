@@ -1,0 +1,27 @@
+{
+ "base_url": "https://github.com/example-org/eta-portal/blob/002b1cff8ebb7ca67d5ebe215ab005a137a6ec29/",
+ "commit": "002b1cff8ebb7ca67d5ebe215ab005a137a6ec29",
+ "depended_on_by": [],
+ "depends_on": [
+  {
+   "chart": "",
+   "examples": [
+    {
+     "line": "\"beta-app\": \"^1.0.0\"",
+     "url": "https://github.com/example-org/eta-portal/blob/002b1cff8ebb7ca67d5ebe215ab005a137a6ec29/package.json#L5"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "references": 1,
+   "refs_pinned": {
+    "^1.0.0": 1
+   },
+   "refs_unpinned": 0,
+   "repository": "beta-app"
+  }
+ ],
+ "extra": {},
+ "repository": "eta-portal"
+}

@@ -1,0 +1,7 @@
+{
+  "partitioner": "louvain",
+  "communities": 7,
+  "clustered_nodes": 40,
+  "described": "graph.json",
+  "hash_randomised": false
+}

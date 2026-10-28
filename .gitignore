@@ -238,6 +238,14 @@ graphify-out/
 repositories/
 knowledge_context.md
 
+# The one exception: the MCP server's tests read committed stores, which are made of
+# exactly these. Without it the stores are silently left out of every commit and
+# the server suite fails from a clean checkout (`tests/server/test_committed_stores.py`
+# holds the stores to being tracked).
+!/tests/server/library_store/**/knowledge/
+!/tests/server/library_store/**/graphify-out/
+!/tests/server/library_store/**/knowledge_context.md
+
 # Working plans and specs are estate-flavoured scratch. This repository is
 # public; planning material lives with the estate that motivated it, never here.
 docs/superpowers/

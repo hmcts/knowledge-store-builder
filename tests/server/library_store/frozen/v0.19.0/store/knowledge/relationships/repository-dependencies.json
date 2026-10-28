@@ -1,0 +1,81 @@
+{
+ "conflicts": {},
+ "edges": [
+  {
+   "chart": "",
+   "consumer": "alpha-lib",
+   "examples": [
+    {
+     "line": "\"beta-app\": \"^1.0.0\"",
+     "url": "https://github.com/example-org/alpha-lib/blob/ebfe7220750b4663a617ee03d5ebd3d2549530f7/package.json#L5"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "provider": "beta-app",
+   "references": 1,
+   "refs_pinned": {
+    "^1.0.0": 1
+   },
+   "refs_unpinned": 0
+  },
+  {
+   "chart": "",
+   "consumer": "beta-app",
+   "examples": [
+    {
+     "line": "\"@example/alpha-lib\": \"^1.2.0\",",
+     "url": "https://github.com/example-org/beta-app/blob/085f0da738cebf28ac22b57c8c07530936769442/package.json#L4"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "provider": "alpha-lib",
+   "references": 1,
+   "refs_pinned": {
+    "^1.2.0": 1
+   },
+   "refs_unpinned": 0
+  },
+  {
+   "chart": "",
+   "consumer": "eta-portal",
+   "examples": [
+    {
+     "line": "\"beta-app\": \"^1.0.0\"",
+     "url": "https://github.com/example-org/eta-portal/blob/002b1cff8ebb7ca67d5ebe215ab005a137a6ec29/package.json#L5"
+    }
+   ],
+   "kinds": {
+    "npm_package": 1
+   },
+   "provider": "beta-app",
+   "references": 1,
+   "refs_pinned": {
+    "^1.0.0": 1
+   },
+   "refs_unpinned": 0
+  }
+ ],
+ "format": {
+  "layer": "relationships",
+  "major": 1,
+  "minor": 1
+ },
+ "unresolved_conflicts": {},
+ "unresolved_targets_outside_estate": {
+  "helm_chart": {},
+  "maven_artifact": {},
+  "npm_package": {
+   "gamma-service": {
+    "referenced_by": [
+     "beta-app"
+    ],
+    "references": 1
+   }
+  },
+  "terraform_module": {}
+ }
+}

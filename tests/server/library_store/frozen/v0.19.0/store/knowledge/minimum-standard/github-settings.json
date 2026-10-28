@@ -1,0 +1,59 @@
+{
+  "format": {
+    "layer": "minimum_standard",
+    "major": 1,
+    "minor": 0
+  },
+  "organisations": {
+    "example-org": {
+      "default_security_policy": null,
+      "public": false,
+      "unreadable": []
+    }
+  },
+  "read_at": "2026-10-20T00:00:00+00:00",
+  "repositories": {
+    "alpha-lib": {
+      "archived": false,
+      "branch_protection": "present",
+      "default_branch": "main",
+      "dependabot_alerts": "enabled",
+      "organisation": "example-org",
+      "secret_scanning": "enabled",
+      "unreadable": []
+    },
+    "beta-app": {
+      "archived": false,
+      "branch_protection": "absent",
+      "default_branch": "main",
+      "dependabot_alerts": "enabled",
+      "organisation": "example-org",
+      "secret_scanning": "enabled",
+      "unreadable": []
+    },
+    "delta-deploy": {
+      "archived": null,
+      "branch_protection": null,
+      "default_branch": null,
+      "dependabot_alerts": null,
+      "organisation": "example-org",
+      "secret_scanning": null,
+      "unreadable": [
+        "archived",
+        "branch_protection",
+        "default_branch",
+        "dependabot_alerts",
+        "secret_scanning"
+      ]
+    },
+    "eta-portal": {
+      "archived": false,
+      "branch_protection": "present",
+      "default_branch": "main",
+      "dependabot_alerts": "enabled",
+      "organisation": "example-org",
+      "secret_scanning": "enabled",
+      "unreadable": []
+    }
+  }
+}
