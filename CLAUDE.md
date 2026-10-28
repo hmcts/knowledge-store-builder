@@ -628,7 +628,10 @@ release — that is what makes the skill's stage comparison worth performing.
   other. `complexipy` is closer but is not a proxy either — it has read both above
   and below Sonar on this codebase, once by 9 points.
 - Automatic analysis **ignores `sonar-project.properties` entirely** —
-  exclusions and issue-ignore rules alike. Scope exclusions are a UI action.
+  exclusions and issue-ignore rules alike. It reads **`.sonarcloud.properties`**
+  at the repository root instead, so scope exclusions (`sonar.exclusions`,
+  `sonar.cpd.exclusions`) belong there; that file is how the MCP server's
+  committed test stores are kept out of the score.
 - `NOSONAR` comments work for the Python analyser and are ignored by the
   JavaScript one. Where a JS rule cannot be suppressed, remove the construct.
 - The GitHub Actions rules read the **command**, not the files it references.
