@@ -4,8 +4,11 @@ This page is for store maintainers and contributors who need to know what is
 released, by whom, and what runs on an asker's machine. Askers do not need it.
 
 Six things get released. Two kinds of repository own them: this library's
-repository, and each store's own. The asker's machine only ever holds three of
-them, and the server reads the store from local disk with no network access.
+repository, and each store's own. The asker installs nothing by hand. `uvx`
+fetches the library tag the store plugin pins, with the `[server]` extra, and runs
+`knowledgestore serve`; the build stages come with that package but are never run
+there. Beyond the server the asker holds the store plugin and a clone of the store,
+and the server reads the clone from local disk with no network access.
 
 ![The library, generic plugin, fixture store and MCP server all come from knowledge-store-builder, the server installed with its [server] extra; store data and the store plugin come from each store repository. On the asker's runtime the store plugin launches the MCP server, which reads a local clone of the store and talks to the agent over stdio, with no network or credentials.](architecture.svg)
 
@@ -21,7 +24,7 @@ answers by reading files.
 |---|---|---|---|
 | ① Library | The maintainer cuts a GitHub release | Git tag (hatch-vcs) | Store builds, pinned in the store's lock file |
 | ② Generic plugin | Merging to `main` | Nothing: installs from `main` | Builders, through the marketplace |
-| ③ Fixture store | Each ① release | The ① tag | ⑥'s contract tests |
+| ③ Fixture store | Each ① release | The ① tag | The library's own suite, which tests the stages and ⑥ together |
 | ④ Store data | The store build pushes to its default branch | Commit, with the format declared in `store-manifest.json` | ⑥, through the asker's clone |
 | ⑤ Store plugin | The store repository's marketplace entry | Its default branch | Askers |
 | ⑥ MCP server | The same release as ①: it is `knowledgestore serve`, installed with the `[server]` extra | The ① tag, `v0.22.0` or later | ⑤'s `mcpServers` entry, run with `uvx` at that tag |
