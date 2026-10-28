@@ -19,42 +19,8 @@ That is a real answer from the explorer page this repository's test store builds
 Two applications each have their own `AddressPipe`, and nothing links them, so the
 store reports two separate implementations rather than guessing they are shared.
 
-## Try it in two minutes
-
-You need Python 3.10 or later and Git.
-
-```bash
-git clone https://github.com/hmcts/knowledge-store-builder
-cd knowledge-store-builder
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e .
-python3 tests/explorer/fixture.py
-open .fixture-store/graphify-out/explorer.html   # xdg-open on Linux
-```
-
-Then ask the page: *how are addresses validated?*
-
-## Ask questions of a store
-
-**In Claude Code.** You need Claude Code, [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
-and a store that someone has built. Run:
-
-```
-/plugin marketplace add hmcts/knowledge-store-builder
-/plugin install knowledge-store@knowledge-store-builder
-/reload-plugins
-```
-
-Without `/reload-plugins`, the plugin is installed but inactive. Then install the
-store's own plugin, as that store's README describes, and ask in plain English:
-*which services call the payments API?*
-
-**In GitHub Copilot or another MCP client.** The same server and tools; see
-[Use another assistant](docs/asking-questions.md#use-another-assistant-github-copilot-a-hosted-agent).
-
-**In a browser.** Open the store's `graphify-out/explorer.html`.
-
-The full guide is [Asking questions](docs/asking-questions.md).
+Asking questions of a store someone has built? You need the store, not this
+library: see [Asking questions](docs/asking-questions.md).
 
 ## Build a store
 
