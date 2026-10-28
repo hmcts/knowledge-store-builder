@@ -218,7 +218,7 @@ class ReadOnlyByConstructionTest(unittest.TestCase):
         matches nothing, which would read as a clean pass over no code."""
         names = {path.name for path in PACKAGE.rglob("*.py")}
         self.assertGreaterEqual(len(names), 15, names)
-        self.assertTrue({"server.py", "index.py", "store.py", "cli.py"} <= names, names)
+        self.assertLessEqual({"server.py", "index.py", "store.py", "cli.py"}, names)
         self.assertIn(CACHE_WRITER, names)
 
     def test_the_scan_descends_into_subpackages(self):
