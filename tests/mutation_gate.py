@@ -1745,12 +1745,11 @@ MUTATIONS = (
     Mutation(
         "extract-ast roots the extractor at the store again",
         "extract_ast.py",
-        "    return group_dir(name) if name else root",
+        "    return config.REPOSITORIES_DIR / name if name else root",
         "    return root",
         "the layer carried `repositories/<repo>/<path>` as `source_file` with no `repo`, so the file-to-ticket join matched nothing and every node lost its tickets, silently: the graph, the index and every count were valid (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
@@ -1776,12 +1775,10 @@ MUTATIONS = (
         "intent[repo][source_file] is the join; a node with repo unset has no row to read, so an extract-ast layer joins to nothing even when its paths are right (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
-            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_and_the_corpus_reach_the_extractor",
             "test_extract_ast_ticket_join.ExtractAstTicketJoin.test_a_node_extract_ast_wrote_carries_its_files_tickets",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
@@ -1813,7 +1810,6 @@ MUTATIONS = (
         "a node's source_file is now repository-relative, so keyed alone it matches no content-set file, every file counts 0, and the vanished-file guard can never fire (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
@@ -1838,25 +1834,23 @@ MUTATIONS = (
         "                return path",
         "a store reached through a link names its files through that link while the extractor resolves its root, so a file it cannot place under the clone comes back as `../<link>/...` and joins to nothing (#512)",
         (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
         ),
     ),
     Mutation(
         "a file's record key is cut at the first repositories segment again",
         "extract_ast.py",
-        '    return f"{group_prefix(name)}/{inside}"',
+        '    return f"{config.REPOSITORIES_DIR.name}/{name}/{inside}"',
         "    return store_paths.relative(path)",
         "store_paths.relative cuts at the first `repositories/`, so a store kept under a directory of that name keys its files differently from the nodes extracted from them, and the run refuses as an instrument mismatch (#512)",
         (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
         ),
     ),
     Mutation(
         "an unread file is keyed relative to the clone",
         "extract_ast.py",
-        '    return posixpath.normpath(f"{group_prefix(name)}/{entry}")',
+        '    return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{name}/{entry}")',
         "    return entry",
         "graphify spells failed_sources relative to its root, now the clone, so left as it arrives it matches no record key and an unreadable file reads as VANISHED (#512)",
         (
@@ -1998,7 +1992,6 @@ MUTATIONS = (
         "with no record the comparison has nothing to compare against, so the guard "
         "reports a first run forever and never fails",
         (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_failed_repositorys_files_are_neither_vanished_nor_forgotten",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
@@ -2099,21 +2092,20 @@ MUTATIONS = (
         "extract_ast.py",
         "    rebuilt = os.path.normpath(os.path.join(config.ROOT.resolve(), source))\n    return store_paths.relative(rebuilt)",
         "    return store_paths.relative(source)",
-        "graphify spells source_file relative to the resolved root, so under a symlinked store root a path comes back as ../<link>/... (repository and corpus files are rooted at their directory now, so this is the unread-file spelling and any node with no repository); keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
+        "graphify spells source_file relative to the resolved root, so under a symlinked store root a path (repository files are rooted at their clone, so this is the unread-file spelling and any node with no repository) comes back as ../<link>/...; keyed as it arrives it misses the content set's key and the run refuses a mismatch it could have measured",
         (
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_source_spelled_through_the_link_is_keyed_as_the_content_set_is",
         ),
     ),
     Mutation(
-        "a file outside the repositories and the corpus is extracted",
+        "a file outside the declared repositories is extracted",
         "extract_ast.py",
-        "        (corpus if _under(path, corpus_dir()) else outside).append(path)",
-        "        corpus.append(path)",
-        "#525: the detect command scans the store root, so a fetch-only clone under external/ and the store's own scripts/ were extracted as nodes with no repository - including a clone a store's own selective-ingestion rule forbids - while json-schema skipped the same files as outside-repositories",
+        '    outside: list[Path] = list(groups.pop("", []))',
+        "    outside: list[Path] = []",
+        "#525: the detect command scans the store root, so a fetch-only clone under external/, the store's own scripts/ and its generated knowledge/ layers were extracted as nodes with no repository, while json-schema skipped the same files as outside-repositories",
         (
-            "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
             "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
-            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_and_the_corpus_reach_the_extractor",
+            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
         ),
     ),
     Mutation(
@@ -2124,16 +2116,6 @@ MUTATIONS = (
         "the per-repository route extracts what config/repositories.txt declares, and merge-inputs names a graph it does not declare as an anomaly; extracting every directory under repositories/ puts an abandoned refresh's clone into the layer with nothing to date it",
         (
             "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
-        ),
-    ),
-    Mutation(
-        "the knowledge corpus is keyed under repositories/",
-        "extract_ast.py",
-        '    if name == corpus_name():\n        return CORPUS_DIRNAME\n    return f"{config.REPOSITORIES_DIR.name}/{name}"',
-        '    return f"{config.REPOSITORIES_DIR.name}/{name}"',
-        "the per-file record joins a node to its content-set file by (repo, source_file); a corpus file keyed repositories/knowledge/... matches no content-set path, so every corpus file counts 0 and the stage refuses an instrument mismatch on a store that is fine",
-        (
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
         ),
     ),
     Mutation(
@@ -4106,13 +4088,9 @@ MUTATIONS = (
             "test_extract_ast.TimeLimitTest.test_a_repository_that_hangs_is_timed_out_named_and_counted",
             "test_extract_ast.TimeLimitTest.test_an_extractor_that_swallows_exceptions_cannot_swallow_the_bound",
             "test_extract_ast_declined_graphify.DeclinedByGraphifyTest.test_the_stage_names_the_declined_file_and_fails",
-            "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
-            "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
-            "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
-            "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_and_the_corpus_reach_the_extractor",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_could_not_read_is_named_unread_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_graphify_declined_is_named_as_declined_and_still_fails",
             "test_extract_ast_vanished.VanishedFilesTest.test_a_file_that_went_to_zero_fails_the_stage_naming_it",

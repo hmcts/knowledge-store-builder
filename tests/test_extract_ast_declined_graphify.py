@@ -167,29 +167,6 @@ class SymlinkedStoreRootTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertEqual(len(record), 1, record)
         self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
 
-    def test_a_corpus_file_matches_content_set_keys_under_a_symlinked_root(self):
-        """Catches a knowledge-corpus node keyed on graphify's `../<link>/...` spelling.
-
-        The corpus is extracted as a group of its own with the corpus directory as
-        graphify's root, so it is a second place a file reached through the store's link
-        can arrive spelled relative to the resolved root. Keyed as it arrives it matches
-        no content-set path, counts 0, and the stage refuses an instrument mismatch; a
-        passing run that counted the file is the evidence the keys met.
-        """
-        notes = self.root / "knowledge"
-        notes.mkdir()
-        (notes / "helper.py").write_text(CODE, encoding="utf-8")
-        detect = self._detect([self.link / "knowledge" / "helper.py"])
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = extract_ast.main(["--detect", str(detect)])
-        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
-        record = json.loads(
-            (self.root / "graphify-out" / ".graphify_ast_file_counts.json").read_text("utf-8")
-        )
-        self.assertEqual(list(record), ["knowledge/helper.py"], record)
-        self.assertGreater(next(iter(record.values())), 0, "the join missed: the file counted 0")
-
     def test_a_source_spelled_through_the_link_is_keyed_as_the_content_set_is(self):
         """Catches `source_key` keying a `../<link>/...` spelling as it arrives.
 

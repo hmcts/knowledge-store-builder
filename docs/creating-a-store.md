@@ -576,17 +576,16 @@ store-relative keys, so its baseline stays valid. The `[ast]` extra installs the
 run without it. It reads the content set from
 `graphify-out/.graphify_detect.json`, so write that first, as above.
 
-**It extracts the declared repositories and the knowledge corpus, and nothing else.**
+**It extracts the declared repositories, and nothing else.**
 The detect scan covers the whole store root, so its content set also holds fetch-only
-clones under `external/` and the store's own `.claude/`, `tests/` and `scripts/`.
-`extract-ast` extracts the repositories `config/repositories.txt` declares, plus the
-store's `knowledge/` directory as a group tagged `knowledge` (the corpus
-`merge-graphs` would be given beside the per-repository graphs). Every other file in
-the content set is printed as `N file(s) outside scope, skipped`, followed by each path,
-and is never extracted. That is the scope `json-schema` applies, which skips the same
-files as `outside-repositories`. A store with no `config/repositories.txt` keeps every
-clone under `repositories/` in scope. A repository named `knowledge` would share the
-corpus's tag, so the stage refuses it.
+clones under `external/`, the store's own `.claude/`, `tests/` and `scripts/`, and its
+generated `knowledge/` layers. `extract-ast` extracts the repositories
+`config/repositories.txt` declares, which is what the per-repository route hands
+`merge-graphs`. Every other file in the content set is printed as
+`N file(s) outside scope, skipped`, followed by each path, and is never extracted. That
+is the scope `json-schema` applies, which skips the same files as
+`outside-repositories`. A store with no `config/repositories.txt` keeps every clone
+under `repositories/` in scope.
 
 This is an output change: a layer written by an earlier release held nodes from those
 files, with `repo` unset, and re-running `extract-ast` drops them.

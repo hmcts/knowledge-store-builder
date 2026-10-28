@@ -136,9 +136,9 @@ per-repository route's, so a store can use either and the join, `explorer` and
 `deepdive` work on both. A layer written by an earlier `extract-ast` carried
 store-relative paths and no `repo`; re-run `extract-ast` rather than reuse it.
 
-**`extract-ast` extracts the declared repositories and the `knowledge/` corpus only.**
-Every other file the detect scan found - fetch-only clones under `external/`, the
-store's own `.claude/`, `tests/`, `scripts/` - is printed as
+**`extract-ast` extracts the declared repositories, nothing else.** Every other file the
+detect scan found - fetch-only clones under `external/`, the store's own `.claude/`,
+`tests/`, `scripts/` and generated `knowledge/` - is printed as
 `N file(s) outside scope, skipped` with each path listed, and is never extracted; that
 is the scope `json-schema` applies. A store with no `config/repositories.txt` keeps every
 clone under `repositories/` in scope.
