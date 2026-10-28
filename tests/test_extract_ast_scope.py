@@ -93,6 +93,25 @@ class ScopeTest(_DeclaredStoreCase, unittest.TestCase):
         )
         self.assertIn("1 file(s) outside scope, skipped", out)
 
+    def test_a_long_out_of_scope_list_is_capped_like_the_unread_report(self):
+        self._clone("repo-a", "src/one.py")
+        self._declare("repo-a")
+        files = [self.root / "repositories" / "repo-a" / "src" / "one.py"]
+        for n in range(7):
+            stray = self.root / "scripts" / f"s{n}.py"
+            stray.parent.mkdir(parents=True, exist_ok=True)
+            stray.write_text("x = 1\n", encoding="utf-8")
+            files.append(stray)
+        code, out, _err = self._run(_Extractor(), ["--detect", str(self._detect(files))])
+
+        # Break caught: thousands of out-of-scope paths are printed one a line and bury the
+        # run's own counts.
+        self.assertEqual(code, 0)
+        self.assertIn("7 file(s) outside scope, skipped", out)
+        self.assertIn("  scripts/s4.py", out)
+        self.assertNotIn("scripts/s5.py", out)
+        self.assertIn("... and 2 more", out)
+
     def test_nothing_in_scope_is_refused(self):
         self._clone("repo-a", "src/one.py")
         self._declare("repo-a")
@@ -106,6 +125,8 @@ class ScopeTest(_DeclaredStoreCase, unittest.TestCase):
         # as a successful run.
         self.assertEqual(code, 1)
         self.assertIn("outside scope", err)
+        # Break caught: the refusal prints a build machine's absolute path.
+        self.assertIn("first: scripts/run.py", err)
         self.assertEqual(extractor.calls, [])
 
 

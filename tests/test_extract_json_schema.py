@@ -722,6 +722,18 @@ class StageTest(StoreCase):
         self.assertIn(str(stray), out.stdout)
         self.assertEqual(telemetry.read()["json_schema.files_recognised"], 2)
 
+    def test_a_clone_the_store_does_not_declare_is_named_and_skipped(self):
+        """Breaks if this stage reads a clone `config/repositories.txt` omits while
+        `extract-ast` skips it, so the two stages disagree about what is in scope."""
+        declaration = self.root / "config" / "repositories.txt"
+        declaration.parent.mkdir(parents=True, exist_ok=True)
+        declaration.write_text("widgets | https://example.invalid/widgets.git | main\n")
+        out = run_capturing(layer.main, [])
+        self.assertEqual(out.code, 0)
+        self.assertIn("outside-repositories 1", out.stdout)
+        self.assertIn(str(self.person_file), out.stdout)
+        self.assertEqual(telemetry.read()["json_schema.files_recognised"], 1)
+
     def test_data_json_is_counted_but_not_named_or_skipped(self):
         """Breaks if data JSON is skipped (hiding it from graphify) or named as a failure."""
         data = self.widgets / "data.json"

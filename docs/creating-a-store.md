@@ -581,14 +581,19 @@ The detect scan covers the whole store root, so its content set also holds fetch
 clones under `external/`, the store's own `.claude/`, `tests/` and `scripts/`, and its
 generated `knowledge/` layers. `extract-ast` extracts the repositories
 `config/repositories.txt` declares, which is what the per-repository route hands
-`merge-graphs`. Every other file in the content set is printed as
-`N file(s) outside scope, skipped`, followed by each path, and is never extracted. That
-is the scope `json-schema` applies, which skips the same files as
-`outside-repositories`. A store with no `config/repositories.txt` keeps every clone
-under `repositories/` in scope.
+`merge-graphs`. Every other file in the content set, including a clone under
+`repositories/` the declaration does not name, is printed as
+`N file(s) outside scope, skipped` with the first five paths and a count of the rest,
+and is never extracted. `json-schema` uses the same cut, so it reads exactly the files
+`extract-ast` extracts and names the rest `outside-repositories`. A store with no
+`config/repositories.txt` keeps every clone under `repositories/` in scope.
 
 This is an output change: a layer written by an earlier release held nodes from those
-files, with `repo` unset, and re-running `extract-ast` drops them.
+files, with `repo` unset, and re-running `extract-ast` drops them. `json-schema` no
+longer reads a schema in an undeclared clone. The first `extract-ast` run after the
+upgrade also reports the old `(corpus root)` group as `extracted last run, absent from
+the content set now`, because its per-repository count was recorded last time; that
+line is the change, not a loss.
 
 Run the AST route in this order, because each step reads what the one before it
 left in the clones:

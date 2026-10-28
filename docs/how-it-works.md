@@ -143,8 +143,8 @@ names it, so a symlink keeps its own name. A symlink to another content-set file
 in the same repository is read once, as that file, and takes its outcome: when
 the target is a schema, graphify's nodes on the link's path are removed with the
 target's, and the report counts the link as `symlinked to an owned file`. A
-symlink whose target is outside every repository is named
-`outside-repositories` and never read.
+symlink whose target is outside every declared repository is named
+`outside-repositories` and never read, as is any file in a clone the store does not declare.
 
 **What it removes.** graphify's nodes for an owned file, when their origin is
 the AST pass, together with their edges. Nodes from any other pass on that file

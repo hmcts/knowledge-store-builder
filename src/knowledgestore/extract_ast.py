@@ -215,10 +215,6 @@ from pathlib import Path
 from . import apply_ignores, config, content_set, export_git_history, io, store_paths
 from .build_store_manifest import write_atomically
 
-# How a file outside every repository is grouped and labelled: as a group of its own
-# rather than dropped, so the stage's count still reconciles with its input.
-CORPUS_ROOT = "(corpus root)"
-
 # The kinds `detect` classifies that hold parseable source. `paper`, `image` and
 # `video` are content the semantic layer reads and the AST parser cannot, so
 # handing them over costs a parse per file and yields nothing.
@@ -446,9 +442,8 @@ def carry_forward(
 def by_repository(files: "list[Path]", corpus: Path) -> "dict[str, list[Path]]":
     """Group the content set by the repository directory each file sits under.
 
-    A file outside the corpus is grouped under `""`, which reports as `(corpus
-    root)` rather than being dropped: silently discarding input would make this
-    stage's own count disagree with the content set it was handed.
+    A file outside `repositories/` is grouped under `""` rather than being dropped, so
+    the caller decides what it is; `in_scope` is what both stages use to decide.
     """
     try:
         corpus_resolved = corpus.resolve()
@@ -477,8 +472,8 @@ def in_scope(
     nothing has no declaration to filter by, so every clone under `repositories/` stays
     in scope, as it did.
 
-    `by_repository` is the grouping `json-schema` uses too, so the two stages cannot
-    disagree about which clone a file belongs to.
+    `json-schema` calls this too, so the two stages cannot disagree about which files
+    are in scope.
     """
     groups = by_repository(files, config.REPOSITORIES_DIR)
     outside: list[Path] = list(groups.pop("", []))
@@ -492,9 +487,12 @@ def outside_scope_report(outside: "list[Path]") -> "list[str]":
     """The count line and one line per path left out, store-relative; empty when none."""
     if not outside:
         return []
+    shown = [f"  {store_paths.relative(path)}" for path in outside[:5]]
+    more = [f"  ... and {len(outside) - 5:,} more"] if len(outside) > 5 else []
     return [
         f"{len(outside):,} file(s) outside scope, skipped (not in a declared repository):",
-        *(f"  {store_paths.relative(path)}" for path in outside),
+        *shown,
+        *more,
     ]
 
 
@@ -518,7 +516,7 @@ def declined_path(name: str, entry: str) -> str:
     change of spelling upstream cannot silently undo the distinction.
     """
     relative = store_paths.relative(entry)
-    if relative.startswith(f"{config.REPOSITORIES_DIR.name}/") or not name:
+    if relative.startswith(f"{config.REPOSITORIES_DIR.name}/"):
         return relative
     return f"{config.REPOSITORIES_DIR.name}/{name}/{relative}"
 
@@ -529,7 +527,7 @@ def unread_path(name: str, entry: str) -> str:
     graphify spells it relative to its root, which is now the clone, so a relative entry
     is placed under `repositories/<repo>/`; an absolute one already names its place.
     """
-    if not name or Path(entry).is_absolute():
+    if Path(entry).is_absolute():
         return entry
     return posixpath.normpath(f"{config.REPOSITORIES_DIR.name}/{name}/{entry}")
 
@@ -555,11 +553,8 @@ def namespace_repository(result: dict, name: str) -> dict:
     is what `merge-graphs` adds: the `<repo>::` prefix on every node id and both edge
     endpoints, the `repo` attribute, and `local_id` holding the un-prefixed id. Without
     them a node names `repositories/<repo>/...` and no repository, and the file-to-ticket
-    join (`intent[repo][source_file]`) matches nothing. The corpus-root group has no
-    repository, so nothing is added.
+    join (`intent[repo][source_file]`) matches nothing.
     """
-    if not name:
-        return result
     prefix = f"{name}::"
     nodes = []
     for node in result.get("nodes") or []:
@@ -577,13 +572,12 @@ def namespace_repository(result: dict, name: str) -> dict:
     return {**result, "nodes": nodes, "edges": edges}
 
 
-def clone_root(name: str, root: Path) -> Path:
-    """The directory the extractor treats as its root for one group.
+def clone_root(name: str) -> Path:
+    """The directory the extractor treats as its root for one repository: its own clone.
 
-    A repository's own clone, so that ids and `source_file` come out repository-relative
-    (CLAUDE.md 6.2); the corpus-root group keeps the store root.
+    So that ids and `source_file` come out repository-relative (CLAUDE.md 6.2).
     """
-    return config.REPOSITORIES_DIR / name if name else root
+    return config.REPOSITORIES_DIR / name
 
 
 def under_clone(path: Path, clone: Path) -> Path:
@@ -611,8 +605,6 @@ def file_key(name: str, path: Path) -> str:
     through a link. Built as `node_key` builds it - `repositories/<repo>/<path in the
     clone>` - so a file and the nodes extracted from it meet on one spelling.
     """
-    if not name:
-        return store_paths.relative(path)
     clone = config.REPOSITORIES_DIR / name
     placed = under_clone(path, clone)
     try:
@@ -667,7 +659,6 @@ def _absorb(result: dict, name: str, label: str, run: _EstateRun) -> "tuple[int,
 def extract_estate(
     groups: "dict[str, list[Path]]",
     extractor,
-    root: Path,
     timeout: int = 0,
     before: "dict[str, int] | None" = None,
     checkpoint: "Callable[[dict, list, list], None] | None" = None,
@@ -691,13 +682,13 @@ def extract_estate(
     run = _EstateRun()
     width = max((len(name) for name in groups), default=1)
     ordered = sorted(groups.items())
-    labels = [name or CORPUS_ROOT for name, _ in ordered]
+    labels = [name for name, _ in ordered]
     for position, (name, files) in enumerate(ordered):
-        label = labels[position]
+        label = name
         started = time.monotonic()
         try:
-            clone = clone_root(name, root)
-            handed = [under_clone(path, clone) for path in files] if name else files
+            clone = clone_root(name)
+            handed = [under_clone(path, clone) for path in files]
             result = namespace_repository(
                 _bounded_extract(extractor, handed, clone, timeout, run), name
             )
@@ -759,8 +750,8 @@ def node_key(node: dict) -> str:
     """A node's content-set key, or "" when it names no file.
 
     A node with `repo` set has a repository-relative `source_file`, so the store-relative
-    key the record uses is that path under `repositories/<repo>/`. One without is a
-    corpus-root node, spelled relative to the store.
+    key the record uses is that path under `repositories/<repo>/`. One without names no
+    repository, so its `source_file` is read as spelled relative to the store.
     """
     source = node.get("source_file")
     if not isinstance(source, str) or not source:
@@ -798,7 +789,7 @@ def nodes_per_file(
     failed = {label for label, _ in failures}
     counts: dict[str, int] = {}
     for name, files in groups.items():
-        if (name or CORPUS_ROOT) in failed:
+        if name in failed:
             continue
         for path in files:
             key = file_key(name, path)
@@ -838,7 +829,7 @@ def file_record(
     carried = {
         key: before[key]
         for name, files in groups.items()
-        if (name or CORPUS_ROOT) in failed
+        if name in failed
         for key in (file_key(name, path) for path in files)
         if key in before
     }
@@ -1175,7 +1166,7 @@ def scoped_input(
         raise InputRefused(
             f"Refusing to extract: none of the {len(files):,} file(s) in {source} is in "
             f"scope, which is a declared repository. {len(outside):,} file(s) outside "
-            f"scope, first: {outside[0] if outside else ''}."
+            f"scope, first: {store_paths.relative(outside[0]) if outside else ''}."
         )
     return groups, outside, check_declared(groups, declared)
 
@@ -1230,7 +1221,7 @@ def main(argv: "list[str] | None" = None) -> int:
     in_scope_files = sum(len(group) for group in groups.values())
     print(f"Extracting {in_scope_files:,} file(s) across {len(groups):,} repository group(s):")
     layer, failures, counts, skipped, declined = extract_estate(
-        groups, extract, config.ROOT, arguments.timeout, before, record
+        groups, extract, arguments.timeout, before, record
     )
 
     # Written even when repositories failed: a layer covering the rest is worth

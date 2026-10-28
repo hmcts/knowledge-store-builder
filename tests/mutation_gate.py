@@ -1745,8 +1745,8 @@ MUTATIONS = (
     Mutation(
         "extract-ast roots the extractor at the store again",
         "extract_ast.py",
-        "    return config.REPOSITORIES_DIR / name if name else root",
-        "    return root",
+        "    return config.REPOSITORIES_DIR / name",
+        "    return config.ROOT",
         "the layer carried `repositories/<repo>/<path>` as `source_file` with no `repo`, so the file-to-ticket join matched nothing and every node lost its tickets, silently: the graph, the index and every count were valid (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
@@ -2036,7 +2036,7 @@ MUTATIONS = (
     Mutation(
         "a failed repository's files read as vanished",
         "extract_ast.py",
-        "        if (name or CORPUS_ROOT) in failed:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
+        "        if name in failed:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
         "        if False:\n            continue\n        for path in files:\n            key = file_key(name, path)\n            counts[key] = found.get(key, 0)",
         "a repository that raised has no nodes; counting its files as 0 reports every one as vanished and buries the real failure under a list of false losses",
         (
@@ -2116,6 +2116,26 @@ MUTATIONS = (
         "the per-repository route extracts what config/repositories.txt declares, and merge-inputs names a graph it does not declare as an anomaly; extracting every directory under repositories/ puts an abandoned refresh's clone into the layer with nothing to date it",
         (
             "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
+        ),
+    ),
+    Mutation(
+        "json-schema reads a clone the store does not declare",
+        "extract_json_schema.py",
+        "        groups, outside = extract_ast.in_scope(json_files, extract_ast.declared_repositories())",
+        "        groups, outside = extract_ast.in_scope(json_files, None)",
+        "#525: extract-ast and json-schema disagreed about scope - json-schema never read config/repositories.txt, so it read schemas in a clone extract-ast skipped, and the layer held nodes for files the AST layer did not",
+        (
+            "test_extract_json_schema.StageTest.test_a_clone_the_store_does_not_declare_is_named_and_skipped",
+        ),
+    ),
+    Mutation(
+        "the out-of-scope list is printed in full",
+        "extract_ast.py",
+        '    shown = [f"  {store_paths.relative(path)}" for path in outside[:5]]',
+        '    shown = [f"  {store_paths.relative(path)}" for path in outside]',
+        "a store whose content set holds thousands of out-of-scope files (vendored clones, generated layers) buried the run's own counts under one line each, as the unread report would without its cap",
+        (
+            "test_extract_ast_scope.ScopeTest.test_a_long_out_of_scope_list_is_capped_like_the_unread_report",
         ),
     ),
     Mutation(

@@ -689,7 +689,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     json_files = [path for path in files if path.suffix.lower() == ".json"]
-    groups = extract_ast.by_repository(json_files, config.REPOSITORIES_DIR)
+    # The scope `extract-ast` extracts: the declared repositories. What falls outside is
+    # handed to `read_owned` as the group it already names `outside-repositories`.
+    try:
+        groups, outside = extract_ast.in_scope(json_files, extract_ast.declared_repositories())
+    except extract_ast.InputRefused as refusal_message:
+        print(str(refusal_message), file=sys.stderr)
+        return 1
+    if outside:
+        groups[""] = outside
     owned, info = read_owned(groups, config.REPOSITORIES_DIR, arguments.max_bytes)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
