@@ -96,6 +96,8 @@ def verified_lines() -> tuple[str, ...]:
         f"{VERIFIED}: every shard's entries agree with what the suite observed.",
         "The legs ran in this run and applied every entry in their slice against a",
         "whole-suite run, so the table's observer sets are checked as of this commit.",
+        "An entry that names fewer tests than observe it is a warning and does not fail",
+        "a leg, so look for annotations on this run and `MAPPING WARNING` in the legs' logs.",
     )
 
 

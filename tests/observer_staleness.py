@@ -58,8 +58,9 @@ be CLEAN. Without that bound a pull request adding one slow test costs the job t
 number of entries times that test - a branch whose arrivals build trees and spawn
 runs took over half an hour before it was stopped. An arrived test that fails under
 an entry and is not in that entry's set is **STALE**: a failure observed, not a
-suspicion, and it fails the job with the `--derive-mapping` command that produces
-the corrected set. What it still cannot see:
+suspicion. It is a warning - the job exits 0 - with the `--derive-mapping` command
+that produces the corrected set, because an under-described entry is still caught by
+the tests it does name and loses no protection. What it still cannot see:
 
 - **The `src/` half**, as above. It runs arrived tests only, so a test that was
   already there and was moved onto a mutated line by a source change is the
@@ -457,7 +458,9 @@ def settled(
             STALE,
             f"{len(stale)} entry(s) are observed by an arrived test they do not name: {ran}, "
             "and each test listed failed with its entry applied. This is an observation, not a "
-            "suspicion - take each corrected set from the command beside it.",
+            "suspicion, and a warning rather than a failure: the entry is still caught by the "
+            "tests it names, so no protection is lost. Take each corrected set from the "
+            "command beside it.",
             stale=tuple(stale),
             undecided=tuple(undecided),
             unjudged=unjudged,
@@ -675,7 +678,7 @@ def needed_minutes(report: Report) -> int:
 
 def deriving(name: str) -> str:
     """The command that prints an entry's corrected set, quoted as `verifying` does."""
-    return f"python3 tests/mutation_gate.py --derive-mapping --only {shlex.quote(name)}"
+    return gate.derive_command(name)
 
 
 def source_at(commit: str, path: str, *, run=subprocess.run) -> str | None:
@@ -860,7 +863,7 @@ def lines(report: Report) -> tuple[str, ...]:
     inline = set()
     for stale in report.stale:
         inline.add(deriving(stale.entry))
-        written.append(f"  STALE {stale.entry} - should also name:")
+        written.append(f"  WARNING under-described {stale.entry} - should also name:")
         written.extend(f"    {test}" for test in stale.unnamed)
         written.append(f"    $ {deriving(stale.entry)}")
     for undecided in report.undecided:
@@ -943,6 +946,17 @@ def as_dict(report: Report) -> dict[str, object]:
 def announce(report: Report, *, as_json: bool = False) -> None:
     """Print the report, and put it where Actions shows it and a matrix could read it."""
     print(json.dumps(as_dict(report), indent=2) if as_json else "\n".join(lines(report)))
+    for stale in report.stale:
+        # A line each: Actions lists annotations on the run's page, so a warning that
+        # exits 0 is still where a reader of the checks looks. Outside Actions the
+        # report above is the whole of it.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(
+                f"::warning title=Mapping under-describes an entry::{stale.entry}: "
+                f"{', '.join(stale.unnamed)} failed and is not named - re-derive with: "
+                f"{deriving(stale.entry)}",
+                file=sys.stderr,
+            )
     # `mapping_trigger`'s writer rather than a second one: two files that each
     # decide what an Actions variable is called are two files that can disagree
     # about it, and only one of them would be noticed.
@@ -994,14 +1008,16 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
 
 
 def exit_code(report: Report, *, refuse: bool) -> int:
-    """Non-zero for STALE always, and for anything but CLEAN when asked to refuse.
+    """Zero for every verdict, unless asked to refuse: then non-zero for anything but CLEAN.
 
-    STALE blocks by default because it is the one verdict that is an observation:
-    a test was seen failing under an entry that does not name it. SUSPECT and
-    CANNOT_TELL stay advisory - blocking on them is the trade `--refuse` names.
+    STALE is the one verdict that is an observation - a test was seen failing under
+    an entry that does not name it - and it still does not block, because the entry
+    is caught by the tests it does name: nothing is unprotected, the set is merely
+    out of date. Blocking on it failed pull requests over churn. What fails a run is
+    protection lost, which `mutation_gate.py` reads on its own. SUSPECT and
+    CANNOT_TELL stay advisory too - blocking on any of them is the trade `--refuse`
+    names.
     """
-    if report.verdict == STALE:
-        return 1
     return 1 if refuse and report.verdict != CLEAN else 0
 
 

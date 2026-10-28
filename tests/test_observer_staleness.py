@@ -741,7 +741,27 @@ class SettlingReadsWhatTheArrivalsObserveTest(unittest.TestCase):
         )
         self.assertNotIn("the second value is lost", written)
         self.assertNotIn("the third value is lost", written)
-        self.assertEqual(staleness.exit_code(report, refuse=False), 1)
+
+    def test_an_arrived_observer_the_entry_does_not_name_warns_and_exits_zero(self):
+        """Catches STALE going back to failing the pull request.
+
+        An entry an arrived test observes without naming it is still caught by the
+        tests it does name, so nothing is unprotected and a red job over it is churn:
+        26 entries went red after two merges added tests to existing modules. The
+        verdict stays STALE and the report still names the entry, the test and the
+        command that re-derives the set, but the exit status is 0 - and `--refuse`,
+        the maintainer's opt-in to block on anything but CLEAN, still blocks. Restore
+        `if report.verdict == STALE: return 1` and the first assertion fails.
+        """
+        report = self._settle("Arrived.test_reads_first", "Arrived.test_reads_second")
+        written = "\n".join(staleness.lines(report))
+
+        self.assertEqual(report.verdict, staleness.STALE)
+        self.assertEqual(staleness.exit_code(report, refuse=False), 0)
+        self.assertEqual(staleness.exit_code(report, refuse=True), 1)
+        self.assertIn("WARNING under-described the first value is lost", written)
+        self.assertIn("test_arrived.Arrived.test_reads_first", written)
+        self.assertIn("--derive-mapping --only 'the first value is lost'", written)
 
     def test_an_arrived_observer_the_entry_already_names_is_clean(self):
         """Catches settling flagging its own remedy. A branch that adds a test and
