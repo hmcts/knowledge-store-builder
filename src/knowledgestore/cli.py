@@ -285,6 +285,13 @@ STAGES: dict[str, tuple[str, str]] = {
 }
 
 
+# `serve` is a command, not a pipeline stage: it writes nothing, belongs to no run
+# order, and takes the server's own arguments. It stays out of STAGES so that every
+# check that reads STAGES as "the stages a build runs" keeps meaning that.
+SERVE = "serve"
+SERVE_HELP = "serve a built store to an MCP client over stdio (read-only; needs the `server` extra)"
+
+
 def usage() -> str:
     width = max(len(name) for name in STAGES)
     lines = [
@@ -295,6 +302,8 @@ def usage() -> str:
     ]
     lines += [f"  {name:<{width}}  {help_}" for name, (_, help_) in STAGES.items()]
     lines += [
+        "",
+        f"Command, outside the pipeline:  knowledgestore {SERVE}  {SERVE_HELP}",
         "",
         "Stages that both extract evidence and merge written prose back in",
         "(summaries, topics, deepdive) take a sub-command:",
@@ -365,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     stage = rest[0] if rest else ""
+    if stage == SERVE:
+        return _serve(rest[1:])
     if stage not in STAGES:
         print(
             f"unknown stage: {stage or '(none)'} (this is knowledgestore {__version__}; the "
@@ -417,6 +428,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     return _run_stage(stage, rest[1:])
+
+
+def _serve(arguments: Sequence[str]) -> int:
+    """Run the MCP server with exactly the arguments and environment it always took."""
+    try:
+        from .server.cli import main as serve_main
+    except ModuleNotFoundError as missing:
+        if missing.name is None or missing.name.split(".")[0] not in ("mcp", "mcp_types"):
+            raise
+        print(
+            "knowledgestore serve needs the MCP SDK, which is not installed: "
+            "pip install 'hmcts-knowledge-store-builder[server]'",
+            file=sys.stderr,
+        )
+        return 1
+    return serve_main(list(arguments))
 
 
 def _run_stage(stage: str, arguments: Sequence[str]) -> int:
