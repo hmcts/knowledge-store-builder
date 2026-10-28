@@ -1160,22 +1160,33 @@ def vanished_report(
     return bool(refused)
 
 
+def scoped_input(
+    arguments, graph_directory: Path
+) -> "tuple[dict[str, list[Path]], list[Path], list[str]]":
+    """The groups to extract, the files left out of scope, and the declaration's warnings.
+
+    Every refusal that can precede extraction is raised from here, so `main` has one
+    place to catch them.
+    """
+    files, source = resolve_input(arguments, graph_directory)
+    declared = declared_repositories()
+    groups, outside = in_scope(files, declared)
+    if not groups:
+        raise InputRefused(
+            f"Refusing to extract: none of the {len(files):,} file(s) in {source} is in "
+            f"scope, which is a declared repository. {len(outside):,} file(s) outside "
+            f"scope, first: {outside[0] if outside else ''}."
+        )
+    return groups, outside, check_declared(groups, declared)
+
+
 def main(argv: "list[str] | None" = None) -> int:
     arguments = parse_args(argv)
     graph_directory = config.GRAPH_PATH.parent
     destination = arguments.out or (graph_directory / ".graphify_ast.json")
 
     try:
-        files, source = resolve_input(arguments, graph_directory)
-        declared = declared_repositories()
-        groups, outside = in_scope(files, declared)
-        if not groups:
-            raise InputRefused(
-                f"Refusing to extract: none of the {len(files):,} file(s) in {source} is in "
-                f"scope, which is a declared repository. {len(outside):,} file(s) outside "
-                f"scope, first: {outside[0] if outside else ''}."
-            )
-        warnings = check_declared(groups, declared)
+        groups, outside, warnings = scoped_input(arguments, graph_directory)
     except InputRefused as refusal:
         print(str(refusal), file=sys.stderr)
         return 1

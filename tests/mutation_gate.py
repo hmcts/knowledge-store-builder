@@ -4091,6 +4091,7 @@ MUTATIONS = (
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
             "test_extract_ast_parity.ExtractAstParityTest.test_extract_ast_matches_the_per_repository_route_on_code_nodes",
+            "test_extract_ast_scope.ScopeTest.test_a_store_declaring_nothing_still_leaves_strays_out_and_keeps_its_clones",
             "test_extract_ast_scope.ScopeTest.test_an_undeclared_clone_is_outside_scope_when_the_store_declares_repositories",
             "test_extract_ast_scope.ScopeTest.test_nothing_in_scope_is_refused",
             "test_extract_ast_scope.ScopeTest.test_only_declared_repositories_reach_the_extractor",
