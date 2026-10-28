@@ -799,7 +799,11 @@ class DamagedIndexTest(ToolTestCase):
         self.assertEqual(response["store"]["index"], "absent: graph read whole")
         self.assertEqual(response["store"]["layers_used"], ["graph"])
         self.assertTrue(response["fallback"].startswith("the index could not be searched ("))
-        self.assertIn("fts5: corruption found", response["fallback"])
+        # SQLite's own words, which differ by build: some report "fts5: corruption
+        # found", others that the virtual table's constructor failed.
+        self.assertRegex(
+            response["fallback"], r"fts5: corruption found|vtable constructor failed: labels"
+        )
         self.assertTrue(response["fallback"].endswith("): graph read whole"))
         node_response = tools_graph.node(session, "payments-api::RefundHandler")
         self.assertEqual(node_response["store"]["index"], "present")
