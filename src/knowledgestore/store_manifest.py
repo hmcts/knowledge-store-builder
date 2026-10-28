@@ -342,8 +342,8 @@ def _file_digest(path: Path) -> str:
     """The first 16 hex digits of the file's sha256, streamed.
 
     Streamed in 1 MiB chunks because a plain `graph.json` can be several
-    gigabytes. A loop rather than `hashlib.file_digest`, which needs Python 3.11
-    while this package supports 3.10. The value is the one `io.layer_digests`
+    gigabytes. A loop rather than `hashlib.file_digest`, kept so the digest
+    stays byte-stable with `io.layer_digests`. The value is the one `io.layer_digests`
     records for the same file.
     """
     digest = hashlib.sha256()

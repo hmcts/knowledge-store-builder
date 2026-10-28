@@ -505,7 +505,7 @@ def layer_digests(paths: "list[Path]", root: Path) -> dict:
             # Read policy as above; the path comes from a caller that built it
             # from `--root`, so the same grounds apply.
             # Streamed: a plain graph can be gigabytes, and the digest is the same.
-            # A chunked loop rather than `hashlib.file_digest`, which needs 3.11.
+            # A chunked loop, the same one `store_manifest._file_digest` uses.
             digest = hashlib.sha256()
             with path.open("rb") as handle:  # NOSONAR(S8707)
                 while chunk := handle.read(1 << 20):

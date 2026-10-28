@@ -37,16 +37,12 @@ import importlib.util
 import json
 import os
 import re
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import overload
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - the backport is a dependency below 3.11 only
-    import tomli as tomllib
+import tomllib
 
 
 class SettingsFileError(ValueError):

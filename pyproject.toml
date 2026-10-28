@@ -9,7 +9,7 @@ name = "hmcts-knowledge-store-builder"
 dynamic = ["version"]
 description = "Build a committed, queryable knowledge store from a fleet of git repositories"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = { file = "LICENSE" }
 authors = [{ name = "HM Courts & Tribunals Service" }]
 keywords = ["knowledge-graph", "graphrag", "code-analysis", "documentation"]
@@ -18,13 +18,12 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Documentation",
 ]
 # The core pipeline is standard library only, by design: it runs anywhere
-# Python does, with no supply chain to review. The one exception is the TOML
-# reader for a store's `config/knowledgestore.toml`, which is the standard
-# library's `tomllib` from 3.11 and its backport below that.
-dependencies = ["tomli>=1.1; python_version < '3.11'"]
+# Python does, with no supply chain to review.
+dependencies = []
 
 [project.optional-dependencies]
 # Only the semantic index needs a model. Everything else works without it.
@@ -100,5 +99,5 @@ include = [
 # Stage modules read module-level path constants that tests and configure()
 # rebind, so inferred types are deliberately loose in places.
 typeCheckingMode = "basic"
-pythonVersion = "3.10"
+pythonVersion = "3.13"
 reportMissingImports = "warning"

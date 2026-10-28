@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # Before the Python steps, not after: the answer gate's own test drives the
       # shipped runner through Node and fails rather than skips without it. Ordered
@@ -231,7 +231,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - uses: actions/setup-node@v7
         with:
@@ -314,7 +314,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # Through the environment rather than interpolated into the script, which
       # is the script-injection shape the analysers read. `github.event.before`
@@ -347,7 +347,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - uses: actions/setup-node@v7
         with:
@@ -437,7 +437,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # No `pip install` step: the module imports the standard library and
       # `mapping_trigger`, and nothing from the package.
@@ -483,7 +483,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # No `pip install`: the module imports the standard library only. Through the
       # environment rather than interpolated into the script, which is the

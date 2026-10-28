@@ -24,7 +24,7 @@ library: see [Asking questions](docs/asking-questions.md).
 
 ## Build a store
 
-You need Python 3.10 or later, Git 2.48 or later, the GitHub CLI, and access to
+You need Python 3.13 or later, Git 2.48 or later, the GitHub CLI, and access to
 the repositories. The `knowledgestore` command runs a build one stage at a time:
 it lists an organisation's repositories, clones them, extracts their code with
 [graphify](https://github.com/safishamsi/graphify), joins files to the tickets
