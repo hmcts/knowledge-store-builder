@@ -53,6 +53,7 @@ behaviour is tested.
 **Asking**
 
 - [Asking questions](docs/asking-questions.md): Claude Code, Copilot, the browser, the terminal
+- [The MCP server](docs/mcp-server.md): setting it up for Copilot and other clients, wiring it into a store plugin, troubleshooting
 - [`CHEATSHEET.md`](CHEATSHEET.md): every command, with nothing around it
 
 **Building and running a store**
@@ -67,6 +68,7 @@ behaviour is tested.
 - [Grounding and verification](docs/grounding-and-verification.md): how answers stay tied to evidence
 - [Retrieval architecture](docs/retrieval-architecture.md): how this differs from vector search
 - [How it works](docs/how-it-works.md): each mechanism, its settings and its tests
+- [How the server is told to answer](docs/answering-guidance.md), [what is released and by whom](docs/architecture.md), and [Microsoft 365 Copilot and the hosted agent](docs/microsoft-365.md)
 
 ## Contributing
 

@@ -1773,8 +1773,8 @@ library declares:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.3.0",
-        "knowledge-store-mcp", "--store-id", "<id>"
+        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }
   }

@@ -61,7 +61,7 @@ available in the CLI, and the reverse.
 
 - **WSL:** plugins are not available, so no plugin launches the server. Add the
   knowledge-store server to Claude Code by hand, as the server's
-  [Claude Code and Claude Desktop](https://github.com/hmcts/knowledge-store-mcp#claude-code-and-claude-desktop)
+  [Claude Code and Claude Desktop](docs/mcp-server.md#claude-code-and-claude-desktop)
   section shows.
 - **Cloud sessions:** the plugin browser does not exist, and plugins installed on
   desktop do not carry over. Declare it in the repository's

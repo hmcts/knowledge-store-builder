@@ -220,5 +220,5 @@ missing.
 
 There is nothing to migrate: v0.18 is the first release in which these clients
 answer from a store. Set one up from the server's
-[front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors)
+[front doors](mcp-server.md#front-doors)
 section.

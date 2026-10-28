@@ -42,3 +42,15 @@ docs/creating-a-store.md#add-the-server-to-the-store-plugin
 docs/moving-to-v0-18.md
 docs/moving-to-v0-18.md#for-store-maintainers
 docs/moving-to-v0-18.md#for-askers
+
+# The MCP server reference. The server used to have its own repository, and the
+# stores that link into its README for client setup now point here; the headings
+# are the ones that README carried, kept so those links resolve after the move.
+docs/mcp-server.md
+docs/mcp-server.md#front-doors
+docs/mcp-server.md#claude-code-and-claude-desktop
+docs/mcp-server.md#github-copilot-in-vs-code
+docs/mcp-server.md#github-copilot-cli
+docs/mcp-server.md#the-copilot-coding-agent
+docs/mcp-server.md#a-hosted-agent
+docs/mcp-server.md#microsoft-365-copilot

@@ -26,4 +26,6 @@
 --comments :: twg
 --store-id :: mcp-server
 --from :: uv
+--no-python-downloads :: uv
+--allow-all-mcp-server-instructions :: copilot
 --upgrade-package :: uv

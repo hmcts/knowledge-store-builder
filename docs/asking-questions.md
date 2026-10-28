@@ -220,21 +220,25 @@ predates it — a builder adds it with `knowledgestore content-set`, and
 Ask from GitHub Copilot, or any other MCP client, through the knowledge-store
 MCP server. It answers from a local clone of the store, with the same read-only
 tools in every client. Setup for each client is in the server's
-[Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) section,
-and the server is available from the first knowledge-store-mcp release.
+[Front doors](mcp-server.md#front-doors) section. The server is the library's
+`knowledgestore serve`, available from v0.22.0.
+
+The server needs Python 3.13. `uv` downloads it unless managed Python downloads
+are disabled (`UV_PYTHON_DOWNLOADS=never`), in which case 3.13 must already be
+installed.
 
 | You use | Take |
 |---|---|
 | Claude Code | The plugin: [Ask with Claude Code](#ask-with-claude-code) |
-| Claude Desktop | The MCP server: [Claude Code and Claude Desktop](https://github.com/hmcts/knowledge-store-mcp#claude-code-and-claude-desktop) |
-| GitHub Copilot in VS Code | The MCP server: [GitHub Copilot in VS Code](https://github.com/hmcts/knowledge-store-mcp#github-copilot-in-vs-code) |
-| The GitHub Copilot CLI | The MCP server: [GitHub Copilot CLI](https://github.com/hmcts/knowledge-store-mcp#github-copilot-cli) |
-| The Copilot coding agent, on GitHub | The MCP server: [The Copilot coding agent](https://github.com/hmcts/knowledge-store-mcp#the-copilot-coding-agent). Read its privacy note first |
-| A hosted agent (in design) | The MCP server, run by the agent: [A hosted agent](https://github.com/hmcts/knowledge-store-mcp#a-hosted-agent) |
-| Any other MCP client | The MCP server: [Front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors) |
+| Claude Desktop | The MCP server: [Claude Code and Claude Desktop](mcp-server.md#claude-code-and-claude-desktop) |
+| GitHub Copilot in VS Code | The MCP server: [GitHub Copilot in VS Code](mcp-server.md#github-copilot-in-vs-code) |
+| The GitHub Copilot CLI | The MCP server: [GitHub Copilot CLI](mcp-server.md#github-copilot-cli) |
+| The Copilot coding agent, on GitHub | The MCP server: [The Copilot coding agent](mcp-server.md#the-copilot-coding-agent). Read its privacy note first |
+| A hosted agent (in design) | The MCP server, run by the agent: [A hosted agent](mcp-server.md#a-hosted-agent) |
+| Any other MCP client | The MCP server: [Front doors](mcp-server.md#front-doors) |
 | A browser, to look around | The explorer: [Use `explorer.html`](#use-explorerhtml) |
 | A terminal or a script | The CLI: [Use the terminal](#use-the-terminal) |
-| Microsoft 365 Copilot or Teams | Not available yet. [Microsoft 365 Copilot](https://github.com/hmcts/knowledge-store-mcp#microsoft-365-copilot) gives the planned route and what enabling it for a store involves |
+| Microsoft 365 Copilot or Teams | Not available yet. [Microsoft 365 Copilot](mcp-server.md#microsoft-365-copilot) gives the planned route and what enabling it for a store involves |
 
 Every route reads the same store and gives the same cited answers. The explorer
 and the terminal answer fewer kinds of question; they do not answer differently.

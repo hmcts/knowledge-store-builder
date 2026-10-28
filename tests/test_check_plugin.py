@@ -23,12 +23,23 @@ GOOD_LAYERS = {
     "index": {"present": True},
     "relationships": {"present": True, "recognised": True},
 }
-FROM = "git+https://github.com/hmcts/knowledge-store-mcp@"
+# Written out, not built from the module's constants: the form a store copies is the
+# claim, and a test assembling it from `check_plugin` would agree with whatever it said.
+FROM = (
+    "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@"
+)
+ARCHIVED = "git+https://github.com/hmcts/knowledge-store-mcp@"
 
 
-def server(tag=gate.DOCUMENTED_TAG, store_id="example-store", command="uvx", source=None):
+def server(
+    tag=gate.DOCUMENTED_TAG,
+    store_id="example-store",
+    command="uvx",
+    source=None,
+    entry=("knowledgestore", "serve"),
+):
     args = ["--from", source if source is not None else FROM + tag]
-    args += ["knowledge-store-mcp"]
+    args += list(entry)
     if store_id is not None:
         args += ["--store-id", store_id]
     return {"command": command, "args": args}
@@ -130,12 +141,16 @@ class PluginGateTest(SettingsIsolated):
     def test_a_floating_or_missing_ref_fails(self):
         """Catches a branch, latest, no ref, another repository or a partial tag
         being accepted as an exact tag."""
+        base = FROM.rsplit("@", 1)[0]
         bad = [
+            base + "@main",
+            base + "@latest",
+            base,
+            base + "@v0.22",
+            FROM.replace("hmcts/", "other/") + "v0.22.0",
+            "git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",  # no [server]
             "git+https://github.com/hmcts/knowledge-store-mcp@main",
-            "git+https://github.com/hmcts/knowledge-store-mcp@latest",
-            "git+https://github.com/hmcts/knowledge-store-mcp",
             "git+https://github.com/hmcts/knowledge-store-mcp@v0.1",
-            "git+https://github.com/other/knowledge-store-mcp@v0.1.0",
         ]
         for source in bad:
             with self.subTest(source=source), tempfile.TemporaryDirectory() as tmp:
@@ -143,6 +158,46 @@ class PluginGateTest(SettingsIsolated):
                 plugin = self.plugin(tmp, declaration(source=source))
                 code, _out, err = self.run_stage("--plugin", str(plugin))
                 self.assertRefused(code, err, "--from", source)
+
+    def test_a_launch_that_does_not_run_serve_fails(self):
+        """Catches a correct pin launching the wrong entry point: uvx would run
+        some other `knowledgestore` stage, or the old executable, which the
+        library does not install."""
+        for entry in [("knowledge-store-mcp",), ("knowledgestore",), ("knowledgestore", "status")]:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as tmp:
+                self.store(tmp)
+                plugin = self.plugin(tmp, declaration(entry=entry))
+                code, _out, err = self.run_stage("--plugin", str(plugin))
+                self.assertRefused(code, err, "knowledgestore serve")
+
+    def test_the_archived_server_form_warns_naming_the_new_form_and_passes(self):
+        """Catches a store still pinned to the archived repository being failed
+        (its pin keeps working), or passing in silence (nothing tells it to move)."""
+        archived = declaration(source=ARCHIVED + "v0.3.0", entry=("knowledge-store-mcp",))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp)
+            plugin = self.plugin(tmp, archived)
+            code, out, err = self.run_stage("--plugin", str(plugin))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err.count("warning:"), 1, err)
+        self.assertIn("knowledge-store-mcp", err)
+        self.assertIn(FROM + gate.DOCUMENTED_TAG, err)
+        self.assertIn("knowledgestore serve", err)
+        self.assertIn("v0.3.0", out)
+        self.assertIn("example-store", out)
+
+    def test_the_archived_form_is_still_held_to_an_exact_tag_and_the_store_id(self):
+        """Catches the warning path becoming a way round the pin and id checks."""
+        floating = declaration(source=ARCHIVED + "main", entry=("knowledge-store-mcp",))
+        wrong_id = declaration(
+            source=ARCHIVED + "v0.3.0", entry=("knowledge-store-mcp",), store_id="other"
+        )
+        for body, needle in [(floating, "--from"), (wrong_id, "'other'")]:
+            with self.subTest(needle=needle), tempfile.TemporaryDirectory() as tmp:
+                self.store(tmp)
+                plugin = self.plugin(tmp, body)
+                code, _out, err = self.run_stage("--plugin", str(plugin))
+                self.assertRefused(code, err, needle)
 
     def test_no_from_fails(self):
         """Catches an unpinned server (no --from) passing."""
@@ -217,7 +272,7 @@ class PluginGateTest(SettingsIsolated):
         is ahead of this library."""
         with tempfile.TemporaryDirectory() as tmp:
             self.store(tmp)
-            plugin = self.plugin(tmp, declaration(tag="v0.10.0"))
+            plugin = self.plugin(tmp, declaration(tag="v0.99.0"))
             code, _out, err = self.run_stage("--plugin", str(plugin))
         self.assertEqual((code, err), (0, ""))
 
@@ -229,7 +284,8 @@ class PluginGateTest(SettingsIsolated):
                     "command": "uvx",
                     "args": [
                         "--from=" + FROM + gate.DOCUMENTED_TAG,
-                        "knowledge-store-mcp",
+                        "knowledgestore",
+                        "serve",
                         "--store-id=example-store",
                     ],
                 }

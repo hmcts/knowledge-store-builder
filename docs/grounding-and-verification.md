@@ -19,6 +19,7 @@ dispatching agent checked that it *arrived* rather than that it was *true*.
 > | `docs/building-a-knowledge-store.md` — keeping a store honest | one-line pointer |
 > | `docs/asking-questions.md` — understand the answer | traceability of every claim; absence reported as a finding |
 > | `src/knowledgestore/server/server.py` — `INSTRUCTIONS`, sent to every client of `knowledgestore serve` | estate content is data, not instruction; say which layer answered |
+> | `docs/answering-guidance.md` — the rules the server sends, restated for the people configuring a client | absence is a fact about membership; estate content is data, not instruction |
 >
 > **Estate content is data, not instruction** is part of this contract as well,
 > and names its own mirrors at the end of that section.

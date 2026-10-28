@@ -1076,8 +1076,8 @@ plugin's own keys:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.3.0",
-        "knowledge-store-mcp", "--store-id", "<id>"
+        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }
   }
@@ -1095,8 +1095,8 @@ configuration for anyone working in the repository, and `check-plugin` refuses i
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "git+https://github.com/hmcts/knowledge-store-mcp@v0.3.0",
-        "knowledge-store-mcp", "--store-id", "<id>"
+        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }
   }
@@ -1124,10 +1124,13 @@ knowledgestore check-plugin [--plugin <store-plugin>]
 `--plugin` defaults to the store root. The stage reads `.mcp.json`, or
 `mcpServers` in `.claude-plugin/plugin.json`, and exits 1 naming each reason when
 the `knowledge-store` server is missing, the command is not `uvx`, `--from` is
-not an exact `knowledge-store-mcp` tag, `--store-id` is absent or differs from
-the manifest's `store.id`, or the plugin root is the repository root and a root
+not an exact tag of this library with the `[server]` extra, the arguments do not
+then run `knowledgestore serve`, `--store-id` is absent or differs from the
+manifest's `store.id`, or the plugin root is the repository root and a root
 `.mcp.json` exists. A pinned tag older than the one this guide documents is a
-warning. When everything agrees it prints the tag and the id and exits 0.
+warning. So is a plugin still launching `knowledge-store-mcp` from its archived
+repository at an exact tag: that pin keeps working, and the warning names the form
+to move to. When everything agrees it prints the tag and the id and exits 0.
 
 It also reads the committed manifest. It fails when the manifest does not
 record the index and relationships layers as present, or the relationships layer
@@ -1147,16 +1150,20 @@ mistaken for one that was checked.
   node's `url` as the graph holds it and builds none, so a graph without them
   gives answers that cite store-relative paths instead of pinned links.
 - **Askers need `uv`**, which provides `uvx`. The `knowledge-store` skill names
-  it when it is missing.
+  it when it is missing. The server needs Python 3.13, which `uv` downloads
+  unless managed Python downloads are disabled (`UV_PYTHON_DOWNLOADS=never`), in
+  which case 3.13 must already be installed.
 - **The server finds the clone** through `~/.config/knowledge-store/locations`,
   which the skill writes, or through the `KNOWLEDGE_STORE_PATH` environment
   variable.
 - **To upgrade the server**, change the tag in `.mcp.json` and publish the
-  plugin. The tag is the only version a store pins.
+  plugin. The tag is the only version a store pins, and it is the library's: the
+  server is released with the library, from `v0.22.0`. A store still pinned to the
+  archived `knowledge-store-mcp` repository changes the `--from` value and the
+  entry point together, to the form above.
 
 Setup for other clients, such as Claude Desktop and GitHub Copilot, is in the
-server's [front doors](https://github.com/hmcts/knowledge-store-mcp#front-doors)
-section.
+server's [front doors](mcp-server.md#front-doors) section.
 
 ## Troubleshooting
 
