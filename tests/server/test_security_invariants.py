@@ -26,37 +26,32 @@ from mcp_types import TextContent
 
 from fixture_store.build import HOSTILE, build
 from fixture_store.sweep import CALLS
+from knowledgestore.server import index
 from knowledgestore.server.server import KnowledgeStoreServer
 
 PACKAGE = Path(server_package.__file__).resolve().parent
 
-# The one module that writes: the query-index cache, outside the store, written to a
-# temp file and renamed. A write in any other module fails the static check below.
-# What it writes *to* is held at runtime: `test_security.py` sweeps a read-only store
-# in every index mode and `test_index_cache.py` pins the cache location.
+# The functions that write the query-index cache, outside the store: a temp file
+# renamed into place, a digest beside it, and the removal of a stale entry or of
+# another version's. Only these, only in `index.py`, may change the filesystem; a
+# write anywhere else in that module, or in any other, fails the static check below.
+# What they write *to* is held at runtime by `CacheWritesStayInTheCacheTest`.
 CACHE_WRITER = "index.py"
+CACHE_WRITER_FUNCTIONS = frozenset({"_discard", "_write", "_write_digest", "_remove_others"})
 
-# Importing any of these gives a module a way to start a process, reach a network or
-# remove files. Prefix matches: `urllib.request` is `urllib`.
+# Importing any of these gives a module a way to start a process, reach a network,
+# remove files, or load code the scan cannot read. Prefix matches: `urllib.request`
+# is `urllib`. `importlib.metadata` is the one allowed corner of `importlib`: the
+# package reads its own version with it.
 FORBIDDEN_IMPORTS = frozenset(
-    {
-        "subprocess",
-        "socket",
-        "ssl",
-        "urllib",
-        "http",
-        "requests",
-        "httpx",
-        "aiohttp",
-        "ftplib",
-        "smtplib",
-        "telnetlib",
-        "xmlrpc",
-        "shutil",
-        "multiprocessing",
-        "pty",
-    }
+    {"subprocess", "socket", "ssl", "urllib", "http", "requests", "httpx", "aiohttp"}
+    | {"ftplib", "smtplib", "telnetlib", "xmlrpc", "shutil", "multiprocessing", "pty"}
+    | {"importlib", "ctypes"}
 )
+ALLOWED_IMPORTS = ("importlib.metadata",)
+
+# Builtins that run or load code the scan cannot see.
+FORBIDDEN_BUILTINS = frozenset({"exec", "eval", "__import__"})
 
 # `os.<name>` calls that start a process.
 FORBIDDEN_OS = frozenset(
@@ -64,9 +59,12 @@ FORBIDDEN_OS = frozenset(
     | {"spawnl", "spawnv", "spawnve", "spawnvp", "posix_spawn", "posix_spawnp"}
 )
 
-# Calls that change the filesystem. Allowed only in CACHE_WRITER.
+# Methods that change the filesystem, whatever they are called on. `replace` is
+# judged by its argument count: `Path.replace(target)` takes one, `str.replace`
+# takes two or more.
 WRITE_METHODS = frozenset(
-    {"write_text", "write_bytes", "unlink", "mkdir", "rmdir", "touch", "symlink_to", "hardlink_to"}
+    {"write_text", "write_bytes", "unlink", "mkdir", "rmdir", "touch", "symlink_to"}
+    | {"hardlink_to", "rename", "chmod", "truncate"}
 )
 WRITE_OS = frozenset(
     {"replace", "rename", "remove", "unlink", "rmdir", "mkdir", "makedirs", "removedirs"}
@@ -114,38 +112,47 @@ def _opens_for_writing(call: ast.Call) -> bool:
 
 
 def _import_problems(node: ast.AST, where: str) -> list[str]:
-    """Imports that give a module a process, a network, a remover, or the library."""
+    """Imports that give a module a process, a network, a remover, dynamic code, or
+    the library. A name imported out of `os` that writes is refused at the import, so
+    the bare call that follows it needs no resolving."""
     found = []
     if isinstance(node, ast.Import):
         for alias in node.names:
             top = alias.name.split(".")[0]
-            if top in FORBIDDEN_IMPORTS:
+            if top in FORBIDDEN_IMPORTS and not alias.name.startswith(ALLOWED_IMPORTS):
                 found.append(f"{where} imports {alias.name}")
             if top == "knowledgestore" and not alias.name.startswith("knowledgestore.server"):
                 found.append(f"{where} imports the library: {alias.name}")
     elif isinstance(node, ast.ImportFrom):
         module = node.module or ""
-        if node.level == 0 and module.split(".")[0] in FORBIDDEN_IMPORTS:
+        top = module.split(".")[0]
+        if node.level == 0 and top in FORBIDDEN_IMPORTS and not module.startswith(ALLOWED_IMPORTS):
             found.append(f"{where} imports from {module}")
-        if node.level == 0 and module.split(".")[0] == "knowledgestore":
+        if node.level == 0 and top == "knowledgestore":
             if not module.startswith("knowledgestore.server"):
                 found.append(f"{where} imports the library: {module}")
         # `from .. import io` reaches the library's writers from inside the package.
         if node.level >= 2:
             found.append(f"{where} imports from outside the server package")
+        if node.level == 0 and module == "os":
+            for alias in node.names:
+                if alias.name == "*" or alias.name in WRITE_OS | FORBIDDEN_OS:
+                    found.append(f"{where} imports os.{alias.name}")
+        if node.level == 0 and module == "tempfile":
+            found.append(f"{where} imports from tempfile")
     return found
 
 
 def _call_problems(call: ast.Call, where: str, *, may_write: bool) -> list[str]:
-    """Calls that start a process or, outside the cache writer, change the filesystem."""
+    """Calls that run dynamic code or start a process or, outside the cache writer,
+    change the filesystem."""
     found = []
     func = call.func
-    owner = (
-        func.value.id
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
-        else ""
-    )
-    attr = func.attr if isinstance(func, ast.Attribute) else ""
+    if isinstance(func, ast.Name) and func.id in FORBIDDEN_BUILTINS:
+        found.append(f"{where} calls {func.id}")
+    is_attribute = isinstance(func, ast.Attribute)
+    owner = func.value.id if is_attribute and isinstance(func.value, ast.Name) else ""
+    attr = func.attr if is_attribute else ""
     if owner == "os" and attr in FORBIDDEN_OS:
         found.append(f"{where} calls os.{attr}")
     if may_write:
@@ -154,6 +161,8 @@ def _call_problems(call: ast.Call, where: str, *, may_write: bool) -> list[str]:
         found.append(f"{where} opens a file for writing")
     if attr in WRITE_METHODS:
         found.append(f"{where} calls .{attr}()")
+    if attr == "replace" and owner != "os" and len(call.args) + len(call.keywords) == 1:
+        found.append(f"{where} calls .replace() with one argument (Path.replace)")
     if owner == "os" and attr in WRITE_OS:
         found.append(f"{where} calls os.{attr}")
     if owner == "tempfile":
@@ -161,81 +170,147 @@ def _call_problems(call: ast.Call, where: str, *, may_write: bool) -> list[str]:
     return found
 
 
-def violations(source: str, filename: str, *, may_write: bool) -> list[str]:
-    """What in this module could write, spawn or reach a network. Empty when nothing."""
-    found = []
-    for node in ast.walk(ast.parse(source, filename=filename)):
-        where = f"{filename}:{getattr(node, 'lineno', 0)}"
-        found += _import_problems(node, where)
+def violations(source: str, filename: str, *, writers: frozenset[str] = frozenset()) -> list[str]:
+    """What in this module could write, spawn or reach a network. Empty when nothing.
+
+    `writers` names the top-level functions allowed to change the filesystem; the
+    rest of the module is held to the same rule as every other. Each finding reads
+    `file:line [function] what`."""
+    found: list[str] = []
+
+    def visit(node: ast.AST, function: str) -> None:
+        if not function and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            function = node.name
+        where = f"{filename}:{getattr(node, 'lineno', 0)} [{function}]"
+        found.extend(_import_problems(node, where))
         if isinstance(node, ast.Call):
-            found += _call_problems(node, where, may_write=may_write)
+            found.extend(_call_problems(node, where, may_write=function in writers))
+        for child in ast.iter_child_nodes(node):
+            visit(child, function)
+
+    visit(ast.parse(source, filename=filename), "")
     return found
 
 
 def package_violations(directory: Path) -> list[str]:
+    """Every module under the package, subpackages included."""
     found = []
-    for path in sorted(directory.glob("*.py")):
-        source = path.read_text(encoding="utf-8")
-        found += violations(source, path.name, may_write=path.name == CACHE_WRITER)
+    for path in sorted(directory.rglob("*.py")):
+        name = path.relative_to(directory).as_posix()
+        writers = CACHE_WRITER_FUNCTIONS if name == CACHE_WRITER else frozenset()
+        found += violations(path.read_text(encoding="utf-8"), name, writers=writers)
     return found
 
 
 class ReadOnlyByConstructionTest(unittest.TestCase):
     def test_no_module_of_the_server_can_write_spawn_or_reach_a_network(self):
         """Catches: a server module importing `subprocess`, a socket or HTTP client,
-        `shutil`, or a library module that writes (`knowledgestore.io`); calling
-        `os.system`; opening a file for writing; or removing, renaming or creating a
-        path - anywhere but the cache writer. The server being read-only is a
-        property of its source, so it is read from its source."""
+        `shutil`, `importlib`, `ctypes` or a library module that writes
+        (`knowledgestore.io`); calling `os.system`, `exec`, `eval` or `__import__`;
+        opening a file for writing; or removing, renaming or creating a path - by
+        `os.`, by `Path` method, or by a name imported from `os` - anywhere but the
+        functions that write the cache. The server being read-only is a property of
+        its source, so it is read from its source."""
         self.assertEqual(package_violations(PACKAGE), [])
 
     def test_the_scan_reads_the_modules_the_package_holds(self):
         """Catches: the check above going vacuous - a moved package, or a glob that
         matches nothing, which would read as a clean pass over no code."""
-        names = {path.name for path in PACKAGE.glob("*.py")}
+        names = {path.name for path in PACKAGE.rglob("*.py")}
         self.assertGreaterEqual(len(names), 15, names)
         self.assertTrue({"server.py", "index.py", "store.py", "cli.py"} <= names, names)
         self.assertIn(CACHE_WRITER, names)
 
-    def test_the_cache_writer_is_the_only_module_that_writes_at_all(self):
+    def test_the_scan_descends_into_subpackages(self):
+        """Catches: a scan that reads only the package's top directory, so a write
+        in a subpackage is never looked at."""
+        with tempfile.TemporaryDirectory() as tmp:
+            nested = Path(tmp) / "inner"
+            nested.mkdir()
+            (nested / "deep.py").write_text("import subprocess\n", encoding="utf-8")
+            self.assertEqual(
+                package_violations(Path(tmp)), ["inner/deep.py:1 [] imports subprocess"]
+            )
+
+    def test_the_cache_functions_are_the_only_code_that_writes_at_all(self):
         """Catches: the allowance for the cache writer widening into a way to write
-        everywhere. With the allowance removed, the cache writer is the only module
-        reported - so every write the package has is in that one file."""
+        everywhere. With the allowance removed, the only code reported is the named
+        functions of `index.py` - so every write the package has is in them, and the
+        named functions still write (an allowance for code that no longer writes
+        would be a hole waiting for a tenant)."""
         found = []
-        for path in sorted(PACKAGE.glob("*.py")):
+        for path in sorted(PACKAGE.rglob("*.py")):
+            name = path.relative_to(PACKAGE).as_posix()
             source = path.read_text(encoding="utf-8")
             found += [
-                line
-                for line in violations(source, path.name, may_write=False)
-                if "imports" not in line
+                line for line in violations(source, name) if "imports" not in line and "[" in line
             ]
-        self.assertTrue(found, "the cache writer was expected to be flagged without its allowance")
-        self.assertEqual({line.split(":")[0] for line in found}, {CACHE_WRITER})
+        placed = {(line.split(":")[0], line.split("[")[1].split("]")[0]) for line in found}
+        self.assertEqual(placed, {(CACHE_WRITER, name) for name in CACHE_WRITER_FUNCTIONS}, found)
 
     def test_the_scan_notices_each_kind_of_write_path(self):
-        """Catches: a scan that has stopped recognising a way to write - each source
-        here is one the package must never contain, and each must be reported."""
+        """Catches: a scan that has stopped recognising a way to write, spawn or load
+        code - each source here is one the package must never contain, and each must
+        be reported."""
         bad = {
             "import subprocess": "imports subprocess",
             "import socket": "imports socket",
             "from urllib.request import urlopen": "imports from urllib.request",
             "import http.client": "imports http.client",
             "import shutil": "imports shutil",
+            "from shutil import rmtree": "imports from shutil",
+            "from subprocess import run": "imports from subprocess",
+            "from socket import socket": "imports from socket",
+            "import importlib": "imports importlib",
+            "import importlib.util": "imports importlib.util",
+            "from importlib import import_module": "imports from importlib",
+            "import ctypes": "imports ctypes",
+            "__import__('os')": "calls __import__",
+            "exec('x = 1')": "calls exec",
+            "eval('1')": "calls eval",
             "from knowledgestore import io": "imports the library",
             "from knowledgestore.io import write_json": "imports the library",
             "from .. import io": "outside the server package",
             "import os\nos.system('x')": "os.system",
+            "from os import remove\nremove('f')": "imports os.remove",
+            "from os import rename": "imports os.rename",
+            "from os import *": "imports os.*",
+            "from tempfile import mkstemp": "imports from tempfile",
             "open('f', 'w')": "opens a file for writing",
             "open('f', mode='a')": "opens a file for writing",
             "from pathlib import Path\nPath('f').open('wb')": "opens a file for writing",
             "from pathlib import Path\nPath('f').write_text('x')": ".write_text()",
+            "from pathlib import Path\nPath('f').rename('g')": ".rename()",
+            "from pathlib import Path\nPath('f').replace('g')": "Path.replace",
+            "from pathlib import Path\nPath('f').symlink_to('g')": ".symlink_to()",
+            "from pathlib import Path\nPath('f').hardlink_to('g')": ".hardlink_to()",
+            "from pathlib import Path\nPath('f').touch()": ".touch()",
+            "from pathlib import Path\nPath('f').unlink()": ".unlink()",
+            "from pathlib import Path\nPath('f').rmdir()": ".rmdir()",
             "import os\nos.remove('f')": "os.remove",
+            "import os\nos.rename('f', 'g')": "os.rename",
+            "import os\nos.replace('f', 'g')": "os.replace",
+            "import os\nos.unlink('f')": "os.unlink",
+            "import os\nos.rmdir('f')": "os.rmdir",
+            "import os\nos.makedirs('f')": "os.makedirs",
             "import tempfile\ntempfile.mkstemp()": "tempfile.mkstemp",
         }
         for source, expected in bad.items():
             with self.subTest(source=source):
-                found = violations(source, "x.py", may_write=False)
+                found = violations(source, "x.py")
                 self.assertTrue(any(expected in line for line in found), (source, found))
+
+    def test_the_exemption_is_the_named_functions_only(self):
+        """Catches: the cache allowance covering a whole module - a write in another
+        function of `index.py` must be reported, and one inside a named function not."""
+        write = "import os\ndef {name}(p):\n    os.remove(p)\n"
+        self.assertEqual(
+            violations(write.format(name="_write"), "index.py", writers=CACHE_WRITER_FUNCTIONS),
+            [],
+        )
+        self.assertTrue(
+            violations(write.format(name="_other"), "index.py", writers=CACHE_WRITER_FUNCTIONS)
+        )
 
     def test_the_scan_leaves_reads_alone(self):
         """Catches: a scan so broad it refuses the server's own reads, which would be
@@ -247,10 +322,13 @@ class ReadOnlyByConstructionTest(unittest.TestCase):
             "from pathlib import Path\nPath('f').read_text()",
             "import sqlite3\nsqlite3.connect('file:x?mode=ro', uri=True)",
             "import os\nos.fspath('x')",
+            "from os import fspath, getpid",
+            "'a-b'.replace('-', '_')",
+            "from importlib.metadata import version",
         ]
         for source in reads:
             with self.subTest(source=source):
-                self.assertEqual(violations(source, "x.py", may_write=False), [])
+                self.assertEqual(violations(source, "x.py"), [])
 
 
 class SweepTestCase(unittest.IsolatedAsyncioTestCase):
@@ -277,6 +355,47 @@ class SweepTestCase(unittest.IsolatedAsyncioTestCase):
                 assert isinstance(block, TextContent)
                 out.append((tool, json.loads(block.text)))
         return out
+
+
+def everything_under(root: Path) -> dict[str, tuple[str, int]]:
+    """Every entry under `root` with its type and, for a file, its size."""
+    found = {}
+    for path in sorted(root.rglob("*")):
+        found[path.relative_to(root).as_posix()] = (
+            "dir" if path.is_dir() else "file",
+            0 if path.is_dir() else path.stat().st_size,
+        )
+    return found
+
+
+class CacheWritesStayInTheCacheTest(SweepTestCase):
+    async def test_a_sweep_writes_only_under_the_cache_directory(self):
+        """Catches: a cache function writing anywhere but the cache directory - into
+        the store beside the archive, into the home directory, or into the temp tree
+        around them. The cache directory is resolved from `XDG_CACHE_HOME` by the
+        server's own `cache_home`, the cache is made to be written (a gzip index must
+        be decompressed into it), and everything else under the temp tree must be
+        exactly as it was. This is the runtime half of the static check, which only
+        says which functions may write, not where."""
+        home = self.tmp / "home"
+        home.mkdir()
+        cache = index.cache_home({"XDG_CACHE_HOME": str(self.tmp / "xdg")}, home)
+        self.assertEqual(cache, self.tmp / "xdg")
+        before = everything_under(self.tmp)
+        before_home = everything_under(home)
+        self.cache = cache
+        await self.answers(list(CALLS))
+        after = everything_under(self.tmp)
+        written = {name for name in after if after[name] != before.get(name)}
+        self.assertTrue(written, "nothing was written, so the cache was never exercised")
+        outside = {name for name in written if not name.split("/")[0] == "xdg"}
+        self.assertEqual(outside, set(), "a write left the cache directory")
+        self.assertTrue(any(name.endswith(".sqlite") for name in written), written)
+        self.assertEqual(everything_under(home), before_home)
+        self.assertEqual(
+            everything_under(self.root),
+            {k[len("store/") :]: v for k, v in before.items() if k.startswith("store/")},
+        )
 
 
 # Calls the server refuses or misses, so the refusal text is swept as well as the
