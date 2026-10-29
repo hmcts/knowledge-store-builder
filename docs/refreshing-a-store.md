@@ -60,7 +60,28 @@ is the stage that discovers which tickets exist:
 
 ```bash
 knowledgestore fetch-tickets
+knowledgestore redact-cache
 knowledgestore manifest
+```
+
+`redact-cache` needs no credentials. `fetch-tickets` redacts only what it fetches,
+and a resolved ticket is never fetched again, so a rule added since — or one a new
+release of the library ships — reaches the cache only through it. Run it after
+every upgrade and every change to `KSB_SENSITIVE_PATTERNS`; it reports counts of
+spans and records, never the text.
+
+It cleans the cache and nothing built from it. The old text still sits in the
+intent layer, the answers layer, the index and the explorer page until they are
+rebuilt, so when it changed anything it prints the stages to re-run, in this order:
+
+```bash
+knowledgestore intent
+knowledgestore answers-layer
+knowledgestore index
+knowledgestore explorer
+knowledgestore manifest
+knowledgestore check-evidence
+knowledgestore summaries verify   # regenerate any summary or brief written from the old text
 ```
 
 It asks the tracker about tickets it has never had an answer for, and about up
@@ -264,7 +285,7 @@ previous refresh: see
 [Write the detect result, then expose the content set](creating-a-store.md#write-the-detect-result-then-expose-the-content-set).
 
 `intent` reports how many mined values it withheld as identifying a case or a
-person, and `check-evidence` fails if any remain in the committed artefact —
+person, and `check-evidence` fails if any remain in the committed artefact or the tracker cache —
 including ones a store committed before the rule existed. Read that count as a
 finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See

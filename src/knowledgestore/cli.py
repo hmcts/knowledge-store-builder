@@ -29,6 +29,7 @@ SELF_PARSING = frozenset(
         "fetch-tickets",
         "summaries",
         "status",
+        "redact-cache",
         "check-evidence",
         "check-answers",
         "check-citations",
@@ -134,6 +135,10 @@ STAGES: dict[str, tuple[str, str]] = {
     "fetch-tickets": (
         "fetch_tickets",
         "ask the issue tracker about discovered tickets (opt-in; needs credentials)",
+    ),
+    "redact-cache": (
+        "redact_cache",
+        "re-redact cached tracker text under the rules now in force (run after changing them)",
     ),
     "merge-inputs": (
         "merge_inputs",
