@@ -29,3 +29,5 @@
 --no-python-downloads :: uv
 --allow-all-mcp-server-instructions :: copilot
 --upgrade-package :: uv
+--index :: uv
+--index-strategy :: uv

@@ -11887,6 +11887,36 @@ MUTATIONS = (
         ("test_check_plugin.PluginGateTest.test_a_floating_or_missing_ref_fails",),
     ),
     Mutation(
+        "check-plugin stops requiring an --index for the feed form",
+        "check_plugin.py",
+        "    if FEED_INDEX not in naming:",
+        "    if False:",
+        "the name is not on PyPI, so a feed launch with no --index resolves it there and runs whatever an attacker registered, for every asker",
+        (
+            "test_check_plugin.PluginGateTest.test_the_feed_form_without_an_index_fails_naming_pypi",
+            "test_check_plugin.PluginGateTest.test_an_index_after_the_program_does_not_count",
+        ),
+    ),
+    Mutation(
+        "check-plugin accepts an index on another host",
+        "check_plugin.py",
+        "            if value != FEED_INDEX:",
+        "            if False:",
+        "an --index or --extra-index-url naming PyPI or any other host passes, so another index can answer for the package name",
+        (
+            "test_check_plugin.PluginGateTest.test_the_feed_form_with_an_index_not_naming_the_feed_fails",
+            "test_check_plugin.PluginGateTest.test_a_foreign_host_is_named_in_the_refusal",
+        ),
+    ),
+    Mutation(
+        "check-plugin accepts an unsafe index strategy",
+        "check_plugin.py",
+        "        if strategy in UNSAFE_STRATEGIES:",
+        "        if False:",
+        "unsafe-best-match picks the highest version across indexes, so a PyPI squat of the name beats the feed's release",
+        ("test_check_plugin.PluginGateTest.test_an_unsafe_index_strategy_fails",),
+    ),
+    Mutation(
         "check-plugin stops comparing --store-id with the manifest",
         "check_plugin.py",
         "    elif declared != wanted:",

@@ -8,8 +8,8 @@ with Python and grepping the corpus - which is a second answering path with its 
 rules, and the one nothing else shared.
 
 `docs/mcp-server.txt` is the single declared pin of the server: its first line is
-the release tag the store plugin launches, and the rest are the tools that release
-serves. The tests here hold the skill to that list in both directions, keep the
+the release tag the store plugin launches, its second the package feed index the
+launch names, and the rest are the tools that release serves. The tests here hold the skill to that list in both directions, keep the
 file-reading path from returning to a command block an agent would run, and pin
 what an asker is told when the store's plugin does not launch the server.
 
@@ -67,7 +67,8 @@ def pinned_tag(text: str) -> str:
 
 
 def pinned_tools(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines()[1:] if line.strip()]
+    # Line 1 is the tag and line 2 the feed index; the tools follow.
+    return [line.strip() for line in text.splitlines()[2:] if line.strip()]
 
 
 def tool_table(text: str) -> list[str]:

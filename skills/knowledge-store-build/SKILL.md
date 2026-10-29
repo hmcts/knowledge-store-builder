@@ -1764,8 +1764,10 @@ nothing matched the rules, never that the file holds no personal data.
 
 **The store plugin must declare the knowledge-store server.** Assistants answer
 a store's questions only through it, so a store plugin without it answers
-nothing. If `<store-plugin>/.mcp.json` is missing, add it, at the tag this
-library declares:
+nothing. If `<store-plugin>/.mcp.json` is missing, add it, at the version this
+library declares. Keep `--index`: the package is not on PyPI, so
+without it the name would resolve there, and `knowledgestore check-plugin` refuses
+the launch:
 
 ```json
 {
@@ -1773,7 +1775,8 @@ library declares:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/",
+        "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
         "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }

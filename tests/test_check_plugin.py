@@ -45,6 +45,19 @@ def server(
     return {"command": command, "args": args}
 
 
+# Written out, as FROM is: the feed URL a store copies is the claim.
+FEED = "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/"
+FEED_FROM = "hmcts-knowledge-store-builder[server]=="
+
+
+def feed_server(version="0.22.0", store_id="example-store", before=None, source=None):
+    """The documented launch: the feed named by --index, an exact == version."""
+    args = ["--index", FEED] if before is None else list(before)
+    args += ["--from", source if source is not None else FEED_FROM + version]
+    args += ["knowledgestore", "serve", "--store-id", store_id]
+    return {"command": "uvx", "args": args}
+
+
 def declaration(**kwargs):
     return {"mcpServers": {"knowledge-store": server(**kwargs)}}
 
@@ -198,6 +211,128 @@ class PluginGateTest(SettingsIsolated):
                 plugin = self.plugin(tmp, body)
                 code, _out, err = self.run_stage("--plugin", str(plugin))
                 self.assertRefused(code, err, needle)
+
+    def feed(self, body):
+        """(code, out, err) for a plugin declaring `body` as its server."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.store(tmp)
+            plugin = self.plugin(tmp, {"mcpServers": {"knowledge-store": body}})
+            return self.run_stage("--plugin", str(plugin))
+
+    def test_the_feed_url_constant_is_the_hmcts_lib_feed(self):
+        """Catches the constant drifting from the feed the docs and askers use."""
+        self.assertEqual(gate.FEED_INDEX, FEED)
+
+    def test_the_feed_form_passes_and_names_version_and_id(self):
+        """Catches the documented form being refused, or a success line that does
+        not say which release and store it verified."""
+        code, out, err = self.feed(feed_server())
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(
+            out.splitlines()[0].split(": ", 1)[1],
+            ("launches knowledge-store v0.22.0 for store example-store"),
+        )
+
+    def test_the_feed_form_accepts_default_index_and_equals_spelling(self):
+        """Catches the index being read only in its `--index <url>` spelling."""
+        for before in (["--default-index", FEED], ["--index=" + FEED]):
+            with self.subTest(before=before):
+                code, _out, err = self.feed(feed_server(before=before))
+                self.assertEqual((code, err), (0, ""))
+
+    def test_the_feed_form_without_an_index_fails_naming_pypi(self):
+        """Catches the dependency-confusion hole: the name is not on PyPI, so a
+        launch with no --index resolves it there, where anyone can register it."""
+        code, _out, err = self.feed(feed_server(before=[]))
+        self.assertRefused(code, err, "PyPI", "--index")
+
+    def test_the_feed_form_with_an_index_not_naming_the_feed_fails(self):
+        """Catches an --index on another host passing as if it were the feed,
+        and the legacy options putting PyPI or another index in play."""
+        other = "https://pkgs.example.com/simple/"
+        pypi = "https://pypi.org/simple/"
+        for before in (
+            ["--index", other],
+            ["--default-index", pypi],
+            ["--index", FEED, "--extra-index-url", pypi],
+            ["--index", FEED, "--index-url", pypi],
+            ["--extra-index-url", FEED, "--index-url", pypi],
+            ["--index", FEED[:-1]],
+        ):
+            with self.subTest(before=before):
+                code, _out, err = self.feed(feed_server(before=before))
+                self.assertRefused(code, err, "--")
+                self.assertNotIn("launches", _out)
+
+    def test_a_foreign_host_is_named_in_the_refusal(self):
+        """Catches a refusal that says nothing about which index was refused."""
+        code, _out, err = self.feed(feed_server(before=["--index", "https://pkgs.example.com/s/"]))
+        self.assertRefused(code, err, "https://pkgs.example.com/s/")
+
+    def test_an_unsafe_index_strategy_fails(self):
+        """Catches unsafe-best-match and unsafe-first-match passing: they pick the
+        highest version across indexes, so a PyPI squat would win."""
+        for strategy in ("unsafe-best-match", "unsafe-first-match"):
+            with self.subTest(strategy=strategy):
+                before = ["--index", FEED, "--index-strategy", strategy]
+                code, _out, err = self.feed(feed_server(before=before))
+                self.assertRefused(code, err, strategy)
+        code, _out, err = self.feed(
+            feed_server(before=["--index", FEED, "--index-strategy=unsafe-best-match"])
+        )
+        self.assertRefused(code, err, "unsafe-best-match")
+
+    def test_the_first_index_strategy_passes(self):
+        """Catches every --index-strategy being refused, not only the unsafe ones."""
+        before = ["--index", FEED, "--index-strategy", "first-index"]
+        code, _out, err = self.feed(feed_server(before=before))
+        self.assertEqual((code, err), (0, ""))
+
+    def test_an_index_after_the_program_does_not_count(self):
+        """Catches an --index handed to the server, after `knowledgestore`, being
+        read as uvx's: uvx would still resolve the name from PyPI."""
+        body = feed_server(before=[])
+        body["args"] += ["--index", FEED]
+        code, _out, err = self.feed(body)
+        self.assertRefused(code, err, "PyPI")
+
+    def test_a_range_or_unpinned_feed_requirement_fails(self):
+        """Catches a version range, a bare name or a partial version passing as an
+        exact pin."""
+        for source in (
+            "hmcts-knowledge-store-builder[server]",
+            "hmcts-knowledge-store-builder[server]>=0.22.0",
+            "hmcts-knowledge-store-builder[server]==0.22",
+            "hmcts-knowledge-store-builder[server]==0.22.*",
+            "hmcts-knowledge-store-builder==0.22.0",
+            "hmcts-knowledge-store-builder[server]~=0.22.0",
+        ):
+            with self.subTest(source=source):
+                code, _out, err = self.feed(feed_server(source=source))
+                self.assertRefused(code, err, "--from", source)
+
+    def test_an_older_feed_version_warns_but_passes_and_a_newer_does_not_warn(self):
+        """Catches the feed version not being compared with the documented tag the
+        way a git tag is."""
+        code, out, err = self.feed(feed_server(version="0.21.9"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning: pinned v0.21.9 is older than", err)
+        self.assertIn("v0.21.9", out)
+        code, _out, err = self.feed(feed_server(version="99.0.0"))
+        self.assertEqual((code, err), (0, ""))
+
+    def test_the_feed_form_is_still_held_to_serve_and_the_store_id(self):
+        """Catches the feed path being a way round the entry-point and id checks."""
+        no_serve = feed_server()
+        no_serve["args"] = no_serve["args"][:-3] + ["knowledgestore", "status"]
+        code, _out, err = self.feed(no_serve)
+        self.assertRefused(code, err, "knowledgestore serve")
+        code, _out, err = self.feed(feed_server(store_id="other"))
+        self.assertRefused(code, err, "'other'")
+        gone = feed_server()
+        gone["args"] = gone["args"][:-2]
+        code, _out, err = self.feed(gone)
+        self.assertRefused(code, err, "no --store-id")
 
     def test_no_from_fails(self):
         """Catches an unpinned server (no --from) passing."""

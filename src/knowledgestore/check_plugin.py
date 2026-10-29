@@ -10,15 +10,26 @@ The server declaration is read from `<plugin>/.mcp.json`, else from `mcpServers`
 
   - no `knowledge-store` server is declared;
   - the command is not `uvx`;
-  - `--from` is not `hmcts-knowledge-store-builder[server] @
-    git+https://github.com/hmcts/knowledge-store-builder@<exact tag>`, where a
-    branch, `latest` or no ref are all refused;
+  - `--from` is neither of the two accepted forms: the published package,
+    `hmcts-knowledge-store-builder[server]==<exact version>` launched with
+    `--index` naming the hmcts-lib feed, or the git form
+    `hmcts-knowledge-store-builder[server] @
+    git+https://github.com/hmcts/knowledge-store-builder@<exact tag>`. A branch,
+    `latest`, a version range or no ref are all refused;
+  - the feed form would let the name resolve from anywhere else (see below);
   - the arguments do not then run `knowledgestore serve`;
   - `--store-id` is absent, or differs from `store.id` in
     `knowledge/store-manifest.json`; or
   - the plugin root is the repository root and a root `.mcp.json` exists, because
     that file also loads as project configuration for anyone working in the
     repository.
+
+The feed form is the documented one, and the name matters: `hmcts-knowledge-store-builder`
+is not on PyPI, so a launch that can reach PyPI lets anyone register it and have
+every asker run their code (dependency confusion). The feed form therefore fails
+without an `--index` (or `--default-index`) naming exactly `FEED_INDEX`, with any
+other index URL on any index option, and with `--index-strategy
+unsafe-best-match` or `unsafe-first-match`, which pick across indexes by version.
 
 A pinned tag older than `DOCUMENTED_TAG` is a warning and not a failure: the
 store has chosen an older server, which is a decision and not a defect.
@@ -54,11 +65,18 @@ REQUIREMENT = f"hmcts-knowledge-store-builder[server] @ {SOURCE}"
 # The server's earlier home. Its tags still resolve, so a plugin pinned there works.
 ARCHIVED_SOURCE = "git+https://github.com/hmcts/knowledge-store-mcp"
 DOCUMENTED_TAG = "v0.22.0"
+# The published form. The name is absent from PyPI, so which index answers is the
+# whole security question; the feed is readable anonymously.
+FEED_INDEX = "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/"
+FEED_REQUIREMENT = "hmcts-knowledge-store-builder[server]=="
+INDEX_OPTIONS = ("--index", "--default-index", "--index-url", "--extra-index-url")
+UNSAFE_STRATEGIES = ("unsafe-best-match", "unsafe-first-match")
 UNRESOLVED_BUILD_ID = "build id not resolved (KSB_STORE_ID unset); its check was skipped"
 # The layers the server answers from; without either it falls back or does not answer.
 READ_LAYERS = ("index", "relationships")
 
 _TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 def _tag_key(tag: str) -> tuple[int, int, int] | None:
@@ -66,15 +84,21 @@ def _tag_key(tag: str) -> tuple[int, int, int] | None:
     return (int(match[1]), int(match[2]), int(match[3])) if match else None
 
 
-def _option(args: list, flag: str) -> str | None:
-    """The value after `flag` or in `flag=value`, else None. Last occurrence wins."""
-    found = None
+def _options(args: list, flag: str) -> list[str]:
+    """Every value after `flag` or in `flag=value`, in order."""
+    found = []
     for index, argument in enumerate(args):
         if argument == flag and index + 1 < len(args):
-            found = str(args[index + 1])
+            found.append(str(args[index + 1]))
         elif isinstance(argument, str) and argument.startswith(flag + "="):
-            found = argument.split("=", 1)[1]
+            found.append(argument.split("=", 1)[1])
     return found
+
+
+def _option(args: list, flag: str) -> str | None:
+    """The value after `flag` or in `flag=value`, else None. Last occurrence wins."""
+    values = _options(args, flag)
+    return values[-1] if values else None
 
 
 def _read_json(path: Path) -> object:
@@ -130,14 +154,78 @@ def _runs_serve(args: list) -> bool:
     )
 
 
+def _uvx_options(args: list) -> list:
+    """The arguments uvx reads: those before the program it runs.
+
+    After `knowledgestore` they belong to the server, so an `--index` there changes
+    nothing about where the package came from.
+    """
+    return args[: args.index("knowledgestore")] if "knowledgestore" in args else args
+
+
+def _check_index(args: list, failures: list[str]) -> None:
+    """The feed form must resolve the name from the feed and nowhere else."""
+    uvx = _uvx_options(args)
+    naming = _options(uvx, "--index") + _options(uvx, "--default-index")
+    if FEED_INDEX not in naming:
+        failures.append(
+            f"--from names the package without `--index {FEED_INDEX}` (or --default-index): "
+            "hmcts-knowledge-store-builder is not on PyPI, so the name would resolve from "
+            "PyPI, where anyone can register it and run their code for every asker"
+        )
+    for flag in INDEX_OPTIONS:
+        for value in _options(uvx, flag):
+            if value != FEED_INDEX:
+                failures.append(
+                    f"{flag} is {value!r}, not {FEED_INDEX}: another index (PyPI included) "
+                    "could answer for the package name"
+                )
+    for strategy in _options(uvx, "--index-strategy"):
+        if strategy in UNSAFE_STRATEGIES:
+            failures.append(
+                f"--index-strategy {strategy} picks the best version across every index, so "
+                "a higher version of the name on PyPI would win over the feed's"
+            )
+
+
+def _launches_tag(args: list, tag: str, failures: list[str], warnings: list[str]) -> str:
+    """`tag` once the arguments run `knowledgestore serve`, warning when it is old."""
+    if not _runs_serve(args):
+        failures.append(
+            "args do not run `knowledgestore serve` after --from, so uvx would not start the server"
+        )
+        return ""
+    if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):  # type: ignore[operator]
+        warnings.append(
+            f"pinned {tag} is older than {DOCUMENTED_TAG}, the tag this library documents"
+        )
+    return tag
+
+
+def _check_feed_pin(args: list, source: str, failures: list[str], warnings: list[str]) -> str:
+    """The pinned tag (`v` + version) when `source` is the exact-version feed form, else ''."""
+    _check_index(args, failures)
+    version = source[len(FEED_REQUIREMENT) :] if source.startswith(FEED_REQUIREMENT) else ""
+    if not _VERSION.match(version):
+        failures.append(
+            f"--from is {source!r}, not {FEED_REQUIREMENT}<exact version> such as "
+            f"'{FEED_REQUIREMENT}{DOCUMENTED_TAG[1:]}': a range or an unpinned name launches "
+            "a server nobody chose"
+        )
+        return ""
+    return _launches_tag(args, f"v{version}", failures, warnings)
+
+
 def _check_pin(args: list, failures: list[str], warnings: list[str]) -> str:
-    """The pinned tag when `--from` is an exact tag of the library, else ''."""
+    """The pinned tag when `--from` is an exact version or tag of the library, else ''."""
     source = _option(args, "--from")
     prefix = REQUIREMENT + "@"
     expected = f"{prefix}{DOCUMENTED_TAG}"
     if source is None:
         failures.append("args carry no --from, so the server is not pinned to a tag")
         return ""
+    if source.startswith("hmcts-knowledge-store-builder") and "@" not in source:
+        return _check_feed_pin(args, source, failures, warnings)
     archived = ARCHIVED_SOURCE + "@"
     if source.startswith(archived) and _tag_key(source[len(archived) :]):
         tag = source[len(archived) :]
@@ -149,21 +237,12 @@ def _check_pin(args: list, failures: list[str], warnings: list[str]) -> str:
         return tag
     if not (source.startswith(prefix) and _tag_key(source[len(prefix) :])):
         failures.append(
-            f"--from is {source!r}, not {prefix}<exact tag> such as {expected!r}: "
+            f"--from is {source!r}, not {FEED_REQUIREMENT}<exact version> with --index "
+            f"{FEED_INDEX} or {prefix}<exact tag> such as {expected!r}: "
             "a branch, `latest` or no ref launches a server nobody chose"
         )
         return ""
-    if not _runs_serve(args):
-        failures.append(
-            "args do not run `knowledgestore serve` after --from, so uvx would not start the server"
-        )
-        return ""
-    tag = source[len(prefix) :]
-    if _tag_key(tag) < _tag_key(DOCUMENTED_TAG):  # type: ignore[operator]
-        warnings.append(
-            f"pinned {tag} is older than {DOCUMENTED_TAG}, the tag this library documents"
-        )
-    return tag
+    return _launches_tag(args, source[len(prefix) :], failures, warnings)
 
 
 def _check_store_id(args: list, manifest: Path, failures: list[str]) -> str:
