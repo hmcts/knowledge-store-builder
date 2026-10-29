@@ -594,6 +594,9 @@ MUTATIONS = (
             "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
             "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
             "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+            "test_repository_node.ConsumersReadARepositoryNode.test_the_explorer_and_both_indexes_take_a_node_with_no_source_file",
+            "test_repository_node.DeploysTargetTheRepository.test_deploys_ends_on_the_repository_not_on_its_lowest_node",
+            "test_repository_node.OneRepositoryNode.test_packages_and_deployments_share_one_repository_node_in_either_order",
         ),
     ),
     Mutation(
@@ -643,6 +646,9 @@ MUTATIONS = (
             "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
             "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
             "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+            "test_repository_node.ConsumersReadARepositoryNode.test_the_explorer_and_both_indexes_take_a_node_with_no_source_file",
+            "test_repository_node.DeploysTargetTheRepository.test_deploys_ends_on_the_repository_not_on_its_lowest_node",
+            "test_repository_node.OneRepositoryNode.test_packages_and_deployments_share_one_repository_node_in_either_order",
         ),
     ),
     Mutation(
@@ -679,6 +685,9 @@ MUTATIONS = (
             "test_deployment_prefix_match.PrefixClaims.test_two_processes_with_different_hash_seeds_name_the_same_claimant",
             "test_deployment_prefix_match.ReachabilityReport.test_a_fully_joined_run_says_nothing_about_reach",
             "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+            "test_repository_node.ConsumersReadARepositoryNode.test_the_explorer_and_both_indexes_take_a_node_with_no_source_file",
+            "test_repository_node.DeploysTargetTheRepository.test_deploys_ends_on_the_repository_not_on_its_lowest_node",
+            "test_repository_node.OneRepositoryNode.test_packages_and_deployments_share_one_repository_node_in_either_order",
         ),
     ),
     Mutation(
@@ -4233,7 +4242,7 @@ MUTATIONS = (
             "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_tool_configs_declaring_a_schema_keep_graphifys_nodes",
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_a_manifest_the_json_schema_stage_owns_is_not_the_anchor",
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_edge_lands_on_the_manifest_node_in_both_stage_orders",
-            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_a_code_node_in_both_stage_orders",
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_the_repository_in_both_stage_orders",
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_without_a_manifest_node_the_edge_lands_on_a_code_node",
         ),
     ),
@@ -12544,7 +12553,7 @@ MUTATIONS = (
         "#510: the lowest id under the package directory was a graphify keyword node from a schema file, which the json-schema stage removes with its edges, so the package lost its `provided_by` edge",
         (
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_a_manifest_the_json_schema_stage_owns_is_not_the_anchor",
-            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_a_code_node_in_both_stage_orders",
+            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_the_repository_in_both_stage_orders",
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_without_a_manifest_node_the_edge_lands_on_a_code_node",
         ),
     ),
