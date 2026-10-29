@@ -71,7 +71,7 @@ def undeclared_directories(parent: Path, declared: "list[str] | None") -> list[s
     return sorted(
         entry.name
         for entry in parent.iterdir()
-        if entry.is_dir() and entry.name.casefold() not in kept
+        if entry.is_dir() and not entry.name.startswith(".") and entry.name.casefold() not in kept
     )
 
 
@@ -792,7 +792,7 @@ def main() -> int:
     # stage module loads.
     from . import config
 
-    root_dir = arguments.root.resolve() if arguments.root else config.ROOT
+    root_dir = (arguments.root or config.ROOT).resolve()
     config_path = (
         arguments.config.resolve() if arguments.config else root_dir / "config" / "repositories.txt"
     )
@@ -801,9 +801,16 @@ def main() -> int:
     )
 
     output_root.mkdir(parents=True, exist_ok=True)
+    output_root = output_root.resolve()
+    history_root = (root_dir / "knowledge" / "git-history").resolve()
 
     try:
         repositories = read_repository_config(config_path)
+        for repository in repositories:
+            # A name is a path under the history root and the clones; one that climbs
+            # out of it would write, and later be compared, somewhere else.
+            if Path(repository.name).is_absolute() or ".." in Path(repository.name).parts:
+                raise ValueError(f"Repository name {repository.name!r} climbs out of its root")
 
         for repository in repositories:
             export_repository(
@@ -817,10 +824,18 @@ def main() -> int:
             # a store with no repositories, and "everything is undeclared" is the one
             # reading that deletes all of it.
             print(f"No repositories declared in {config_path}: no history directory removed.")
-        elif not (config_path.is_relative_to(root_dir) and output_root.is_relative_to(root_dir)):
+        elif output_root != history_root:
+            # `--output` can name any directory, the store root included, and everything
+            # under one that is not declared would go: config/, knowledge/, the clones
+            # and their untracked graphs. Only the store's own history root is swept.
             print(
-                f"{config_path} and {output_root} are not both under {root_dir}, so the "
-                "declaration may belong to another store: no history directory removed."
+                f"{output_root} is not this store's history root ({history_root}): "
+                "no history directory removed."
+            )
+        elif not config_path.is_relative_to(root_dir):
+            print(
+                f"{config_path} is not under {root_dir}, so the declaration may belong to "
+                "another store: no history directory removed."
             )
         else:
             removed = remove_undeclared_history(output_root, [r.name for r in repositories])

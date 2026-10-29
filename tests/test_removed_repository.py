@@ -194,6 +194,95 @@ class ExportHistoryTest(TwoRepositoryStore):
             str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*")) if p.is_file()
         }
 
+    def tree(self, base: Path) -> dict[str, bytes]:
+        return {
+            str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*")) if p.is_file()
+        }
+
+    def export_to(self, *extra: str) -> tuple[int, str]:
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = cli.main(["--root", str(self.root), "export-history", *extra])
+        return code, out.getvalue()
+
+    def assert_nothing_outside_the_rule_is_touched(self, before: dict[str, bytes]) -> None:
+        after = self.tree(self.root)
+        for path, data in before.items():
+            self.assertIn(path, after, f"{path} was deleted")
+            self.assertEqual(after[path], data, f"{path} changed")
+
+    def test_an_output_directory_that_is_not_the_history_root_sweeps_nothing(self):
+        """Catches: `--output <store root>` (or `<root>/knowledge`) making config/,
+        knowledge/, repositories/ with its untracked graphs and .git count as
+        undeclared history directories and be deleted."""
+        _git(self.root, "init", "-q")
+        (self.root / ".git" / "marker").write_text("keep\n", encoding="utf-8")
+        for label, output in (("root", self.root), ("knowledge", self.root / "knowledge")):
+            with self.subTest(output=label):
+                self.drop_beta()
+                before = self.tree(self.root)
+                code, text = self.export_to("--output", str(output))
+                self.assertEqual(code, 0, text)
+                self.assertIn("is not this store's history root", text)
+                self.assertNotIn("removed:", text)
+                self.assert_nothing_outside_the_rule_is_touched(before)
+                for name in ("config", "knowledge", "repositories", ".git"):
+                    self.assertTrue((self.root / name).is_dir(), name)
+
+    def test_a_whitespace_only_declaration_removes_nothing(self):
+        """Catches: a declaration of blank lines parsing to nothing and reading as
+        "every repository is undeclared"."""
+        before = self.snapshot_all()
+        (self.root / "config" / "repositories.txt").write_text("  \n\t\n\n", encoding="utf-8")
+        self.run_stage("export-history")
+        self.assertEqual(self.snapshot_all(), before)
+
+    def test_a_plain_file_under_the_history_root_survives(self):
+        """Catches: the sweep removing anything but a directory."""
+        note = self.history("notes.txt")
+        note.write_text("keep\n", encoding="utf-8")
+        self.drop_beta()
+        self.run_stage("export-history")
+        self.assertEqual(note.read_text(encoding="utf-8"), "keep\n")
+        self.assertFalse(self.history("beta").exists())
+
+    def test_a_dot_directory_under_the_history_root_survives(self):
+        """Catches: the sweep removing a `.`-prefixed entry such as `.git`."""
+        hidden = self.history(".keep")
+        hidden.mkdir()
+        (hidden / "x").write_text("keep\n", encoding="utf-8")
+        self.drop_beta()
+        self.run_stage("export-history")
+        self.assertEqual((hidden / "x").read_text(encoding="utf-8"), "keep\n")
+
+    def test_a_declared_name_that_climbs_out_is_refused_and_nothing_is_touched(self):
+        """Catches: a declared `../escape` writing outside the history root, or
+        steering the sweep there."""
+        (self.root / "config" / "repositories.txt").write_text(
+            f"../escape|{self.origins['alpha']}|main\n", encoding="utf-8"
+        )
+        before = self.tree(self.root)
+        code, text = self.run_stage("export-history")
+        self.assertEqual(code, 1, text)
+        self.assertFalse((self.root / "knowledge" / "escape").exists())
+        self.assert_nothing_outside_the_rule_is_touched(before)
+
+    def test_a_symlinked_history_root_is_swept_through_its_target(self):
+        """Catches: the history root being a symlink making the sweep refuse, or
+        judge every entry outside the root and delete or keep the wrong ones."""
+        history = self.history("")
+        target = self.root.parent / "elsewhere"
+        shutil.move(str(history), str(target))
+        history.symlink_to(target, target_is_directory=True)
+        alpha_before = {k: v for k, v in self.tree(target).items() if k.startswith("alpha/")}
+        self.drop_beta()
+        code, text = self.run_stage("export-history")
+        self.assertEqual(code, 0, text)
+        self.assertFalse((target / "beta").exists())
+        self.assertEqual(
+            {k: v for k, v in self.tree(target).items() if k.startswith("alpha/")}, alpha_before
+        )
+
     def test_a_declaration_that_names_nothing_removes_nothing(self):
         """Catches: an empty or comment-only repositories.txt reading as "every
         repository is undeclared" and deleting every history directory; and a

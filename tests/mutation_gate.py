@@ -12821,8 +12821,10 @@ MUTATIONS = (
         "        pass\n",
         "export-history never pruned the dataset of a repository removed from config/repositories.txt, so every later stage read a repository the estate no longer had",
         (
+            "test_removed_repository.ExportHistoryTest.test_a_plain_file_under_the_history_root_survives",
             "test_removed_repository.ExportHistoryTest.test_a_second_run_removes_nothing_more",
             "test_removed_repository.ExportHistoryTest.test_a_symlinked_entry_is_not_followed_out_of_the_history_root",
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_history_root_is_swept_through_its_target",
             "test_removed_repository.ExportHistoryTest.test_export_history_removes_the_undeclared_directory_and_keeps_the_declared",
         ),
     ),
@@ -12864,6 +12866,17 @@ MUTATIONS = (
         "an empty or comment-only repositories.txt parsed to no repositories, so every history directory counted as undeclared and export-history deleted them all",
         (
             "test_removed_repository.ExportHistoryTest.test_a_declaration_that_names_nothing_removes_nothing",
+            "test_removed_repository.ExportHistoryTest.test_a_whitespace_only_declaration_removes_nothing",
+        ),
+    ),
+    Mutation(
+        "the sweep runs outside the history root",
+        "export_git_history.py",
+        "        elif output_root != history_root:\n",
+        "        elif False:\n",
+        "export-history --output <store root> treated config/, knowledge/ and the clones under repositories/ as undeclared history directories and deleted them, untracked graphs included",
+        (
+            "test_removed_repository.ExportHistoryTest.test_an_output_directory_that_is_not_the_history_root_sweeps_nothing",
         ),
     ),
 )
