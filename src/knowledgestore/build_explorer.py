@@ -223,6 +223,11 @@ def include_entry(node: dict, kind: str, degree: int) -> bool:
         # "dev", "aat" - three letters, exactly what the minified-symbol filter
         # exists to drop. Every environment node on a real estate would go with it.
         return True
+    if kinds.is_kind(node, kinds.REPOSITORY):
+        # A repository is a search target however few edges reach it: a store with
+        # one or two deployed services would otherwise have no entry for the very
+        # repository they deploy, while a library file beside it did.
+        return True
     if is_noise(node, kind):
         return False
     if kind in ("feature", "scenario", "ticket"):

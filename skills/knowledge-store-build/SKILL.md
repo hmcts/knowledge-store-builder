@@ -814,6 +814,13 @@ knowledgestore source-urls     # a `url` on each node: its file at the build com
 knowledgestore manifest        # the relationships are a layer: re-run it
 ```
 
+`deployments` writes a deployment's configuration into node metadata
+(`metadata.config`), so it is read through `node` or `repo_answer`, never found
+by searching labels for a key name. A `config_truncated: <n>` beside it means
+`KSB_DEPLOY_MAX_KEYS` dropped `n` keys. Each deployment's `deploys` edge ends on
+the matched repository's `<repo>::repository` node, which `packages` shares for
+its `USES_MODULE` anchor; a service no repository matched gets no edge.
+
 `json-schema` reads JSON Schema documents itself, replacing graphify's output
 for a format graphify does read, and owns every file it recognises as one. **That is an output change
 you will see:** graphify's keyword nodes for those files are removed from the

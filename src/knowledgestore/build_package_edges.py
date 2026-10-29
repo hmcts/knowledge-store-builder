@@ -26,7 +26,7 @@ import json
 import sys
 from collections.abc import Mapping
 
-from . import config, graph_files, io, relationships
+from . import config, graph_files, io, relationships, repository_node
 
 FORMAT = "packages"
 # The `_origin` the json-schema stage writes; named here rather than imported, as
@@ -191,16 +191,13 @@ def _add_module_layer(
     that lost 290 of 388 relationships, and alphabetically, so the survivors
     looked like a complete answer.
     """
-    # One pass over the representatives, not one per pair: a large graph has
-    # hundreds of thousands of them and there are hundreds of pairs.
-    reps = _representatives(graph)
-    anchors = {
-        repo: anchor
-        for repo in {key[0] for key in reps}
-        if (anchor := _code_anchor(reps, repo)) is not None
-    }
-    estate = {clone.name for clone in clones}
+    # One pass over the graph, not one per pair: a large graph has hundreds of
+    # thousands of nodes and there are hundreds of pairs. A repository is held when
+    # a file of it is in the graph; module and chart nodes name repositories the
+    # estate may not hold, so they do not count.
+    held = {repo for repo, _ in _representatives(graph)}
     existing = {n["id"] for n in graph["nodes"]}
+    estate = {clone.name for clone in clones}
     references = _module_references(clones, orgs)
 
     edges = 0
@@ -210,9 +207,10 @@ def _add_module_layer(
         if node_id not in existing:
             graph["nodes"].append(_module_node(provider, provider in estate))
             existing.add(node_id)
-        anchor = anchors.get(consumer_repo)
-        if not anchor:
+        if consumer_repo not in held:
             continue
+        # The repository itself: the edge says "this repository uses that module".
+        anchor = repository_node.ensure_repository_node(graph, consumer_repo, existing)
         if len(files) > MAX_EVIDENCE_FILES:
             capped += len(files) - MAX_EVIDENCE_FILES
         for rel in files[:MAX_EVIDENCE_FILES]:
@@ -338,6 +336,7 @@ def main() -> int:
         graph, clones, orgs
     )
 
+    repository_node.settle_repository_nodes(graph)
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:

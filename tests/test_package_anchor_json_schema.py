@@ -161,10 +161,10 @@ class ProvidedByAnchorTest(SettingsIsolated):
                     [("repo-a::pkg:@example/lib", "repo-a::m_index")],
                 )
 
-    def test_the_module_consumer_anchor_is_a_code_node_in_both_stage_orders(self):
-        """Break caught: the per-repository `USES_MODULE` anchor taken from the repository's
-        lowest id, a schema file's node, so `json-schema` removes it or the edge starts
-        from a schema node."""
+    def test_the_module_consumer_anchor_is_the_repository_in_both_stage_orders(self):
+        """Break caught: the per-repository `USES_MODULE` anchor being a node `json-schema`
+        owns, which it removes, or any file's node, which is not the repository. The edge
+        starts from the repository node whichever stage ran last."""
         for order in (("packages", "json-schema"), ("json-schema", "packages")):
             with self.subTest(order=order):
                 self.store(False)
@@ -189,7 +189,7 @@ class ProvidedByAnchorTest(SettingsIsolated):
                 uses = [e for e in result["links"] if e.get("relation") == "USES_MODULE"]
                 self.assertEqual(
                     [(e["source"], e["target"]) for e in uses],
-                    [("repo-b::app_main", "repo-a::module")],
+                    [("repo-b::repository", "repo-a::module")],
                 )
 
 

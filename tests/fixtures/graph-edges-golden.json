@@ -54,31 +54,31 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-a::.terraform/modules/cached/main.tf",
+    "svc-a::repository",
     "tf-cache::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::.terraform/modules/cached/main.tf",
+    "svc-a::repository",
     "tf-dns::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::.terraform/modules/cached/main.tf",
+    "svc-a::repository",
     "tf-network::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::.terraform/modules/cached/main.tf",
+    "svc-a::repository",
     "tf-queue::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::.terraform/modules/cached/main.tf",
+    "svc-a::repository",
     "tf-storage::module",
     "main.tf"
    ],
@@ -132,7 +132,7 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-alpha::main.tf",
+    "svc-alpha::repository",
     "example-charts::module",
     "main.tf"
    ],
@@ -183,31 +183,31 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-x::main.tf",
+    "svc-x::repository",
     "tf-cache::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::main.tf",
+    "svc-x::repository",
     "tf-dns::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::main.tf",
+    "svc-x::repository",
     "tf-network::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::main.tf",
+    "svc-x::repository",
     "tf-queue::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::main.tf",
+    "svc-x::repository",
     "tf-storage::module",
     "main.tf"
    ]
@@ -244,19 +244,19 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-x::net.tf",
+    "svc-x::repository",
     "tf-network::module",
     "net.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::net.tf",
+    "svc-x::repository",
     "tf-network::module",
     "other.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::net.tf",
+    "svc-x::repository",
     "tf-storage::module",
     "storage.tf"
    ]
@@ -278,25 +278,25 @@
   "edges": [
    [
     "USES_MODULE",
-    "consumer::.terraform/modules/x/main.tf",
+    "consumer::repository",
     "mod-bare::module",
     "c.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::.terraform/modules/x/main.tf",
+    "consumer::repository",
     "mod-https::module",
     "b.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::.terraform/modules/x/main.tf",
+    "consumer::repository",
     "mod-scp::module",
     "a.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::.terraform/modules/x/main.tf",
+    "consumer::repository",
     "mod-ssh::module",
     "d.tf"
    ]

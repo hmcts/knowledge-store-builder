@@ -283,7 +283,19 @@ def _walk(value: object, prefix: str, out: dict[str, str], max_chars: int) -> No
     out[prefix] = str(value)[:max_chars]
 
 
-def flatten(value: object, max_keys: int, max_chars: int) -> dict[str, str]:
+class Flattened(dict[str, str]):
+    """A flattened config that remembers how many keys the cap dropped.
+
+    A plain `dict` equal to the capped result in every way a consumer compares or
+    serialises, so the layout readers keep their shape; `dropped` is what lets the
+    node say its config is partial rather than leaving a reader to assume the
+    keys they cannot find were never set.
+    """
+
+    dropped: int = 0
+
+
+def flatten(value: object, max_keys: int, max_chars: int) -> Flattened:
     """Dotted keys to scalar values, capped in key count and value length.
 
     Sorted before capping so two runs on the same input keep the same keys - an
@@ -291,4 +303,6 @@ def flatten(value: object, max_keys: int, max_chars: int) -> dict[str, str]:
     """
     out: dict[str, str] = {}
     _walk(withhold_secret_locations(value), "", out, max_chars)
-    return {key: out[key] for key in sorted(out)[:max_keys]}
+    kept = Flattened((key, out[key]) for key in sorted(out)[:max_keys])
+    kept.dropped = max(0, len(out) - max_keys)
+    return kept

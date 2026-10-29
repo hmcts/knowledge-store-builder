@@ -319,9 +319,7 @@ class ComposingABaseWithItsPatches(SettingsIsolated):
         """The join runs off the service name, so a reader that never registers its
         services leaves the whole layout hanging off environments only."""
         edges = {(edge["source"], edge["target"], edge["relation"]) for edge in self.graph["links"]}
-        self.assertIn(
-            (f"{REPO}::deploy:staging:alpha", "svc-alpha::AlphaHandler", "deploys"), edges
-        )
+        self.assertIn((f"{REPO}::deploy:staging:alpha", "svc-alpha::repository", "deploys"), edges)
 
     def test_the_run_reports_what_it_read(self):
         """#88's premise is a silent stage: the report has to carry the document
