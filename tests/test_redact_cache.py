@@ -191,15 +191,17 @@ class AtomicWriteTest(StoreWithACachedTracker):
         before = self.cache_path.read_bytes()
         for failure in (KeyboardInterrupt(), GeneratorExit()):
             with self.subTest(failure=type(failure).__name__):
-                with self.assertRaises(type(failure)):
+                expected = type(failure)
+                with self.assertRaises(expected):
                     self._write_then(failure)
                 self._assert_untouched(before)
 
     def test_an_error_mid_write_leaves_the_original_file_byte_identical(self):
         self._cache({"AAA-1": {"summary": "kept"}})
         before = self.cache_path.read_bytes()
+        failure = RuntimeError("disk full")
         with self.assertRaises(RuntimeError):
-            self._write_then(RuntimeError("disk full"))
+            self._write_then(failure)
         self._assert_untouched(before)
 
 
