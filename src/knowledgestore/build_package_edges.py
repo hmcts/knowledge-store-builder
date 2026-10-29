@@ -195,7 +195,7 @@ def _add_module_layer(
     # thousands of nodes and there are hundreds of pairs. A repository is held when
     # a file of it is in the graph; module and chart nodes name repositories the
     # estate may not hold, so they do not count.
-    held = {repo for repo, _ in _representatives(graph)}
+    held = {key[0] for key in _representatives(graph)}
     existing = {n["id"] for n in graph["nodes"]}
     estate = {clone.name for clone in clones}
     references = _module_references(clones, orgs)
@@ -337,6 +337,7 @@ def main() -> int:
     )
 
     repository_node.settle_repository_nodes(graph)
+    repository_node.prune_unlinked_repository_nodes(graph)
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:

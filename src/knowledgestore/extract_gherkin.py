@@ -300,8 +300,8 @@ def stepdef_class_nodes(graph: dict, repo: str) -> dict[str, str]:
         n.get("source_file"): n["id"]
         for n in graph["nodes"]
         if n.get("repo") == repo
-        and n.get("source_file", "").endswith(".java")
-        and n["label"] == Path(n.get("source_file", "")).stem
+        and (n.get("source_file") or "").endswith(".java")
+        and n["label"] == Path(n.get("source_file") or "").stem
     }
 
 

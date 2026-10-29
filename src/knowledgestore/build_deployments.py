@@ -923,6 +923,7 @@ def main() -> int:
         _add_repo_layer(graph, deploy_repo, repos, tally, communities)
 
     repository_node.settle_repository_nodes(graph)
+    repository_node.prune_unlinked_repository_nodes(graph)
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:

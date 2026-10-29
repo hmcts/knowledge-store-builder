@@ -16,8 +16,13 @@ graph byte-identical - with one more step, `settle_repository_nodes`: a node
 created mid-run sits wherever the stage happened to need it first, and on the
 next run, already present, it would sit somewhere else. Each stage ends by moving
 every repository node to the tail of the node list, sorted by id, so the position
-does not depend on which run created the node. A fresh merge rebuilds the graph without it, and with it
-the edges that used it, so nothing outlives the repository it described.
+does not depend on which run created the node.
+
+Neither stage strips the node, so a stage that stops linking a repository would
+leave it behind at degree 0. Each stage therefore also ends with
+`prune_unlinked_repository_nodes`: what survives is what some stage's edges still
+use. A fresh merge rebuilds the graph without the node, and with it the edges that
+used it, so nothing outlives the repository it described.
 """
 
 from __future__ import annotations
@@ -73,3 +78,16 @@ def settle_repository_nodes(graph: dict) -> None:
     ours = sorted((n for n in nodes if n.get("_origin") == ORIGIN), key=lambda n: n["id"])
     if ours:
         graph["nodes"] = [n for n in nodes if n.get("_origin") != ORIGIN] + ours
+
+
+def prune_unlinked_repository_nodes(graph: dict) -> None:
+    """Drop repository nodes no edge reaches.
+
+    Neither stage strips the node, so when a stage re-runs and no longer links a
+    repository (its deployment repository dropped, its modules removed) the node
+    would stay at degree 0 and be listed by the explorer as a repository nothing
+    relates to. Called after `settle_repository_nodes`, so what is left is what
+    some stage's edges still use.
+    """
+    linked = {e["source"] for e in graph["links"]} | {e["target"] for e in graph["links"]}
+    graph["nodes"] = [n for n in graph["nodes"] if n.get("_origin") != ORIGIN or n["id"] in linked]

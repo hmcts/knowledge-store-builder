@@ -825,6 +825,36 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "deployments: a repository node nothing links is kept",
+        "build_deployments.py",
+        "    repository_node.prune_unlinked_repository_nodes(graph)\n",
+        "",
+        "#536: neither stage strips the repository node, so one that a rerun no longer links stays at degree 0 and the explorer lists a repository nothing relates to",
+        (
+            "test_repository_node.NoOrphanedRepositoryNode.test_deployments_alone_leaves_none_once_nothing_matches",
+        ),
+    ),
+    Mutation(
+        "packages: a repository node nothing links is kept",
+        "build_package_edges.py",
+        "    repository_node.prune_unlinked_repository_nodes(graph)\n",
+        "",
+        "#536: neither stage strips the repository node, so one that a rerun no longer links stays at degree 0 and the explorer lists a repository nothing relates to",
+        (
+            "test_repository_node.NoOrphanedRepositoryNode.test_a_repository_node_lives_only_while_some_stage_still_links_it",
+        ),
+    ),
+    Mutation(
+        "gherkin: a node with no source_file crashes the step-definition scan",
+        "extract_gherkin.py",
+        '        and (n.get("source_file") or "").endswith(".java")\n',
+        '        and n.get("source_file", "").endswith(".java")\n',
+        "#536: a repository node has `repo` and no `source_file`, so the scan called `.endswith` on None and `gherkin` crashed on any store that had run `deployments` or `packages`",
+        (
+            "test_every_stage_reads_a_repository_node.EveryStageReadsARepositoryNode.test_no_stage_crashes_on_a_repository_node_and_none_behaves_differently",
+        ),
+    ),
+    Mutation(
         "packages overwrites the committed graph from a stale one",
         "build_package_edges.py",
         "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
@@ -12553,7 +12583,6 @@ MUTATIONS = (
         "#510: the lowest id under the package directory was a graphify keyword node from a schema file, which the json-schema stage removes with its edges, so the package lost its `provided_by` edge",
         (
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_a_manifest_the_json_schema_stage_owns_is_not_the_anchor",
-            "test_package_anchor_json_schema.ProvidedByAnchorTest.test_the_module_consumer_anchor_is_the_repository_in_both_stage_orders",
             "test_package_anchor_json_schema.ProvidedByAnchorTest.test_without_a_manifest_node_the_edge_lands_on_a_code_node",
         ),
     ),

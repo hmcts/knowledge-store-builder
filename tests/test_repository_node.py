@@ -182,6 +182,54 @@ class OneRepositoryNode(SettingsIsolated, unittest.TestCase):
 
 
 @needs_yaml
+class NoOrphanedRepositoryNode(SettingsIsolated, unittest.TestCase):
+    def test_a_repository_node_lives_only_while_some_stage_still_links_it(self):
+        """Break caught: a stage leaving the repository node behind once it no longer
+        links the repository, so the explorer lists a repository with no relations and
+        the graph differs from a fresh build of the same inputs."""
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw), services=("alpha-agent",))
+            _run(packages)
+            _run(deployments)
+            self.assertEqual(len(_edges(_graph(), "deploys")), 1)
+            # The deployment repository now declares a service nothing matches: the
+            # deploys edges go, the USES_MODULE edge from `packages` remains.
+            group = Path(raw) / "repositories" / "estate-deploy" / "ansible" / "group_vars" / "prd"
+            (group / "alpha-agent_values.yaml.j2").unlink()
+            (group / "omega-agent_values.yaml.j2").write_text(
+                "replicas: 2\nimage:\n  name: omega-agent\n", encoding="utf-8"
+            )
+            _run(deployments)
+            kept = _graph()
+            self.assertEqual(_edges(kept, "deploys"), [])
+            self.assertEqual([n["id"] for n in _repository_nodes(kept)], ["alpha::repository"])
+            # Nothing links it any more.
+            (Path(raw) / "repositories" / "alpha" / "main.tf").unlink()
+            _run(packages)
+            rerun = config.GRAPH_PATH.read_bytes()
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw), services=("omega-agent",))
+            (Path(raw) / "repositories" / "alpha" / "main.tf").unlink()
+            _run(packages)
+            _run(deployments)
+            fresh = config.GRAPH_PATH.read_bytes()
+        self.assertEqual(_repository_nodes(json.loads(rerun)), [])
+        self.assertEqual(rerun, fresh)
+
+    def test_deployments_alone_leaves_none_once_nothing_matches(self):
+        """Break caught: `deployments` leaving the node it created after a rerun in
+        which no service matches a repository any more."""
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw), services=("alpha-agent",))
+            _run(deployments)
+            self.assertEqual(len(_repository_nodes(_graph())), 1)
+            group = Path(raw) / "repositories" / "estate-deploy" / "ansible" / "group_vars" / "prd"
+            (group / "alpha-agent_values.yaml.j2").rename(group / "omega-agent_values.yaml.j2")
+            _run(deployments)
+            self.assertEqual(_repository_nodes(_graph()), [])
+
+
+@needs_yaml
 class ConfigTruncation(SettingsIsolated, unittest.TestCase):
     def test_a_capped_config_says_how_many_keys_were_dropped(self):
         """Break caught: `KSB_DEPLOY_MAX_KEYS` truncating with no marker, so a key a
