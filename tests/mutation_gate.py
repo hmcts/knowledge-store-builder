@@ -12856,6 +12856,16 @@ MUTATIONS = (
             "test_removed_repository.DriftTest.test_a_repository_only_in_after_lists_its_tracked_files_under_new",
         ),
     ),
+    Mutation(
+        "an empty declaration deletes everything",
+        "export_git_history.py",
+        "        if not repositories:\n",
+        "        if False:\n",
+        "an empty or comment-only repositories.txt parsed to no repositories, so every history directory counted as undeclared and export-history deleted them all",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_declaration_that_names_nothing_removes_nothing",
+        ),
+    ),
 )
 
 

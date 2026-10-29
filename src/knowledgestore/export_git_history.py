@@ -63,8 +63,15 @@ def undeclared_directories(parent: Path, declared: "list[str] | None") -> list[s
     """
     if declared is None or not parent.is_dir():
         return []
+    # What a stage writes for `org/repo` is `<parent>/org/repo`, so the directory that
+    # exists is `org`: compare on the first path component. Case-folded, because on a
+    # case-insensitive filesystem `repo` and a declared `Repo` are one directory, and
+    # judging it undeclared would delete what was just written.
+    kept = {name.split("/")[0].casefold() for name in declared}
     return sorted(
-        entry.name for entry in parent.iterdir() if entry.is_dir() and entry.name not in declared
+        entry.name
+        for entry in parent.iterdir()
+        if entry.is_dir() and entry.name.casefold() not in kept
     )
 
 
@@ -804,7 +811,19 @@ def main() -> int:
                 output_root,
                 repository,
             )
-        removed = remove_undeclared_history(output_root, [r.name for r in repositories])
+        removed = []
+        if not repositories:
+            # An empty or comment-only declaration is a broken file far more often than
+            # a store with no repositories, and "everything is undeclared" is the one
+            # reading that deletes all of it.
+            print(f"No repositories declared in {config_path}: no history directory removed.")
+        elif not (config_path.is_relative_to(root_dir) and output_root.is_relative_to(root_dir)):
+            print(
+                f"{config_path} and {output_root} are not both under {root_dir}, so the "
+                "declaration may belong to another store: no history directory removed."
+            )
+        else:
+            removed = remove_undeclared_history(output_root, [r.name for r in repositories])
         if removed:
             print(
                 f"{len(removed):,} history directory(ies) for undeclared repositories removed: "

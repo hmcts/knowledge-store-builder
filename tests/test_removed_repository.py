@@ -13,7 +13,10 @@ import contextlib
 import gzip
 import io as _io
 import json
+import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,8 +24,9 @@ from pathlib import Path
 from settings_isolation import SettingsIsolated  # noqa: E402
 from test_drift import Estate, _commit  # noqa: E402
 
-from knowledgestore import cli, config, drift
+from knowledgestore import cli, config, drift, export_git_history
 
+SOURCE = Path(__file__).resolve().parent.parent / "src"
 GRAPH_BYTES = b'{"nodes": [], "note": "untracked per-repository graph"}\n'
 
 
@@ -46,21 +50,43 @@ def _origin(root: Path, name: str, subject: str) -> Path:
 
 
 class TwoRepositoryStore(SettingsIsolated):
-    """alpha and beta, synced, exported and indexed; `drop_beta` then undeclares beta."""
+    """alpha and beta, synced, exported and indexed; `drop_beta` then undeclares beta.
+
+    The store is built once per class, through the real stages in child processes, and
+    copied for each test: building real git origins and running three stages per test
+    made this module cost minutes, and every test needs only its own copy of the result.
+    """
+
+    template: Path
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template = Path(tempfile.mkdtemp()).resolve()
+        cls.addClassCleanup(shutil.rmtree, cls.template, True)
+        (cls.template / "config").mkdir()
+        cls.origins = {
+            "alpha": _origin(cls.template, "alpha", "DEMO-1: tidy alpha"),
+            "beta": _origin(cls.template, "beta", "DEMO-2: retire beta"),
+        }
+        (cls.template / "config" / "repositories.txt").write_text(
+            "".join(f"{name}|{origin}|main\n" for name, origin in cls.origins.items()),
+            encoding="utf-8",
+        )
+        env = {**os.environ, "PYTHONPATH": str(SOURCE)}
+        for stage in ("sync", "export-history", "intent"):
+            done = subprocess.run(
+                [sys.executable, "-B", "-m", "knowledgestore", "--root", str(cls.template), stage],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            assert done.returncode == 0, (stage, done.stdout, done.stderr)
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name).resolve()
-        (self.root / "config").mkdir()
-        self.origins = {
-            "alpha": _origin(self.root, "alpha", "DEMO-1: tidy alpha"),
-            "beta": _origin(self.root, "beta", "DEMO-2: retire beta"),
-        }
-        self.declare("alpha", "beta")
-        for stage in ("sync", "export-history", "intent"):
-            code, _ = self.run_stage(stage)
-            self.assertEqual(code, 0, stage)
+        self.root = Path(tmp.name).resolve() / "store"
+        shutil.copytree(self.template, self.root, symlinks=True)
         # Work a clone holds that nothing else does (CLAUDE.md 7).
         graph = self.root / "repositories" / "beta" / "graphify-out" / "graph.json"
         graph.parent.mkdir()
@@ -161,6 +187,79 @@ class ExportHistoryTest(TwoRepositoryStore):
             "gone-0, gone-1, gone-2, gone-3, gone-4 and 2 more",
             output,
         )
+
+    def snapshot_all(self) -> dict[str, bytes]:
+        base = self.root / "knowledge" / "git-history"
+        return {
+            str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*")) if p.is_file()
+        }
+
+    def test_a_declaration_that_names_nothing_removes_nothing(self):
+        """Catches: an empty or comment-only repositories.txt reading as "every
+        repository is undeclared" and deleting every history directory; and a
+        missing or unparseable one doing the same before it was read."""
+        before = self.snapshot_all()
+        self.assertTrue(before)
+        declaration = self.root / "config" / "repositories.txt"
+        cases = {
+            "empty": "",
+            "comment-only": "# discover found nothing\n\n",
+            "unparseable": "alpha|only-two-fields\n",
+            "missing": None,
+        }
+        for label, text in cases.items():
+            with self.subTest(declaration=label):
+                if text is None:
+                    declaration.unlink()
+                else:
+                    declaration.write_text(text, encoding="utf-8")
+                _, output = self.run_stage("export-history")
+                self.assertNotIn("removed:", output)
+                self.assertEqual(self.snapshot_all(), before)
+        self.declare("alpha", "beta")
+        declaration.write_text("# nothing\n", encoding="utf-8")
+        _, output = self.run_stage("export-history")
+        self.assertIn("no history directory removed", output)
+
+    def test_a_declaration_from_outside_the_store_removes_nothing(self):
+        """Catches: --config naming another store's declaration, which lists none of
+        this store's repositories, deleting this store's history."""
+        before = self.snapshot_all()
+        elsewhere = self.root.parent / "other-store" / "repositories.txt"
+        elsewhere.parent.mkdir()
+        elsewhere.write_text(f"alpha|{self.origins['alpha']}|main\n", encoding="utf-8")
+        out = _io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            cli.main(["--root", str(self.root), "export-history", "--config", str(elsewhere)])
+        self.assertIn("may belong to another store", out.getvalue())
+        self.assertEqual(self.snapshot_all(), before)
+
+    def test_an_org_qualified_name_is_not_removed_straight_after_it_is_written(self):
+        """Catches: a declared `org/alpha`, whose dataset is written under
+        history/org/alpha, being judged undeclared because `org` is not a name."""
+        clone = self.root / "repositories" / "org" / "alpha"
+        shutil.copytree(self.root / "repositories" / "alpha", clone)
+        declaration = self.root / "config" / "repositories.txt"
+        declaration.write_text(
+            f"org/alpha|{self.origins['alpha']}|main\nbeta|{self.origins['beta']}|main\n",
+            encoding="utf-8",
+        )
+        code, output = self.run_stage("export-history")
+        self.assertEqual(code, 0, output)
+        written = self.root / "knowledge" / "git-history" / "org" / "alpha" / "commits.ndjson"
+        self.assertTrue(written.is_file())
+        # Only the old top-level `alpha`, which is no longer declared, goes; `org` stays.
+        self.assertIn("removed: alpha\n", output)
+        self.assertTrue(written.parent.parent.is_dir())
+
+    def test_a_directory_differing_only_in_case_from_a_declared_name_is_kept(self):
+        """Catches: a declared `Alpha` with an existing `alpha` directory being judged
+        undeclared. On a case-insensitive filesystem they are one directory and the
+        just-exported data would be deleted; the rule is asserted here by name so it
+        holds on a case-sensitive one too."""
+        base = self.root / "knowledge" / "git-history"
+        self.assertEqual(export_git_history.undeclared_directories(base, ["Alpha"]), ["beta"])
+        self.assertEqual(export_git_history.undeclared_directories(base, ["ALPHA", "Beta"]), [])
 
 
 class IntentTest(TwoRepositoryStore):
