@@ -27,10 +27,10 @@ answers by reading files.
 | ③ Fixture store | Each ① release | The ① tag | The library's own suite, which tests the stages and ⑥ together |
 | ④ Store data | The store build pushes to its default branch | Commit, with the format declared in `store-manifest.json` | ⑥, through the asker's clone |
 | ⑤ Store plugin | The store repository's marketplace entry | Its default branch | Askers |
-| ⑥ MCP server | The same release as ①: it is `knowledgestore serve`, installed with the `[server]` extra | The ① tag, `v0.22.0` or later | ⑤'s `mcpServers` entry, run with `uvx` at that tag |
+| ⑥ MCP server | The same release as ①: it is `knowledgestore serve`, installed with the `[server]` extra | The ① release, `0.22.0` or later | ⑤'s `mcpServers` entry, run with `uvx` at that version |
 
 ## Decided
 
-- **Delivery of ⑥.** Running `uvx --from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0" knowledgestore serve --store-id <id>` keeps the asker free of a Python install step beyond `uv` itself. It needs `uv` on the host, and Python 3.13, which `uv` downloads unless managed Python downloads are disabled. [Use it now](mcp-server.md#use-it-now) gives the form to copy.
+- **Delivery of ⑥.** Running `uvx --index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ --from "hmcts-knowledge-store-builder[server]==0.22.0" knowledgestore serve --store-id <id>` keeps the asker free of a Python install step beyond `uv` itself. It needs `uv` on the host, and Python 3.13, which `uv` downloads unless managed Python downloads are disabled. [Use it now](mcp-server.md#use-it-now) gives the form to copy.
 - **One tag for the library and the server.** The server's tests run against the library's own fixture and frozen stores in the same repository, so a library change that breaks what the server reads fails the library's own suite. A store pins the server by pinning that tag in its plugin, and `knowledgestore check-plugin` holds the pin to an exact tag.
 - **The `[server]` extra, not a separate package.** The MCP SDK is a dependency only `serve` needs, so builders and CI that never run the server do not install it.

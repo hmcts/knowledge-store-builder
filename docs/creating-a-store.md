@@ -1076,7 +1076,8 @@ plugin's own keys:
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/",
+        "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
         "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }
@@ -1095,7 +1096,8 @@ configuration for anyone working in the repository, and `check-plugin` refuses i
     "knowledge-store": {
       "command": "uvx",
       "args": [
-        "--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+        "--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/",
+        "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
         "knowledgestore", "serve", "--store-id", "<id>"
       ]
     }
@@ -1124,7 +1126,11 @@ knowledgestore check-plugin [--plugin <store-plugin>]
 `--plugin` defaults to the store root. The stage reads `.mcp.json`, or
 `mcpServers` in `.claude-plugin/plugin.json`, and exits 1 naming each reason when
 the `knowledge-store` server is missing, the command is not `uvx`, `--from` is
-not an exact tag of this library with the `[server]` extra, the arguments do not
+not an exact `==` version of this library with the `[server]` extra (or, the
+accepted alternative, an exact git tag), the feed form has no `--index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/`
+(the name is not on PyPI, so it would resolve there, where anyone can register it),
+names another index, or sets `--index-strategy unsafe-best-match` or
+`unsafe-first-match`, the arguments do not
 then run `knowledgestore serve`, `--store-id` is absent or differs from the
 manifest's `store.id`, or the plugin root is the repository root and a root
 `.mcp.json` exists. A pinned tag older than the one this guide documents is a
@@ -1156,8 +1162,8 @@ mistaken for one that was checked.
 - **The server finds the clone** through `~/.config/knowledge-store/locations`,
   which the skill writes, or through the `KNOWLEDGE_STORE_PATH` environment
   variable.
-- **To upgrade the server**, change the tag in `.mcp.json` and publish the
-  plugin. The tag is the only version a store pins, and it is the library's: the
+- **To upgrade the server**, change the version in `.mcp.json` and publish the
+  plugin. The version is the only one a store pins, and it is the library's: the
   server is released with the library, from `v0.22.0`. A store still pinned to the
   archived `knowledge-store-mcp` repository changes the `--from` value and the
   entry point together, to the form above.

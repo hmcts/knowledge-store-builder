@@ -40,7 +40,7 @@ To add the server to Claude Code, run this in a terminal:
 mkdir -p ~/.config/knowledge-store
 grep -qxF "$(pwd)" ~/.config/knowledge-store/locations 2>/dev/null \
   || printf '%s\n' "$(pwd)" >> ~/.config/knowledge-store/locations
-claude mcp add knowledge-store -- uvx --from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0" knowledgestore serve --store-id <id>
+claude mcp add knowledge-store -- uvx --index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ --from "hmcts-knowledge-store-builder[server]==0.22.0" knowledgestore serve --store-id <id>
 ```
 
 The first three lines register your clone's absolute path, which is how the
@@ -48,9 +48,21 @@ server finds it. `<id>` is `store.id` in the clone's
 `knowledge/store-manifest.json`. If you cloned with the `knowledge-store` skill, it
 has already registered the clone.
 
-The tag, `v0.22.0` here, is a library release from
-[the releases page](https://github.com/hmcts/knowledge-store-builder/releases).
-Use `v0.22.0` or later: earlier tags do not contain `knowledgestore serve`.
+The version, `0.22.0` here, is a library release published to the hmcts-lib
+package feed; [the releases page](https://github.com/hmcts/knowledge-store-builder/releases)
+lists them. Use `0.22.0` or later: earlier releases do not contain
+`knowledgestore serve`. Pin it exactly with `==`: a range or a bare name is
+refused by `knowledgestore check-plugin`.
+
+**Keep `--index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/`.**
+`hmcts-knowledge-store-builder` is not on PyPI, so without that option `uvx` would
+look the name up there, where anyone can register it and have your askers run their
+code. `check-plugin` refuses a launch with no `--index` naming the feed, any other
+index URL, and `--index-strategy unsafe-best-match` or `unsafe-first-match`.
+
+Launching from the git tag instead, with
+`--from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0"`
+and no `--index`, is still accepted; the feed form is the documented one.
 
 The quotes matter. `uvx --from` takes a requirement, and the `[server]` extra in
 it is what installs the MCP SDK; without the extra the server stops, saying it needs
@@ -74,9 +86,9 @@ answer in Copilot and an answer in Claude Code come from the same thirteen
 read-only tools.
 
 Every block below runs the same command as [Use it now](#use-it-now): `uvx` at a
-library release tag (`v0.22.0` or later), running `knowledgestore serve` with
-`--store-id <id>`. Pin a tag; do not install from the default branch, because a
-store should run a released server.
+published library release (`0.22.0` or later) from the hmcts-lib feed, running
+`knowledgestore serve` with `--store-id <id>`. Pin an exact version; do not install
+from the default branch, because a store should run a released server.
 
 `--store-id` finds your clone through `~/.config/knowledge-store/locations`, which
 holds one absolute clone path per line. The `knowledge-store` skill writes that
@@ -91,7 +103,7 @@ The store's plugin declares the server, in `.mcp.json` at the plugin root:
   "mcpServers": {
     "knowledge-store": {
       "command": "uvx",
-      "args": ["--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+      "args": ["--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/", "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
                "knowledgestore", "serve", "--store-id", "<id>"]
     }
   }
@@ -118,7 +130,7 @@ uses a top-level `servers` key and an explicit `type`:
     "knowledge-store": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+      "args": ["--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/", "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
                "knowledgestore", "serve", "--store-id", "<id>"]
     }
   }
@@ -134,7 +146,7 @@ default.
 Add the server to your user configuration, `~/.copilot/mcp-config.json`:
 
 ```bash
-copilot mcp add knowledge-store -- uvx --from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0" knowledgestore serve --store-id <id>
+copilot mcp add knowledge-store -- uvx --index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ --from "hmcts-knowledge-store-builder[server]==0.22.0" knowledgestore serve --store-id <id>
 ```
 
 To share it with everyone working in a repository, commit `.github/mcp.json`
@@ -147,7 +159,7 @@ configuration only once you have trusted the folder:
     "knowledge-store": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+      "args": ["--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/", "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
                "knowledgestore", "serve", "--store-id", "<id>"],
       "tools": ["*"]
     }
@@ -196,7 +208,7 @@ agent works in:
            uses: astral-sh/setup-uv@<setup-uv-tag>
          # Builds the server into uv's cache now, so a failure shows in this step's log.
          - name: Fetch the server
-           run: uvx --from "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0" knowledgestore serve --version
+           run: uvx --index https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/ --from "hmcts-knowledge-store-builder[server]==0.22.0" knowledgestore serve --version
    ```
 
 3. **The MCP configuration**, in the repository's settings (Settings → Copilot →
@@ -209,7 +221,7 @@ agent works in:
        "knowledge-store": {
          "type": "stdio",
          "command": "uvx",
-         "args": ["--from", "hmcts-knowledge-store-builder[server] @ git+https://github.com/hmcts/knowledge-store-builder@v0.22.0",
+         "args": ["--index", "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/pypi/simple/", "--from", "hmcts-knowledge-store-builder[server]==0.22.0",
                   "knowledgestore", "serve"],
          "env": { "KNOWLEDGE_STORE_PATH": "/home/runner/knowledge-store" },
          "tools": ["*"]
