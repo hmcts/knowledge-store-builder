@@ -1546,14 +1546,19 @@ unrelated material came with it.
 
 ### Removing repositories from an estate
 
-Nothing in the pipeline prunes what you remove. After editing the filters and
-re-running `discover`, delete `repositories/<repo>` and
-`knowledge/git-history/<repo>` by hand: `merge-graphs` takes a shell glob of
-per-repository graphs and `intent` globs `*/commits.ndjson`, so both stages read
-the filesystem rather than the configuration and a leftover directory silently
-keeps a removed repository in every answer. Check for orphans that match no
-configured repository at all while you are there. Then treat it as a normal
-re-cluster, and expect `remap` to report the summaries whose members are gone —
+A repository that leaves `config/repositories.txt` is reconciled by some stages
+and not others. After editing the filters and re-running `discover`: `sync` names
+each clone no longer declared (`N clone(s) not declared: ...`) and never deletes
+one, because a clone can hold untracked per-repository graphs, so delete
+`repositories/<repo>` by hand (`merge-graphs` takes a shell glob of per-repository
+graphs and would keep it in the merged graph). `export-history` deletes
+`knowledge/git-history/<repo>` for every undeclared repository and reports it, and
+`intent` skips an undeclared history directory even when `export-history` was not
+run first, so a removed repository's tickets leave the index and the estate the
+server describes. `drift` lists a repository present only in `--before` under
+`deleted`, with all its planned files, and one present only in `--after` under
+`new`. Then treat it as a normal
+re-cluster, and expect `remap` to report the summaries whose members are gone -
 that is a correct loss. Full procedure in
 [docs/refreshing-a-store.md](../../docs/refreshing-a-store.md#remove-repositories).
 
