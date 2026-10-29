@@ -50,7 +50,7 @@ def _origin(root: Path, name: str, subject: str) -> Path:
 
 
 class TwoRepositoryStore(SettingsIsolated):
-    """alpha and beta, synced, exported and indexed; `drop_beta` then undeclares beta.
+    """alpha and beta, synced, exported and indexed; `_drop_beta` then undeclares beta.
 
     The store is built once per class, through the real stages in child processes, and
     copied for each test: building real git origins and running three stages per test
@@ -103,11 +103,11 @@ class TwoRepositoryStore(SettingsIsolated):
             code = cli.main(["--root", str(self.root), stage])
         return code, out.getvalue()
 
-    def intent_layer(self) -> dict:
+    def _intent_layer(self) -> dict:
         with gzip.open(self.root / "knowledge" / "intent" / "file-tickets.json.gz", "rt") as f:
             return json.load(f)
 
-    def drop_beta(self) -> None:
+    def _drop_beta(self) -> None:
         self.declare("alpha")
 
 
@@ -115,7 +115,7 @@ class SyncTest(TwoRepositoryStore):
     def test_sync_names_an_undeclared_clone_and_leaves_it_untouched(self):
         """Catches: sync deleting the clone, taking its untracked graph with it
         (CLAUDE.md 7), or saying nothing so the clone lingers unseen."""
-        self.drop_beta()
+        self._drop_beta()
         code, output = self.run_stage("sync")
         self.assertEqual(code, 0)
         self.assertIn("1 clone(s) not declared: beta", output)
@@ -145,7 +145,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         indexed), or the removal reaching a declared repository's dataset."""
         before = self.snapshot("alpha")
         self.assertTrue(before)
-        self.drop_beta()
+        self._drop_beta()
         code, output = self.run_stage("export-history")
         self.assertEqual(code, 0)
         self.assertIn("1 history directory(ies) for undeclared repositories removed: beta", output)
@@ -159,7 +159,7 @@ class ExportHistoryTest(TwoRepositoryStore):
 
     def test_a_second_run_removes_nothing_more(self):
         """Catches: the report firing again for a directory already gone."""
-        self.drop_beta()
+        self._drop_beta()
         self.run_stage("export-history")
         _, output = self.run_stage("export-history")
         self.assertNotIn("removed", output)
@@ -171,7 +171,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         outside.mkdir()
         (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
         (self.history("escape")).symlink_to(outside, target_is_directory=True)
-        self.drop_beta()
+        self._drop_beta()
         code, _ = self.run_stage("export-history")
         self.assertEqual(code, 0)
         self.assertEqual((outside / "keep.txt").read_text(encoding="utf-8"), "keep\n")
@@ -219,7 +219,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         (self.root / ".git" / "marker").write_text("keep\n", encoding="utf-8")
         for label, output in (("root", self.root), ("knowledge", self.root / "knowledge")):
             with self.subTest(output=label):
-                self.drop_beta()
+                self._drop_beta()
                 before = self.tree(self.root)
                 code, text = self.export_to("--output", str(output))
                 self.assertEqual(code, 0, text)
@@ -241,7 +241,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         """Catches: the sweep removing anything but a directory."""
         note = self.history("notes.txt")
         note.write_text("keep\n", encoding="utf-8")
-        self.drop_beta()
+        self._drop_beta()
         self.run_stage("export-history")
         self.assertEqual(note.read_text(encoding="utf-8"), "keep\n")
         self.assertFalse(self.history("beta").exists())
@@ -251,7 +251,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         hidden = self.history(".keep")
         hidden.mkdir()
         (hidden / "x").write_text("keep\n", encoding="utf-8")
-        self.drop_beta()
+        self._drop_beta()
         self.run_stage("export-history")
         self.assertEqual((hidden / "x").read_text(encoding="utf-8"), "keep\n")
 
@@ -275,7 +275,7 @@ class ExportHistoryTest(TwoRepositoryStore):
         shutil.move(str(history), str(target))
         history.symlink_to(target, target_is_directory=True)
         alpha_before = {k: v for k, v in self.tree(target).items() if k.startswith("alpha/")}
-        self.drop_beta()
+        self._drop_beta()
         code, text = self.run_stage("export-history")
         self.assertEqual(code, 0, text)
         self.assertFalse((target / "beta").exists())
@@ -355,17 +355,17 @@ class IntentTest(TwoRepositoryStore):
     def test_before_the_drop_both_repositories_are_indexed(self):
         """Control: the instrument sees beta while it is declared, so its absence
         below is the reconciliation and not a blind read."""
-        self.assertEqual(sorted(self.intent_layer()), ["alpha", "beta"])
+        self.assertEqual(sorted(self._intent_layer()), ["alpha", "beta"])
 
     def test_intent_excludes_an_undeclared_repository_from_the_index_and_tickets(self):
         """Catches: intent indexing every knowledge/git-history/<repo> directory, so
         a dropped repository's tickets stay in file-tickets and in the estate."""
-        self.drop_beta()
+        self._drop_beta()
         code, output = self.run_stage("intent")
         self.assertEqual(code, 0)
         self.assertIn("1 history directory(ies) not declared, skipped: beta", output)
         self.assertIn("across 1 repos", output)
-        layer = self.intent_layer()
+        layer = self._intent_layer()
         self.assertEqual(sorted(layer), ["alpha"])
         self.assertNotIn("DEMO-2", json.dumps(layer))
         with gzip.open(
@@ -380,7 +380,7 @@ class IntentTest(TwoRepositoryStore):
         (self.root / "config" / "repositories.txt").unlink()
         code, output = self.run_stage("intent")
         self.assertEqual(code, 0, output)
-        self.assertEqual(sorted(self.intent_layer()), ["alpha", "beta"])
+        self.assertEqual(sorted(self._intent_layer()), ["alpha", "beta"])
 
     def test_the_undeclared_names_are_capped(self):
         """Catches: a store that dropped hundreds of repositories printing them all."""
@@ -442,7 +442,7 @@ class ServerTest(TwoRepositoryStore):
         server reports an archived repository as a member of the estate."""
         from knowledgestore.server import tools_graph
 
-        self.drop_beta()
+        self._drop_beta()
         self.run_stage("intent")
         found = tools_graph.find_repo(self._session(), "beta")
         self.assertNotEqual(found["answer"], "in the estate")
