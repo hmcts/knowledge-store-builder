@@ -145,24 +145,44 @@ def mined_values(records: dict) -> Iterator[tuple[str, str, str]]:
                 yield ticket, field, str(value)
 
 
+def _record_texts(record: dict) -> Iterator[tuple[str, str]]:
+    """Every (field, value) of narrative text in one cached tracker record, in
+    field order: the plain strings first, then each comment thread."""
+    for field in TRACKER_TEXT_FIELDS:
+        value = record.get(field)
+        if isinstance(value, str):
+            yield field, value
+    for field in TRACKER_LIST_FIELDS:
+        values = record.get(field)
+        if isinstance(values, list):
+            for value in values:
+                if isinstance(value, str):
+                    yield field, value
+
+
 def tracker_values(records: dict) -> Iterator[tuple[str, str, str]]:
     """Every (ticket, field, value) of narrative text in a ticket-tracker cache,
     ticket-ordered. Tolerant of an outcome that is not a fetched record: the
     cache also holds `denied` and `absent` entries, and an older file may hold
     fields this version does not write."""
     for ticket, record in sorted(records.items()):
-        if not isinstance(record, dict):
-            continue
-        for field in TRACKER_TEXT_FIELDS:
-            value = record.get(field)
-            if isinstance(value, str):
+        if isinstance(record, dict):
+            for field, value in _record_texts(record):
                 yield ticket, field, value
-        for field in TRACKER_LIST_FIELDS:
-            values = record.get(field)
-            if isinstance(values, list):
-                for value in values:
-                    if isinstance(value, str):
-                        yield ticket, field, value
+
+
+def _redact_record(record: dict, counts: Counter[str]) -> None:
+    """Redact one cached tracker record in place; a field that is not text, or
+    a thread entry that is not a string, is left as it was."""
+    for field in TRACKER_TEXT_FIELDS:
+        if isinstance(record.get(field), str):
+            record[field] = redact(record[field], counts)
+    for field in TRACKER_LIST_FIELDS:
+        if isinstance(record.get(field), list):
+            record[field] = [
+                redact(value, counts) if isinstance(value, str) else value
+                for value in record[field]
+            ]
 
 
 def redact_tracker(records: dict, counts: Counter[str]) -> int:
@@ -176,19 +196,10 @@ def redact_tracker(records: dict, counts: Counter[str]) -> int:
     """
     touched = 0
     for record in records.values():
-        if not isinstance(record, dict):
-            continue
-        before = sum(counts.values())
-        for field in TRACKER_TEXT_FIELDS:
-            if isinstance(record.get(field), str):
-                record[field] = redact(record[field], counts)
-        for field in TRACKER_LIST_FIELDS:
-            if isinstance(record.get(field), list):
-                record[field] = [
-                    redact(value, counts) if isinstance(value, str) else value
-                    for value in record[field]
-                ]
-        touched += sum(counts.values()) > before
+        if isinstance(record, dict):
+            before = sum(counts.values())
+            _redact_record(record, counts)
+            touched += sum(counts.values()) > before
     return touched
 
 

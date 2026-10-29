@@ -45,13 +45,13 @@ REBUILD = (
 )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args(argv)
     cache = io.read_gzip_json_dict(config.TICKET_TRACKER_PATH)
     if not cache:
         print(f"No tracker cache at {config.TICKET_TRACKER_PATH} - nothing to redact")
-        return 0
+        return
     counts: Counter[str] = Counter()
     touched = sensitive.redact_tracker(cache, counts)
     if touched:
@@ -68,8 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             + "Then `knowledgestore summaries verify`: a summary or brief written from the old "
             "text must be regenerated."
         )
-    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

@@ -327,6 +327,7 @@ def gzip_text(path: Path, compresslevel: int = 9):
     checked_write_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    completed = False
     try:
         with (
             open(staging, "wb") as raw,  # NOSONAR(S2083, S8707) - validated above
@@ -343,9 +344,13 @@ def gzip_text(path: Path, compresslevel: int = 9):
                 text.flush()
                 text.detach()
         os.replace(staging, path)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
+        completed = True
+    finally:
+        # Whatever ended the block - an exception in it, an early exit that
+        # closes the generator, a failed replace - the staging file goes, and
+        # only a completed replace has moved it into place.
+        if not completed:
+            staging.unlink(missing_ok=True)
 
 
 def write_gzip_json(path: Path, data) -> None:

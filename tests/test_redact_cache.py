@@ -52,10 +52,10 @@ class StoreWithACachedTracker(SettingsIsolated):
         self.cache_path = config.TICKET_TRACKER_PATH
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def cache(self, records: dict) -> None:
+    def _cache(self, records: dict) -> None:
         pio.write_gzip_json(self.cache_path, dict(sorted(records.items())))
 
-    def cached(self) -> dict:
+    def _cached(self) -> dict:
         return pio.read_gzip_json_dict(self.cache_path)
 
 
@@ -76,13 +76,13 @@ class RedactCacheTest(StoreWithACachedTracker):
         """Catches the cache not being re-redacted: a record fetched before the
         rule existed keeps the text in summary, description, resolution and every
         comment, and a resolved ticket is never fetched again to fix it."""
-        self.cache({"AAA-1": self.record("see REC/1234 now"), "AAA-2": {"summary": "clean"}})
+        self._cache({"AAA-1": self.record("see REC/1234 now"), "AAA-2": {"summary": "clean"}})
         config.SENSITIVE_PATTERNS = {**config.SENSITIVE_PATTERNS, **LATER_RULE}
 
         code, output = run_quietly(redact_cache)
 
-        self.assertEqual(code, 0)
-        stored = self.cached()
+        self.assertIsNone(code)
+        stored = self._cached()
         self.assertEqual(stored["AAA-1"]["summary"], "summary see [record reference withheld] now")
         self.assertEqual(
             stored["AAA-1"]["description"], "description see [record reference withheld] now"
@@ -108,7 +108,7 @@ class RedactCacheTest(StoreWithACachedTracker):
         """Catches a re-redaction that is not idempotent (a placeholder matching
         a rule, or a rewrite that churns bytes): a committed artefact would
         change on every run."""
-        self.cache({"AAA-1": self.record(f"REC/1234 and {MENTION} and {EMAIL}")})
+        self._cache({"AAA-1": self.record(f"REC/1234 and {MENTION} and {EMAIL}")})
         config.SENSITIVE_PATTERNS = {**config.SENSITIVE_PATTERNS, **LATER_RULE}
         run_quietly(redact_cache)
         first = self.cache_path.read_bytes()
@@ -121,35 +121,35 @@ class RedactCacheTest(StoreWithACachedTracker):
     def test_a_default_pasted_mention_in_a_cached_comment_is_withheld(self):
         """Catches the shipped rule not reaching a cache written before it
         existed: the exact case of the report this stage answers."""
-        self.cache({"AAA-1": {"summary": "s", "comments": [f"ping {MENTION} please"]}})
+        self._cache({"AAA-1": {"summary": "s", "comments": [f"ping {MENTION} please"]}})
 
         _, output = run_quietly(redact_cache)
 
         self.assertEqual(
-            self.cached()["AAA-1"]["comments"], ["ping [pasted mention withheld] please"]
+            self._cached()["AAA-1"]["comments"], ["ping [pasted mention withheld] please"]
         )
         self.assertNotIn(NAME, output)
 
     def test_no_cache_is_nothing_to_do_not_a_failure(self):
         code, output = run_quietly(redact_cache)
-        self.assertEqual(code, 0)
+        self.assertIsNone(code)
         self.assertIn("nothing to redact", output)
         self.assertFalse(self.cache_path.exists())
 
     def test_type_status_and_parent_are_redacted_too(self):
         """Catches the fields `fetch-tickets` redacts being skipped on re-run."""
-        self.cache(
+        self._cache(
             {"AAA-1": {"summary": "s", "type": MENTION, "status": MENTION, "parent": MENTION}}
         )
         run_quietly(redact_cache)
-        stored = self.cached()["AAA-1"]
+        stored = self._cached()["AAA-1"]
         for field in ("type", "status", "parent"):
             self.assertEqual(stored[field], "[pasted mention withheld]")
 
     def test_a_change_names_the_stages_that_rebuild_the_copies(self):
         """Catches a clean cache reported as a clean store: the page, index and
         intent layer still hold the old text until these stages re-run."""
-        self.cache({"AAA-1": {"summary": MENTION}})
+        self._cache({"AAA-1": {"summary": MENTION}})
         _, output = run_quietly(redact_cache)
         order = [output.index(f"knowledgestore {stage}\n") for stage in redact_cache.REBUILD]
         self.assertEqual(order, sorted(order))
@@ -161,9 +161,9 @@ class RedactCacheTest(StoreWithACachedTracker):
     def test_denied_and_absent_entries_survive_untouched(self):
         """Catches a walker assuming every cached entry is a record: the cache
         also holds `denied` and `absent` outcomes."""
-        self.cache({"AAA-1": "denied", "AAA-2": None, "AAA-3": {"summary": MENTION}})
+        self._cache({"AAA-1": "denied", "AAA-2": None, "AAA-3": {"summary": MENTION}})
         run_quietly(redact_cache)
-        stored = self.cached()
+        stored = self._cached()
         self.assertEqual(stored["AAA-1"], "denied")
         self.assertEqual(stored["AAA-3"]["summary"], "[pasted mention withheld]")
 
@@ -173,17 +173,34 @@ class AtomicWriteTest(StoreWithACachedTracker):
     content: an interrupt left a tracker cache whose resolved tickets are never
     fetched again, so nothing could rebuild it."""
 
-    def test_an_error_mid_write_leaves_the_original_file_byte_identical(self):
-        self.cache({"AAA-1": {"summary": "kept"}})
-        before = self.cache_path.read_bytes()
-        with self.assertRaises(RuntimeError):
-            with pio.gzip_text(self.cache_path) as out:
-                out.write('{"AAA-1": {"summary": "half')
-                raise RuntimeError("disk full")
+    def _write_then(self, failure: BaseException) -> None:
+        with pio.gzip_text(self.cache_path) as out:
+            out.write('{"AAA-1": {"summary": "half')
+            raise failure
+
+    def _assert_untouched(self, before: bytes) -> None:
         self.assertEqual(self.cache_path.read_bytes(), before)
         self.assertEqual(
             sorted(p.name for p in self.cache_path.parent.iterdir()), [self.cache_path.name]
         )
+
+    def test_an_early_exit_leaves_no_temporary_file_and_the_original_whole(self):
+        """Catches cleanup that runs only for `Exception`: a `GeneratorExit` or
+        `KeyboardInterrupt` through the block left a stray temporary file."""
+        self._cache({"AAA-1": {"summary": "kept"}})
+        before = self.cache_path.read_bytes()
+        for failure in (KeyboardInterrupt(), GeneratorExit()):
+            with self.subTest(failure=type(failure).__name__):
+                with self.assertRaises(type(failure)):
+                    self._write_then(failure)
+                self._assert_untouched(before)
+
+    def test_an_error_mid_write_leaves_the_original_file_byte_identical(self):
+        self._cache({"AAA-1": {"summary": "kept"}})
+        before = self.cache_path.read_bytes()
+        with self.assertRaises(RuntimeError):
+            self._write_then(RuntimeError("disk full"))
+        self._assert_untouched(before)
 
 
 class CheckEvidenceReadsTheTrackerCacheTest(StoreWithACachedTracker):
@@ -192,7 +209,7 @@ class CheckEvidenceReadsTheTrackerCacheTest(StoreWithACachedTracker):
 
     def test_a_cached_comment_matching_a_rule_fails_the_default_gate(self):
         """Catches check-evidence ignoring the tracker cache."""
-        self.cache({"AAA-9": {"summary": "s", "comments": ["fine", f"cc {MENTION}"]}})
+        self._cache({"AAA-9": {"summary": "s", "comments": ["fine", f"cc {MENTION}"]}})
 
         code, output = run_quietly(check_evidence)
 
@@ -204,7 +221,7 @@ class CheckEvidenceReadsTheTrackerCacheTest(StoreWithACachedTracker):
     def test_the_gate_never_prints_the_text_it_matched(self):
         """Catches a finding that carries the value: a build log would republish
         the name. Both streams are captured together."""
-        self.cache(
+        self._cache(
             {
                 "AAA-9": {
                     "summary": f"{NAME} {EMAIL}",
@@ -221,7 +238,7 @@ class CheckEvidenceReadsTheTrackerCacheTest(StoreWithACachedTracker):
             self.assertNotIn(text, output)
 
     def test_a_redacted_cache_passes(self):
-        self.cache({"AAA-9": {"summary": "s", "comments": [f"cc {MENTION}"]}})
+        self._cache({"AAA-9": {"summary": "s", "comments": [f"cc {MENTION}"]}})
         run_quietly(redact_cache)
         code, _ = run_quietly(check_evidence)
         self.assertEqual(code, 0)
