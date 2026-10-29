@@ -347,6 +347,21 @@ The whole configuration stays in the graph for an agent to read; the explorer
 page carries a capped summary per deployment (`KSB_DEPLOY_PAGE_KEYS`), searchable
 by key or value, on the same trade the ticket detail makes.
 
+**A `deploys` edge ends on the repository, not on a node inside it.** Each
+matched repository gets one `<repo>::repository` node (kind `repository`, labelled
+with the repository name) and every service it ships points at it. A repository
+node is shared: `packages` anchors its per-repository `USES_MODULE` edges on the
+same node, whichever stage runs first, and neither stage strips it. A service no
+repository matched gets no `deploys` edge and is counted in the run's report; the
+stage never substitutes some other node of a repository for the repository.
+
+**Configuration is node metadata, read through `node` or `repo_answer`.** A
+deployment's keys and values live in `metadata.config`, so searching labels for a
+key name finds nothing: ask `node` for the deployment, or `repo_answer` for the
+repository, and read the config there. Where `KSB_DEPLOY_MAX_KEYS` cut a
+deployment's config, the node carries `config_truncated: <n>`, the number of keys
+dropped, so a key that is missing is not read as a key the service never set.
+
 ## 4. Architecture-as-code earns its place
 
 If a repository in your organisation contains an architecture model, ingest it

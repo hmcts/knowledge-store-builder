@@ -26,7 +26,17 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, deploy_flux, deploy_values, graph_files, io, relationships, telemetry
+from . import (
+    config,
+    deploy_flux,
+    deploy_values,
+    graph_files,
+    io,
+    kinds,
+    relationships,
+    repository_node,
+    telemetry,
+)
 
 FORMAT = "deployments"
 _VALUES_SUFFIX = re.compile(r"_values\.ya?ml(\.j2)?$")
@@ -439,9 +449,20 @@ def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -
             "environment": fact.environment,
             "route": fact.route,
             "config": fact.config,
+            **_truncation(fact.config),
             **fact.extra,
         },
     }
+
+
+def _truncation(flat: dict[str, str]) -> dict[str, int]:
+    """`config_truncated: <n>` when KSB_DEPLOY_MAX_KEYS dropped keys, else nothing.
+
+    Absent rather than zero on an untruncated node, so graphs built before the
+    marker existed do not differ from ones built now except where it applies.
+    """
+    dropped = getattr(flat, "dropped", 0)
+    return {"config_truncated": dropped} if dropped else {}
 
 
 def _chart_node(source: str, in_estate: bool) -> dict:
@@ -507,22 +528,20 @@ def _source_file(root: str, environment: str, service: str) -> str:
     return "/".join(segment for segment in segments if segment)
 
 
-def _representatives(graph: dict) -> dict[str, str]:
-    """repo -> one deterministic node id, the lowest in that repository.
+def _repositories(graph: dict) -> set[str]:
+    """The repositories the graph holds, read off the nodes that belong to them.
 
-    `min` over the ids, so the answer does not depend on node order. This stage's
-    own nodes are excluded as well as stripped beforehand: without that, a second
-    run could pick a deployment node as a repository's representative and chain
-    deployment nodes to each other.
+    This stage's own nodes are left out, as are repository nodes: a repository node
+    is a consequence of a repository being held, so counting one would let a node
+    left behind by an earlier run keep a removed repository "held".
     """
-    best: dict[str, str] = {}
-    for node in graph["nodes"]:
-        repo = node.get("repo")
-        if not repo or node.get("_origin") == FORMAT:
-            continue
-        if repo not in best or node["id"] < best[repo]:
-            best[repo] = node["id"]
-    return best
+    return {
+        node["repo"]
+        for node in graph["nodes"]
+        if node.get("repo")
+        and node.get("_origin") not in (FORMAT, repository_node.ORIGIN)
+        and not kinds.is_kind(node, kinds.REPOSITORY)
+    }
 
 
 class _FluxTally:
@@ -637,7 +656,7 @@ def _merged_facts(
     return facts
 
 
-def _chart_provider(fact: _Fact, reps: dict[str, str], flux: _FluxTally) -> tuple[str, bool]:
+def _chart_provider(fact: _Fact, repos: set[str], flux: _FluxTally) -> tuple[str, bool]:
     """The repository a fact's chart comes from, and whether the estate holds it.
 
     Resolved by `relationships.resolve_chart`, the rule the dependency layer uses,
@@ -654,7 +673,7 @@ def _chart_provider(fact: _Fact, reps: dict[str, str], flux: _FluxTally) -> tupl
             sorted(
                 d
                 for d in config.REPOSITORIES_DIR.iterdir()
-                if (d / ".git").is_dir() and d.name in reps
+                if (d / ".git").is_dir() and d.name in repos
             )
             if config.REPOSITORIES_DIR.is_dir()
             else []
@@ -663,7 +682,7 @@ def _chart_provider(fact: _Fact, reps: dict[str, str], flux: _FluxTally) -> tupl
     provider = relationships.resolve_chart(
         fact.chart,
         fact.chart_source,
-        set(reps),
+        repos,
         config.CHART_REPO_PATTERN,
         flux.chart_definitions,
     )
@@ -672,16 +691,14 @@ def _chart_provider(fact: _Fact, reps: dict[str, str], flux: _FluxTally) -> tupl
     return provider, True
 
 
-def _chart_edges(
-    graph: dict, fact: _Fact, node_id: str, reps: dict[str, str], tally: _Tally
-) -> None:
+def _chart_edges(graph: dict, fact: _Fact, node_id: str, repos: set[str], tally: _Tally) -> None:
     """The chart a fact declares, as a node for its providing repository and a
     dependency edge. A release naming no `sourceRef` gets none, as before charts
     were resolved: resolution changes where an edge points, not which releases
     have one."""
     if not fact.chart_source:
         return
-    provider, in_estate = _chart_provider(fact, reps, tally.flux)
+    provider, in_estate = _chart_provider(fact, repos, tally.flux)
     if not provider:
         return
     if provider not in tally.flux.chart_sources:
@@ -710,7 +727,7 @@ def _record_flux(
 def _add_repo_layer(
     graph: dict,
     deploy_repo: str,
-    reps: dict[str, str],
+    repos: set[str],
     tally: _Tally,
     communities: Communities,
 ) -> None:
@@ -727,10 +744,11 @@ def _add_repo_layer(
     # construction, and the matcher sorts what it is given, so neither the set nor
     # anything downstream of it depends on iteration order.
     services = {fact.service for fact in facts.values()}
-    matched = match_services(services, set(reps))
+    matched = match_services(services, repos)
     unmatched = services - set(matched)
+    known = {n["id"] for n in graph["nodes"]}
     tally.unmatched |= unmatched
-    tally.out_of_reach |= unreachable_services(unmatched, set(reps))
+    tally.out_of_reach |= unreachable_services(unmatched, repos)
 
     for _, fact in sorted(facts.items()):
         environment = fact.environment
@@ -746,12 +764,16 @@ def _add_repo_layer(
             _edge(node["id"], f"deploy::env:{environment}", "deployed_in", fact.rel)
         )
         tally.edges += 1
-        target = reps.get(matched.get(fact.service, ""))
-        if target:
+        # The repository itself, never a node inside it: "deploys" is a claim about
+        # the repository, and an arbitrary node (a document sentence, a config key)
+        # makes it a different and false one. No match, no edge.
+        matched_repo = matched.get(fact.service)
+        if matched_repo:
+            target = repository_node.ensure_repository_node(graph, matched_repo, known)
             graph["links"].append(_edge(node["id"], target, "deploys", fact.rel))
             tally.edges += 1
             tally.joined += 1
-        _chart_edges(graph, fact, node["id"], reps, tally)
+        _chart_edges(graph, fact, node["id"], repos, tally)
 
 
 def _named(paths: list[str], limit: int = 5) -> str:
@@ -881,7 +903,7 @@ def main() -> int:
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     _strip_layer(graph)
-    reps = _representatives(graph)
+    repos = _repositories(graph)
 
     # Community labels live beside the graph, so the page can name an area. Read
     # what clustering wrote, add one entry per environment, write it back - the
@@ -898,8 +920,10 @@ def main() -> int:
         if not (config.REPOSITORIES_DIR / deploy_repo).is_dir():
             print(f"  {deploy_repo}: no clone under {config.REPOSITORIES_DIR} - skipped")
             continue
-        _add_repo_layer(graph, deploy_repo, reps, tally, communities)
+        _add_repo_layer(graph, deploy_repo, repos, tally, communities)
 
+    repository_node.settle_repository_nodes(graph)
+    repository_node.prune_unlinked_repository_nodes(graph)
     serialised = json.dumps(graph, ensure_ascii=False)
     config.GRAPH_PATH.write_text(serialised, encoding="utf-8")  # NOSONAR(S2083)
     with io.gzip_text(config.GRAPH_PATH.with_suffix(".json.gz")) as out:

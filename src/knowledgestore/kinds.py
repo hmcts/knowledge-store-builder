@@ -19,6 +19,7 @@ TICKET = "ticket"
 SCHEMA = "schema"
 DEFINITION = "definition"
 FIELD = "field"
+REPOSITORY = "repository"
 
 # kind as written now -> every kind that has ever meant it
 _ALIASES: dict[str, frozenset[str]] = {

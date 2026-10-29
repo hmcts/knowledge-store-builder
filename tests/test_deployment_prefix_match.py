@@ -264,7 +264,7 @@ class DeploymentEdges(SettingsIsolated, unittest.TestCase):
             },
         )
         targets = {e["target"] for e in graph["links"] if e["relation"] == "deploys"}
-        self.assertEqual(targets, {"alpha::AgentMain"})
+        self.assertEqual(targets, {"alpha::repository"})
         report = said.getvalue()
         self.assertIn("joined to a repository in the graph: 3 of 4", report)
         self.assertIn("omega-agent", report)

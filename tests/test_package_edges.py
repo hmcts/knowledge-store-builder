@@ -144,6 +144,11 @@ class PackageEdgesTest(SettingsIsolated):
 # the shapes the other stage tests use. An equivalence scenario must still produce
 # it exactly; a declared-change scenario holds the old output too, and its test
 # names, by hand, the edges that changed and why.
+#
+# One change is applied to the whole file rather than declared per scenario: a
+# `USES_MODULE` edge's source is the consumer's `<repo>::repository` node, where it
+# was the lowest-id file in the repository (#536). The golden file records that
+# source after the change; every other field is as the stages first wrote it.
 
 ESTATE = Path(__file__).resolve().parent / "fixtures" / "relationships"
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "graph-edges-golden.json"
@@ -532,11 +537,16 @@ class TheDeclaredGraphChangesTest(SettingsIsolated):
             self._changed("org-check"),
             {
                 "edges added": [
-                    ["USES_MODULE", "svc-x::net.tf", "other-org/svc-x::module", "self.tf"],
-                    ["USES_MODULE", "svc-x::net.tf", "other-org/tf-network::module", "other.tf"],
+                    ["USES_MODULE", "svc-x::repository", "other-org/svc-x::module", "self.tf"],
+                    [
+                        "USES_MODULE",
+                        "svc-x::repository",
+                        "other-org/tf-network::module",
+                        "other.tf",
+                    ],
                 ],
                 "edges removed": [
-                    ["USES_MODULE", "svc-x::net.tf", "tf-network::module", "other.tf"],
+                    ["USES_MODULE", "svc-x::repository", "tf-network::module", "other.tf"],
                 ],
                 "nodes added": [
                     ["other-org/svc-x::module", "", False],
@@ -554,7 +564,7 @@ class TheDeclaredGraphChangesTest(SettingsIsolated):
             {
                 "edges added": [],
                 "edges removed": [
-                    ["USES_MODULE", "svc-x::main.tf", f"{repo}::module", "main.tf"]
+                    ["USES_MODULE", "svc-x::repository", f"{repo}::module", "main.tf"]
                     for repo in ("tf-cache", "tf-dns", "tf-network", "tf-queue")
                 ],
                 "nodes added": [],
@@ -571,7 +581,9 @@ class TheDeclaredGraphChangesTest(SettingsIsolated):
         self.assertEqual(
             self._changed("credentialed"),
             {
-                "edges added": [["USES_MODULE", "svc-x::main.tf", "tf-network::module", "main.tf"]],
+                "edges added": [
+                    ["USES_MODULE", "svc-x::repository", "tf-network::module", "main.tf"]
+                ],
                 "edges removed": [],
                 "nodes added": [["tf-network::module", "tf-network", True]],
                 "nodes removed": [],
@@ -627,7 +639,7 @@ class EachCloneItsOwnOrganisationTest(SettingsIsolated):
                 "edges": [
                     [
                         "USES_MODULE",
-                        "svc-x::a-theirs.tf",
+                        "svc-x::repository",
                         f"{provider}::module",
                         rel,
                     ]

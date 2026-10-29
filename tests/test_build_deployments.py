@@ -215,7 +215,7 @@ class Layer(SettingsIsolated, unittest.TestCase):
         labels = {n["label"] for n in added if n["metadata"]["kind"] == "deployment"}
         self.assertIn("progression-service (prd)", labels)
         targets = {e["target"] for e in graph["links"]}
-        self.assertIn("svc-context-progression::CaseAggregate", targets)
+        self.assertIn("svc-context-progression::repository", targets)
 
     def test_the_configuration_travels_on_the_node_so_it_can_be_quoted(self):
         with tempfile.TemporaryDirectory() as raw:
