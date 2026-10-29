@@ -12840,6 +12840,7 @@ MUTATIONS = (
         "#527: a finding that carried the value copied a person's name into a build log, "
         "which is read more widely and kept longer than the artefact it was checking",
         (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
             "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
             "test_build_intent_index.CheckEvidenceStageTest.test_the_gate_never_prints_the_value_it_matched",
         ),
