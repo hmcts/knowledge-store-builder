@@ -70,6 +70,20 @@ release of the library ships — reaches the cache only through it. Run it after
 every upgrade and every change to `KSB_SENSITIVE_PATTERNS`; it reports counts of
 spans and records, never the text.
 
+It cleans the cache and nothing built from it. The old text still sits in the
+intent layer, the answers layer, the index and the explorer page until they are
+rebuilt, so when it changed anything it prints the stages to re-run, in this order:
+
+```bash
+knowledgestore intent
+knowledgestore answers-layer
+knowledgestore index
+knowledgestore explorer
+knowledgestore manifest
+knowledgestore check-evidence
+knowledgestore summaries verify   # regenerate any summary or brief written from the old text
+```
+
 It asks the tracker about tickets it has never had an answer for, and about up
 to `KSB_TRACKER_REFRESH_MAX` unresolved tickets whose record is
 `KSB_TRACKER_REFRESH_DAYS` old, so a refresh costs requests for the tickets it

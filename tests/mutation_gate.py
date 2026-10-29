@@ -12845,6 +12845,39 @@ MUTATIONS = (
             "test_build_intent_index.CheckEvidenceStageTest.test_the_gate_never_prints_the_value_it_matched",
         ),
     ),
+    Mutation(
+        "the gzip writer truncates the live file as it writes",
+        "io.py",
+        '            open(staging, "wb") as raw,',
+        '            open(path, "wb") as raw,',
+        "#527 review: an error mid-write left a half-written tracker cache, whose "
+        "resolved tickets are never fetched again",
+        (
+            "test_redact_cache.AtomicWriteTest.test_an_error_mid_write_leaves_the_original_file_byte_identical",
+        ),
+    ),
+    Mutation(
+        "an email display name leaves its profile link",
+        "config.py",
+        r"\[@(?:[^\]\n]|\[[a-z ]+ withheld\]){1,80}?\|",
+        r"\[@[^\]\n]{1,80}?\|",
+        "#527 review: the email rule runs first and its placeholder holds a `]` the name "
+        "class cannot cross, so the profile link of an email display name survived",
+        (
+            "test_redact_cache.PastedMentionRuleTest.test_an_email_display_name_leaves_no_link_behind",
+        ),
+    ),
+    Mutation(
+        "the cache is re-redacted without naming the stages that rebuild its copies",
+        "redact_cache.py",
+        "    if touched:\n        print(\n",
+        "    if False:\n        print(\n",
+        "#527 review: a clean cache reported as a clean store, while the page, index and "
+        "intent layer kept the old text",
+        (
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+        ),
+    ),
 )
 
 

@@ -46,9 +46,10 @@ from . import config
 EVIDENCE_FIELDS = ("d", "s", "b", "ps", "pb")
 
 # The text fields of a cached tracker record (`fetch-tickets`): plain strings,
-# and the comment thread, which is a list of strings. Type, status and the day
-# fields hold tracker vocabulary and dates, not narrative.
-TRACKER_TEXT_FIELDS = ("summary", "description", "resolution")
+# and the comment thread, which is a list of strings. `fetch-tickets` redacts type,
+# status and resolution too, and a parent is a key; all are re-redacted alike. The
+# day fields are dates.
+TRACKER_TEXT_FIELDS = ("summary", "description", "resolution", "type", "status", "parent")
 TRACKER_LIST_FIELDS = ("comments",)
 
 # Any word character outside a placeholder means the value still says something.

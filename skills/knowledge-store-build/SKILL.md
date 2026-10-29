@@ -1000,10 +1000,16 @@ committed cache; an unresolved ticket is requested again once its record is
 `KSB_SENSITIVE_PATTERNS`, then `knowledgestore check-evidence`.** `fetch-tickets`
 redacts what it fetches once, and a resolved ticket is never fetched again, so a
 rule added later never reaches the cached records on its own. `redact-cache` needs
-no credentials: it re-applies the rules in force to summary, description,
+no credentials: it re-applies the rules in force to summary, description, type, status, parent,
 resolution and comments, changes nothing on a second run, and reports counts of
 spans and records, never the text. Hold to that in your report too: no matched
-value, and no name, anywhere.
+value, and no name, anywhere. It cleans the cache only: the intent layer, answers
+layer, index and explorer page built from the old text stay dirty until rebuilt, so
+when it changed anything run, in order, `knowledgestore intent`,
+`knowledgestore answers-layer`, `knowledgestore index`, `knowledgestore explorer`,
+`knowledgestore manifest`, `knowledgestore check-evidence`, then
+`knowledgestore summaries verify` and regenerate any summary or brief written from
+the old text. It prints this list itself.
 
 Four numbers from its report belong in yours, and three of them are findings
 rather than statistics:

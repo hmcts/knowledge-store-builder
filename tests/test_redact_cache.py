@@ -136,6 +136,28 @@ class RedactCacheTest(StoreWithACachedTracker):
         self.assertIn("nothing to redact", output)
         self.assertFalse(self.cache_path.exists())
 
+    def test_type_status_and_parent_are_redacted_too(self):
+        """Catches the fields `fetch-tickets` redacts being skipped on re-run."""
+        self.cache(
+            {"AAA-1": {"summary": "s", "type": MENTION, "status": MENTION, "parent": MENTION}}
+        )
+        run_quietly(redact_cache)
+        stored = self.cached()["AAA-1"]
+        for field in ("type", "status", "parent"):
+            self.assertEqual(stored[field], "[pasted mention withheld]")
+
+    def test_a_change_names_the_stages_that_rebuild_the_copies(self):
+        """Catches a clean cache reported as a clean store: the page, index and
+        intent layer still hold the old text until these stages re-run."""
+        self.cache({"AAA-1": {"summary": MENTION}})
+        _, output = run_quietly(redact_cache)
+        order = [output.index(f"knowledgestore {stage}\n") for stage in redact_cache.REBUILD]
+        self.assertEqual(order, sorted(order))
+        for stage in ("intent", "answers-layer", "index", "explorer", "check-evidence"):
+            self.assertIn(f"knowledgestore {stage}\n", output)
+        _, again = run_quietly(redact_cache)
+        self.assertNotIn("Re-run", again)
+
     def test_denied_and_absent_entries_survive_untouched(self):
         """Catches a walker assuming every cached entry is a record: the cache
         also holds `denied` and `absent` outcomes."""
@@ -144,6 +166,24 @@ class RedactCacheTest(StoreWithACachedTracker):
         stored = self.cached()
         self.assertEqual(stored["AAA-1"], "denied")
         self.assertEqual(stored["AAA-3"]["summary"], "[pasted mention withheld]")
+
+
+class AtomicWriteTest(StoreWithACachedTracker):
+    """Catches a writer that truncates the live file before it has the new
+    content: an interrupt left a tracker cache whose resolved tickets are never
+    fetched again, so nothing could rebuild it."""
+
+    def test_an_error_mid_write_leaves_the_original_file_byte_identical(self):
+        self.cache({"AAA-1": {"summary": "kept"}})
+        before = self.cache_path.read_bytes()
+        with self.assertRaises(RuntimeError):
+            with pio.gzip_text(self.cache_path) as out:
+                out.write('{"AAA-1": {"summary": "half')
+                raise RuntimeError("disk full")
+        self.assertEqual(self.cache_path.read_bytes(), before)
+        self.assertEqual(
+            sorted(p.name for p in self.cache_path.parent.iterdir()), [self.cache_path.name]
+        )
 
 
 class CheckEvidenceReadsTheTrackerCacheTest(StoreWithACachedTracker):
@@ -219,6 +259,19 @@ class PastedMentionRuleTest(SettingsIsolated):
             self.withheld(f"[@{NAME}|mailto:[email address withheld]]"),
             "[pasted mention withheld]",
         )
+
+    def test_an_email_display_name_leaves_no_link_behind(self):
+        """Catches the name class being unable to cross the email placeholder's
+        `]`: the email rule runs first and `[@[email address withheld]|<link>]`
+        kept the profile link, and check-evidence then matched nothing."""
+        raw = f"see [@{EMAIL}|https://chat.example/p/1] ok"
+        self.assertEqual(self.withheld(raw), "see [pasted mention withheld] ok")
+        # The other order: the mention rule meeting the raw email, and meeting
+        # the placeholder an earlier email pass left.
+        rule = re.compile(config.DEFAULT_SENSITIVE_PATTERNS["pasted-mention"])
+        self.assertEqual(rule.sub("X", raw), "see X ok")
+        after_email = "[@[email address withheld]|https://chat.example/p/1]"
+        self.assertEqual(rule.sub("X", after_email), "X")
 
     def test_attribute_fragments_are_left_alone(self):
         for code in ("[@attr=value]", "[@attr]", "x[@id='a'] y"):

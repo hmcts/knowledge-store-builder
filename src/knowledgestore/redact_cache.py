@@ -18,7 +18,10 @@ writes only when something changed. **Only counts are reported** - spans changed
 per rule and records touched - never the text, for the reason `check-evidence`
 gives: a log is read more widely and kept longer than the artefact.
 
-Covers summary, description, resolution and comments.
+Covers summary, description, resolution, type, status, parent and comments. It
+cleans the cache only: when it changed anything it names the stages to re-run so
+the copies built from the old text (intent layer, answers, index, page) are
+rebuilt too.
 """
 
 from __future__ import annotations
@@ -27,6 +30,19 @@ import argparse
 from collections import Counter
 
 from . import config, fetch_tickets, io, sensitive
+
+# What still holds the old text after the cache is clean, in the order that
+# carries the redaction to every copy: the tracker text was copied into the intent
+# layer, the answers layer, the index and the page when they were built, and this
+# stage rewrites only the cache.
+REBUILD = (
+    "intent",
+    "answers-layer",
+    "index",
+    "explorer",
+    "manifest",
+    "check-evidence",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,6 +61,13 @@ def main(argv: list[str] | None = None) -> int:
         f"redacted {sum(counts.values()):,} spans in {touched:,} of {len(cache):,} "
         f"cached tracker records" + (f": {named}" if named else " (nothing matched a rule)")
     )
+    if touched:
+        print(
+            "The cache is clean; copies built from it are not, until rebuilt. Re-run, in order:\n"
+            + "".join(f"  knowledgestore {stage}\n" for stage in REBUILD)
+            + "Then `knowledgestore summaries verify`: a summary or brief written from the old "
+            "text must be regenerated."
+        )
     return 0
 
 

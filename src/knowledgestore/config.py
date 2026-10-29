@@ -606,7 +606,9 @@ TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 # everywhere, and so does a pasted mention - `[@Display Name|<profile link>]`,
 # which a tracker or chat tool writes into a comment: the name and the link both
 # identify a person, so the whole span goes. The pattern lets the name hold a `|`
-# and lets text sit before an email placeholder (the email rule runs first), and
+# and lets a placeholder stand in the name (the email rule runs first, so an email
+# display name arrives as `[email address withheld]`, whose `]` the name class
+# alone cannot cross) and lets text sit before an email placeholder, and
 # leaves `[@attr=value]` code fragments, which carry no link, alone. These are the
 # identifiers this library can recognise without assuming a jurisdiction or a
 # subject domain. Reference formats for cases,
@@ -618,7 +620,7 @@ TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 # operator can see what is actually being applied.
 DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
     "email-address": r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b",
-    "pasted-mention": r"\[@[^\]\n]{1,80}?\|(?:mailto:[^\]\s\[]*\[[a-z ]+ withheld\]|[^\]\s]*)\]",
+    "pasted-mention": r"\[@(?:[^\]\n]|\[[a-z ]+ withheld\]){1,80}?\|(?:mailto:[^\]\s\[]*\[[a-z ]+ withheld\]|[^\]\s]*)\]",
 }
 SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 
