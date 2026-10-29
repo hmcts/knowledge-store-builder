@@ -8561,8 +8561,8 @@ MUTATIONS = (
     Mutation(
         "git env: drift's diff inherits the hook's repository",
         "drift.py",
-        "        check=False,\n        env=git_env(),\n",
-        "        check=False,\n",
+        '"--name-status", before, after],\n        capture_output=True,\n        encoding="utf-8",\n        check=False,\n        env=git_env(),\n',
+        '"--name-status", before, after],\n        capture_output=True,\n        encoding="utf-8",\n        check=False,\n',
         "a stage run from a store's git hook inherits GIT_DIR, which outranks `git -C`, so drift diffs the store rather than the clone - a fixture commit landed on a store's real branch this way",
         (
             "test_git_env.AHookBindingDoesNotRedirectAStage.test_drift_diffs_the_clone",
@@ -12791,6 +12791,69 @@ MUTATIONS = (
             "server.test_tools_tickets.HostileTextTest.test_the_hostile_description_comes_back_verbatim_in_description_only",
             "server.test_tools_tickets.TicketTest.test_a_proposed_ticket_is_proposed_with_its_branch_and_its_file",
             "server.test_tools_tickets.TicketTest.test_branch_only_text_on_a_landed_ticket_is_kept_apart",
+        ),
+    ),
+    Mutation(
+        "intent reads an undeclared history directory",
+        "build_intent_index.py",
+        "        if ndjson.parent.name not in stale\n",
+        "        if True\n",
+        "a repository `discover` dropped kept its knowledge/git-history directory, so `intent` kept its tickets in file-tickets and the server went on treating an archived repository as a member of the estate",
+        (
+            "test_removed_repository.IntentTest.test_intent_excludes_an_undeclared_repository_from_the_index_and_tickets",
+            "test_removed_repository.ServerTest.test_after_the_drop_the_server_no_longer_names_the_repository",
+        ),
+    ),
+    Mutation(
+        "drift leaves a removed repository unmeasured",
+        "drift.py",
+        "    for name in removed:\n        changes.removed(name)\n",
+        "    for name in removed:\n        pass\n",
+        "a repository present only in --before was reported as not measured, its plan files neither stale nor deleted, so a delta-driven prune kept its semantic nodes until someone listed them by hand",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_before_is_deleted_with_all_its_planned_files",
+        ),
+    ),
+    Mutation(
+        "an undeclared history directory survives",
+        "export_git_history.py",
+        "        shutil.rmtree(entry)\n",
+        "        pass\n",
+        "export-history never pruned the dataset of a repository removed from config/repositories.txt, so every later stage read a repository the estate no longer had",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_second_run_removes_nothing_more",
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_entry_is_not_followed_out_of_the_history_root",
+            "test_removed_repository.ExportHistoryTest.test_export_history_removes_the_undeclared_directory_and_keeps_the_declared",
+        ),
+    ),
+    Mutation(
+        "export-history follows a symlinked history entry",
+        "export_git_history.py",
+        "        if entry.is_symlink() or entry.resolve().parent != root:\n            continue\n",
+        "        if False:\n            continue\n",
+        "the removal of undeclared history is a recursive delete under a store root; a symlinked entry must never lead it to a directory outside knowledge/git-history/",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_entry_is_not_followed_out_of_the_history_root",
+        ),
+    ),
+    Mutation(
+        "drift leaves a new repository unmeasured",
+        "drift.py",
+        "        for path in files:\n            changes.added(",
+        "        for path in []:\n            changes.added(",
+        "a repository present only in --after was reported as not measured, so none of its files reached the delta: five new repositories contributed nothing on one store",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_after_lists_its_tracked_files_under_new",
+        ),
+    ),
+    Mutation(
+        "drift counts a new repository's ignored files",
+        "drift.py",
+        '    return [path for path in paths if path not in excluded], ""',
+        '    return paths, ""',
+        "listing every tracked file of a new repository without its .graphifyignore would extract vendored and generated code a full build skips",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_after_lists_its_tracked_files_under_new",
         ),
     ),
 )

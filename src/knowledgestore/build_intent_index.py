@@ -1027,7 +1027,24 @@ def report_redactions(redactions: RedactionReport) -> None:
 
 
 def main() -> int:
-    ndjson_files = sorted(config.HISTORY_DIR.glob("*/commits.ndjson"))
+    from .export_git_history import declared_names, not_declared_line, undeclared_directories
+
+    try:
+        declared = declared_names()
+    except (OSError, ValueError) as error:
+        print(f"Cannot read the declared repositories: {error}")
+        return 1
+    # A repository `discover` dropped keeps its history directory until somebody
+    # removes it; indexing it would keep its tickets in the estate, and the server
+    # treats a repository the ticket layer names as a member.
+    stale = undeclared_directories(config.HISTORY_DIR, declared)
+    ndjson_files = [
+        ndjson
+        for ndjson in sorted(config.HISTORY_DIR.glob("*/commits.ndjson"))
+        if ndjson.parent.name not in stale
+    ]
+    if stale:
+        print(not_declared_line(stale, "history directory(ies)", ", skipped"))
     if not ndjson_files:
         print(f"No history datasets under {config.HISTORY_DIR}. Run: knowledgestore export-history")
         return 1

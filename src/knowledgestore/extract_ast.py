@@ -996,12 +996,8 @@ def declared_repositories() -> "list[str] | None":
     Read with the library's own parser. An unreadable declaration refuses rather than
     reading as "declares nothing", which would switch the reconciliation off.
     """
-    if not config.REPOSITORIES_CONFIG.is_file():
-        return None
     try:
-        return [
-            r.name for r in export_git_history.read_repository_config(config.REPOSITORIES_CONFIG)
-        ]
+        return export_git_history.declared_names()
     except (OSError, ValueError) as error:
         raise InputRefused(f"Cannot read the declared repositories: {error}") from None
 

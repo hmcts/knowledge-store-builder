@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -49,6 +50,71 @@ def run_git(repo_path: Path, *arguments: str) -> str:
         raise
 
     return completed.stdout
+
+
+NAMED_LIMIT = 5
+
+
+def undeclared_directories(parent: Path, declared: "list[str] | None") -> list[str]:
+    """Directories under `parent` that `config/repositories.txt` does not declare, sorted.
+
+    A store declaring nothing (None) has no declaration to reconcile against, so
+    nothing is undeclared. Sorted so two runs name the same ones in the same order.
+    """
+    if declared is None or not parent.is_dir():
+        return []
+    return sorted(
+        entry.name for entry in parent.iterdir() if entry.is_dir() and entry.name not in declared
+    )
+
+
+def declared_names() -> "list[str] | None":
+    """Every repository `config/repositories.txt` names, or None when the store has none.
+
+    The one reader of the declaration for the stages that reconcile against it
+    (`extract-ast`, `json-schema`, `intent`, `export-history`, `sync`). It lives here, not
+    in `extract_ast`, because importing that module reads the store manifest's paths at
+    import time and a stage that only needs the names should not pay for it. Raises
+    OSError or ValueError for an unreadable declaration, which must refuse rather than
+    read as "declares nothing", since that would switch the reconciliation off.
+    """
+    from . import config
+
+    if not config.REPOSITORIES_CONFIG.is_file():
+        return None
+    return [r.name for r in read_repository_config(config.REPOSITORIES_CONFIG)]
+
+
+def remove_undeclared_history(output_root: Path, declared: "list[str]") -> list[str]:
+    """Delete each history directory whose repository is no longer declared; return the names.
+
+    The datasets are generated output, rebuilt by this stage, so one left by a repository
+    `discover` dropped is stale rather than precious - and `intent` would otherwise keep
+    its tickets in the estate. Only real directories directly under `output_root` go: a
+    symlink is never followed (its target may be anywhere), and a directory whose
+    resolved parent is not `output_root` is refused. Nothing under `repositories/` is
+    touched; clones can hold untracked graphs (CLAUDE.md 7).
+    """
+    root = output_root.resolve()
+    removed: list[str] = []
+    for name in undeclared_directories(output_root, declared):
+        entry = output_root / name
+        if entry.is_symlink() or entry.resolve().parent != root:
+            continue
+        shutil.rmtree(entry)
+        removed.append(name)
+    return removed
+
+
+def named(names: "list[str]") -> str:
+    """The names, capped, with how many more there were."""
+    shown = ", ".join(names[:NAMED_LIMIT])
+    return shown + (f" and {len(names) - NAMED_LIMIT:,} more" if len(names) > NAMED_LIMIT else "")
+
+
+def not_declared_line(names: "list[str]", noun: str, outcome: str = "") -> str:
+    """`N <noun> not declared<outcome>: a, b, c and M more`, the names capped."""
+    return f"{len(names):,} {noun} not declared{outcome}: {named(names)}"
 
 
 def read_repository_config(path: Path) -> list[RepositoryConfig]:
@@ -737,6 +803,12 @@ def main() -> int:
                 root_dir,
                 output_root,
                 repository,
+            )
+        removed = remove_undeclared_history(output_root, [r.name for r in repositories])
+        if removed:
+            print(
+                f"{len(removed):,} history directory(ies) for undeclared repositories removed: "
+                f"{named(removed)}"
             )
 
     except (OSError, ValueError, subprocess.CalledProcessError) as error:

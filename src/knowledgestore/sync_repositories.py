@@ -22,7 +22,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .export_git_history import RepositoryConfig, read_repository_config
+from .export_git_history import (
+    RepositoryConfig,
+    not_declared_line,
+    read_repository_config,
+    undeclared_directories,
+)
 
 
 from . import config
@@ -242,7 +247,8 @@ def main() -> int:
     previous = provenance.read()
     entries: dict[str, dict] = {}
     failures: list[tuple[str, str]] = []
-    for repo in read_repository_config(config.REPOSITORIES_CONFIG):
+    declared = read_repository_config(config.REPOSITORIES_CONFIG)
+    for repo in declared:
         print(f"\nSynchronising {repo.name}")
         # One repository's failure must not cost the estate. Aborting here used
         # to skip every repository after it and, because provenance is written
@@ -271,6 +277,12 @@ def main() -> int:
         # record is recoverable; nothing is silently wrong. The file is small and
         # this loop is dominated by network and git, so the cost does not signify.
         provenance.write(entries, provenance.read_external())
+    # Report only. A clone can hold untracked per-repository graphs (CLAUDE.md 7),
+    # so deleting one for being undeclared would destroy work nothing else holds.
+    abandoned = undeclared_directories(config.REPOSITORIES_DIR, [r.name for r in declared])
+    if abandoned:
+        print(f"\n{not_declared_line(abandoned, 'clone(s)')}")
+        print("  Left on disk untouched; remove one by hand once its graph is not needed.")
     external, external_failures = _sync_external()
     failures.extend(external_failures)
     provenance.write(entries, external)
