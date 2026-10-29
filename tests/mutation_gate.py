@@ -12793,6 +12793,57 @@ MUTATIONS = (
             "server.test_tools_tickets.TicketTest.test_branch_only_text_on_a_landed_ticket_is_kept_apart",
         ),
     ),
+    Mutation(
+        "the tracker cache is not re-redacted",
+        "redact_cache.py",
+        "    touched = sensitive.redact_tracker(cache, counts)\n",
+        "    touched = 0\n",
+        "#527: a rule added after a fetch never reached cached tracker text, so a name a "
+        "store had since taught the library to withhold stayed in its committed cache",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+        ),
+    ),
+    Mutation(
+        "check-evidence ignores the tracker cache",
+        "check_evidence.py",
+        "        config.TICKET_TRACKER_PATH,\n",
+        "",
+        "#527: the gate read ticket descriptions only, and passed a store whose far larger "
+        "tracker cache held matching text",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "check-evidence reads the tracker cache's path but not its fields",
+        "sensitive.py",
+        "(*mined_values(records), *tracker_values(records))",
+        "(*mined_values(records),)",
+        "#527: a named tracker artefact was opened and reported clean because none of "
+        "its summary, description, resolution or comments was looked at",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "a check prints matched text",
+        "sensitive.py",
+        "        (ticket, field, rule)\n        for ticket, field, value in (*mined",
+        '        (ticket, field, f"{rule} {value}")\n        for ticket, field, value in (*mined',
+        "#527: a finding that carried the value copied a person's name into a build log, "
+        "which is read more widely and kept longer than the artefact it was checking",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_build_intent_index.CheckEvidenceStageTest.test_the_gate_never_prints_the_value_it_matched",
+        ),
+    ),
 )
 
 

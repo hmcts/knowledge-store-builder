@@ -1,7 +1,8 @@
 """Gate a committed evidence artefact: does it still hold an identifier?
 
-The `intent` stage redacts them as it mines, but that only helps the next
-refresh. A store's artefact is already in version control and already embedded
+The `intent` stage redacts them as it mines and `fetch-tickets` as it fetches, but
+that only helps the next refresh; `redact-cache` brings the tracker cache under
+rules added since. A store's artefact is already in version control and already embedded
 in a published page, so there has to be a way to check what is *there* - and to
 fail a build over it, which is why this is a stage of its own rather than a flag
 on `status`. `status` never returns non-zero by design: drift and coverage gaps
@@ -19,6 +20,8 @@ personal data in general, and personal names are deliberately not detected - so 
 redacted value can still describe an identifiable person's case with the
 reference taken out (`sensitive.py` sets out the limits). Read a pass as "nothing
 matched the rules", never as "this file holds no personal data".
+
+Reads ticket-descriptions.json.gz and ticket-tracker.json.gz by default.
 
 Run: knowledgestore check-evidence [artefact.json.gz ...]
 """
@@ -38,7 +41,7 @@ def check(path: Path) -> tuple[int, int]:
     if not records:
         print(f"No ticket records at {path} - nothing to check")
         return 0, 0
-    checked = sum(1 for _ in sensitive.mined_values(records))
+    checked = sum(1 for _ in (*sensitive.mined_values(records), *sensitive.tracker_values(records)))
     found = sensitive.findings(records)
     if not found:
         print(f"{path.name}: {checked:,} mined values checked, none matches a redaction rule")
@@ -59,17 +62,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "paths",
         nargs="*",
-        help="ticket-description artefacts to check (default: this store's own)",
+        help="ticket-description or ticket-tracker artefacts to check (default: this store's own, both)",
     )
     arguments = parser.parse_args(argv)
-    paths = [Path(p) for p in arguments.paths] or [config.TICKET_DESCRIPTIONS_PATH]
+    paths = [Path(p) for p in arguments.paths] or [
+        config.TICKET_DESCRIPTIONS_PATH,
+        config.TICKET_TRACKER_PATH,
+    ]
 
     findings = sum(check(path)[1] for path in paths)
     if not findings:
         return 0
     print(
         "\nThe matched text is deliberately not printed. Re-run"
-        "\n`knowledgestore intent` to rebuild the artefact with these redacted,"
+        "\n`knowledgestore intent` to rebuild ticket descriptions with these redacted,"
+        "\nand `knowledgestore redact-cache` for the tracker cache,"
         "\nthen `knowledgestore explorer` so the page stops embedding them.",
         file=sys.stderr,
     )

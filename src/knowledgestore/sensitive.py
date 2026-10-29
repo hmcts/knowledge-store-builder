@@ -45,6 +45,12 @@ from . import config
 # ticket's branch-only subjects and bodies, which reach the page like the rest.
 EVIDENCE_FIELDS = ("d", "s", "b", "ps", "pb")
 
+# The text fields of a cached tracker record (`fetch-tickets`): plain strings,
+# and the comment thread, which is a list of strings. Type, status and the day
+# fields hold tracker vocabulary and dates, not narrative.
+TRACKER_TEXT_FIELDS = ("summary", "description", "resolution")
+TRACKER_LIST_FIELDS = ("comments",)
+
 # Any word character outside a placeholder means the value still says something.
 WORD = re.compile(r"\w")
 
@@ -138,6 +144,53 @@ def mined_values(records: dict) -> Iterator[tuple[str, str, str]]:
                 yield ticket, field, str(value)
 
 
+def tracker_values(records: dict) -> Iterator[tuple[str, str, str]]:
+    """Every (ticket, field, value) of narrative text in a ticket-tracker cache,
+    ticket-ordered. Tolerant of an outcome that is not a fetched record: the
+    cache also holds `denied` and `absent` entries, and an older file may hold
+    fields this version does not write."""
+    for ticket, record in sorted(records.items()):
+        if not isinstance(record, dict):
+            continue
+        for field in TRACKER_TEXT_FIELDS:
+            value = record.get(field)
+            if isinstance(value, str):
+                yield ticket, field, value
+        for field in TRACKER_LIST_FIELDS:
+            values = record.get(field)
+            if isinstance(values, list):
+                for value in values:
+                    if isinstance(value, str):
+                        yield ticket, field, value
+
+
+def redact_tracker(records: dict, counts: Counter[str]) -> int:
+    """Re-redact a ticket-tracker cache in place under the rules in force now;
+    return how many records changed.
+
+    `fetch-tickets` redacts only what it fetches, so a rule added after a record
+    was cached never reached it. Idempotent: a placeholder is words only and so
+    cannot match a rule, and a value with nothing to take is left as it was.
+    `counts` accumulates spans changed per rule - never the text.
+    """
+    touched = 0
+    for record in records.values():
+        if not isinstance(record, dict):
+            continue
+        before = sum(counts.values())
+        for field in TRACKER_TEXT_FIELDS:
+            if isinstance(record.get(field), str):
+                record[field] = redact(record[field], counts)
+        for field in TRACKER_LIST_FIELDS:
+            if isinstance(record.get(field), list):
+                record[field] = [
+                    redact(value, counts) if isinstance(value, str) else value
+                    for value in record[field]
+                ]
+        touched += sum(counts.values()) > before
+    return touched
+
+
 def findings(records: dict) -> list[tuple[str, str, str]]:
     """Every (ticket, field, rule) a stored value falls foul of.
 
@@ -147,6 +200,6 @@ def findings(records: dict) -> list[tuple[str, str, str]]:
     """
     return [
         (ticket, field, rule)
-        for ticket, field, value in mined_values(records)
+        for ticket, field, value in (*mined_values(records), *tracker_values(records))
         if (rule := matched_rule(value))
     ]
