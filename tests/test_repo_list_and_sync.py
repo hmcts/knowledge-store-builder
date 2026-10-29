@@ -520,6 +520,10 @@ class CliTest(SettingsIsolated):
                 # the other route to the same enrichment: ask the tracker
                 # rather than import an export of it
                 "fetch-tickets",
+                # the cached tracker text, brought under rules added since it was
+                # fetched; needs no credentials, so a store reading a committed
+                # cache can run it
+                "redact-cache",
                 # `graphify merge-graphs` runs at this point, and takes a shell
                 # glob while extraction took the declaration - so this names what
                 # the glob would read before anything reads it (#222)

@@ -686,8 +686,12 @@ Anything in a mined value matching a rule in `KSB_SENSITIVE_PATTERNS` is
 therefore replaced before it is stored — as a description, as a subject and as
 body prose alike.
 
-**One rule ships, and only one.** An email address has the same shape everywhere,
-so it is the only identifier this library can recognise without assuming a
+**Two rules ship, and only two.** An email address has the same shape everywhere,
+and so does a pasted mention, `[@Display Name|<profile link>]`, which a tracker or
+chat tool writes into a comment and which names a person twice, once in the name
+and once in the link; the whole span is withheld as `[pasted mention withheld]`
+and a code fragment such as `[@attr=value]`, which has no link, is left alone.
+They are the only identifiers this library can recognise without assuming a
 jurisdiction or a subject domain. Every other format belongs to an organisation:
 reference numbers for cases, claims, accounts or patients are locally defined, and
 national identifiers and postal codes vary by country. A library that shipped one
@@ -733,6 +737,17 @@ and the rule, and never the value: a gate that printed the text would copy it
 into a build log, read more widely and kept longer than the artefact. It is a
 stage of its own rather than a flag on `status` because `status` never fails by
 design.
+
+**The tracker cache is covered too, and a rule added later reaches it.**
+`fetch-tickets` redacts what it fetches, once, and never fetches a resolved ticket
+again, so a rule added afterwards would never touch a record already cached.
+`knowledgestore redact-cache` re-applies the rules in force to the cache's
+summary, description, resolution and comments. It needs no credentials, writes
+only when something changed, and a second run changes nothing. Like the gate it
+reports counts — spans changed per rule, records touched — and never the text.
+`check-evidence` reads `ticket-tracker.json.gz` as well as the ticket
+descriptions and names the ticket, the field and the rule. Re-run `redact-cache`
+after upgrading the library or changing `KSB_SENSITIVE_PATTERNS`.
 
 ## The prose layer, and how it is checked
 

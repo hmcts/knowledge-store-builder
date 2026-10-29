@@ -12793,6 +12793,103 @@ MUTATIONS = (
             "server.test_tools_tickets.TicketTest.test_branch_only_text_on_a_landed_ticket_is_kept_apart",
         ),
     ),
+    Mutation(
+        "the tracker cache is not re-redacted",
+        "redact_cache.py",
+        "    touched = sensitive.redact_tracker(cache, counts)\n",
+        "    touched = 0\n",
+        "#527: a rule added after a fetch never reached cached tracker text, so a name a "
+        "store had since taught the library to withhold stayed in its committed cache",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
+        ),
+    ),
+    Mutation(
+        "check-evidence ignores the tracker cache",
+        "check_evidence.py",
+        "        config.TICKET_TRACKER_PATH,\n",
+        "",
+        "#527: the gate read ticket descriptions only, and passed a store whose far larger "
+        "tracker cache held matching text",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "check-evidence reads the tracker cache's path but not its fields",
+        "sensitive.py",
+        "(*mined_values(records), *tracker_values(records))",
+        "(*mined_values(records),)",
+        "#527: a named tracker artefact was opened and reported clean because none of "
+        "its summary, description, resolution or comments was looked at",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "a check prints matched text",
+        "sensitive.py",
+        "        (ticket, field, rule)\n        for ticket, field, value in (*mined",
+        '        (ticket, field, f"{rule} {value}")\n        for ticket, field, value in (*mined',
+        "#527: a finding that carried the value copied a person's name into a build log, "
+        "which is read more widely and kept longer than the artefact it was checking",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_build_intent_index.CheckEvidenceStageTest.test_the_gate_never_prints_the_value_it_matched",
+        ),
+    ),
+    Mutation(
+        "the gzip writer truncates the live file as it writes",
+        "io.py",
+        '            open(staging, "wb") as raw,',
+        '            open(path, "wb") as raw,',
+        "#527 review: an error mid-write left a half-written tracker cache, whose "
+        "resolved tickets are never fetched again",
+        (
+            "test_redact_cache.AtomicWriteTest.test_an_error_mid_write_leaves_the_original_file_byte_identical",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_a_second_run_changes_nothing",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
+        ),
+    ),
+    Mutation(
+        "an email display name leaves its profile link",
+        "config.py",
+        r"\[@(?:[^\]\n]|\[[a-z ]+ withheld\]){1,80}?\|",
+        r"\[@[^\]\n]{1,80}?\|",
+        "#527 review: the email rule runs first and its placeholder holds a `]` the name "
+        "class cannot cross, so the profile link of an email display name survived",
+        (
+            "test_redact_cache.PastedMentionRuleTest.test_an_email_display_name_leaves_no_link_behind",
+        ),
+    ),
+    Mutation(
+        "the cache is re-redacted without naming the stages that rebuild its copies",
+        "redact_cache.py",
+        "    if touched:\n        print(\n",
+        "    if False:\n        print(\n",
+        "#527 review: a clean cache reported as a clean store, while the page, index and "
+        "intent layer kept the old text",
+        (
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+        ),
+    ),
 )
 
 
