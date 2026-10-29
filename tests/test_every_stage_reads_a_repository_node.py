@@ -10,6 +10,7 @@ store with and without the node.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import json
 import re
@@ -48,6 +49,15 @@ RUN: dict[str, list[str]] = {
     "index": [],
     "status": [],
     "dangling-endpoints": [],
+}
+# A stage whose optional dependency is not installed refuses before it reads the
+# graph, with or without the node, so running it says nothing: it is left out, and
+# named, rather than passed or failed on. CI's default install has no PyYAML.
+NEEDS_MODULE = {"deployments": "yaml"}
+LEFT_OUT = {
+    stage: f"needs {module}, which is not installed"
+    for stage, module in NEEDS_MODULE.items()
+    if importlib.util.find_spec(module) is None
 }
 # Stages that must actually reach the graph here, so a harness that has gone vacuous
 # (every stage refusing for a missing input) says so instead of passing.
@@ -184,6 +194,8 @@ class EveryStageReadsARepositoryNode(SettingsIsolated, unittest.TestCase):
         must finish the way it finishes without the node."""
         outcomes: dict[str, dict[bool, tuple[str, str]]] = {}
         for stage in RUN:
+            if stage in LEFT_OUT:
+                continue
             for with_node in (False, True):
                 with tempfile.TemporaryDirectory() as raw:
                     config.configure(
@@ -196,7 +208,7 @@ class EveryStageReadsARepositoryNode(SettingsIsolated, unittest.TestCase):
         differ = {s: o for s, o in outcomes.items() if o[True][0] != o[False][0]}
         self.assertEqual(differ, {})
         self.assertEqual(
-            [s for s in MUST_SUCCEED if outcomes[s][True][0] != "ok"],
+            [s for s in MUST_SUCCEED if s not in LEFT_OUT and outcomes[s][True][0] != "ok"],
             [],
             f"these stages never reached the graph, so the check above says nothing: {outcomes}",
         )
