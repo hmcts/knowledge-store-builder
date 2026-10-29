@@ -821,6 +821,13 @@ by searching labels for a key name. A `config_truncated: <n>` beside it means
 the matched repository's `<repo>::repository` node, which `packages` shares for
 its `USES_MODULE` anchor; a service no repository matched gets no edge.
 
+Config values are published with the node, so those matching the secret rules
+(built-in plus `KSB_SENSITIVE_PATTERNS`) are withheld as `[<rule> withheld]` and
+their keys listed under `config_withheld`; the run names repository, file, key and
+rule, never the value, and `check-evidence` reads deployment config too. A
+literal credential found this way should still be rotated at source: the graph no
+longer holds it, the repository still does.
+
 `json-schema` reads JSON Schema documents itself, replacing graphify's output
 for a format graphify does read, and owns every file it recognises as one. **That is an output change
 you will see:** graphify's keyword nodes for those files are removed from the

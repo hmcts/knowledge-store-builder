@@ -81,7 +81,7 @@ WRITE_SINKS = frozenset(
 # it. Listed so a module touching the archive through a sink this file does not
 # know about still has to be classified by hand rather than
 # passing as neither a reader nor a writer.
-ARCHIVE_READERS = frozenset({"status", "store_manifest"})
+ARCHIVE_READERS = frozenset({"check_evidence", "status", "store_manifest"})
 
 # `knowledgestore <stage>` inside the section's fenced blocks, which is where the
 # stage set is derived from: a block is what an operator reads as the list, and

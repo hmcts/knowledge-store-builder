@@ -12793,6 +12793,97 @@ MUTATIONS = (
             "server.test_tools_tickets.TicketTest.test_branch_only_text_on_a_landed_ticket_is_kept_apart",
         ),
     ),
+    Mutation(
+        "a deployment config value that matches a secret rule is written unmasked",
+        "deploy_secrets.py",
+        "        out[key] = sensitive.placeholder(rule) if rule else value\n",
+        "        out[key] = value\n",
+        "#541: a credential typed into an overlay was published in the graph, the page and "
+        "the MCP answers, and the node still listed it as withheld",
+        (
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_store_rule_is_applied",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_value_shaped_like_a_vendor_token_is_withheld_under_a_harmless_key",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_value_under_a_secret_named_key_is_withheld",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_an_instrumentation_key_is_withheld",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_base_fact_is_masked_as_well",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_value_is_in_no_output_and_no_file_the_stage_wrote",
+            "test_deployments_withhold_credentials.ATruncatedValueIsStillWithheld.test_a_long_matching_value_is_withheld_not_stored_cut_off",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_the_rules_the_stage_applies_are_the_rules_the_gate_reads",
+            "test_deployments_withhold_credentials.TheValuesRouteIsMaskedToo.test_a_values_file_value_is_withheld",
+        ),
+    ),
+    Mutation(
+        "the stage report prints the value it withheld",
+        "deploy_secrets.py",
+        "            found.append((key, rule))\n",
+        "            found.append((key, value))\n",
+        "#541: the report that says a credential was found put it in a build log, "
+        "which is read more widely and kept longer than the graph",
+        (
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_report_names_repository_file_key_and_rule",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_value_is_in_no_output_and_no_file_the_stage_wrote",
+            "test_deployments_withhold_credentials.ATruncatedValueIsStillWithheld.test_a_long_matching_value_is_withheld_not_stored_cut_off",
+            "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
+            "test_deployments_withhold_credentials.TheValuesRouteIsMaskedToo.test_a_values_file_value_is_withheld",
+        ),
+    ),
+    Mutation(
+        "the check-evidence report prints the value it flagged",
+        "deploy_secrets.py",
+        "        (node_id, rule)\n        for node_id, key, value in deployment_values(graph)\n",
+        "        (node_id, value)\n        for node_id, key, value in deployment_values(graph)\n",
+        "#541: a gate that names the value in its output republishes exactly what it "
+        "was called to protect",
+        (
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_a_graph_still_holding_a_matching_value_fails_and_names_the_node",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_no_value_is_printed",
+        ),
+    ),
+    Mutation(
+        "a mask that matched nothing still leaves a zero entry in the caller's counter",
+        "secret_mask.py",
+        "        counts.update({rule: hits for rule, hits in tally.items() if hits > 0})\n",
+        "        counts.update(tally)\n",
+        "#541: `if counts:` read true over text that was never masked, and one store "
+        "reported 13,029 locations for 951 matches",
+        (
+            "test_build_deployments.Layer.test_the_configuration_travels_on_the_node_so_it_can_be_quoted",
+            "test_deployment_prefix_match.ReachabilityReport.test_the_run_names_the_services_no_repository_could_match",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_node_with_nothing_withheld_carries_no_marker",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_store_rule_is_applied",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_value_shaped_like_a_vendor_token_is_withheld_under_a_harmless_key",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_value_that_matches_nothing_is_kept_unchanged",
+            "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_withheld_keys_are_listed_sorted",
+            "test_deployments_withhold_credentials.ATruncatedValueIsStillWithheld.test_a_long_matching_value_is_withheld_not_stored_cut_off",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_a_graph_still_holding_a_matching_value_fails_and_names_the_node",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_a_rule_added_later_is_noticed",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_only_deployment_nodes_are_read",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_what_the_stage_withheld_is_not_flagged_again",
+            "test_deployments_withhold_credentials.MaskLeavesNoZeroEntries.test_text_that_matches_nothing_leaves_the_counter_empty",
+            "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
+            "test_deployments_withhold_credentials.TheValuesRouteIsMaskedToo.test_a_values_file_value_is_withheld",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_one_node_and_the_existing_route_keeps_it",
+            "test_repository_node.ConfigTruncation.test_a_capped_config_says_how_many_keys_were_dropped",
+        ),
+    ),
+    Mutation(
+        "check-evidence ignores deployment config",
+        "check_evidence.py",
+        '    if isinstance(records.get("nodes"), list):\n',
+        "    if False:\n",
+        "#541: a graph holding a credential, or one a later rule now matches, passed the "
+        "gate and stayed on the page",
+        (
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_a_graph_still_holding_a_matching_value_fails_and_names_the_node",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_a_rule_added_later_is_noticed",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_no_value_is_printed",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_the_node_list_is_capped",
+            "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_what_the_stage_withheld_is_not_flagged_again",
+        ),
+    ),
 )
 
 

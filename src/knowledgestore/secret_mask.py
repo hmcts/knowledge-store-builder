@@ -1073,7 +1073,10 @@ def mask(text: str, counts: Counter[str] | None = None) -> str:
     text = _apply_key_names(text, tally)
     text = _apply_structures(text, tally)
     if counts is not None:
-        counts.update(tally)
+        # Positive entries only: a rule that matched nothing is not a hit, and a
+        # zero left in the caller's Counter makes `if counts:` true over text that
+        # was never masked - one store reported 13,029 locations for 951 matches.
+        counts.update({rule: hits for rule, hits in tally.items() if hits > 0})
     return text
 
 

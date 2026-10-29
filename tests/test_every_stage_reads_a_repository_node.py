@@ -48,6 +48,7 @@ RUN: dict[str, list[str]] = {
     "explorer": [],
     "index": [],
     "status": [],
+    "check-evidence": [],
     "dangling-endpoints": [],
 }
 # A stage whose optional dependency is not installed refuses before it reads the
@@ -74,6 +75,7 @@ MUST_SUCCEED = (
     "explorer",
     "index",
     "status",
+    "check-evidence",
     "dangling-endpoints",
 )
 

@@ -362,6 +362,19 @@ repository, and read the config there. Where `KSB_DEPLOY_MAX_KEYS` cut a
 deployment's config, the node carries `config_truncated: <n>`, the number of keys
 dropped, so a key that is missing is not read as a key the service never set.
 
+**Configuration values are published, so a secret-shaped one is withheld.** The
+graph, the explorer page and the MCP server's answers all carry `metadata.config`.
+Each value is read against the library's secret rules (the built-in ones and any
+`KSB_SENSITIVE_PATTERNS`) as `<key>: <value>`, on both layouts. A value that
+matches is replaced by `[<rule> withheld]` and its key is listed, sorted, under
+`config_withheld`; a value that is wholly a templating placeholder is kept unless
+a value-shape rule matches it. The run reports repository, file, key and rule for
+each, never the value. `knowledgestore check-evidence` reads the graph's
+deployment config with the rules in force, so a rule added later is noticed;
+re-running `deployments` re-masks. **Withholding it from the graph does not remove
+it from the repository: a literal credential found this way should still be
+rotated at source.**
+
 ## 4. Architecture-as-code earns its place
 
 If a repository in your organisation contains an architecture model, ingest it
