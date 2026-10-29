@@ -12802,9 +12802,11 @@ MUTATIONS = (
         "store had since taught the library to withhold stayed in its committed cache",
         (
             "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
             "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
             "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
             "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
         ),
     ),
     Mutation(
@@ -12854,6 +12856,16 @@ MUTATIONS = (
         "resolved tickets are never fetched again",
         (
             "test_redact_cache.AtomicWriteTest.test_an_error_mid_write_leaves_the_original_file_byte_identical",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_a_second_run_changes_nothing",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
         ),
     ),
     Mutation(
