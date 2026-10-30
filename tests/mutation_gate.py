@@ -1963,6 +1963,8 @@ MUTATIONS = (
         "the layer carried `repositories/<repo>/<path>` as `source_file` with no `repo`, so the file-to-ticket join matched nothing and every node lost its tickets, silently: the graph, the index and every count were valid (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
+            "test_extract_ast_declined_graphify.DeclinedByGraphifyTest.test_the_stage_names_the_declined_file_and_fails",
+            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_store_behind_two_links_is_still_counted_rather_than_recorded_as_zeros",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
@@ -1997,6 +1999,8 @@ MUTATIONS = (
         "intent[repo][source_file] is the join; a node with repo unset has no row to read, so an extract-ast layer joins to nothing even when its paths are right (#512)",
         (
             "test_duplicate_input_paths.ExtractAstTest.test_the_real_extractor_doubles_nodes_for_a_repeated_file",
+            "test_extract_ast_declined_graphify.DeclinedByGraphifyTest.test_the_stage_names_the_declined_file_and_fails",
+            "test_extract_ast_declined_graphify.LossySpellingTest.test_a_store_behind_two_links_is_still_counted_rather_than_recorded_as_zeros",
             "test_extract_ast_declined_graphify.SymlinkedStoreRootTest.test_the_per_file_record_matches_content_set_keys_under_a_symlinked_root",
             "test_extract_ast_grammars.GrammarsTest.test_sql_yields_nodes",
             "test_extract_ast_grammars.GrammarsTest.test_terraform_yields_nodes",
