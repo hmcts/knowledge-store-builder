@@ -194,7 +194,7 @@ taking the zero as the new baseline.
 
 Beside the per-file record sits `<layer>_extension_counts.json`: nodes per source-file
 extension. The run prints the largest and warns when one extension's share of the layer
-has grown by `EXTENSION_GROWTH_POINTS` since the last run, as when graphify 0.9.97 began
+has grown by `EXTENSION_GROWTH_POINTS` since the last run, as when graphify 0.9.95 began
 extracting YAML as one node per key. The warning never refuses; the remedy is to list the
 content in `config/graphify-ignore.txt`. A run with a failed repository leaves the record
 alone, because a layer missing a repository is not a baseline.
@@ -1024,7 +1024,7 @@ def report_duplicate_ids(merged: int, collisions: "list[str]") -> "tuple[str, st
 
 
 # An extension is flagged when its share of the layer has grown by this many points
-# (0.10 is ten percentage points) since the last run. graphify 0.9.97 took `.yaml` from
+# (0.10 is ten percentage points) since the last run. graphify 0.9.95 took `.yaml` from
 # no nodes to a large share of a layer, so the real event clears this by a wide
 # margin. A routine run - one repository added or refactored among hundreds - moves an
 # extension's share by a point or two, and a threshold that fires on that is read once

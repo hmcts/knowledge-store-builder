@@ -72,7 +72,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
           # The MCP SDK, pinned to what the `server` extra declares, so the server's
           # tests under tests/server run instead of skipping. The default-install run
           # above skips them with a reason that names the extra.
@@ -261,7 +261,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
           # The MCP SDK, pinned to what the `server` extra declares, so the server's
           # tests under tests/server run instead of skipping. The default-install run
           # above skips them with a reason that names the extra.
@@ -381,7 +381,7 @@ jobs:
           # of its own suite never running. Found by the mutation gate below,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
-          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.94'
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
           # The MCP SDK, pinned to what the `server` extra declares, so the server's
           # tests under tests/server run instead of skipping. The default-install run
           # above skips them with a reason that names the extra.

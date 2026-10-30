@@ -130,7 +130,7 @@ clones it or it is removed from `config/repositories.txt`.
 
 `extract-ast` also prints nodes per extension and warns, never refuses, when one
 extension's share of the layer has grown by ten percentage points or more since the
-last run (`.yaml: 0 -> 12,400 nodes (41% of the layer)`; graphify 0.9.97 began extracting
+last run (`.yaml: 0 -> 12,400 nodes (41% of the layer)`; graphify 0.9.95 began extracting
 YAML as one node per key). Content the store does not want in the layer is listed in
 `config/graphify-ignore.txt` (`*.yaml`, `*.yml`) and applied with `apply-ignores`. Files
 graphify failed on are reported as `could not be parsed`, with a count per extension;
