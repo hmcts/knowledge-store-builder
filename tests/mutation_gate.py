@@ -4822,6 +4822,7 @@ MUTATIONS = (
             "test_mapping_trigger.WhatWarrantsARunTest.test_a_path_nobody_thought_about_is_read_as_one_that_matters",
             "test_mapping_trigger.WhatWarrantsARunTest.test_the_nightly_runs_for_a_document_the_table_mutates",
             "test_mapping_trigger.WhatWarrantsARunTest.test_the_nightly_runs_when_only_source_changed",
+            "test_mapping_trigger.WhatWarrantsARunTest.test_the_nightly_runs_when_only_the_servers_source_changed",
         ),
     ),
     Mutation(
