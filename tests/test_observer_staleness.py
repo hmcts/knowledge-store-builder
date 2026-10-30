@@ -323,6 +323,7 @@ class AMergeInARealRepositoryTest(unittest.TestCase):
 
     @staticmethod
     def _write(root: Path, path: str, text: str) -> None:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
 
     def _merge_main_into_a_branch(self, root: Path, changes: dict[str, str]) -> str:
@@ -430,6 +431,34 @@ class AMergeInARealRepositoryTest(unittest.TestCase):
 
         self.assertEqual(why, "")
         self.assertEqual(arrived, {"test_renamed": ("AlphaTest.test_one", "OtherTest.test_one")})
+
+    def test_a_test_arriving_in_a_package_under_tests_is_an_arrival_under_its_package_name(self):
+        """Catches the arrival map keying a package module by its bare file name.
+
+        `tests/server/test_gamma.py` arrived as `test_gamma`, a module no entry names
+        and no run can load, so a real arrival was either dropped from the verdict or
+        sent to a runner that cannot find it. The gate names the module
+        `server.test_gamma`, and the arrival has to match that to meet an entry."""
+        root = self._repository()
+        base = self._merge_main_into_a_branch(
+            root,
+            {
+                "tests/server/__init__.py": "",
+                "tests/server/test_gamma.py": ALPHA,
+            },
+        )
+        table = (entry("a server entry", ("server.test_gamma.AlphaTest.test_one",)),)
+
+        arrived, why = staleness.what_arrived(base, "HEAD")
+        report = staleness.judge(table, arrived, why or base)
+
+        self.assertEqual(why, "")
+        self.assertEqual(
+            arrived,
+            {"server.test_gamma": ("AlphaTest.test_one", "OtherTest.test_one")},
+        )
+        self.assertEqual(report.verdict, staleness.SUSPECT)
+        self.assertEqual(report.suspects[0].arrived, ("OtherTest.test_one",))
 
     def test_the_report_reaches_the_step_summary_and_the_job_output(self):
         """`main` end to end over the files Actions actually reads. A verdict that
@@ -902,3 +931,24 @@ class TheWorkflowSettlesOnAPullRequestTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryTestModuleUnderTestsIsSeenTest(unittest.TestCase):
+    """The next package under `tests/` is not missed the way `tests/server/` was."""
+
+    def test_each_test_module_at_any_depth_is_seen_by_both_tools_and_named_as_the_gate_names_it(
+        self,
+    ):
+        """Catches either tool going blind to a `test_*.py` at some depth under
+        `tests/`: the trigger not treating its arrival as one, or the arrival map
+        naming it by something `mutation_gate.observer_path` cannot resolve back to
+        the file. Walks the real tree, so a new package is covered the day it lands."""
+        suite = Path(__file__).resolve().parent
+        found = sorted(suite.rglob("test_*.py"))
+        self.assertTrue(any(path.parent != suite for path in found), "no package test to walk")
+        for path in found:
+            relative = path.relative_to(suite.parent).as_posix()
+            with self.subTest(module=relative):
+                self.assertTrue(trigger.is_test_module(relative))
+                module = staleness.module_name(relative)
+                self.assertEqual(gate.observer_path(f"{module}.Class.test_a"), path)

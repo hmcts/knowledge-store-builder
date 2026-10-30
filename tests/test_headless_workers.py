@@ -19,7 +19,7 @@ from pathlib import Path
 import secret_corpus
 from settings_isolation import SettingsIsolated
 
-from knowledgestore import chunk_status, config, summary_batches
+from knowledgestore import chunk_status, config, cost, summary_batches
 from knowledgestore import headless_workers as hw
 from knowledgestore.headless_workers import Job, Outcome, Report
 
@@ -41,6 +41,7 @@ needs_graphify = unittest.skipUnless(
 def result_json(session="sess-1", is_error=False, denials=0, inp=10, out=5, usd=0.5):
     return json.dumps(
         {
+            "type": "result",
             "session_id": session,
             "is_error": is_error,
             "num_turns": 2,
@@ -443,9 +444,12 @@ class ExtractTests(StoreBase):
         results = sorted(
             p.name for p in (config.CHUNK_PLAN_PATH.parent / ".workers/results").glob("*")
         )
+        # Chunk 1 ran once, in the first command only. Chunk 2 ran in both - its first
+        # attempt wrote nothing - and the second attempt's result sits beside the first.
         self.assertEqual(
-            results, ["extract-0001-1.json", "extract-0002-1.json"]
-        )  # chunk 1 ran once, in the first command only
+            results,
+            ["extract-0001-1.json", "extract-0002-1.attempt-2.json", "extract-0002-1.json"],
+        )
 
     def test_the_prompt_carries_the_files_the_out_path_and_the_estate_content_rule(self):
         # Break: prompt assembly - a placeholder left in, or a rule dropped.
@@ -840,6 +844,64 @@ class SummariesTests(StoreBase):
         )
         self.assertEqual(code, 1)
         self.assertIn("batch_", err)
+
+
+class ARerunKeepsTheFailedAttemptsSpendTest(Base):
+    """A batch that fails its gate and is run again is two attempts, and `cost` sums both."""
+
+    def test_cost_over_the_results_is_the_sum_of_both_attempts(self):
+        """Catches the re-run's result file replacing the failed attempt's, so `cost`
+        undercounts by the whole spend of the attempt that failed (#524).
+
+        Attempt one: 10 + 100 + 1000 = 1,110 input, 5 output, $0.50. Attempt two:
+        20 + 100 + 1000 = 1,120 input, 7 output, $0.25. Together 2,230 input, 12
+        output, $0.75 over two runs, of which the re-run is one run and $0.25."""
+        job = self.job(gate=lambda: ["still bad"])
+        first = hw.run_job(
+            job,
+            **self.opts(Stub(job.out, stdout=result_json(inp=10, out=5, usd=0.5)), repair_rounds=0),
+        )
+        second = hw.run_job(
+            job,
+            **self.opts(
+                Stub(job.out, stdout=result_json(inp=20, out=7, usd=0.25)), repair_rounds=0
+            ),
+        )
+
+        self.assertEqual(first.outcome, Outcome.GATE_FAILED)
+        self.assertEqual(second.outcome, Outcome.GATE_FAILED)
+        self.assertEqual(len(list((self.runs / "results").glob("*.json"))), 2)
+        tally = cost.measure([self.runs / "results"])
+        self.assertEqual(tally.headless.runs, 2)
+        self.assertEqual(tally.headless.input, 2230)
+        self.assertEqual(tally.headless.output, 12)
+        self.assertAlmostEqual(tally.headless.dollars, 0.75)
+        self.assertEqual(tally.reruns.runs, 1)
+        self.assertAlmostEqual(tally.reruns.dollars, 0.25)
+        lines = "\n".join(cost.report(tally))
+        self.assertIn("first pass: 1 runs, cost $0.50", lines)
+        self.assertIn("re-runs of a failed attempt: 1 runs, cost $0.25", lines)
+
+    def test_a_third_attempt_is_numbered_after_the_second(self):
+        """Catches attempt numbering that reuses a name once two attempts exist, which
+        would erase the second attempt's spend while keeping the first's."""
+        job = self.job(gate=lambda: ["still bad"])
+        for _ in range(3):
+            hw.run_job(job, **self.opts(Stub(job.out), repair_rounds=0))
+
+        names = sorted(p.name for p in (self.runs / "results").iterdir())
+        self.assertEqual(
+            names,
+            ["extract-1-1.attempt-2.json", "extract-1-1.attempt-3.json", "extract-1-1.json"],
+        )
+
+    def test_a_first_attempt_keeps_the_name_it_always_had(self):
+        """Catches a rename of the first attempt's file, which every consumer of the
+        results directory and every committed run would then stop finding."""
+        job = self.job()
+        hw.run_job(job, **self.opts(Stub(job.out)))
+
+        self.assertEqual([p.name for p in (self.runs / "results").iterdir()], ["extract-1-1.json"])
 
 
 if __name__ == "__main__":

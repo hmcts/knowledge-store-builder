@@ -102,6 +102,40 @@ class WhatWarrantsARunTest(unittest.TestCase):
                 self.assertFalse(decision.run, decision.reason)
                 self.assertIn("nightly", decision.reason)
 
+    def test_a_merge_that_adds_renames_or_deletes_a_test_in_a_package_runs_immediately(self):
+        """Catches the merge rule reading only `tests/test_*.py`, which is #530: the
+        MCP server's tests live in `tests/server/`, and a module arriving there makes
+        an observer set stale exactly as one at the top level does, while the push
+        skipped the check and reported nothing."""
+        for line in (
+            "A\ttests/server/test_new_tool.py",
+            "D\ttests/server/test_old_tool.py",
+            "R090\ttests/test_x.py\ttests/server/test_x.py",
+        ):
+            with self.subTest(line=line):
+                decision = trigger.decide("push", changes(line), "the last push")
+
+                self.assertTrue(decision.run, decision.reason)
+                self.assertIn("tests/server/", decision.reason)
+
+    def test_a_package_helper_that_is_not_a_test_module_waits_for_the_night(self):
+        """The over-correction guard for the rule above: `tests/server/library_store/`
+        holds fixtures, and a fixture file is not a test module."""
+        decision = trigger.decide("push", changes("A\ttests/server/helpers.py"), "the last push")
+
+        self.assertFalse(decision.run, decision.reason)
+
+    def test_the_nightly_runs_when_only_the_servers_source_changed(self):
+        """Catches the nightly treating `src/knowledgestore/server/` as something no
+        test reads. Its tests observe the mutated lines there, and the three `server:`
+        entries target it."""
+        decision = trigger.decide(
+            "schedule", changes("M\tsrc/knowledgestore/server/tools.py"), "last night"
+        )
+
+        self.assertTrue(decision.run, decision.reason)
+        self.assertIn("src/knowledgestore/server/tools.py", decision.reason)
+
     def test_the_nightly_runs_when_only_source_changed(self):
         """The argument this design turns on, so it is pinned rather than asserted in
         a comment. A source change alone can invalidate an observer set in both

@@ -199,13 +199,34 @@ def _output_parses(out: Path) -> bool:
         return False
 
 
+def _attempt_stem(runs: Path, kind: str, report: Report) -> Path:
+    """The result path for this round, without a suffix, that no earlier attempt used.
+
+    A job whose gate failed is run again by the next `workers` invocation, and that
+    run starts its rounds at 1 again - so `<kind>-<key>-1.json` is the failed
+    attempt's file, and writing it again would erase the spend `cost` sums. The first
+    attempt keeps the name it always had; a later one is `<name>.attempt-N`, which
+    `cost` reads as a re-run. Both suffixes are checked, because a failed attempt may
+    have left a `.txt` where the re-run left a `.json`.
+    """
+    results = runs / "results"
+    base = f"{kind}-{report.key}-{report.rounds}"
+    attempt = 1
+    while any(
+        (results / f"{base}{'' if attempt == 1 else f'.attempt-{attempt}'}{suffix}").exists()
+        for suffix in (".json", ".txt")
+    ):
+        attempt += 1
+    return results / (base if attempt == 1 else f"{base}.attempt-{attempt}")
+
+
 def _record(report: Report, runs: Path, kind: str, proc, parsed: dict | None) -> None:
-    stem = runs / "results" / f"{kind}-{report.key}-{report.rounds}"
+    stem = _attempt_stem(runs, kind, report)
     if parsed is not None:
-        path = stem.with_suffix(".json")
+        path = stem.with_name(stem.name + ".json")
         io.write_json(path, parsed)
     else:
-        path = stem.with_suffix(".txt")
+        path = stem.with_name(stem.name + ".txt")
         io.checked_write_target(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(proc.stdout or "", encoding="utf-8")

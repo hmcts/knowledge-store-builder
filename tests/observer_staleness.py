@@ -713,6 +713,16 @@ def changed_test_modules(base: str, head: str, *, run=subprocess.run) -> tuple[s
     return tuple(sorted({change.path for change in changes if trigger.is_test_module(change.path)}))
 
 
+def module_name(path: str) -> str:
+    """A test module's name as the gate spells it: `tests/server/test_x.py` is `server.test_x`.
+
+    The path below `tests/`, dotted, which is what `mutation_gate.module_of` returns
+    for an observer and `observer_path` resolves back to the file. The bare file name
+    named a package module as one no entry mentions and no run can load.
+    """
+    return ".".join(Path(path).relative_to("tests").with_suffix("").parts)
+
+
 def arrivals_between(
     base: str, head: str, modules: tuple[str, ...], *, run=subprocess.run
 ) -> Arrivals | None:
@@ -733,7 +743,7 @@ def arrivals_between(
             return None
         arrived = arrivals(before, after)
         if arrived:
-            found[Path(path).stem] = arrived
+            found[module_name(path)] = arrived
     return found
 
 

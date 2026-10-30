@@ -5,7 +5,9 @@
 Two kinds of record are read, and each file is read as one of them by its suffix:
 
     *.json             a headless run's result, as `claude -p --output-format json`
-                       prints it: `usage` and `total_cost_usd`, summed per run
+                       prints it: `usage` and `total_cost_usd`, summed per run.
+                       `<name>.attempt-N.json` is a re-run of a job whose earlier
+                       attempt failed: summed with the rest and reported apart
     *.jsonl, *.output  a Claude Code transcript, such as a subagent's; usage is
                        summed once per distinct message id
 
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -51,6 +54,9 @@ from pathlib import Path
 from typing import Any
 
 RESULT_SUFFIXES = frozenset({".json"})
+# `workers` writes a re-run's result beside the failed attempt's as
+# `<name>.attempt-N.json`, so a re-run never replaces the spend it repeats.
+RERUN = re.compile(r"\.attempt-(\d+)$")
 TRANSCRIPT_SUFFIXES = frozenset({".jsonl", ".output"})
 
 
@@ -145,6 +151,8 @@ class Transcripts:
 @dataclass
 class Tally:
     headless: Headless = field(default_factory=Headless)
+    # The part of `headless` that was a re-run of a job whose earlier attempt failed.
+    reruns: Headless = field(default_factory=Headless)
     transcripts: Transcripts = field(default_factory=Transcripts)
     skipped: int = 0
 
@@ -206,17 +214,26 @@ def measure(paths: Iterable[Path]) -> Tally:
             tally.skipped += 1
         else:
             tally.headless.add(result)
+            if RERUN.search(path.stem):
+                tally.reruns.add(result)
     return tally
 
 
-def report_headless(headless: Headless) -> list[str]:
+def report_headless(headless: Headless, reruns: Headless | None = None) -> list[str]:
     if not headless.runs:
         return []
-    return [
+    lines = [
         f"Headless results: {headless.runs:,} runs, {headless.turns:,} turns",
         f"  input {headless.input:,} tokens, output {headless.output:,} tokens",
         f"  cost ${headless.dollars:,.2f} (total_cost_usd, as the runs reported it)",
     ]
+    if reruns is not None and reruns.runs:
+        lines += [
+            f"  first pass: {headless.runs - reruns.runs:,} runs, "
+            f"cost ${headless.dollars - reruns.dollars:,.2f}",
+            f"  re-runs of a failed attempt: {reruns.runs:,} runs, cost ${reruns.dollars:,.2f}",
+        ]
+    return lines
 
 
 def report_transcripts(transcripts: Transcripts) -> list[str]:
@@ -239,7 +256,7 @@ def report_transcripts(transcripts: Transcripts) -> list[str]:
 
 
 def report(tally: Tally) -> list[str]:
-    lines = report_headless(tally.headless) + report_transcripts(tally.transcripts)
+    lines = report_headless(tally.headless, tally.reruns) + report_transcripts(tally.transcripts)
     if tally.skipped:
         lines.append(
             f"Skipped {tally.skipped:,} files that were neither, and read nothing from them"

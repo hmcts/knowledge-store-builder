@@ -12464,6 +12464,58 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the arrival map names a package test by its bare file name",
+        "tests/observer_staleness.py",
+        '    return ".".join(Path(path).relative_to("tests").with_suffix("").parts)',
+        "    return Path(path).stem",
+        "#530: `tests/server/test_x.py` arrived as `test_x`, a module no entry names and "
+        "no run can load, so the MCP server's tests were never settled against the table "
+        "and the verdict read CLEAN over them",
+        (
+            "test_observer_staleness.AMergeInARealRepositoryTest.test_a_test_arriving_in_a_package_under_tests_is_an_arrival_under_its_package_name",
+            "test_observer_staleness.EveryTestModuleUnderTestsIsSeenTest.test_each_test_module_at_any_depth_is_seen_by_both_tools_and_named_as_the_gate_names_it",
+        ),
+    ),
+    Mutation(
+        "the merge trigger sees only test modules directly under tests",
+        "tests/mapping_trigger.py",
+        '        path.startswith("tests/") and path.endswith(".py") and Path(path).name.startswith("test_")',
+        '        path.startswith("tests/") and "/" not in path[6:] and path.endswith(".py") and Path(path).name.startswith("test_")',
+        "#530: a test module added under a package in `tests/` goes stale an observer set "
+        "exactly as one at the top level does, and a push that skipped the check for it "
+        "reported a green summary over a mapping nobody verified",
+        (
+            "test_mapping_trigger.WhatWarrantsARunTest.test_a_merge_that_adds_renames_or_deletes_a_test_in_a_package_runs_immediately",
+            "test_observer_staleness.AMergeInARealRepositoryTest.test_a_test_arriving_in_a_package_under_tests_is_an_arrival_under_its_package_name",
+            "test_observer_staleness.EveryTestModuleUnderTestsIsSeenTest.test_each_test_module_at_any_depth_is_seen_by_both_tools_and_named_as_the_gate_names_it",
+        ),
+    ),
+    Mutation(
+        "a re-run's result file replaces the failed attempt's",
+        "src/knowledgestore/headless_workers.py",
+        "        attempt += 1\n",
+        "        break\n",
+        "#524: a job whose gate failed is run again, and its rounds restart at 1, so the "
+        "re-run wrote the file the failed attempt had written and `cost` lost that spend "
+        "(about 9% on one real rebuild) with nothing on the page to say so",
+        (
+            "test_headless_workers.ARerunKeepsTheFailedAttemptsSpendTest.test_a_third_attempt_is_numbered_after_the_second",
+            "test_headless_workers.ARerunKeepsTheFailedAttemptsSpendTest.test_cost_over_the_results_is_the_sum_of_both_attempts",
+            "test_headless_workers.ExtractTests.test_a_rerun_skips_the_complete_chunk_without_spawning",
+        ),
+    ),
+    Mutation(
+        "cost reports a re-run as part of the first pass",
+        "src/knowledgestore/cost.py",
+        "            if RERUN.search(path.stem):",
+        "            if False:",
+        "#524: the total was right and the split was not - a rebuild whose first pass cost "
+        "less than it appeared to would read as one that needed no repair",
+        (
+            "test_headless_workers.ARerunKeepsTheFailedAttemptsSpendTest.test_cost_over_the_results_is_the_sum_of_both_attempts",
+        ),
+    ),
+    Mutation(
         "json-schema: a declared fork is treated as an owner",
         "json_schema_refs.py",
         "    non_forks = [c for c in candidates if c[0] not in forks]",
