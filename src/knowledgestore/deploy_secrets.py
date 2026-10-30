@@ -106,7 +106,9 @@ def deployment_values(nodes: Iterable[object]) -> list[tuple[str, str, str]]:
     """
     found: list[tuple[str, str, str]] = []
     for node in nodes:
-        metadata = node.get("metadata") if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            continue
+        metadata = node.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") != "deployment":
             continue
         config = metadata.get("config")
