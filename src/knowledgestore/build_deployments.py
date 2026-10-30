@@ -775,7 +775,8 @@ def _add_repo_layer(
         name = communities.labels[str(cid)]
         # Withheld at flatten, before the length cap, on both routes: the key list
         # and the report read what that already replaced.
-        found = list(getattr(fact.config, "withheld", ()))
+        recorded: tuple[tuple[str, str], ...] = getattr(fact.config, "withheld", ())
+        found = list(recorded)
         tally.withheld.extend((deploy_repo, fact.rel, key, rule) for key, rule in found)
         node = _deployment_node(fact, deploy_repo, cid, name, found)
         graph["nodes"].append(node)
