@@ -852,6 +852,60 @@ expectSame('links: the which-repositories table links each file it names',
     + 'src/pipes/address.pipe.ts</a>')),
   [true, true]);
 
+// --- inputs are labelled and nothing steals focus (#514) -------------------
+// Catches: an <input> with no accessible name (WCAG 1.3.1 / 4.1.2) - a screen
+// reader announces it as an unnamed edit field - and an `autofocus` attribute,
+// which moves focus on load without the user asking (WCAG 3.2.1 / 2.4.3).
+// A name is an aria-label, a <label for=id> naming it, or an enclosing <label>
+// with text of its own. A placeholder is not a name.
+const pageHtml = readFileSync(pagePath, 'utf-8');
+// Plain string scanning, no regex over the page: patterns of this shape backtrack
+// super-linearly on hostile input (Sonar javascript:S8786).
+/** Every start tag on the page, as written: `<name ...>`. */
+const allTags = pageHtml.split('<').slice(1).flatMap((part) => {
+  const end = part.indexOf('>');
+  return end < 0 ? [] : [{ tag: `<${part.slice(0, end + 1)}`, after: part.slice(end + 1) }];
+});
+/** The element name of a start tag, lower-cased; '' for an end tag or comment. */
+const nameOf = (tag) => {
+  const body = tag.slice(1);
+  let n = 0;
+  while (n < body.length && /[a-zA-Z0-9]/.test(body[n])) n += 1;
+  return body.slice(0, n).toLowerCase();
+};
+/** The value of a quoted attribute in a start tag, or null. */
+const attrOf = (tag, attr) => {
+  const at = tag.indexOf(` ${attr}="`);
+  if (at < 0) return null;
+  const from = at + attr.length + 3;
+  return tag.slice(from, tag.indexOf('"', from));
+};
+/** The text of a fragment with its tags removed. */
+const textOf = (html) => html.split('<').map((part, k) => (k === 0 ? part : part.slice(part.indexOf('>') + 1))).join('');
+const inputTags = allTags.filter((t) => nameOf(t.tag) === 'input').map((t) => t.tag);
+const labelFors = new Set(allTags
+  .filter((t) => nameOf(t.tag) === 'label' && attrOf(t.tag, 'for') && t.after.trim())
+  .map((t) => attrOf(t.tag, 'for')));
+const wrapped = pageHtml.split('</label>').flatMap((chunk) => {
+  const start = chunk.lastIndexOf('<label');
+  if (start < 0) return [];
+  const label = chunk.slice(start);
+  const openTag = label.slice(0, label.indexOf('>') + 1);
+  if (nameOf(openTag) !== 'label' || attrOf(openTag, 'for') !== null) return [];
+  return textOf(label).trim() ? [label] : [];
+});
+const unlabelled = inputTags.filter((tag) => {
+  if (attrOf(tag, 'aria-label')) return false;
+  const id = attrOf(tag, 'id');
+  if (id && labelFors.has(id)) return false;
+  return !wrapped.some((l) => l.includes(tag));
+});
+expectSame('a11y: the page has inputs to check', inputTags.length > 0, true);
+expectSame('a11y: every <input> has an accessible label', unlabelled, []);
+expectSame('a11y: no element carries autofocus',
+  allTags.filter((t) => nameOf(t.tag) && t.tag.slice(1, -1).split(/[\s/]+/)
+    .some((tok) => tok.toLowerCase() === 'autofocus' || tok.toLowerCase().startsWith('autofocus='))).map((t) => t.tag), []);
+
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);
   process.exit(1);

@@ -1011,6 +1011,8 @@ h2 { font-size:15px; margin:18px 0 8px; color:var(--muted); font-weight:600; }
 .tabs button { padding:6px 16px; font-size:14px; border:1px solid var(--line);
        border-radius:8px 8px 0 0; background:var(--card); color:var(--muted); cursor:pointer; }
 .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden;
+           clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 #q { width:100%; padding:12px 14px; font-size:17px; border:2px solid var(--line);
      border-radius:8px; background:var(--card); color:var(--fg); outline:none; }
 #q:focus { border-color:var(--accent); }
@@ -1088,7 +1090,8 @@ questions nobody anticipated &mdash; see the README.</div>
   <button id="tab-search" class="on">Search</button>
   <button id="tab-ask">Ask a question</button>
 </div>
-<input id="q" type="search" placeholder="search components, capabilities, tickets&hellip;" autofocus>
+<label for="q" class="sr-only">Search components, capabilities and tickets</label>
+<input id="q" type="search" placeholder="search components, capabilities, tickets&hellip;">
 <div class="filters" id="search-filters">
   <select id="repo"><option value="">all repositories</option></select>
   <label><input type="checkbox" class="k" value="code" checked> code</label>
