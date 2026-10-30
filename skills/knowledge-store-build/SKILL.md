@@ -627,7 +627,9 @@ missing, or a `--brief` it refuses. The run prints the outcomes sorted by chunk 
 directory of result files. `--runs` sets where the work and results go (default
 `graphify-out/.workers`).
 
-To total the wave's cost, run `knowledgestore cost graphify-out/.workers/results`.
+To total the wave's cost, run `knowledgestore cost graphify-out/.workers/results`. A re-run of a
+job whose earlier attempt failed writes its results beside the first as
+`<name>.attempt-N.json`, and `cost` sums every attempt and reports the re-runs apart.
 
 **`no-output` is not an empty chunk.** A worker denied something, or one that gave
 up, exits cleanly having written nothing. Read the denials, then re-run the same
