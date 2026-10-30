@@ -4929,6 +4929,7 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
             "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
             "test_summaries_remap.RemapCliTest.test_a_summary_whose_members_have_all_gone_is_dropped",
             "test_summaries_remap.RemapCliTest.test_a_summary_with_no_snapshot_entry_is_dropped_not_carried_forward",
@@ -7224,6 +7225,7 @@ MUTATIONS = (
         (
             "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_linked_count_is_recorded_for_the_store_manifest",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
@@ -7433,6 +7435,7 @@ MUTATIONS = (
         "fails the stage when the repository list is absent, though it ran clean before",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_no_estate_nodes_passes",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
         ),
     ),
     Mutation(
@@ -7881,7 +7884,9 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_estate_nodes_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_repository_list_naming_none_of_the_graphs_repositories_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
@@ -9276,6 +9281,8 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+            "test_summaries_no_community.NoCommunityTest.test_merge_does_not_report_no_community_as_a_summary_still_owed",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
             "test_summaries_remap.RemapWriteGateTest.test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded",
             "test_summaries_remap.RemapWriteGateTest.test_a_remap_that_moves_an_id_still_rewrites_the_file",
             "test_summaries_remap.RemapWriteGateTest.test_an_identity_remap_does_not_rewrite_the_committed_file",
@@ -13259,7 +13266,9 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_two_runs_under_different_hash_seeds_write_identical_bytes",
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_no_estate_nodes_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_real_repositories_directory_is_not_read_as_the_corpus_prefix",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_a_rerun_is_byte_identical",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_both_graph_files_are_written_and_agree",
