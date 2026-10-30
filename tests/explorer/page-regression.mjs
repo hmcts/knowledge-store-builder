@@ -862,8 +862,16 @@ const pageHtml = readFileSync(pagePath, 'utf-8');
 const inputTags = [...pageHtml.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
 const labelFors = new Set([...pageHtml.matchAll(/<label\b[^>]*\bfor="([^"]+)"[^>]*>\s*[^<\s]/g)]
   .map((m) => m[1]));
-const wrapped = [...pageHtml.matchAll(/<label\b(?![^>]*\bfor=)[^>]*>(?:(?!<\/label>)[\s\S])*?<\/label>/g)]
-  .map((m) => m[0]).filter((l) => l.replace(/<[^>]*>/g, '').trim());
+// Split on the closing tag rather than one regex over the page: a tempered
+// pattern backtracks super-linearly (Sonar javascript:S8786).
+const wrapped = pageHtml.split('</label>').flatMap((chunk) => {
+  const start = chunk.lastIndexOf('<label');
+  if (start < 0) return [];
+  const label = chunk.slice(start);
+  const openTag = label.slice(0, label.indexOf('>') + 1);
+  if (!/^<label\b/.test(openTag) || /\bfor=/.test(openTag)) return [];
+  return label.replace(/<[^>]*>/g, '').trim() ? [label] : [];
+});
 const unlabelled = inputTags.filter((tag) => {
   if (/\baria-label="[^"]+"/.test(tag)) return false;
   const id = (tag.match(/\bid="([^"]+)"/) || [])[1];
