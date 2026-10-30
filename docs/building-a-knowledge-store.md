@@ -364,8 +364,9 @@ dropped, so a key that is missing is not read as a key the service never set.
 
 **Configuration values are published, so a secret-shaped one is withheld.** The
 graph, the explorer page and the MCP server's answers all carry `metadata.config`.
-Each value is read against the library's secret rules (the built-in ones and any
-`KSB_SENSITIVE_PATTERNS`) as `<key>: <value>`, on both layouts. A value that
+Each value is read in full, before the `KSB_DEPLOY_VALUE_CHARS` cap, against the
+library's secret rules (the built-in ones and any `KSB_SENSITIVE_PATTERNS`) as
+`<key>: <value>`, on both layouts. A value that
 matches is replaced by `[<rule> withheld]` and its key is listed, sorted, under
 `config_withheld`; a value that is wholly a templating placeholder is kept unless
 a value-shape rule matches it. The run reports repository, file, key and rule for

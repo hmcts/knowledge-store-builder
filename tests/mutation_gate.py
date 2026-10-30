@@ -4411,8 +4411,8 @@ MUTATIONS = (
     Mutation(
         "the secret-location policy unwired",
         "deploy_values.py",
-        '    _walk(withhold_secret_locations(value), "", out, max_chars)',
-        '    _walk(value, "", out, max_chars)',
+        '    _walk(withhold_secret_locations(value), "", out, max_chars, scrub)',
+        '    _walk(value, "", out, max_chars, scrub)',
         "#88: a values file maps an environment variable to a store and an entry inside it, "
         "which is a map of where each credential lives, and the flattened output is "
         "committed. Every test of the primitive itself still passes with the call site "
@@ -12858,8 +12858,8 @@ MUTATIONS = (
     Mutation(
         "a deployment config value that matches a secret rule is written unmasked",
         "deploy_secrets.py",
-        "        out[key] = sensitive.placeholder(rule) if rule else value\n",
-        "        out[key] = value\n",
+        "        return sensitive.placeholder(rule)\n",
+        "        return None\n",
         "#541: a credential typed into an overlay was published in the graph, the page and "
         "the MCP answers, and the node still listed it as withheld",
         (
@@ -12869,31 +12869,35 @@ MUTATIONS = (
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_an_instrumentation_key_is_withheld",
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_base_fact_is_masked_as_well",
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_value_is_in_no_output_and_no_file_the_stage_wrote",
-            "test_deployments_withhold_credentials.ATruncatedValueIsStillWithheld.test_a_long_matching_value_is_withheld_not_stored_cut_off",
             "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_the_rules_the_stage_applies_are_the_rules_the_gate_reads",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_private_key_block_longer_than_the_cap_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_token_that_starts_inside_the_cap_and_ends_beyond_it_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_the_values_route_masks_before_the_cap_too",
             "test_deployments_withhold_credentials.TheValuesRouteIsMaskedToo.test_a_values_file_value_is_withheld",
         ),
     ),
     Mutation(
         "the stage report prints the value it withheld",
         "deploy_secrets.py",
-        "            found.append((key, rule))\n",
-        "            found.append((key, value))\n",
+        "        found[key] = rule\n",
+        "        found[key] = text\n",
         "#541: the report that says a credential was found put it in a build log, "
         "which is read more widely and kept longer than the graph",
         (
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_report_names_repository_file_key_and_rule",
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_value_is_in_no_output_and_no_file_the_stage_wrote",
-            "test_deployments_withhold_credentials.ATruncatedValueIsStillWithheld.test_a_long_matching_value_is_withheld_not_stored_cut_off",
             "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_private_key_block_longer_than_the_cap_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_token_that_starts_inside_the_cap_and_ends_beyond_it_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_the_values_route_masks_before_the_cap_too",
             "test_deployments_withhold_credentials.TheValuesRouteIsMaskedToo.test_a_values_file_value_is_withheld",
         ),
     ),
     Mutation(
         "the check-evidence report prints the value it flagged",
         "deploy_secrets.py",
-        "        (node_id, rule)\n        for node_id, key, value in deployment_values(graph)\n",
-        "        (node_id, value)\n        for node_id, key, value in deployment_values(graph)\n",
+        "        (node_id, rule)\n        for node_id, key, value in deployment_values(nodes)\n",
+        "        (node_id, value)\n        for node_id, key, value in deployment_values(nodes)\n",
         "#541: a gate that names the value in its output republishes exactly what it "
         "was called to protect",
         (
@@ -12932,10 +12936,24 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the length cap runs before the secret rules read a config value",
+        "deploy_values.py",
+        "    replacement = scrub(prefix, text)\n",
+        "    replacement = scrub(prefix, text[:max_chars])\n",
+        "#541 review: a private-key block cut at 200 characters lost its footer, matched "
+        "nothing, and its first 200 characters were published; a token straddling the "
+        "cap was cut into a fragment no rule recognises",
+        (
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_private_key_block_longer_than_the_cap_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_token_that_starts_inside_the_cap_and_ends_beyond_it_is_withheld",
+            "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_the_values_route_masks_before_the_cap_too",
+        ),
+    ),
+    Mutation(
         "check-evidence ignores deployment config",
         "check_evidence.py",
-        '    if isinstance(records.get("nodes"), list):\n',
-        "    if False:\n",
+        "        if nodes:\n            return check_graph(path, checked, graph_found)\n",
+        "        if False:\n            return check_graph(path, checked, graph_found)\n",
         "#541: a graph holding a credential, or one a later rule now matches, passed the "
         "gate and stayed on the page",
         (

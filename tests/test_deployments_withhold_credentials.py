@@ -355,9 +355,9 @@ class CheckEvidenceReadsDeploymentConfig(SettingsIsolated):
         passes and a value it withholds is one the gate would flag."""
         for key, value in (("replicas", "2"), ("dbPassword", PASSWORD), ("h", VENDOR_KEY)):
             with self.subTest(key=key):
-                flat, found = deploy_secrets.withhold({key: value})
-                self.assertEqual(bool(found), bool(deploy_secrets.rule_for(key, value)))
-                self.assertEqual(deploy_secrets.findings(_graph_holding(dict(flat))), [])
+                flat = deploy_secrets.flatten({key: value}, 10, 200)
+                self.assertEqual(bool(flat.withheld), bool(deploy_secrets.rule_for(key, value)))
+                self.assertEqual(deploy_secrets.findings(_graph_holding(dict(flat))["nodes"]), [])
 
 
 class ThePlaceholderPatternsAreNamedAndTested(SettingsIsolated):
@@ -402,32 +402,96 @@ class MaskLeavesNoZeroEntries(SettingsIsolated):
         self.assertEqual(dict(counts), {"key-name": 1})
 
 
-@needs_yaml
-class ATruncatedValueIsStillWithheld(SettingsIsolated):
-    """Break it catches: reading the rules before the 200-character cap, or storing
-    the cut value when it matched, which publishes the first 200 characters of a
-    credential."""
+PEM_KIND = "RSA PRIVATE" + " KEY"
+# Header, 300 characters of body, footer: it matches `pem-private-key` whole and
+# matches nothing once cut at 200, because the cut leaves no footer.
+PEM = "-----BEGIN " + PEM_KIND + "-----\n" + "A" * 300 + "\n-----END " + PEM_KIND + "-----"
+# A token whose first character is the 191st, so the cap would keep its first ten.
+LATE_TOKEN = "build-log " + "w" * 180 + " " + "gh" + "p_" + "x" * 36
+CAP = 200
 
-    def test_a_long_matching_value_is_withheld_not_stored_cut_off(self):
-        long_password = PASSWORD + "x" * 300
-        long_token = VENDOR_KEY + "y" * 300
-        base = BASE.split("    appInsights:")[0] + (
-            f"    database:\n      dbPassword: {long_password}\n"
-            f"    notifier:\n      header: {long_token}\n"
+
+def _stage_over(**values: str) -> tuple[dict, str, str, dict[str, str]]:
+    """Run the stage over a base overlay holding `values` (YAML text, by key)."""
+    lines = "".join(f"    {key}: {text}\n" for key, text in values.items())
+    base = BASE.split("    appInsights:")[0] + lines
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _graph(root)
+        _deploy_repo(root, {**LAYOUT, "apps/base/services/alpha/helmrelease.yaml": base})
+        config.configure(root=root, DEPLOY_REPOS={REPO})
+        graph, stdout, stderr = _run(root)
+        return graph, stdout, stderr, _written_text(root)
+
+
+@needs_yaml
+class TheCapNeverRunsBeforeMasking(SettingsIsolated):
+    """Break it catches: cutting a value to 200 characters before the rules read it.
+    A rule that needs the whole value (a private-key block, whose footer the cut
+    removes) or a token that straddles the cap matches nothing once cut, and the
+    first 200 characters are published. A prefix-matching rule cannot show this:
+    it matches the cut value as well, which is why the earlier version of this test
+    passed over it."""
+
+    def _assert_withheld_everywhere(self, secret_text: str, key: str, marker: str, run):
+        graph, stdout, stderr, written = run
+        cfg = _facts(graph)["alpha (staging)"]["metadata"]["config"]
+        self.assertEqual(cfg[key], marker)
+        for fragment in (secret_text[:60], secret_text[-60:]):
+            for text in (stdout, stderr, *written.values()):
+                self.assertNotIn(fragment, text)
+                self.assertNotIn(json.dumps(fragment)[1:-1], text)
+
+    def test_a_private_key_block_longer_than_the_cap_is_withheld(self):
+        self.assertGreater(len(PEM), CAP)
+        self.assertEqual(deploy_secrets.rule_for("tlsKey", PEM[:CAP]), "")
+        self.assertNotEqual(deploy_secrets.rule_for("tlsKey", PEM), "")
+        run = _stage_over(tlsKey=json.dumps(PEM))
+        self._assert_withheld_everywhere(PEM, "tlsKey", "[pem private key withheld]", run)
+        node = _facts(run[0])["alpha (staging)"]["metadata"]
+        self.assertIn("tlsKey", node["config_withheld"])
+
+    def test_a_token_that_starts_inside_the_cap_and_ends_beyond_it_is_withheld(self):
+        self.assertEqual(deploy_secrets.rule_for("note", LATE_TOKEN[:CAP]), "")
+        rule = deploy_secrets.rule_for("note", LATE_TOKEN)
+        self.assertNotEqual(rule, "")
+        run = _stage_over(note=json.dumps(LATE_TOKEN))
+        self._assert_withheld_everywhere(
+            LATE_TOKEN[190:], "note", f"[{rule.replace('-', ' ')} withheld]", run
         )
+
+    def test_a_long_value_that_matches_nothing_is_still_capped(self):
+        """The cap still applies to what is kept, so the change cannot grow a node."""
+        long_value = "z" * 500
+        graph, *_ = _stage_over(banner=long_value)
+        cfg = _facts(graph)["alpha (staging)"]["metadata"]["config"]
+        self.assertEqual(cfg["banner"], "z" * CAP)
+        self.assertNotIn(
+            "banner", _facts(graph)["alpha (staging)"]["metadata"].get("config_withheld", [])
+        )
+
+    def test_the_values_route_masks_before_the_cap_too(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _graph(root)
-            _deploy_repo(root, {**LAYOUT, "apps/base/services/alpha/helmrelease.yaml": base})
+            repo = root / "repositories" / REPO
+            (repo / ".git").mkdir(parents=True)
+            _write(
+                repo,
+                {
+                    "ansible/group_vars/prod/alpha_values.yaml.j2": (
+                        f"tlsKey: {json.dumps(PEM)}\nnote: {json.dumps(LATE_TOKEN)}\n"
+                    )
+                },
+            )
             config.configure(root=root, DEPLOY_REPOS={REPO})
             graph, stdout, stderr = _run(root)
             written = _written_text(root)
-        cfg = _facts(graph)["alpha (staging)"]["metadata"]["config"]
-        self.assertEqual(cfg["database.dbPassword"], "[key name withheld]")
-        self.assertEqual(cfg["notifier.header"], "[sk key withheld]")
+        node = _facts(graph)["alpha (prod)"]["metadata"]
+        self.assertEqual(node["config_withheld"], ["note", "tlsKey"])
         for text in (stdout, stderr, *written.values()):
-            for fragment in (PASSWORD, VENDOR_KEY):
-                self.assertNotIn(fragment, text)
+            self.assertNotIn("A" * 60, text)
+            self.assertNotIn("w" * 60, text)
 
 
 if __name__ == "__main__":

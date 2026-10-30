@@ -39,17 +39,15 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import config, deploy_secrets, io, sensitive
+from . import config, deploy_secrets, graph_stream, io, sensitive
 
 
 # How many nodes a graph finding names before the rest are only counted.
 NODES_SHOWN = 20
 
 
-def check_graph(path: Path, graph: dict) -> tuple[int, int]:
+def check_graph(path: Path, checked: int, found: list[tuple[str, str]]) -> tuple[int, int]:
     """Report on a graph's deployment config; return (values checked, findings)."""
-    checked = len(deploy_secrets.deployment_values(graph))
-    found = deploy_secrets.findings(graph)
     if not found:
         print(f"{path.name}: {checked:,} deployment config values checked, none matches a rule")
         return checked, 0
@@ -68,15 +66,33 @@ def check_graph(path: Path, graph: dict) -> tuple[int, int]:
     return checked, len(found)
 
 
+def _scan_graph(path: Path) -> tuple[int, int, list[tuple[str, str]]]:
+    """(nodes seen, config values checked, findings), one node in memory at a time.
+
+    Streamed, as the other readers of a graph are: a merged graph can be 1.6 GB
+    and this runs in CI. An artefact that is not a graph has no `nodes` array and
+    yields nothing, which is how a ticket artefact is told from one.
+    """
+    nodes = checked = 0
+    found: list[tuple[str, str]] = []
+    for node in graph_stream.iter_array(path):
+        nodes += 1
+        checked += len(deploy_secrets.deployment_values([node]))
+        found.extend(deploy_secrets.findings([node]))
+    return nodes, checked, found
+
+
 def check(path: Path) -> tuple[int, int]:
     """Report on one artefact; return (values checked, findings printed).
 
     A graph is told from a ticket artefact by its content, not its name: both are
     committed as `.json.gz` and a store may name either anything.
     """
+    if path.exists():
+        nodes, checked, graph_found = _scan_graph(path)
+        if nodes:
+            return check_graph(path, checked, graph_found)
     records = io.read_json_dict(path)
-    if isinstance(records.get("nodes"), list):
-        return check_graph(path, records)
     if not records:
         print(f"No ticket records or graph at {path} - nothing to check")
         return 0, 0

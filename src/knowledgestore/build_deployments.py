@@ -20,7 +20,6 @@ the clone, write nodes and edges back, report what joined and what did not.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import sys
 import re
@@ -98,7 +97,7 @@ def _parse(text: str) -> dict[str, str] | None:
         return None
     if not isinstance(loaded, dict):
         return None
-    return deploy_values.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
+    return deploy_secrets.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
 
 
 def _documents(text: str) -> list[object] | None:
@@ -647,7 +646,7 @@ def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
             # place this service is defined. Every layer is listed in `layers`.
             fact.layers[0],
             ROUTE_KUSTOMIZE,
-            deploy_values.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
+            deploy_secrets.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
             extra,
             fact.chart.source,
             fact.chart.name,
@@ -774,9 +773,9 @@ def _add_repo_layer(
         environment = fact.environment
         cid = communities.for_environment(environment)
         name = communities.labels[str(cid)]
-        # Before the node exists, so no route can write a value this has not read.
-        masked, found = deploy_secrets.withhold(fact.config)
-        fact = dataclasses.replace(fact, config=masked)
+        # Withheld at flatten, before the length cap, on both routes: the key list
+        # and the report read what that already replaced.
+        found = list(getattr(fact.config, "withheld", ()))
         tally.withheld.extend((deploy_repo, fact.rel, key, rule) for key, rule in found)
         node = _deployment_node(fact, deploy_repo, cid, name, found)
         graph["nodes"].append(node)

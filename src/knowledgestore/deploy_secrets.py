@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 
 from . import deploy_values, secret_mask, sensitive
 
@@ -73,33 +74,36 @@ def rule_for(key: str, value: str) -> str:
     return hits[0] if hits else sensitive.matched_rule(value)
 
 
-def withhold(flat: dict[str, str]) -> tuple[deploy_values.Flattened, list[tuple[str, str]]]:
-    """`flat` with every matching value replaced, and the (key, rule) of each.
+def flatten(value: object, max_keys: int, max_chars: int) -> deploy_values.Flattened:
+    """`deploy_values.flatten` with every matching value withheld, uncapped first.
 
-    The result keeps `dropped`, which is how a node says its config is partial.
-    Keys come back sorted, because the node lists them in that order.
+    Each value is read in full and replaced by `[<rule> withheld]` before the
+    length cap sees it. The order is the point: a private-key block, or a token
+    that starts at character 190, matches nothing once cut at 200, and the cut
+    value would be published. The result's `withheld` names the (key, rule) of each
+    replacement that survived the key cap, sorted.
     """
-    out = deploy_values.Flattened()
-    out.dropped = getattr(flat, "dropped", 0)
-    found: list[tuple[str, str]] = []
-    for key, value in flat.items():
-        rule = rule_for(key, value)
-        out[key] = sensitive.placeholder(rule) if rule else value
-        if rule:
-            found.append((key, rule))
-    return out, sorted(found)
+    found: dict[str, str] = {}
+
+    def scrub(key: str, text: str) -> str | None:
+        rule = rule_for(key, text)
+        if not rule:
+            return None
+        found[key] = rule
+        return sensitive.placeholder(rule)
+
+    flat = deploy_values.flatten(value, max_keys, max_chars, scrub)
+    flat.withheld = tuple(sorted((key, rule) for key, rule in found.items() if key in flat))
+    return flat
 
 
-def deployment_values(graph: dict) -> list[tuple[str, str, str]]:
+def deployment_values(nodes: Iterable[object]) -> list[tuple[str, str, str]]:
     """Every (node id, key, value) of configuration a deployment node publishes.
 
     Tolerant of a node, a `metadata` or a `config` that is not what this version
     writes: a committed graph may predate any release, and a gate that crashes on
     an older one gates nothing. Node order, then key order, so a report is stable.
     """
-    nodes = graph.get("nodes")
-    if not isinstance(nodes, list):
-        return []
     found: list[tuple[str, str, str]] = []
     for node in nodes:
         metadata = node.get("metadata") if isinstance(node, dict) else None
@@ -112,7 +116,7 @@ def deployment_values(graph: dict) -> list[tuple[str, str, str]]:
     return found
 
 
-def findings(graph: dict) -> list[tuple[str, str]]:
+def findings(nodes: Iterable[object]) -> list[tuple[str, str]]:
     """The (node id, rule) of every stored config value that falls foul of a rule.
 
     Never the key's value and never a fragment of it: this is what a CI gate
@@ -120,6 +124,6 @@ def findings(graph: dict) -> list[tuple[str, str]]:
     """
     return [
         (node_id, rule)
-        for node_id, key, value in deployment_values(graph)
+        for node_id, key, value in deployment_values(nodes)
         if (rule := rule_for(key, value))
     ]
