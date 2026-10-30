@@ -8623,8 +8623,8 @@ MUTATIONS = (
     Mutation(
         "git env: drift's diff inherits the hook's repository",
         "drift.py",
-        "        check=False,\n        env=git_env(),\n",
-        "        check=False,\n",
+        '"--name-status", before, after],\n        capture_output=True,\n        encoding="utf-8",\n        check=False,\n        env=git_env(),\n',
+        '"--name-status", before, after],\n        capture_output=True,\n        encoding="utf-8",\n        check=False,\n',
         "a stage run from a store's git hook inherits GIT_DIR, which outranks `git -C`, so drift diffs the store rather than the clone - a fixture commit landed on a store's real branch this way",
         (
             "test_git_env.AHookBindingDoesNotRedirectAStage.test_drift_diffs_the_clone",
@@ -12944,6 +12944,189 @@ MUTATIONS = (
             "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_no_value_is_printed",
             "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_the_node_list_is_capped",
             "test_deployments_withhold_credentials.CheckEvidenceReadsDeploymentConfig.test_what_the_stage_withheld_is_not_flagged_again",
+        ),
+    ),
+    Mutation(
+        "intent reads an undeclared history directory",
+        "build_intent_index.py",
+        "        if ndjson.parent.name not in stale\n",
+        "        if True\n",
+        "a repository `discover` dropped kept its knowledge/git-history directory, so `intent` kept its tickets in file-tickets and the server went on treating an archived repository as a member of the estate",
+        (
+            "test_removed_repository.IntentTest.test_intent_excludes_an_undeclared_repository_from_the_index_and_tickets",
+            "test_removed_repository.ServerTest.test_after_the_drop_the_server_no_longer_names_the_repository",
+        ),
+    ),
+    Mutation(
+        "drift leaves a removed repository unmeasured",
+        "drift.py",
+        "    for name in removed:\n        changes.removed(name)\n",
+        "    for name in removed:\n        pass\n",
+        "a repository present only in --before was reported as not measured, its plan files neither stale nor deleted, so a delta-driven prune kept its semantic nodes until someone listed them by hand",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_before_is_deleted_with_all_its_planned_files",
+        ),
+    ),
+    Mutation(
+        "an undeclared history directory survives",
+        "export_git_history.py",
+        "        shutil.rmtree(entry)\n",
+        "        pass\n",
+        "export-history never pruned the dataset of a repository removed from config/repositories.txt, so every later stage read a repository the estate no longer had",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_plain_file_under_the_history_root_survives",
+            "test_removed_repository.ExportHistoryTest.test_a_second_run_removes_nothing_more",
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_entry_is_not_followed_out_of_the_history_root",
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_history_root_is_swept_through_its_target",
+            "test_removed_repository.ExportHistoryTest.test_export_history_removes_the_undeclared_directory_and_keeps_the_declared",
+        ),
+    ),
+    Mutation(
+        "export-history follows a symlinked history entry",
+        "export_git_history.py",
+        "        if entry.is_symlink() or entry.resolve().parent != root:\n            continue\n",
+        "        if False:\n            continue\n",
+        "the removal of undeclared history is a recursive delete under a store root; a symlinked entry must never lead it to a directory outside knowledge/git-history/",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_symlinked_entry_is_not_followed_out_of_the_history_root",
+        ),
+    ),
+    Mutation(
+        "drift leaves a new repository unmeasured",
+        "drift.py",
+        "        for path in files:\n            changes.added(",
+        "        for path in []:\n            changes.added(",
+        "a repository present only in --after was reported as not measured, so none of its files reached the delta: five new repositories contributed nothing on one store",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_after_lists_its_tracked_files_under_new",
+        ),
+    ),
+    Mutation(
+        "drift counts a new repository's ignored files",
+        "drift.py",
+        '    return [path for path in paths if path not in excluded], ""',
+        '    return paths, ""',
+        "listing every tracked file of a new repository without its .graphifyignore would extract vendored and generated code a full build skips",
+        (
+            "test_removed_repository.DriftTest.test_a_repository_only_in_after_lists_its_tracked_files_under_new",
+        ),
+    ),
+    Mutation(
+        "an empty declaration deletes everything",
+        "export_git_history.py",
+        "        if not repositories:\n",
+        "        if False:\n",
+        "an empty or comment-only repositories.txt parsed to no repositories, so every history directory counted as undeclared and export-history deleted them all",
+        (
+            "test_removed_repository.ExportHistoryTest.test_a_declaration_that_names_nothing_removes_nothing",
+            "test_removed_repository.ExportHistoryTest.test_a_whitespace_only_declaration_removes_nothing",
+        ),
+    ),
+    Mutation(
+        "the sweep runs outside the history root",
+        "export_git_history.py",
+        "        elif output_root != history_root:\n",
+        "        elif False:\n",
+        "export-history --output <store root> treated config/, knowledge/ and the clones under repositories/ as undeclared history directories and deleted them, untracked graphs included",
+        (
+            "test_removed_repository.ExportHistoryTest.test_an_output_directory_that_is_not_the_history_root_sweeps_nothing",
+        ),
+    ),
+    Mutation(
+        "the tracker cache is not re-redacted",
+        "redact_cache.py",
+        "    touched = sensitive.redact_tracker(cache, counts)\n",
+        "    touched = 0\n",
+        "#527: a rule added after a fetch never reached cached tracker text, so a name a "
+        "store had since taught the library to withhold stayed in its committed cache",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
+        ),
+    ),
+    Mutation(
+        "check-evidence ignores the tracker cache",
+        "check_evidence.py",
+        "        config.TICKET_TRACKER_PATH,\n",
+        "",
+        "#527: the gate read ticket descriptions only, and passed a store whose far larger "
+        "tracker cache held matching text",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "check-evidence reads the tracker cache's path but not its fields",
+        "sensitive.py",
+        "(*mined_values(records), *tracker_values(records))",
+        "(*mined_values(records),)",
+        "#527: a named tracker artefact was opened and reported clean because none of "
+        "its summary, description, resolution or comments was looked at",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+        ),
+    ),
+    Mutation(
+        "a check prints matched text",
+        "sensitive.py",
+        "        (ticket, field, rule)\n        for ticket, field, value in (*mined",
+        '        (ticket, field, f"{rule} {value}")\n        for ticket, field, value in (*mined',
+        "#527: a finding that carried the value copied a person's name into a build log, "
+        "which is read more widely and kept longer than the artefact it was checking",
+        (
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_build_intent_index.CheckEvidenceStageTest.test_the_gate_never_prints_the_value_it_matched",
+        ),
+    ),
+    Mutation(
+        "the gzip writer truncates the live file as it writes",
+        "io.py",
+        '            open(staging, "wb") as raw,',
+        '            open(path, "wb") as raw,',
+        "#527 review: an error mid-write left a half-written tracker cache, whose "
+        "resolved tickets are never fetched again",
+        (
+            "test_redact_cache.AtomicWriteTest.test_an_error_mid_write_leaves_the_original_file_byte_identical",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_cached_comment_matching_a_rule_fails_the_default_gate",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_named_tracker_artefact_is_read_too",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_a_redacted_cache_passes",
+            "test_redact_cache.CheckEvidenceReadsTheTrackerCacheTest.test_the_gate_never_prints_the_text_it_matched",
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
+            "test_redact_cache.RedactCacheTest.test_a_default_pasted_mention_in_a_cached_comment_is_withheld",
+            "test_redact_cache.RedactCacheTest.test_a_rule_added_after_the_fetch_is_applied_to_every_text_field",
+            "test_redact_cache.RedactCacheTest.test_a_second_run_changes_nothing",
+            "test_redact_cache.RedactCacheTest.test_denied_and_absent_entries_survive_untouched",
+            "test_redact_cache.RedactCacheTest.test_type_status_and_parent_are_redacted_too",
+        ),
+    ),
+    Mutation(
+        "an email display name leaves its profile link",
+        "config.py",
+        r"\[@(?:[^\]\n]|\[[a-z ]+ withheld\]){1,80}?\|",
+        r"\[@[^\]\n]{1,80}?\|",
+        "#527 review: the email rule runs first and its placeholder holds a `]` the name "
+        "class cannot cross, so the profile link of an email display name survived",
+        (
+            "test_redact_cache.PastedMentionRuleTest.test_an_email_display_name_leaves_no_link_behind",
+        ),
+    ),
+    Mutation(
+        "the cache is re-redacted without naming the stages that rebuild its copies",
+        "redact_cache.py",
+        "    if touched:\n        print(\n",
+        "    if False:\n        print(\n",
+        "#527 review: a clean cache reported as a clean store, while the page, index and "
+        "intent layer kept the old text",
+        (
+            "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
         ),
     ),
 )

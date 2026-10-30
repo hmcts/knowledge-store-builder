@@ -41,6 +41,7 @@ import contextlib
 import gzip
 import hashlib
 import json
+import os
 import sys
 from collections import Counter
 from collections.abc import Iterable
@@ -316,23 +317,40 @@ def gzip_text(path: Path, compresslevel: int = 9):
     so every rebuild rewrote committed artefacts whose content had not
     changed, quietly defeating the byte-identical guarantee and dirtying
     version control on every run.
+
+    **Atomic.** Written to a sibling temporary file and moved into place only
+    when the block completes, so an interrupt, a full disk or an exception
+    mid-write leaves the previous file whole. Opening the live path for writing
+    truncated it first, and a cache whose records are never fetched again
+    cannot be rebuilt from anything.
     """
     checked_write_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with (
-        open(path, "wb") as raw,  # NOSONAR(S2083, S8707) - validated above
-        # filename="" explicitly: GzipFile otherwise lifts raw.name into the
-        # header's FNAME field, which is the other source of byte churn.
-        gzip.GzipFile(
-            filename="", fileobj=raw, mode="wb", compresslevel=compresslevel, mtime=0
-        ) as binary,
-    ):
-        text = TextIOWrapper(binary, encoding="utf-8")
-        try:
-            yield text
-        finally:
-            text.flush()
-            text.detach()
+    staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    completed = False
+    try:
+        with (
+            open(staging, "wb") as raw,  # NOSONAR(S2083, S8707) - validated above
+            # filename="" explicitly: GzipFile otherwise lifts raw.name into the
+            # header's FNAME field, which is the other source of byte churn.
+            gzip.GzipFile(
+                filename="", fileobj=raw, mode="wb", compresslevel=compresslevel, mtime=0
+            ) as binary,
+        ):
+            text = TextIOWrapper(binary, encoding="utf-8")
+            try:
+                yield text
+            finally:
+                text.flush()
+                text.detach()
+        os.replace(staging, path)
+        completed = True
+    finally:
+        # Whatever ended the block - an exception in it, an early exit that
+        # closes the generator, a failed replace - the staging file goes, and
+        # only a completed replace has moved it into place.
+        if not completed:
+            staging.unlink(missing_ok=True)
 
 
 def write_gzip_json(path: Path, data) -> None:

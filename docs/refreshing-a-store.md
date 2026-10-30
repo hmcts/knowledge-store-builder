@@ -60,7 +60,28 @@ is the stage that discovers which tickets exist:
 
 ```bash
 knowledgestore fetch-tickets
+knowledgestore redact-cache
 knowledgestore manifest
+```
+
+`redact-cache` needs no credentials. `fetch-tickets` redacts only what it fetches,
+and a resolved ticket is never fetched again, so a rule added since — or one a new
+release of the library ships — reaches the cache only through it. Run it after
+every upgrade and every change to `KSB_SENSITIVE_PATTERNS`; it reports counts of
+spans and records, never the text.
+
+It cleans the cache and nothing built from it. The old text still sits in the
+intent layer, the answers layer, the index and the explorer page until they are
+rebuilt, so when it changed anything it prints the stages to re-run, in this order:
+
+```bash
+knowledgestore intent
+knowledgestore answers-layer
+knowledgestore index
+knowledgestore explorer
+knowledgestore manifest
+knowledgestore check-evidence
+knowledgestore summaries verify   # regenerate any summary or brief written from the old text
 ```
 
 It asks the tracker about tickets it has never had an answer for, and about up
@@ -130,6 +151,12 @@ chunk plan holds, because stale means extracted and now out of date:
 - **new** — added files whose extension the plan already holds, so a delta
   extracts what a full build would.
 - **a rename** — its old path deleted and its new path new.
+- **a repository only in `--after`** — new to the estate, so every file git
+  tracks at its recorded sha counts as added: those whose extension the plan
+  already holds, minus what the clone's `.graphifyignore` and `.gitignore`
+  exclude, are listed under `new`.
+- **a repository only in `--before`** — dropped from the estate, so every file
+  of it in the plan is listed under `deleted`.
 
 A repository whose recorded sha did not move contributes nothing. The report
 prints the stale count, its share of the plan, and the repositories carrying most
@@ -258,7 +285,7 @@ previous refresh: see
 [Write the detect result, then expose the content set](creating-a-store.md#write-the-detect-result-then-expose-the-content-set).
 
 `intent` reports how many mined values it withheld as identifying a case or a
-person, and `check-evidence` fails if any remain in the committed artefact —
+person, and `check-evidence` fails if any remain in the committed artefact or the tracker cache —
 including ones a store committed before the rule existed. Read that count as a
 finding about the estate: the commit messages still carry the text, whatever the
 store now publishes. See
@@ -367,28 +394,29 @@ boundary declaration, so the next run of this report shows them as decisions.
 
 ## Remove repositories
 
-Removal is the more dangerous direction, because **nothing in the pipeline
-prunes what you remove**. Change the filters, re-resolve, then delete the
-leftovers by hand:
+Removal is the more dangerous direction, because **the pipeline reads the
+filesystem in places, not only the configuration**. Change the filters,
+re-resolve, then let the stages reconcile what they can and delete the clone
+yourself:
 
 ```bash
 # config/repository-filters.txt: an `exclude <name>` line, or drop the rule
 # that selected them. Exclusion always wins over any include.
 knowledgestore discover                    # rewrites config/repositories.txt
-rm -rf repositories/<repo>                 # else it re-enters the graph
-rm -rf knowledge/git-history/<repo>        # else its tickets re-enter the index
+knowledgestore sync                        # names the clones no longer declared
+knowledgestore export-history              # removes their history directories
+rm -rf repositories/<repo>                 # by hand, once its graph is not needed
 ```
 
-Both deletions matter, for the same reason: those stages read the filesystem,
-not the configuration.
+What each stage does with a repository that is no longer in `config/repositories.txt`:
 
-| Left in place | What happens |
+| Stage | What it does |
 |---|---|
-| `repositories/<repo>` | `merge-graphs` is given a shell glob of per-repository graphs, so a removed repository stays in the merged graph |
-| `knowledge/git-history/<repo>` | `intent` globs `*/commits.ndjson`, so removed repositories keep contributing file-to-ticket links |
-
-**`sync` takes no flags.** An unrecognised one is refused and nothing runs.
-Removing a clone is the manual step in the table above.
+| `sync` | Reports `N clone(s) not declared: ...` and **never deletes** one: a clone can hold untracked per-repository graphs a `git clean` would destroy |
+| `export-history` | **Deletes** `knowledge/git-history/<repo>` for every repository not declared, and reports `N history directory(ies) for undeclared repositories removed: ...`. The datasets are generated output; the next run rebuilds any that are wanted. It removes nothing when the declaration names no repository (empty, comment-only, missing or unreadable) or when `--config` and `--output` are not both under the store root, and says so; names are compared case-insensitively on their first path component, so `org/repo` and a differently cased directory are kept. Symlinked entries are left alone and `repositories/` is never touched |
+| `intent` | Skips any history directory not declared and reports `N history directory(ies) not declared, skipped: ...`, so a dropped repository's tickets leave `file-tickets` and the index's repository list even when `export-history` was not run first. The server counts a repository the ticket layer names as a member of the estate, so this is what stops an archived repository looking like one |
+| `drift` | A repository in the `--before` provenance and not in `--after` is **deleted**: every file of it in the plan is listed under `deleted`, so a delta-driven prune removes its semantic nodes |
+| `merge-graphs` (a shell glob of per-repository graphs) | Still reads every clone's graph, so a clone left under `repositories/` stays in the merged graph. Remove it by hand |
 
 `knowledge/provenance.json` self-corrects, because `sync` rewrites it from the
 configured set. So does `knowledge/relationships/`, once the clone is gone:
@@ -396,9 +424,7 @@ configured set. So does `knowledge/relationships/`, once the clone is gone:
 under `repositories/`, and its edges with it.
 
 [`knowledgestore merge-inputs`](#check-what-the-merge-will-read) names any clone
-whose graph `config/repositories.txt` does not declare. Nothing does the same for
-`knowledge/git-history/`, so check that by hand: an orphan from an earlier estate
-is invisible until it turns up in an answer.
+whose graph `config/repositories.txt` does not declare.
 
 Then continue as a normal refresh: snapshot, rebuild the graph, cluster, remap.
 Removing repositories moves community IDs exactly as adding them does, and

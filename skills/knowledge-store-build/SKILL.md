@@ -1003,6 +1003,21 @@ committed cache; an unresolved ticket is requested again once its record is
 `KSB_TRACKER_REFRESH_DAYS` old, at most `KSB_TRACKER_REFRESH_MAX` per run. Commit
 `knowledge/intent/ticket-tracker.json.gz` with the rest.
 
+**Re-run `knowledgestore redact-cache` after upgrading the library or changing
+`KSB_SENSITIVE_PATTERNS`, then `knowledgestore check-evidence`.** `fetch-tickets`
+redacts what it fetches once, and a resolved ticket is never fetched again, so a
+rule added later never reaches the cached records on its own. `redact-cache` needs
+no credentials: it re-applies the rules in force to summary, description, type, status, parent,
+resolution and comments, changes nothing on a second run, and reports counts of
+spans and records, never the text. Hold to that in your report too: no matched
+value, and no name, anywhere. It cleans the cache only: the intent layer, answers
+layer, index and explorer page built from the old text stay dirty until rebuilt, so
+when it changed anything run, in order, `knowledgestore intent`,
+`knowledgestore answers-layer`, `knowledgestore index`, `knowledgestore explorer`,
+`knowledgestore manifest`, `knowledgestore check-evidence`, then
+`knowledgestore summaries verify` and regenerate any summary or brief written from
+the old text. It prints this list itself.
+
 Four numbers from its report belong in yours, and three of them are findings
 rather than statistics:
 
@@ -1538,14 +1553,19 @@ unrelated material came with it.
 
 ### Removing repositories from an estate
 
-Nothing in the pipeline prunes what you remove. After editing the filters and
-re-running `discover`, delete `repositories/<repo>` and
-`knowledge/git-history/<repo>` by hand: `merge-graphs` takes a shell glob of
-per-repository graphs and `intent` globs `*/commits.ndjson`, so both stages read
-the filesystem rather than the configuration and a leftover directory silently
-keeps a removed repository in every answer. Check for orphans that match no
-configured repository at all while you are there. Then treat it as a normal
-re-cluster, and expect `remap` to report the summaries whose members are gone —
+A repository that leaves `config/repositories.txt` is reconciled by some stages
+and not others. After editing the filters and re-running `discover`: `sync` names
+each clone no longer declared (`N clone(s) not declared: ...`) and never deletes
+one, because a clone can hold untracked per-repository graphs, so delete
+`repositories/<repo>` by hand (`merge-graphs` takes a shell glob of per-repository
+graphs and would keep it in the merged graph). `export-history` deletes
+`knowledge/git-history/<repo>` for every undeclared repository and reports it, and
+`intent` skips an undeclared history directory even when `export-history` was not
+run first, so a removed repository's tickets leave the index and the estate the
+server describes. `drift` lists a repository present only in `--before` under
+`deleted`, with all its planned files, and one present only in `--after` under
+`new`. Then treat it as a normal
+re-cluster, and expect `remap` to report the summaries whose members are gone -
 that is a correct loss. Full procedure in
 [docs/refreshing-a-store.md](../../docs/refreshing-a-store.md#remove-repositories).
 
@@ -1765,13 +1785,14 @@ node tests/explorer/estate-regression.mjs   # if the estate has one
 ```
 
 `intent` redacts anything in mined commit text that identifies a specific case or
-person — an email address by default, plus whatever formats the estate declares — replacing the matched span and keeping the account around it, and
+person — an email address and a pasted mention (`[@Name|link]`) by default, plus whatever formats the estate declares — replacing the matched span and keeping the account around it, and
 reports how many went under each rule. **Carry that count into your report.** It is a finding about the
 estate rather than a build statistic: the commit messages still hold the text,
 whatever the store now publishes.
 
 `check-evidence` exits non-zero when such text is still in the committed
-artefact, including anything mined before the rule existed. It names the ticket,
+artefact or in the tracker cache (`ticket-tracker.json.gz`), including anything
+mined before the rule existed; `knowledgestore redact-cache` repairs the cache. It names the ticket,
 the field and the rule and never the value — hold to that yourself: no matched
 value in your report, in a ticket, or in this conversation. A clean result means
 nothing matched the rules, never that the file holds no personal data.

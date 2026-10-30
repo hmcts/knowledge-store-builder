@@ -602,9 +602,16 @@ TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 # KSB_SENSITIVE_PATTERNS, a JSON object merged over these:
 #
 #   KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'
-# One default only, and deliberately: an email address has the same shape
-# everywhere, so it is the only identifier this library can recognise without
-# assuming a jurisdiction or a subject domain. Reference formats for cases,
+# Two defaults, and deliberately only two. An email address has the same shape
+# everywhere, and so does a pasted mention - `[@Display Name|<profile link>]`,
+# which a tracker or chat tool writes into a comment: the name and the link both
+# identify a person, so the whole span goes. The pattern lets the name hold a `|`
+# and lets a placeholder stand in the name (the email rule runs first, so an email
+# display name arrives as `[email address withheld]`, whose `]` the name class
+# alone cannot cross) and lets text sit before an email placeholder, and
+# leaves `[@attr=value]` code fragments, which carry no link, alone. These are the
+# identifiers this library can recognise without assuming a jurisdiction or a
+# subject domain. Reference formats for cases,
 # claims, patients, accounts or citizens differ per organisation, and national
 # identifiers and postal codes differ per country - a library that shipped one
 # country's would protect that estate and quietly miss every other one, which is
@@ -613,6 +620,7 @@ TRACKER_FOLLOWUP_MAX = _env_int("KSB_TRACKER_FOLLOWUP_MAX", 100)
 # operator can see what is actually being applied.
 DEFAULT_SENSITIVE_PATTERNS: dict[str, str] = {
     "email-address": r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b",
+    "pasted-mention": r"\[@(?:[^\]\n]|\[[a-z ]+ withheld\]){1,80}?\|(?:mailto:[^\]\s\[]*\[[a-z ]+ withheld\]|[^\]\s]*)\]",
 }
 SENSITIVE_PATTERNS = _env_pattern_map("KSB_SENSITIVE_PATTERNS", DEFAULT_SENSITIVE_PATTERNS)
 

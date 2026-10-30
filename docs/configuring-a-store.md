@@ -19,7 +19,7 @@ Most settings have defaults. `KSB_GITHUB_ORG` is required for discovery.
 | `KSB_BRIEF_REQUEST_URL` | none | Destination for “request a topic brief”; unset hides the link |
 | `KSB_E2E_REPOS` | none | Repositories whose test code should be indexed as business documentation |
 | `KSB_FEATURES_DIR` | `features/` | Feature-directory segment used to group Gherkin features |
-| `KSB_SENSITIVE_PATTERNS` | email address (the only shipped rule; estates declare their own formats) | Extra rules for mined commit text that must not be stored, as a JSON object of rule name → regex merged over the defaults: `KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'`. Anything matching a rule is replaced by a placeholder naming what was removed, and counted in the run report; a value left with only placeholders is not stored. Malformed JSON raises rather than emptying the rules — see [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record) |
+| `KSB_SENSITIVE_PATTERNS` | email address and pasted mention `[@Name\|link]` (the only shipped rules; estates declare their own formats) | Extra rules for mined commit text that must not be stored, as a JSON object of rule name → regex merged over the defaults: `KSB_SENSITIVE_PATTERNS='{"record-reference": "\\bREC/[0-9]{4}\\b"}'`. Anything matching a rule is replaced by a placeholder naming what was removed, and counted in the run report; a value left with only placeholders is not stored. Malformed JSON raises rather than emptying the rules — see [Redacting text that identifies a person or a record](how-it-works.md#redacting-text-that-identifies-a-person-or-a-record) |
 | `KSB_SECRET_PATTERNS` | the shipped secret shapes (private keys, SAS signatures, connection-string keys, bearer tokens, URL passwords and common token formats) | Extra value shapes masked out of the copies a headless extraction worker reads, as a JSON object of rule name → regex merged over the defaults: `KSB_SECRET_PATTERNS='{"estate-pin": "PIN-([0-9]{4})"}'`. A rule with capturing groups masks the first that matched, one without masks its whole match, and a group named `guarded` is masked only when its value looks like a credential. Masking is pattern-based, so a secret in a shape no rule names is not masked — see [the headless route](../skills/knowledge-store-build/SKILL.md#the-headless-route-workers-extract) |
 | `KSB_TRACKER_TRANSPORT` | `rest` | How `fetch-tickets` reaches the tracker. `rest` is Jira Data Center or Server over HTTP, using the two settings below. `twg` is Jira Cloud through the Atlassian TWG CLI, which signs in by itself, so it needs neither — see [Read Jira Cloud through the TWG CLI](#read-jira-cloud-through-the-twg-cli). Any other value stops the stage before it requests anything |
 | `KSB_TRACKER_BASE_URL` | none | Issue-tracker API root for the `rest` transport, for example `https://tracker.example/jira`: Bearer authentication and `GET /rest/api/2/search`, which Jira Cloud has removed. Empty means the `rest` transport is not configured and the stage does nothing |
@@ -118,6 +118,9 @@ and comments are added to the request only when their settings are on, so a
 response that never carried narrative text is a guarantee rather than a claim.
 Everything fetched goes through the same withholding rules as mined commit text
 (`KSB_SENSITIVE_PATTERNS`), and the run reports how many identifiers went.
+That happens once, at fetch time: after upgrading the library or adding a rule,
+run `knowledgestore redact-cache` to bring the records already cached under the
+rules now in force (no credentials needed; counts only, never text).
 
 **A prefix is in one of three states, not two.** In `KSB_TRACKER_PROJECTS` it is
 fetched; in `KSB_TRACKER_DENY` it is never requested; in neither it is
@@ -322,5 +325,6 @@ estate uses another language or layout.
 | `minimum-standard-settings` | `knowledge/minimum-standard/github-settings.json` | Snapshot the GitHub settings the build's token can read: archived, default branch, branch protection, secret scanning, Dependabot alerts |
 | `minimum-standard` | `knowledge/minimum-standard/` | Record dated, cited evidence for each repository against the GOV.UK minimum standard's seven points; reads `config/products.json` when present |
 | `check-install-docs` | report only | Check the documented install commands against what the lock declares |
-| `check-evidence` | report only | Fail if a committed ticket-descriptions artefact holds mined text matching a withholding rule |
+| `redact-cache` | `knowledge/intent/ticket-tracker.json.gz` | Re-apply the withholding rules in force to cached tracker text (summary, description, resolution, comments); idempotent, reports counts only |
+| `check-evidence` | report only | Fail if a committed ticket-descriptions artefact or the tracker cache holds text matching a withholding rule |
 | `check-citations` | report only | Fail if a published answer cites code the graph does not hold, or a source link whose file its repository does not hold or whose sha is not the build's; name the nearest real identifier and list database columns and links outside the estate apart |
