@@ -151,6 +151,21 @@ SUMMARIES_METADATA_KEY = "_metadata"
 PROSE_DIGESTS_KEY = "prose_digests"
 
 
+# The id a node carries when no clustering placed it, and the one a digest file
+# written before that was understood may still hold. Nodes added after clustering -
+# a `<repo>::repository` node, a chart-source node - have it, or none at all.
+NO_COMMUNITY = -1
+
+
+def has_community(community: object) -> bool:
+    """Whether `community` names a real cluster: not absent, None, or `-1`.
+
+    The one place that says so, because prose written for "the cluster of nodes
+    nothing clustered" is filed under a community no reader can reach.
+    """
+    return community is not None and str(community) != str(NO_COMMUNITY)
+
+
 def summaries_body(document: dict) -> dict:
     """A merged summaries document with its metadata block removed."""
     return {key: value for key, value in document.items() if key != SUMMARIES_METADATA_KEY}

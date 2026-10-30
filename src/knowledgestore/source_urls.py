@@ -60,6 +60,7 @@ CORPUS_PREFIX = "repositories/"
 # Why a node or file got no URL. Reported by name, so they are stable strings.
 NO_SOURCE_FILE = "no source_file"
 NO_REPO = "no repo"
+NO_REPO_OR_FILE = "no repo and no source_file"
 NOT_CONFIGURED = "repository not in config/repositories.txt"
 NOT_GITHUB = "clone URL is not on github.com"
 NO_SHA = "no provenance sha"
@@ -232,6 +233,7 @@ class SourceUrls:
     def __init__(self, clone_urls: dict[str, str], shas: dict[str, str]):
         self._clone_urls = dict(clone_urls)
         self._bases: dict[str, str] = {}
+        self._trees: dict[str, str] = {}
         self._missing: dict[str, str] = {}
         self._shas: dict[str, str] = {}
         # (org, name) on the host, lower-cased because GitHub ignores case there.
@@ -253,6 +255,7 @@ class SourceUrls:
             else:
                 org, name = origin
                 self._bases[repo] = f"https://github.com/{org}/{name}/blob/{sha}/"
+                self._trees[repo] = f"https://github.com/{org}/{name}/tree/{sha}"
 
     @classmethod
     def from_store(cls) -> SourceUrls:
@@ -314,6 +317,17 @@ class SourceUrls:
         except UnicodeEncodeError:
             return Resolution(None, NOT_ENCODABLE)
         return Resolution(base + escaped + line_anchor(source_location), "")
+
+    def resolve_repository(self, repo: object) -> Resolution:
+        """`https://github.com/<org>/<repo>/tree/<sha>`, for the node that stands for
+        a repository and so names no file. The sha and organisation are the ones the
+        file links use, so the two cannot disagree about the build."""
+        if not isinstance(repo, str) or not repo:
+            return Resolution(None, NO_REPO)
+        tree = self._trees.get(repo)
+        if tree is None:
+            return Resolution(None, self._missing.get(repo, NOT_CONFIGURED))
+        return Resolution(tree, "")
 
     def repositories_at(self, org: str, name: str) -> tuple[str, ...]:
         """The configured repositories cloned from github.com/<org>/<name>, by local name."""

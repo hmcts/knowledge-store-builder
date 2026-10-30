@@ -7132,6 +7132,88 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "summaries: extract buckets nodes with no community as a cluster",
+        "build_community_summaries.py",
+        '        if io.has_community(node.get("community")):\n            members[node["community"]].append(node)\n',
+        '        members[node.get("community", -1)].append(node)\n',
+        "the repository and chart-source nodes added after clustering would be filed under digest id -1 and read as a significant community, so an author is asked for prose about a cluster nothing can reach",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_extract_writes_no_digest_for_nodes_with_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: batches cuts a digest that has no community",
+        "summary_batches.py",
+        '        if io.has_community(digest["id"]) and str(digest["id"]) not in have\n',
+        '        if str(digest["id"]) not in have\n',
+        "a digest file holding a -1 entry would still be cut into a batch and sent to an author",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_batches_cut_nothing_for_a_digest_with_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: merge accepts prose keyed to no community",
+        "build_community_summaries.py",
+        "            if not io.has_community(community_id):\n",
+        "            if False:\n",
+        "prose written for community -1 would be merged into the committed summaries under a community nothing can reach, instead of being refused by name",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_merge_of_only_a_no_community_entry_writes_nothing",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
+        ),
+    ),
+    Mutation(
+        "summaries: merge counts a digest with no community as owed prose",
+        "build_community_summaries.py",
+        'known_ids = {str(d["id"]) for d in digests if io.has_community(d["id"])}',
+        'known_ids = {str(d["id"]) for d in digests}',
+        "every merge would end by saying a significant community still lacks a summary, for one that can never have it",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_merge_does_not_report_no_community_as_a_summary_still_owed",
+        ),
+    ),
+    Mutation(
+        "summaries: status expects prose for a digest with no community",
+        "status.py",
+        'sum(1 for d in digests if isinstance(d, dict) and io.has_community(d.get("id")))',
+        "sum(1 for d in digests if isinstance(d, dict))",
+        "the coverage denominator would include a community nothing can write about, so a store reads as permanently short of full coverage",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_status_does_not_expect_prose_for_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: the clustering fingerprint buckets nodes with no community",
+        "build_community_summaries.py",
+        '    sizes = Counter(\n        str(node["community"]) for node in nodes if io.has_community(node.get("community"))\n    )',
+        '    sizes = Counter(str(node.get("community", -1)) for node in nodes)',
+        "the fingerprint would count a -1 group that extract no longer writes, so verify reads every refresh as a different clustering",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_the_clustering_fingerprint_ignores_nodes_with_no_community",
+        ),
+    ),
+    Mutation(
+        "source url: a repository node gets no tree link",
+        "build_source_urls.py",
+        "    if not has_file and kinds.is_kind(node, kinds.REPOSITORY):\n",
+        "    if False:\n",
+        "a repository node has no source_file and would be left without a url, so a store checking that every node carries a pinned url has to special-case it",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
+        ),
+    ),
+    Mutation(
+        "source url: a node with neither repo nor file is not counted by its own reason",
+        "build_source_urls.py",
+        "    if not has_file and not (isinstance(repo, str) and repo):\n",
+        "    if False:\n",
+        "an orphan node would be reported as merely lacking a file, so the report could not tell a node with nowhere to link from one that lacks a file",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+        ),
+    ),
+    Mutation(
         "source url: a clone URL on another host is linked as github.com",
         "source_urls.py",
         r"(?:git@|ssh://git@|https://|http://|git://)github\.com[:/]",

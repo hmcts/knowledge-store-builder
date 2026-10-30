@@ -249,10 +249,62 @@ class SourceUrlsStageTest(SettingsIsolated):
         _, report = self._run()
         self.assertIn("Source URLs: 7 of 12 nodes linked (3 with a line anchor)", report)
         self.assertIn("removed 1 links an earlier build wrote", report)
-        self.assertIn("2 no source_file", report)
+        self.assertIn("1 no source_file", report)
+        self.assertIn("1 no repo and no source_file", report)
         self.assertIn("1 no repo", report)
         self.assertIn("1 clone URL is not on github.com", report)
         self.assertIn("1 repository not in config/repositories.txt", report)
+
+    def test_a_repository_node_links_to_the_tree_at_the_build_commit(self):
+        """Breaks if a repository node, which has no `source_file`, is left without a
+        url, or is given a blob link to a file that is not there: a store checking
+        that every node carries a pinned url would have to special-case it."""
+        graph = _graph()
+        graph["nodes"] = [
+            {
+                "id": "example-repo::repository",
+                "label": "example-repo",
+                "source_file": None,
+                "repo": "example-repo",
+                "_origin": "repository",
+                "metadata": {"kind": "repository"},
+            },
+            # No provenance sha is the same refusal a file gets: no link, not a guess.
+            {
+                "id": "hosted-elsewhere::repository",
+                "repo": "hosted-elsewhere",
+                "metadata": {"kind": "repository"},
+            },
+        ]
+        self._write_graph(graph)
+        code, report = self._run()
+        nodes = self._nodes()
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            nodes["example-repo::repository"]["url"],
+            f"https://github.com/example-org/example-repo/tree/{SHA}",
+        )
+        self.assertNotIn("url", nodes["hosted-elsewhere::repository"])
+        self.assertIn("1 clone URL is not on github.com", report)
+
+    def test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted(self):
+        """Breaks if an orphan node is linked to something, or vanishes from the
+        report: it must be named as having neither, apart from a node that merely
+        lacks a file."""
+        graph = _graph()
+        graph["nodes"] = [
+            _code_node("readme", "README.md", "README.md", None),
+            {"id": "orphan", "label": "Orphan", "source_file": None},
+            {"id": "orphan2", "label": "Orphan Two", "repo": ""},
+        ]
+        self._write_graph(graph)
+        code, report = self._run()
+        nodes = self._nodes()
+        self.assertEqual(code, 0)
+        self.assertNotIn("url", nodes["orphan"])
+        self.assertNotIn("url", nodes["orphan2"])
+        self.assertIn("Source URLs: 1 of 3 nodes linked", report)
+        self.assertIn("2 no repo and no source_file", report)
 
     def test_the_linked_count_is_recorded_for_the_store_manifest(self):
         """Breaks if the stage stops recording `source_urls.linked`, or records a
