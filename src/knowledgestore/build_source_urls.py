@@ -9,6 +9,11 @@ stage writes the followable form onto each node once, at build time,
 so an agent answering from the graph copies a link rather than assembling one.
 `source_urls` builds it; this stage only applies it and accounts for every node.
 
+A repository node - kind `repository`, no `source_file` - gets the tree of the
+build commit, `https://github.com/<org>/<repo>/tree/<provenance sha>`, from the same
+organisation and sha the file links use. A node with neither a `repo` nor a
+`source_file` has nothing to link and is counted under its own reason.
+
 **Every node is accounted for.** The report names how many nodes were linked and
 how many were not, by reason: a node with no `source_file` (a Java package
 node, a module referenced from outside the estate), no `repo`, a repository on
@@ -46,8 +51,14 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import config, graph_files, io, provenance, telemetry
-from .source_urls import NOT_CONFIGURED, SourceUrls, single_root_repositories
+from . import config, graph_files, io, kinds, provenance, telemetry
+from .source_urls import (
+    NO_REPO_OR_FILE,
+    Resolution,
+    NOT_CONFIGURED,
+    SourceUrls,
+    single_root_repositories,
+)
 
 
 @dataclass
@@ -63,6 +74,17 @@ class Outcome:
     skipped: Counter = field(default_factory=Counter)
 
 
+def _resolve(node: dict, urls: SourceUrls, single_root: set[str]):
+    """The link for one node: its file, its repository's tree, or the reason for none."""
+    repo, path = node.get("repo"), node.get("source_file")
+    has_file = isinstance(path, str) and bool(path)
+    if not has_file and kinds.is_kind(node, kinds.REPOSITORY):
+        return urls.resolve_repository(repo)
+    if not has_file and not (isinstance(repo, str) and repo):
+        return Resolution(None, NO_REPO_OR_FILE)
+    return urls.resolve(repo, path, node.get("source_location"), repo in single_root)
+
+
 def annotate(graph: dict, urls: SourceUrls) -> Outcome:
     """Set or clear `url` on every node, and account for each one."""
     nodes = graph["nodes"]
@@ -74,7 +96,7 @@ def annotate(graph: dict, urls: SourceUrls) -> Outcome:
         outcome.carried += had
         repo, path = node.get("repo"), node.get("source_file")
         outcome.estate += bool(isinstance(repo, str) and repo and isinstance(path, str) and path)
-        found = urls.resolve(repo, path, node.get("source_location"), repo in single_root)
+        found = _resolve(node, urls, single_root)
         if found.url is None:
             outcome.skipped[found.reason] += 1
             outcome.removed += had

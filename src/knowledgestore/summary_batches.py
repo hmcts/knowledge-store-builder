@@ -52,7 +52,11 @@ def unwritten_digests() -> list[dict]:
     """The significant communities with no prose, in the digests' own order."""
     digests = io.read_json(config.SUMMARIES_INPUT_PATH) or []
     have = set(io.read_summaries(config.SUMMARIES_PATH))
-    return [digest for digest in digests if str(digest["id"]) not in have]
+    return [
+        digest
+        for digest in digests
+        if io.has_community(digest["id"]) and str(digest["id"]) not in have
+    ]
 
 
 def write_batches(out_dir: Path, size: int) -> int:

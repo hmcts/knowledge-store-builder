@@ -5053,6 +5053,7 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
             "test_summaries_remap.RemapCliTest.test_a_community_that_swallowed_an_old_one_does_not_carry_its_prose",
             "test_summaries_remap.RemapCliTest.test_a_summary_whose_members_have_all_gone_is_dropped",
             "test_summaries_remap.RemapCliTest.test_a_summary_with_no_snapshot_entry_is_dropped_not_carried_forward",
@@ -7256,6 +7257,88 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "summaries: extract buckets nodes with no community as a cluster",
+        "build_community_summaries.py",
+        '        if io.has_community(node.get("community")):\n            members[node["community"]].append(node)\n',
+        '        members[node.get("community", -1)].append(node)\n',
+        "the repository and chart-source nodes added after clustering would be filed under digest id -1 and read as a significant community, so an author is asked for prose about a cluster nothing can reach",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_extract_writes_no_digest_for_nodes_with_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: batches cuts a digest that has no community",
+        "summary_batches.py",
+        '        if io.has_community(digest["id"]) and str(digest["id"]) not in have\n',
+        '        if str(digest["id"]) not in have\n',
+        "a digest file holding a -1 entry would still be cut into a batch and sent to an author",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_batches_cut_nothing_for_a_digest_with_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: merge accepts prose keyed to no community",
+        "build_community_summaries.py",
+        "            if not io.has_community(community_id):\n",
+        "            if False:\n",
+        "prose written for community -1 would be merged into the committed summaries under a community nothing can reach, instead of being refused by name",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_merge_of_only_a_no_community_entry_writes_nothing",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
+        ),
+    ),
+    Mutation(
+        "summaries: merge counts a digest with no community as owed prose",
+        "build_community_summaries.py",
+        'known_ids = {str(d["id"]) for d in digests if io.has_community(d["id"])}',
+        'known_ids = {str(d["id"]) for d in digests}',
+        "every merge would end by saying a significant community still lacks a summary, for one that can never have it",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_merge_does_not_report_no_community_as_a_summary_still_owed",
+        ),
+    ),
+    Mutation(
+        "summaries: status expects prose for a digest with no community",
+        "status.py",
+        'sum(1 for d in digests if isinstance(d, dict) and io.has_community(d.get("id")))',
+        "sum(1 for d in digests if isinstance(d, dict))",
+        "the coverage denominator would include a community nothing can write about, so a store reads as permanently short of full coverage",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_status_does_not_expect_prose_for_no_community",
+        ),
+    ),
+    Mutation(
+        "summaries: the clustering fingerprint buckets nodes with no community",
+        "build_community_summaries.py",
+        '    sizes = Counter(\n        str(node["community"]) for node in nodes if io.has_community(node.get("community"))\n    )',
+        '    sizes = Counter(str(node.get("community", -1)) for node in nodes)',
+        "the fingerprint would count a -1 group that extract no longer writes, so verify reads every refresh as a different clustering",
+        (
+            "test_summaries_no_community.NoCommunityTest.test_the_clustering_fingerprint_ignores_nodes_with_no_community",
+        ),
+    ),
+    Mutation(
+        "source url: a repository node gets no tree link",
+        "build_source_urls.py",
+        "    if not has_file and kinds.is_kind(node, kinds.REPOSITORY):\n",
+        "    if False:\n",
+        "a repository node has no source_file and would be left without a url, so a store checking that every node carries a pinned url has to special-case it",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
+        ),
+    ),
+    Mutation(
+        "source url: a node with neither repo nor file is not counted by its own reason",
+        "build_source_urls.py",
+        "    if not has_file and not (isinstance(repo, str) and repo):\n",
+        "    if False:\n",
+        "an orphan node would be reported as merely lacking a file, so the report could not tell a node with nowhere to link from one that lacks a file",
+        (
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
+            "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
+        ),
+    ),
+    Mutation(
         "source url: a clone URL on another host is linked as github.com",
         "source_urls.py",
         r"(?:git@|ssh://git@|https://|http://|git://)github\.com[:/]",
@@ -7266,6 +7349,7 @@ MUTATIONS = (
         (
             "test_build_relationships.OrgCheckTest.test_each_clone_is_compared_against_its_own_organisation",
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_the_linked_count_is_recorded_for_the_store_manifest",
             "test_build_source_urls.SourceUrlsStageTest.test_the_report_counts_what_was_linked_and_why_the_rest_was_not",
@@ -7475,6 +7559,7 @@ MUTATIONS = (
         "fails the stage when the repository list is absent, though it ran clean before",
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_no_estate_nodes_passes",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
         ),
     ),
     Mutation(
@@ -7923,7 +8008,9 @@ MUTATIONS = (
         (
             "test_build_source_urls.SourceUrlsStageTest.test_a_file_name_that_cannot_be_encoded_is_left_unlinked_and_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_estate_nodes_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_repository_list_naming_none_of_the_graphs_repositories_is_refused",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_that_would_remove_every_link_is_refused",
             "test_build_source_urls.SourceUrlsStageTest.test_a_run_whose_shas_are_all_unusable_keeps_every_link",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
@@ -9318,6 +9405,8 @@ MUTATIONS = (
             "test_summaries_coverage.WriteGateTest.test_a_refresh_that_moved_only_a_count_does_not_rewrite_the_file",
             "test_summaries_coverage.WriteGateTest.test_changed_prose_rewrites_the_file",
             "test_summaries_coverage.WriteGateTest.test_the_recorded_digest_covers_the_prose_and_not_the_metadata",
+            "test_summaries_no_community.NoCommunityTest.test_merge_does_not_report_no_community_as_a_summary_still_owed",
+            "test_summaries_no_community.NoCommunityTest.test_merge_refuses_prose_keyed_to_no_community_and_names_it",
             "test_summaries_remap.RemapWriteGateTest.test_a_merge_after_a_remap_recognises_the_digest_the_remap_recorded",
             "test_summaries_remap.RemapWriteGateTest.test_a_remap_that_moves_an_id_still_rewrites_the_file",
             "test_summaries_remap.RemapWriteGateTest.test_an_identity_remap_does_not_rewrite_the_committed_file",
@@ -13301,7 +13390,9 @@ MUTATIONS = (
             "test_build_intent_index.SquashPromotionTest.test_two_runs_under_different_hash_seeds_write_identical_bytes",
             "test_build_source_urls.SourceUrlsStageTest.test_a_missing_repository_list_with_no_estate_nodes_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_a_node_that_cannot_be_linked_correctly_has_no_url",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted",
             "test_build_source_urls.SourceUrlsStageTest.test_a_real_repositories_directory_is_not_read_as_the_corpus_prefix",
+            "test_build_source_urls.SourceUrlsStageTest.test_a_repository_node_links_to_the_tree_at_the_build_commit",
             "test_build_source_urls.SourceUrlsStageTest.test_a_rerun_is_byte_identical",
             "test_build_source_urls.SourceUrlsStageTest.test_an_estate_configured_on_another_host_still_passes",
             "test_build_source_urls.SourceUrlsStageTest.test_both_graph_files_are_written_and_agree",

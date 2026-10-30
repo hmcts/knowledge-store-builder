@@ -84,7 +84,11 @@ def layer_coverage() -> dict:
         topics = []
     return {
         "summaries_written": len(summaries),
-        "summaries_expected": len(digests) if isinstance(digests, list) else 0,
+        "summaries_expected": (
+            sum(1 for d in digests if isinstance(d, dict) and io.has_community(d.get("id")))
+            if isinstance(digests, list)
+            else 0
+        ),
         "briefs_written": len(briefs),
         "topics_configured": len(topics),
     }

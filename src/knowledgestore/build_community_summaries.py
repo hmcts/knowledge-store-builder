@@ -235,7 +235,10 @@ def extract() -> int:
 
     members: dict[int, list[dict]] = defaultdict(list)
     for node in graph["nodes"]:
-        members[node.get("community", -1)].append(node)
+        # Not bucketed: a node with no community is not a cluster, and a digest for
+        # them would be prose about a group nothing can reach.
+        if io.has_community(node.get("community")):
+            members[node["community"]].append(node)
 
     if graph["nodes"] and not any(n.get("repo") for n in graph["nodes"]):
         # Without it every digest still looks well-formed - the right count, top
@@ -430,7 +433,11 @@ def _take_batches(
             continue
         for community_id, summary in batch.items():
             summary = " ".join(str(summary).split())
-            if str(community_id) not in known_ids:
+            if not io.has_community(community_id):
+                rejected.append(
+                    f"{community_id}: no community - nodes no clustering placed get no prose"
+                )
+            elif str(community_id) not in known_ids:
                 rejected.append(f"{community_id}: unknown community id")
             elif not MIN_SUMMARY_LEN <= len(summary) <= MAX_SUMMARY_LEN:
                 rejected.append(f"{community_id}: length {len(summary)} outside bounds")
@@ -457,7 +464,7 @@ def _refuse_merge(rejected: list[str], misdirected: list[str]) -> int:
 
 def merge(paths: list[str]) -> int:
     digests = json.loads(config.SUMMARIES_INPUT_PATH.read_text(encoding="utf-8"))
-    known_ids = {str(d["id"]) for d in digests}
+    known_ids = {str(d["id"]) for d in digests if io.has_community(d["id"])}
     coverage = {str(d["id"]): d["coverage"] for d in digests if isinstance(d.get("coverage"), dict)}
     document = io.read_json_dict(config.SUMMARIES_PATH)
     merged: dict[str, str] = io.summaries_body(document)
@@ -641,7 +648,7 @@ def _membership(graph: dict) -> dict[str, list[str]]:
     members: dict[str, list[str]] = {}
     for node in graph.get("nodes", []):
         community = node.get("community")
-        if community is None:
+        if not io.has_community(community):
             continue
         members.setdefault(str(community), []).append(node["id"])
     return members
@@ -673,7 +680,7 @@ def _file_membership(graph: dict) -> dict[str, list[list[str]]]:
     for node in graph.get("nodes", []):
         community = node.get("community")
         key = _file_key(node)
-        if community is None or key is None:
+        if not io.has_community(community) or key is None:
             continue
         files[str(community)].add(key)
     return {name: [list(key) for key in sorted(keys)] for name, keys in sorted(files.items())}
@@ -907,7 +914,7 @@ def _tally_membership(
         if node_id in snapshot_ids:
             overlap += 1
         community = node.get("community")
-        if community is None:
+        if not io.has_community(community):
             continue
         clustered += 1
         name = str(community)
@@ -1199,7 +1206,7 @@ def _remap_refusal(
     # Counted over nodes, not over `new_community`, which is keyed by id: a merged
     # graph can repeat an id, and the dict would collapse those and understate
     # coverage enough to refuse a healthy graph.
-    clustered = sum(1 for node in nodes if node.get("community") is not None)
+    clustered = sum(1 for node in nodes if io.has_community(node.get("community")))
     if nodes and clustered / len(nodes) < coverage:
         return (
             f"Refusing to remap: only {clustered} of {len(nodes)} nodes in "
@@ -1318,7 +1325,7 @@ def _file_index(nodes: Iterable[dict]) -> tuple[dict[tuple[str, str], Counter], 
     for node in nodes:
         community = node.get("community")
         key = _file_key(node)
-        if community is None or key is None:
+        if not io.has_community(community) or key is None:
             continue
         name = str(community)
         by_file[key][name] += 1
@@ -1777,7 +1784,9 @@ def remap(
     nodes = io.read_json_dict(config.GRAPH_PATH).get("nodes", [])
     print(_graph_disagreement(_membership({"nodes": nodes})), end="", file=sys.stderr)
     new_community = {
-        node["id"]: str(node["community"]) for node in nodes if node.get("community") is not None
+        node["id"]: str(node["community"])
+        for node in nodes
+        if io.has_community(node.get("community"))
     }
     refusal = _remap_refusal(summaries, nodes, new_community, old_members, floor, coverage)
     if refusal:
@@ -2432,7 +2441,9 @@ def _clustering_of_nodes(nodes: list[dict]) -> str:
     "" when nothing clears the threshold, which reads through as "no identity
     recorded" rather than as the identity of an empty clustering.
     """
-    sizes = Counter(str(node.get("community", -1)) for node in nodes)
+    sizes = Counter(
+        str(node["community"]) for node in nodes if io.has_community(node.get("community"))
+    )
     significant = {cid: n for cid, n in sizes.items() if n >= config.MIN_COMMUNITY_SIZE}
     return _clustering_fingerprint(significant) if significant else ""
 
