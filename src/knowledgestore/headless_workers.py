@@ -52,6 +52,10 @@ from . import check_chunk, config, cost, io, secret_mask, store_paths, summary_b
 
 PACKAGE = "knowledgestore"
 
+# A worker's result is a `.json` when its stdout parsed and a `.txt` when it did not.
+RESULT_JSON = ".json"
+RESULT_TEXT = ".txt"
+
 SYSTEM_PROMPT = (
     "You are a worker for a knowledge store. Use only the tools you have; "
     "everything else is denied."
@@ -214,7 +218,7 @@ def _attempt_stem(runs: Path, kind: str, report: Report) -> Path:
     attempt = 1
     while any(
         (results / f"{base}{'' if attempt == 1 else f'.attempt-{attempt}'}{suffix}").exists()
-        for suffix in (".json", ".txt")
+        for suffix in (RESULT_JSON, RESULT_TEXT)
     ):
         attempt += 1
     return results / (base if attempt == 1 else f"{base}.attempt-{attempt}")
@@ -223,10 +227,10 @@ def _attempt_stem(runs: Path, kind: str, report: Report) -> Path:
 def _record(report: Report, runs: Path, kind: str, proc, parsed: dict | None) -> None:
     stem = _attempt_stem(runs, kind, report)
     if parsed is not None:
-        path = stem.with_name(stem.name + ".json")
+        path = stem.with_name(stem.name + RESULT_JSON)
         io.write_json(path, parsed)
     else:
-        path = stem.with_name(stem.name + ".txt")
+        path = stem.with_name(stem.name + RESULT_TEXT)
         io.checked_write_target(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(proc.stdout or "", encoding="utf-8")
@@ -352,7 +356,7 @@ def _usage_totals(reports: Sequence[Report]) -> tuple[int, int, int, float]:
     for report in reports:
         for path in report.results:
             runs += 1
-            if path.suffix != ".json":
+            if path.suffix != RESULT_JSON:
                 continue
             data = io.read_json_dict(path)
             usage = data.get("usage") or {}
