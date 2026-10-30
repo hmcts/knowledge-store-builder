@@ -128,6 +128,14 @@ intended, one path each: `--allow-vanished PATH [PATH...]`; any file not named
 still fails. A declared repository whose first clone failed blocks it until `sync`
 clones it or it is removed from `config/repositories.txt`.
 
+`extract-ast` also prints nodes per extension and warns, never refuses, when one
+extension's share of the layer has grown by ten percentage points or more since the
+last run (`.yaml: 0 -> 12,400 nodes (41% of the layer)`; graphify 0.9.97 began extracting
+YAML as one node per key). Content the store does not want in the layer is listed in
+`config/graphify-ignore.txt` (`*.yaml`, `*.yml`) and applied with `apply-ignores`. Files
+graphify failed on are reported as `could not be parsed`, with a count per extension;
+`could not be read` means the system would not open the file.
+
 Extracting from inside the repository is what keeps `source_file` repo-relative,
 which is what the file-to-ticket join is keyed on. `extract-ast` does that itself,
 rooting the extractor at each clone and then adding what `merge-graphs` adds: node ids

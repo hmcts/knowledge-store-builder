@@ -190,6 +190,20 @@ lost file is lost whatever the reason. A vanished file `--allow-vanished` does n
 name keeps its previous count in the record, so the next run fails again rather than
 taking the zero as the new baseline.
 
+## What the layer is made of
+
+Beside the per-file record sits `<layer>_extension_counts.json`: nodes per source-file
+extension. The run prints the largest and warns when one extension's share of the layer
+has grown by `EXTENSION_GROWTH_POINTS` since the last run, as when graphify 0.9.97 began
+extracting YAML as one node per key. The warning never refuses; the remedy is to list the
+content in `config/graphify-ignore.txt`. A run with a failed repository leaves the record
+alone, because a layer missing a repository is not a baseline.
+
+Node ids that repeat are handled the way `graphify update` handles them: copies of one
+node differing only in where they were seen collapse to the last (`merge_duplicate_ids`),
+and an id shared by distinct nodes keeps every copy and is named. The per-file record
+counts the nodes before that merge, so a file is not sent to zero by it.
+
 The record is only as good as the join between a node's `source_file` and a
 content-set path, and a join that misses returns a clean 0 for every file - which
 would record all zeros and leave the guard unable ever to fire. So when fewer than
@@ -863,6 +877,45 @@ def report_vanished(
     return lines
 
 
+def extension_breakdown(paths: "list[str]") -> str:
+    """`198 .yaml, 2 .tpl`: how many of `paths` carry each extension, most first.
+
+    Ties break on the extension, so two runs on the same input print the same line
+    (CLAUDE.md 1.3). A path with no extension is counted as `(none)`.
+    """
+    tally: dict[str, int] = {}
+    for name in paths:
+        extension = posixpath.splitext(name)[1].lower() or "(none)"
+        tally[extension] = tally.get(extension, 0) + 1
+    ordered = sorted(tally.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{count:,} {extension}" for extension, count in ordered)
+
+
+def _fails_to_read(name: str) -> bool:
+    """True when the operating system will not hand over the file's first byte.
+
+    graphify lists a file in `failed_sources` for a parse failure and for a read failure
+    alike, and gives no reason. Reading the file ourselves is what tells them apart: a
+    file we can read was one the parser rejected.
+    """
+    path = Path(name)
+    try:
+        with open(path if path.is_absolute() else config.ROOT / path, "rb") as handle:
+            handle.read(1)
+    except OSError:
+        return True
+    return False
+
+
+def _unread_paragraph(names: "list[str]", total: int, outcome: str) -> str:
+    shown = "\n".join(f"  {name}" for name in names[:5])
+    more = f"\n  ... and {len(names) - 5:,} more" if len(names) > 5 else ""
+    return (
+        f"\n{len(names):,} of {total:,} file(s) were handed to the extractor and could "
+        f"not be {outcome} ({extension_breakdown(names)}):\n{shown}{more}"
+    )
+
+
 def report_unread(skipped: "list[str]", total: int) -> str:
     """Files the extractor could not read. Reported, not refused on.
 
@@ -870,15 +923,23 @@ def report_unread(skipped: "list[str]", total: int) -> str:
     that decision rather than overriding it, for the same reason a decrease is
     reported and not refused. What it must not do is stay silent, because a
     repository that parsed none of its files still reports as extracted.
+
+    A file the parser rejected is "could not be parsed" and a file the system will not
+    open is "could not be read". graphify files both under `failed_sources`, and a
+    template with Go templating in a `.yaml` file is not an I/O fault - the old wording
+    sent operators looking for a permissions problem that was not there.
     """
     if not skipped:
         return ""
-    shown = "\n".join(f"  {name}" for name in skipped[:5])
-    more = f"\n  ... and {len(skipped) - 5:,} more" if len(skipped) > 5 else ""
-    return (
-        f"\n{len(skipped):,} of {total:,} file(s) were handed to the extractor and could "
-        f"not be read:\n{shown}{more}"
-    )
+    unopenable = [name for name in skipped if _fails_to_read(name)]
+    refused = set(unopenable)
+    unparsed = [name for name in skipped if name not in refused]
+    paragraphs = []
+    if unparsed:
+        paragraphs.append(_unread_paragraph(unparsed, total, "parsed"))
+    if unopenable:
+        paragraphs.append(_unread_paragraph(unopenable, total, "read"))
+    return "".join(paragraphs)
 
 
 def report_movement(moved: "dict[str, list]") -> str:
@@ -899,6 +960,139 @@ def report_movement(moved: "dict[str, list]") -> str:
     if not lines:
         return ""
     return "\nper-repository movement since the last run:\n" + "\n".join(lines)
+
+
+# What `graphify` stamps on a node to say where it saw it, and which two copies of the
+# same node therefore differ in. `graphify update` builds its graph with `add_node`, so
+# nodes sharing an id collapse to the last one written; observed on a Swift
+# `import Foundation` in two files, which emits one `foundation` module node per
+# importing file, differing only in these two fields. Any other difference between two
+# nodes of one id means they are not the same node.
+PROVENANCE_FIELDS = frozenset({"source_file", "source_location"})
+
+
+def merge_duplicate_ids(nodes: list) -> "tuple[list, int, list[str]]":
+    """The nodes with each repeated id collapsed to its last copy, as `graphify update` does.
+
+    Returns the nodes, how many copies were dropped, and the ids that were *not*
+    collapsed. An id whose copies differ in anything beyond where they were seen is a
+    collision of distinct nodes, not one node emitted twice, and dropping one of them
+    would lose data without a word: every copy is kept and the id is named instead.
+    Order follows each id's first appearance, so the output is deterministic.
+    """
+    groups: dict[object, list[dict]] = {}
+    for node in nodes:
+        groups.setdefault(node.get("id") if isinstance(node, dict) else None, []).append(node)
+    kept: list = []
+    merged = 0
+    collisions: list[str] = []
+    for node_id, copies in groups.items():
+        identities = [
+            {k: v for k, v in copy.items() if k not in PROVENANCE_FIELDS}
+            if isinstance(copy, dict)
+            else copy
+            for copy in copies
+        ]
+        if node_id is None or any(identity != identities[0] for identity in identities):
+            if node_id is not None:
+                collisions.append(str(node_id))
+            kept.extend(copies)
+        else:
+            kept.append(copies[-1])
+            merged += len(copies) - 1
+    return kept, merged, sorted(collisions)
+
+
+def report_duplicate_ids(merged: int, collisions: "list[str]") -> "tuple[str, str]":
+    """(stdout, stderr) text for the duplicate-id handling; each empty when it has nothing to say."""
+    said = ""
+    if merged:
+        said = (
+            f"\n{merged:,} duplicate node id(s) merged: the same node emitted once per file "
+            "that references it, kept once with the last copy's source_file, as "
+            "`graphify update` does."
+        )
+    warned = ""
+    if collisions:
+        shown = "\n".join(f"  {node_id}" for node_id in collisions[:5])
+        more = f"\n  ... and {len(collisions) - 5:,} more" if len(collisions) > 5 else ""
+        warned = (
+            f"\nwarning: {len(collisions):,} node id(s) are shared by distinct nodes (they "
+            f"differ in more than where they were seen), so every copy was kept:\n{shown}{more}"
+        )
+    return said, warned
+
+
+# An extension is flagged when its share of the layer has grown by this many points
+# (0.10 is ten percentage points) since the last run. graphify 0.9.97 took `.yaml` from
+# no nodes to a large share of a layer, so the real event clears this by a wide
+# margin. A routine run - one repository added or refactored among hundreds - moves an
+# extension's share by a point or two, and a threshold that fires on that is read once
+# and then ignored. Only growth is flagged: shrinkage is for the movement and
+# vanished-file reports.
+EXTENSION_GROWTH_POINTS = 0.10
+
+
+def extension_counts_path(layer: Path) -> Path:
+    """Where the per-extension node counts sit: beside the layer and its per-file record."""
+    return layer.with_name(f"{layer.stem}_extension_counts.json")
+
+
+def nodes_per_extension(nodes: list) -> "dict[str, int]":
+    """Nodes per source-file extension, lower-cased and sorted; `(none)` and `(no source_file)`.
+
+    Counted from `source_file` as the nodes carry it, so what is counted is the layer as
+    written, not the content set that went in.
+    """
+    tally: dict[str, int] = {}
+    for node in nodes:
+        source = node.get("source_file") if isinstance(node, dict) else None
+        if not isinstance(source, str) or not source:
+            key = "(no source_file)"
+        else:
+            key = posixpath.splitext(source)[1].lower() or "(none)"
+        tally[key] = tally.get(key, 0) + 1
+    return dict(sorted(tally.items()))
+
+
+def _share(counts: "dict[str, int]", extension: str) -> float:
+    total = sum(counts.values())
+    return counts.get(extension, 0) / total if total else 0.0
+
+
+def grown_extensions(
+    before: "dict[str, int]", now: "dict[str, int]"
+) -> "list[tuple[str, int, int, float]]":
+    """(extension, nodes before, nodes now, share now) for each that crossed the threshold."""
+    return [
+        (extension, before.get(extension, 0), count, _share(now, extension))
+        for extension, count in sorted(now.items())
+        if count > before.get(extension, 0)
+        and _share(now, extension) - _share(before, extension) >= EXTENSION_GROWTH_POINTS
+    ]
+
+
+def report_extensions(
+    now: "dict[str, int]", grown: "list[tuple[str, int, int, float]]"
+) -> "tuple[str, str]":
+    """(counts line, warning): the largest extensions, and a warning when any grew past the threshold."""
+    ordered = sorted(now.items(), key=lambda item: (-item[1], item[0]))
+    line = "\nnodes per extension: " + ", ".join(f"{e} {n:,}" for e, n in ordered[:10])
+    if len(ordered) > 10:
+        line += f", ... and {len(ordered) - 10:,} more"
+    if not grown:
+        return line, ""
+    lines = [
+        f"warning: {len(grown)} extension(s) grew by {EXTENSION_GROWTH_POINTS:.0%} of the "
+        "layer or more since the last run:"
+    ]
+    for extension, was, count, share in grown:
+        lines.append(f"  {extension}: {was:,} -> {count:,} nodes ({share:.0%} of the layer)")
+    lines.append(
+        "If that content is modelled elsewhere or is not wanted, list it in "
+        "config/graphify-ignore.txt (e.g. `*.yaml` and `*.yml`). Nothing was refused."
+    )
+    return line, "\n".join(lines)
 
 
 def parse_args(argv: "list[str] | None") -> argparse.Namespace:
@@ -1218,6 +1412,38 @@ def report_failures(failures: list) -> None:
         print(f"  {label}: {error}", file=sys.stderr)
 
 
+def report_extension_growth(destination: Path, nodes: list, failures: list) -> None:
+    """Print per-extension counts and any growth since last run; then record them.
+
+    Not recorded when a repository failed: a layer missing one is not a baseline, and
+    the next complete run would then read the missing repository as growth everywhere.
+    """
+    path = extension_counts_path(destination)
+    now = nodes_per_extension(nodes)
+    stored = io.read_json(path, default=None)
+    before = (
+        {str(k): int(v) for k, v in stored.items() if isinstance(v, (int, float))}
+        if isinstance(stored, dict)
+        else None
+    )
+    grown = grown_extensions(before, now) if before is not None else []
+    counts_line, warning = report_extensions(now, grown)
+    print(counts_line)
+    if warning:
+        print(warning, file=sys.stderr)
+    if before is None:
+        print(
+            f"no per-extension record in {path.name}; wrote one, so growth is caught from "
+            "the next run."
+        )
+    if failures:
+        print(
+            f"{path.name} was left as it was: a repository failed, so this layer is not a baseline."
+        )
+        return
+    write_counts(path, now)
+
+
 def main(argv: "list[str] | None" = None) -> int:
     arguments = parse_args(argv)
     graph_directory = config.GRAPH_PATH.parent
@@ -1246,14 +1472,19 @@ def main(argv: "list[str] | None" = None) -> int:
     # Written even when repositories failed: a layer covering the rest is worth
     # more than a traceback. The exit code carries the failure instead, because a
     # partial layer reporting success is how a store commits a hole.
-    io.write_json(destination, layer)
+    # Counted and recorded from the raw layer, below, so a file whose only node is one
+    # shared with others still has it in its count; merging first would send such a file
+    # to zero and have the guard fail a file that extracted fine.
+    nodes, merged, collisions = merge_duplicate_ids(layer["nodes"])
+    written = {**layer, "nodes": nodes}
+    io.write_json(destination, written)
     # Only repositories that actually extracted get a fresh count, so a failure does
     # not write a 0 that the next run would read as a legitimate decrease to nothing -
     # and a failed repository keeps its previous one rather than vanishing from the
     # baseline, which would erase the record that shows what the failure cost.
     write_counts(sidecar, carry_forward(before, counts, failures))
     print(
-        f"\nnodes {len(layer['nodes']):,}  edges {len(layer['edges']):,}  "
+        f"\nnodes {len(nodes):,}  edges {len(layer['edges']):,}  "
         f"repositories {len(groups) - len(failures):,} of {len(groups):,}"
     )
     print(f"-> {destination}")
@@ -1262,6 +1493,11 @@ def main(argv: "list[str] | None" = None) -> int:
         print(report_movement(movement(before, counts)) or "\nno per-repository movement.")
     else:
         print(f"\nno previous run recorded in {sidecar.name}; movement starts next run.")
+    said, warned = report_duplicate_ids(merged, collisions)
+    print(said, end="\n" if said else "")
+    if warned:
+        print(warned, file=sys.stderr)
+    report_extension_growth(destination, nodes, failures)
     unread = {source_key(entry) for entry in skipped}
     refused = vanished_report(
         destination, layer, groups, failures, (declined, unread), arguments.allow_vanished

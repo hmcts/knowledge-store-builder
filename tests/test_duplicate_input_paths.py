@@ -77,8 +77,10 @@ class ExtractAstTest(_StoreCase, unittest.TestCase):
     @unittest.skipUnless(shutil.which("graphify"), "needs graphify")
     def test_the_real_extractor_doubles_nodes_for_a_repeated_file(self):
         """Pins what the repeat would cost: graphify's own extractor, given one file
-        twice, returns every node twice. Dropping the repeat is what keeps the layer
-        from holding duplicate node ids."""
+        twice, returns every node twice. Dropping the repeat keeps the file from being
+        parsed twice. The layer no longer shows the doubling, because identical nodes
+        merge, so the dropped-repeat notice and the per-repository count - recorded
+        before the merge - are what catch a repeat that reaches the parser."""
         from graphify.extract import extract
 
         path = self._repo_file("repo-a", "a.py")
@@ -98,6 +100,11 @@ class ExtractAstTest(_StoreCase, unittest.TestCase):
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = extract_ast.main(["--files", str(listing)])
         self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("1 duplicate path(s) in the input ignored", out.getvalue())
+        counts = json.loads(
+            (self.root / "graphify-out" / ".graphify_ast_counts.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(counts, {"repo-a": len(once["nodes"])})
         self.assertEqual(len(self._layer()["nodes"]), len(once["nodes"]))
         ids = [n["id"] for n in self._layer()["nodes"]]
         self.assertEqual(len(ids), len(set(ids)))

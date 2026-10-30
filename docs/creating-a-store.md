@@ -686,6 +686,38 @@ record of zeros would otherwise read as a clean baseline from which the guard co
 never fire. A store root reached through a symlink is handled: graphify spells
 those paths against the resolved root, and the stage rebuilds them.
 
+**It says what the layer is made of, and warns when one extension takes over.** Each
+run prints the largest extensions by node count and records all of them in
+`graphify-out/.graphify_ast_extension_counts.json`. When an extension's share of the
+layer has grown by ten percentage points or more since the last run, it warns on
+stderr and still exits 0:
+
+```text
+warning: 1 extension(s) grew by 10% of the layer or more since the last run:
+  .yaml: 0 -> 12,400 nodes (41% of the layer)
+```
+
+If that content is modelled elsewhere or is not wanted, list it in
+`config/graphify-ignore.txt`, one pattern per line, then run `apply-ignores` and
+rebuild the content set:
+
+```text
+*.yaml
+*.yml
+```
+
+A run with a failed repository leaves the record alone, because a layer missing a
+repository is not a baseline. The first run says it has no record and writes one.
+
+**Files graphify could not handle are named for what went wrong.** A file the parser
+rejected, such as a Helm template with Go templating in a `.yaml` file, is reported as
+`could not be parsed` with a count per extension (`198 .yaml, 2 .tpl`). `could not be
+read` is kept for a file the operating system would not open. Node ids that graphify
+emits more than once, such as the module node one Swift file after another creates for
+`import Foundation`, are merged to the last copy, as `graphify update` does, and the
+run says how many. Two different nodes sharing an id are all kept and named in a
+warning, so nothing is dropped without a word.
+
 **It refuses before extracting when graphify cannot parse a file type the content
 set holds.** graphify reads `.tf`, `.tfvars`, `.hcl` and `.sql` files as nothing
 when its grammar package is absent, with no error, so a green run proves nothing
