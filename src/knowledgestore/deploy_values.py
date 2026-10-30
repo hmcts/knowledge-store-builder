@@ -25,6 +25,7 @@ the store and the entry with the placeholder. Keys are kept, locations are not.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 PLACEHOLDER = "<set-at-deploy-time>"
 
@@ -268,19 +269,27 @@ def withhold_secret_locations(value: object) -> object:
     return value
 
 
-def _walk(value: object, prefix: str, out: dict[str, str], max_chars: int) -> None:
+Scrub = Callable[[str, str], "str | None"]
+
+
+def _walk(value: object, prefix: str, out: dict[str, str], max_chars: int, scrub: Scrub) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
-            _walk(item, f"{prefix}.{key}" if prefix else str(key), out, max_chars)
+            _walk(item, f"{prefix}.{key}" if prefix else str(key), out, max_chars, scrub)
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
-            _walk(item, f"{prefix}.{index}", out, max_chars)
+            _walk(item, f"{prefix}.{index}", out, max_chars, scrub)
         return
     if value is None:
         out[prefix] = ""
         return
-    out[prefix] = str(value)[:max_chars]
+    text = str(value)
+    # The whole value, before the cap: a rule that needs all of it (a private-key
+    # block) or a token straddling the cap matches nothing once the value is cut,
+    # and the cut value would then be published.
+    replacement = scrub(prefix, text)
+    out[prefix] = text[:max_chars] if replacement is None else replacement
 
 
 class Flattened(dict[str, str]):
@@ -293,16 +302,26 @@ class Flattened(dict[str, str]):
     """
 
     dropped: int = 0
+    # (key, rule) of each value `scrub` replaced and the cap kept, sorted.
+    withheld: tuple[tuple[str, str], ...] = ()
 
 
-def flatten(value: object, max_keys: int, max_chars: int) -> Flattened:
+def _keep(_key: str, _value: str) -> None:
+    return None
+
+
+def flatten(value: object, max_keys: int, max_chars: int, scrub: Scrub = _keep) -> Flattened:
     """Dotted keys to scalar values, capped in key count and value length.
+
+    `scrub(key, full_value)` runs on each value before the length cap and returns
+    its replacement, or None to keep the value (then capped). A replacement is
+    stored whole: it is a marker, not a value to cut.
 
     Sorted before capping so two runs on the same input keep the same keys - an
     unstable cap would churn the committed graph for no reason.
     """
     out: dict[str, str] = {}
-    _walk(withhold_secret_locations(value), "", out, max_chars)
+    _walk(withhold_secret_locations(value), "", out, max_chars, scrub)
     kept = Flattened((key, out[key]) for key in sorted(out)[:max_keys])
     kept.dropped = max(0, len(out) - max_keys)
     return kept

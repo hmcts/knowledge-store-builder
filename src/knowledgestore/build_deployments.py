@@ -29,6 +29,7 @@ from pathlib import Path
 from . import (
     config,
     deploy_flux,
+    deploy_secrets,
     deploy_values,
     graph_files,
     io,
@@ -96,7 +97,7 @@ def _parse(text: str) -> dict[str, str] | None:
         return None
     if not isinstance(loaded, dict):
         return None
-    return deploy_values.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
+    return deploy_secrets.flatten(loaded, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS)
 
 
 def _documents(text: str) -> list[object] | None:
@@ -430,7 +431,13 @@ class _Fact:
     chart: str = ""
 
 
-def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -> dict:
+def _deployment_node(
+    fact: _Fact,
+    deploy_repo: str,
+    community: int,
+    name: str,
+    withheld: list[tuple[str, str]] | None = None,
+) -> dict:
     return {
         "id": f"{deploy_repo}::deploy:{fact.environment}:{fact.service}",
         "label": f"{fact.service} ({fact.environment})",
@@ -450,9 +457,19 @@ def _deployment_node(fact: _Fact, deploy_repo: str, community: int, name: str) -
             "route": fact.route,
             "config": fact.config,
             **_truncation(fact.config),
+            **_withheld(withheld),
             **fact.extra,
         },
     }
+
+
+def _withheld(found: list[tuple[str, str]] | None) -> dict[str, list[str]]:
+    """`config_withheld: [keys]` when a value was withheld, else nothing.
+
+    Absent rather than empty on a clean node, as `config_truncated` is. Keys only:
+    the rule is in the run report, and the value is nowhere.
+    """
+    return {"config_withheld": sorted({key for key, _ in found})} if found else {}
 
 
 def _truncation(flat: dict[str, str]) -> dict[str, int]:
@@ -584,6 +601,8 @@ class _Tally:
         self.unmatched: set[str] = set()
         self.out_of_reach: set[str] = set()
         self.unreadable: list[str] = []
+        # (repository, file, key, rule) of each value withheld. Never the value.
+        self.withheld: list[tuple[str, str, str, str]] = []
         self.flux = _FluxTally()
 
 
@@ -627,7 +646,7 @@ def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
             # place this service is defined. Every layer is listed in `layers`.
             fact.layers[0],
             ROUTE_KUSTOMIZE,
-            deploy_values.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
+            deploy_secrets.flatten(fact.values, config.DEPLOY_MAX_KEYS, config.DEPLOY_VALUE_CHARS),
             extra,
             fact.chart.source,
             fact.chart.name,
@@ -754,7 +773,12 @@ def _add_repo_layer(
         environment = fact.environment
         cid = communities.for_environment(environment)
         name = communities.labels[str(cid)]
-        node = _deployment_node(fact, deploy_repo, cid, name)
+        # Withheld at flatten, before the length cap, on both routes: the key list
+        # and the report read what that already replaced.
+        recorded: tuple[tuple[str, str], ...] = getattr(fact.config, "withheld", ())
+        found = list(recorded)
+        tally.withheld.extend((deploy_repo, fact.rel, key, rule) for key, rule in found)
+        node = _deployment_node(fact, deploy_repo, cid, name, found)
         graph["nodes"].append(node)
         tally.pairs += 1
         if environment not in tally.environments:
@@ -836,6 +860,29 @@ def _flux_report(flux: _FluxTally) -> None:
         )
 
 
+# How many withheld values the report names; the count above it is always whole.
+WITHHELD_SHOWN = 10
+
+
+def _withheld_report(withheld: list[tuple[str, str, str, str]]) -> None:
+    """Where a value was withheld, by repository, file, key and rule - never the value.
+
+    Printed so a store learns that a literal credential sat in its configuration:
+    withholding it from the graph does not take it out of the repository, and it
+    should still be rotated at source.
+    """
+    if not withheld:
+        return
+    print(
+        f"  {len(withheld)} config value(s) withheld as secret-shaped "
+        "(listed under config_withheld on the node); rotate any real credential at source:"
+    )
+    for repo, rel, key, rule in sorted(withheld)[:WITHHELD_SHOWN]:
+        print(f"    {repo}: {rel}  key {key}  rule {rule}")
+    if len(withheld) > WITHHELD_SHOWN:
+        print(f"    ... and {len(withheld) - WITHHELD_SHOWN} more")
+
+
 def _report(tally: _Tally, graph: dict) -> None:
     """Everything the run needs to say, including what it could not do."""
     print(
@@ -874,6 +921,7 @@ def _report(tally: _Tally, graph: dict) -> None:
         print(
             f"  {len(tally.unreadable)} values file(s) did not parse and carry no evidence: {shown}"
         )
+    _withheld_report(tally.withheld)
     _flux_report(tally.flux)
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
 
