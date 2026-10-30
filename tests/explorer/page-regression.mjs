@@ -852,6 +852,29 @@ expectSame('links: the which-repositories table links each file it names',
     + 'src/pipes/address.pipe.ts</a>')),
   [true, true]);
 
+// --- inputs are labelled and nothing steals focus (#514) -------------------
+// Catches: an <input> with no accessible name (WCAG 1.3.1 / 4.1.2) - a screen
+// reader announces it as an unnamed edit field - and an `autofocus` attribute,
+// which moves focus on load without the user asking (WCAG 3.2.1 / 2.4.3).
+// A name is an aria-label, a <label for=id> naming it, or an enclosing <label>
+// with text of its own. A placeholder is not a name.
+const pageHtml = readFileSync(pagePath, 'utf-8');
+const inputTags = [...pageHtml.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
+const labelFors = new Set([...pageHtml.matchAll(/<label\b[^>]*\bfor="([^"]+)"[^>]*>\s*[^<\s]/g)]
+  .map((m) => m[1]));
+const wrapped = [...pageHtml.matchAll(/<label\b(?![^>]*\bfor=)[^>]*>(?:(?!<\/label>)[\s\S])*?<\/label>/g)]
+  .map((m) => m[0]).filter((l) => l.replace(/<[^>]*>/g, '').trim());
+const unlabelled = inputTags.filter((tag) => {
+  if (/\baria-label="[^"]+"/.test(tag)) return false;
+  const id = (tag.match(/\bid="([^"]+)"/) || [])[1];
+  if (id && labelFors.has(id)) return false;
+  return !wrapped.some((l) => l.includes(tag));
+});
+expectSame('a11y: the page has inputs to check', inputTags.length > 0, true);
+expectSame('a11y: every <input> has an accessible label', unlabelled, []);
+expectSame('a11y: no element carries autofocus',
+  [...pageHtml.matchAll(/<[a-z][^>]*\bautofocus\b[^>]*>/gi)].map((m) => m[0]), []);
+
 if (failures) {
   console.error(`\n${failures} question shape(s) failed`);
   process.exit(1);
