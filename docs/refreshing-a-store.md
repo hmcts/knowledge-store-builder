@@ -672,6 +672,13 @@ refresh:
   identical set.
 - **Expect other nodes to appear.** SQL gains index nodes, and Java gains nodes
   for annotations and external types. Dangling Terraform edges disappear.
+- **Expect YAML to arrive from 0.9.97.** From graphify 0.9.97, above the 0.9.94 this
+  library was tested against, YAML files are parsed as code: one node per key, with
+  no values. A store can gain tens of thousands of nodes where 0.9.93 gave none, and
+  they carry almost no information. `extract-ast` now warns when an extension's
+  share of the layer grows by ten percentage points or more. To keep YAML out, add
+  `*.yaml` and `*.yml` to `config/graphify-ignore.txt`, run `apply-ignores` and
+  rebuild the content set.
 - **Re-check any AST-share threshold the store uses.** Nodes grow by roughly a
   tenth while edges stay about flat, so a ratio or percentage tuned on the old
   layer will move.

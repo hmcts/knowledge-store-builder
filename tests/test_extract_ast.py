@@ -575,7 +575,7 @@ class UnreadFilesTest(_StoreCase, unittest.TestCase):
         extractor = _Extractor(unreadable=("broken.py",))
         code, out, _ = self._run(extractor, ["--detect", str(detect)])
         self.assertEqual(code, 0)
-        self.assertIn("could not be read", out)
+        self.assertIn("could not be parsed", out)
         self.assertIn("broken.py", out)
         self.assertIn("1 unread", out, "the per-repository line did not carry the count")
 
@@ -588,5 +588,6 @@ class UnreadFilesTest(_StoreCase, unittest.TestCase):
         detect = self._detect([self._repo_file("repo-a", "a.py")])
         code, out, _ = self._run(_Extractor(), ["--detect", str(detect)])
         self.assertEqual(code, 0)
+        self.assertNotIn("could not be parsed", out)
         self.assertNotIn("could not be read", out)
         self.assertNotIn("unread", out)

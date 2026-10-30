@@ -116,5 +116,47 @@ class ExtractAstParityTest(_DeclaredStoreCase, unittest.TestCase):
         self.assertEqual(ours_nodes["repo-a::src_service_service"], ("src/service.py", "repo-a"))
 
 
+@unittest.skipUnless(HAS_GRAPHIFY, "needs the graphify command and the `ast` extra")
+class ExtractAstDuplicateIdParityTest(_DeclaredStoreCase, unittest.TestCase):
+    """The duplicate ids graphify emits are collapsed the way its own route collapses them.
+
+    Break this catches: graphify emits one module node per Swift file importing it, all with
+    one id. `graphify update` keeps the last, so `extract-ast` leaving them in puts
+    duplicate ids in a layer the per-repository route would not have, and a consumer that
+    keys on id sees one node twice. Both routes run for real on an invented clone.
+    """
+
+    def test_a_module_imported_by_two_files_is_one_node_on_both_routes(self):
+        clone = self._clone("repo-a", "one.swift", "two.swift")
+        for name, struct in (("one.swift", "Alpha"), ("two.swift", "Beta")):
+            (clone / name).write_text(
+                f"import Foundation\nstruct {struct} {{}}\n", encoding="utf-8"
+            )
+        self._declare("repo-a")
+        subprocess.run(["graphify", "update", "."], cwd=clone, check=True, capture_output=True)
+        theirs = json.loads((clone / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+        detect = self._detect([clone / "one.swift", clone / "two.swift"])
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = extract_ast.main(["--detect", str(detect)])
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        ours = [n for n in self._layer()["nodes"] if n.get("file_type") == "code"]
+
+        self.assertEqual(
+            sum(1 for n in theirs["nodes"] if n["id"] == "foundation"),
+            1,
+            "graphify no longer collapses the duplicate, or no longer emits it",
+        )
+        ids = sorted(n["id"] for n in ours)
+        self.assertEqual(ids, sorted(set(ids)), "the layer carries a repeated node id")
+        self.assertEqual(
+            sorted(n["id"].removeprefix("repo-a::") for n in ours),
+            sorted(n["id"] for n in theirs["nodes"] if n.get("file_type") == "code"),
+        )
+        kept = next(n for n in ours if n["id"] == "repo-a::foundation")
+        survivor = next(n for n in theirs["nodes"] if n["id"] == "foundation")
+        self.assertEqual(kept["source_file"], survivor["source_file"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1873,6 +1873,87 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "extension growth past the threshold is not flagged",
+        "extract_ast.py",
+        "        and _share(now, extension) - _share(before, extension) >= EXTENSION_GROWTH_POINTS",
+        "        and _share(now, extension) - _share(before, extension) >= 2.0",
+        "graphify 0.9.97 began extracting YAML as one node per key, taking a store's layer from no YAML to a large share of it, and nothing in the library noticed: the vanished-file guard watches loss and the swamping ceiling needs a semantic layer (#535)",
+        (
+            "test_extract_ast_layer_report.ExtensionGrowthTest.test_a_new_extension_taking_a_large_share_is_named_with_its_counts",
+        ),
+    ),
+    Mutation(
+        "every extension's growth is flagged",
+        "extract_ast.py",
+        "EXTENSION_GROWTH_POINTS = 0.10",
+        "EXTENSION_GROWTH_POINTS = 0.0",
+        "a threshold of zero warns on every run that adds a node, which an operator reads once and then ignores, so the one warning that matters is lost among the rest (#535)",
+        ("test_extract_ast_layer_report.ExtensionGrowthTest.test_ordinary_growth_does_not_warn",),
+    ),
+    Mutation(
+        "a partial layer becomes the extension baseline",
+        "extract_ast.py",
+        "        return\n    write_counts(path, now)",
+        "        pass\n    write_counts(path, now)",
+        "a run with a failed repository recorded its smaller layer as the baseline, so the next complete run read the missing repository as growth in every extension (#535)",
+        (
+            "test_extract_ast_layer_report.ExtensionGrowthTest.test_a_run_with_a_failed_repository_leaves_the_baseline_alone",
+        ),
+    ),
+    Mutation(
+        "the same node emitted twice stays in the layer",
+        "extract_ast.py",
+        "            kept.append(copies[-1])",
+        "            kept.extend(copies)",
+        "graphify emits one module node per importing Swift file, all sharing one id; `graphify update` keeps the last, and extract-ast left them in, so the layer carried repeated ids the per-repository route does not (#531)",
+        (
+            "test_extract_ast_layer_report.DuplicateNodeIdsTest.test_the_same_node_emitted_twice_is_kept_once_with_the_last_copy",
+            "test_extract_ast_parity.ExtractAstDuplicateIdParityTest.test_a_module_imported_by_two_files_is_one_node_on_both_routes",
+        ),
+    ),
+    Mutation(
+        "distinct nodes sharing an id are merged away",
+        "extract_ast.py",
+        "        if node_id is None or any(identity != identities[0] for identity in identities):",
+        "        if node_id is None:",
+        "two different nodes colliding on one id were collapsed to one without a word, which loses a node silently; only copies differing in where they were seen are one node twice (#531)",
+        (
+            "test_extract_ast_layer_report.DuplicateNodeIdsTest.test_distinct_nodes_sharing_an_id_are_all_kept_and_named",
+        ),
+    ),
+    Mutation(
+        "the per-file record is counted after the id merge",
+        "extract_ast.py",
+        "        destination, layer, groups, failures, (declined, unread), arguments.allow_vanished",
+        "        destination, written, groups, failures, (declined, unread), arguments.allow_vanished",
+        "counting nodes per file after the duplicate merge sends a file whose only node is shared to zero, and the vanished-file guard then fails a file that extracted fine (#531)",
+        (
+            "test_extract_ast_layer_report.DuplicateNodeIdsTest.test_merging_does_not_send_a_file_whose_only_node_is_shared_to_zero",
+        ),
+    ),
+    Mutation(
+        "every file graphify failed on is called unreadable",
+        "extract_ast.py",
+        "    unopenable = [name for name in skipped if _fails_to_read(name)]",
+        "    unopenable = list(skipped)",
+        "files graphify failed to parse - nearly all YAML, Helm templates with Go templating - were reported as could not be read, which sent operators looking for an I/O fault (#531)",
+        (
+            "test_extract_ast_layer_report.ParseFailureWordingTest.test_a_file_the_system_cannot_open_is_still_called_unread",
+            "test_extract_ast_layer_report.ParseFailureWordingTest.test_files_the_parser_rejected_are_called_unparsed_with_an_extension_breakdown",
+            "test_extract_ast.UnreadFilesTest.test_files_the_extractor_could_not_read_are_named",
+        ),
+    ),
+    Mutation(
+        "an I/O failure is called a parse failure",
+        "extract_ast.py",
+        "    unopenable = [name for name in skipped if _fails_to_read(name)]",
+        "    unopenable = []",
+        "the other half of the wording: a file the system will not open reported as one the parser rejected would hide a permissions fault behind a grammar one (#531)",
+        (
+            "test_extract_ast_layer_report.ParseFailureWordingTest.test_a_file_the_system_cannot_open_is_still_called_unread",
+        ),
+    ),
+    Mutation(
         "extract-ast roots the extractor at the store again",
         "extract_ast.py",
         "    return config.REPOSITORIES_DIR / name",
