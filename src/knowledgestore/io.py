@@ -153,7 +153,7 @@ PROSE_DIGESTS_KEY = "prose_digests"
 
 # The id a node carries when no clustering placed it, and the one a digest file
 # written before that was understood may still hold. Nodes added after clustering -
-# a `<repo>::repository` node, a chart-source node - have it, or none at all.
+# a `<repo>::repository:self` node, a chart-source node - have it, or none at all.
 NO_COMMUNITY = -1
 
 

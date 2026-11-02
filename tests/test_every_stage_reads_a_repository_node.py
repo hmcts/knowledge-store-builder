@@ -124,7 +124,7 @@ def _store(root: Path, with_repository_node: bool) -> None:
     if with_repository_node:
         repository_node.ensure_repository_node(graph, "alpha")
         graph["links"].append(
-            {"source": "alpha::repository", "target": "alpha::Orders", "relation": "uses"}
+            {"source": "alpha::repository:self", "target": "alpha::Orders", "relation": "uses"}
         )
     (root / "graphify-out").mkdir()
     config.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")

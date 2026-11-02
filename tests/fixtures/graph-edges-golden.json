@@ -54,31 +54,31 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-a::repository",
+    "svc-a::repository:self",
     "tf-cache::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::repository",
+    "svc-a::repository:self",
     "tf-dns::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::repository",
+    "svc-a::repository:self",
     "tf-network::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::repository",
+    "svc-a::repository:self",
     "tf-queue::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-a::repository",
+    "svc-a::repository:self",
     "tf-storage::module",
     "main.tf"
    ],
@@ -132,7 +132,7 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-alpha::repository",
+    "svc-alpha::repository:self",
     "example-charts::module",
     "main.tf"
    ],
@@ -183,31 +183,31 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-cache::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-dns::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-network::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-queue::module",
     "main.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-storage::module",
     "main.tf"
    ]
@@ -244,19 +244,19 @@
   "edges": [
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-network::module",
     "net.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-network::module",
     "other.tf"
    ],
    [
     "USES_MODULE",
-    "svc-x::repository",
+    "svc-x::repository:self",
     "tf-storage::module",
     "storage.tf"
    ]
@@ -278,25 +278,25 @@
   "edges": [
    [
     "USES_MODULE",
-    "consumer::repository",
+    "consumer::repository:self",
     "mod-bare::module",
     "c.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::repository",
+    "consumer::repository:self",
     "mod-https::module",
     "b.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::repository",
+    "consumer::repository:self",
     "mod-scp::module",
     "a.tf"
    ],
    [
     "USES_MODULE",
-    "consumer::repository",
+    "consumer::repository:self",
     "mod-ssh::module",
     "d.tf"
    ]

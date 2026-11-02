@@ -189,7 +189,7 @@ class ProvidedByAnchorTest(SettingsIsolated):
                 uses = [e for e in result["links"] if e.get("relation") == "USES_MODULE"]
                 self.assertEqual(
                     [(e["source"], e["target"]) for e in uses],
-                    [("repo-b::repository", "repo-a::module")],
+                    [("repo-b::repository:self", "repo-a::module")],
                 )
 
 

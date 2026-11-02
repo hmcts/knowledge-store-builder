@@ -348,7 +348,7 @@ page carries a capped summary per deployment (`KSB_DEPLOY_PAGE_KEYS`), searchabl
 by key or value, on the same trade the ticket detail makes.
 
 **A `deploys` edge ends on the repository, not on a node inside it.** Each
-matched repository gets one `<repo>::repository` node (kind `repository`, labelled
+matched repository gets one `<repo>::repository:self` node (kind `repository`, labelled
 with the repository name) and every service it ships points at it. A repository
 node is shared: `packages` anchors its per-repository `USES_MODULE` edges on the
 same node, whichever stage runs first, and neither stage strips it. A service no

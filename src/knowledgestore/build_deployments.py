@@ -950,6 +950,11 @@ def main() -> int:
         return 1
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    try:
+        repository_node.migrate_repository_nodes(graph)
+    except repository_node.ForeignNodeError as error:
+        print(error, file=sys.stderr)
+        return 1
     _strip_layer(graph)
     repos = _repositories(graph)
 

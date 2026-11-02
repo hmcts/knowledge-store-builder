@@ -17,7 +17,14 @@ from pathlib import Path
 
 from settings_isolation import SettingsIsolated
 from knowledgestore import build_deployments as deployments
-from knowledgestore import build_explorer, config, deploy_values, kinds, store_index
+from knowledgestore import (
+    build_explorer,
+    config,
+    deploy_values,
+    kinds,
+    repository_node,
+    store_index,
+)
 from knowledgestore import build_package_edges as packages
 from knowledgestore.server import graph as server_graph
 
@@ -85,7 +92,7 @@ def _graph() -> dict:
 
 
 def _repository_nodes(graph: dict) -> list[dict]:
-    return [n for n in graph["nodes"] if n["id"].endswith("::repository")]
+    return [n for n in graph["nodes"] if n["id"].endswith("::repository:self")]
 
 
 def _edges(graph: dict, relation: str) -> list[tuple[str, str]]:
@@ -107,8 +114,8 @@ class DeploysTargetTheRepository(SettingsIsolated, unittest.TestCase):
         self.assertEqual(
             _edges(graph, "deploys"),
             [
-                ("estate-deploy::deploy:prd:alpha-agent", "alpha::repository"),
-                ("estate-deploy::deploy:prd:alpha-backend", "alpha::repository"),
+                ("estate-deploy::deploy:prd:alpha-agent", "alpha::repository:self"),
+                ("estate-deploy::deploy:prd:alpha-backend", "alpha::repository:self"),
             ],
         )
         node = _repository_nodes(graph)[0]
@@ -167,13 +174,13 @@ class OneRepositoryNode(SettingsIsolated, unittest.TestCase):
                         _run(stage)
                     graph = _graph()
                 ids = [n["id"] for n in graph["nodes"]]
-                self.assertEqual(ids.count("alpha::repository"), 1)
+                self.assertEqual(ids.count("alpha::repository:self"), 1)
                 self.assertEqual(len(ids), len(set(ids)))
                 self.assertEqual(
-                    _edges(graph, "USES_MODULE"), [("alpha::repository", "tf-network::module")]
+                    _edges(graph, "USES_MODULE"), [("alpha::repository:self", "tf-network::module")]
                 )
                 self.assertEqual(
-                    {target for _, target in _edges(graph, "deploys")}, {"alpha::repository"}
+                    {target for _, target in _edges(graph, "deploys")}, {"alpha::repository:self"}
                 )
                 present = set(ids)
                 self.assertEqual(
@@ -202,7 +209,7 @@ class NoOrphanedRepositoryNode(SettingsIsolated, unittest.TestCase):
             _run(deployments)
             kept = _graph()
             self.assertEqual(_edges(kept, "deploys"), [])
-            self.assertEqual([n["id"] for n in _repository_nodes(kept)], ["alpha::repository"])
+            self.assertEqual([n["id"] for n in _repository_nodes(kept)], ["alpha::repository:self"])
             # Nothing links it any more.
             (Path(raw) / "repositories" / "alpha" / "main.tf").unlink()
             _run(packages)
@@ -275,10 +282,173 @@ class ConsumersReadARepositoryNode(SettingsIsolated, unittest.TestCase):
         self.assertEqual(kinds.node_kind(node), kinds.REPOSITORY)
         entry = next(e for e in entries if e[0] == "alpha" and e[2] == "")
         self.assertEqual(entry[1], "alpha")
-        row = rows["alpha::repository"]
+        row = rows["alpha::repository:self"]
         self.assertEqual((row[3], row[4]), ("repository", ""))
         self.assertEqual(next(iter(server_graph._node_rows([node]))), row)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _plant(*, nodes: list[dict] = (), links: list[dict] = ()) -> None:
+    """Add to the graph file `_store` wrote, as an earlier stage or graphify would have."""
+    graph = _graph()
+    graph["nodes"].extend(nodes)
+    graph["links"].extend(links)
+    config.GRAPH_PATH.write_text(json.dumps(graph), encoding="utf-8")
+
+
+def _link(source: str, target: str, relation: str, origin: str | None = None) -> dict:
+    return {"source": source, "target": target, "relation": relation, "_origin": origin}
+
+
+# What graphify emits for a class named `Repository` in `alpha`: the id the repository
+# node used to take, with another origin.
+OLD_ID = "alpha::repository"
+CLASS_NODE = {
+    "id": OLD_ID,
+    "label": "Repository",
+    "repo": "alpha",
+    "source_file": "src/Repository.java",
+    "_origin": "ast",
+}
+CLASS_EDGE = _link("alpha::AgentMain", OLD_ID, "uses", "ast")
+
+
+def _previous_version_repository_node() -> dict:
+    """The node the previous version wrote, as it was written."""
+    return {
+        "id": OLD_ID,
+        "label": "alpha",
+        "norm_label": "alpha",
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": "alpha",
+        "_origin": repository_node.ORIGIN,
+        "local_id": "repository",
+        "metadata": {"kind": kinds.REPOSITORY},
+    }
+
+
+@needs_yaml
+class AGraphifyNodeCannotBecomeTheRepository(SettingsIsolated, unittest.TestCase):
+    def test_a_class_named_repository_is_not_adopted_and_is_left_as_it_was(self):
+        """Break caught: the repository node's id being one graphify can emit, so a
+        class named `Repository` is taken for the repository and `deploys` and
+        `USES_MODULE` land on code; or the stage rewriting the class it found."""
+        for stages in ((deployments,), (packages,), (packages, deployments)):
+            with self.subTest(order=[stage.FORMAT for stage in stages]):
+                with tempfile.TemporaryDirectory() as raw:
+                    _store(Path(raw))
+                    _plant(nodes=[CLASS_NODE], links=[CLASS_EDGE])
+                    for stage in stages:
+                        _run(stage)
+                    graph = _graph()
+                by_id = {n["id"]: n for n in graph["nodes"]}
+                self.assertEqual(by_id[OLD_ID], CLASS_NODE)
+                self.assertEqual(by_id["alpha::repository:self"]["_origin"], "repository")
+                self.assertEqual(
+                    [e["target"] for e in graph["links"] if e["relation"] == "uses"], [OLD_ID]
+                )
+                landed = {e["target"] for e in graph["links"] if e["relation"] == "deploys"} | {
+                    e["source"] for e in graph["links"] if e["relation"] == "USES_MODULE"
+                }
+                self.assertEqual(landed, {"alpha::repository:self"})
+
+    def test_a_second_run_over_the_collision_writes_the_same_bytes(self):
+        """Break caught: a rerun that adds, drops or moves a node when the class and
+        the repository both exist, so two builds of one input differ."""
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw))
+            _plant(nodes=[CLASS_NODE], links=[CLASS_EDGE])
+            for stage in (packages, deployments):
+                _run(stage)
+            first = config.GRAPH_PATH.read_bytes()
+            for stage in (packages, deployments):
+                _run(stage)
+            self.assertEqual(first, config.GRAPH_PATH.read_bytes())
+
+    def test_a_foreign_node_at_the_repository_id_is_refused_not_adopted(self):
+        """Break caught: `ensure_repository_node` taking whatever holds the id, so the
+        edges land on a node that is not a repository. The stage must say so and
+        leave the graph as it found it."""
+        foreign = {**CLASS_NODE, "id": "alpha::repository:self"}
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw))
+            _plant(nodes=[foreign])
+            before = config.GRAPH_PATH.read_bytes()
+            graph = _graph()
+            with self.assertRaises(repository_node.ForeignNodeError):
+                repository_node.ensure_repository_node(graph, "alpha")
+            for stage in (deployments, packages):
+                said = io.StringIO()
+                with contextlib.redirect_stderr(said):
+                    self.assertEqual(stage.main(), 1, stage.__name__)
+                self.assertIn("alpha::repository:self", said.getvalue())
+                self.assertIn("refusing to adopt", said.getvalue())
+            self.assertEqual(config.GRAPH_PATH.read_bytes(), before)
+
+
+@needs_yaml
+class AGraphFromThePreviousVersionMigrates(SettingsIsolated, unittest.TestCase):
+    def test_the_old_node_takes_the_new_id_and_its_edges_follow(self):
+        """Break caught: a re-run leaving the old-id node behind, or moving the node
+        but not the edges of the stage that did not run, which then dangle. The class
+        sharing the old id in the same graph must stay with its own edge."""
+        old = _previous_version_repository_node()
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw))
+            # Both layers as the previous version wrote them; only `deployments` runs,
+            # so the module edge is one it does not rebuild and must still retarget.
+            _plant(
+                nodes=[old],
+                links=[
+                    _link(OLD_ID, "tf-network::module", "USES_MODULE", "package"),
+                    _link("estate-deploy::deploy:prd:alpha-agent", OLD_ID, "deploys", "deployment"),
+                ],
+            )
+            _run(deployments)
+            graph = _graph()
+        ids = [n["id"] for n in graph["nodes"]]
+        self.assertNotIn(OLD_ID, ids)
+        self.assertEqual(ids.count("alpha::repository:self"), 1)
+        self.assertEqual(
+            _edges(graph, "USES_MODULE"), [("alpha::repository:self", "tf-network::module")]
+        )
+        self.assertEqual({t for _, t in _edges(graph, "deploys")}, {"alpha::repository:self"})
+        moved = next(n for n in graph["nodes"] if n["id"] == "alpha::repository:self")
+        restored = {**moved, "id": OLD_ID}
+        self.assertEqual(restored, old)
+
+    def test_a_class_at_the_old_id_stays_when_the_old_node_is_gone(self):
+        """Break caught: migration rewriting by id alone, so it takes the class that
+        shares the old id and re-points the class's own edges at the repository."""
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw))
+            _plant(nodes=[CLASS_NODE], links=[CLASS_EDGE])
+            graph = _graph()
+            repository_node.migrate_repository_nodes(graph)
+            self.assertEqual(graph, _graph())
+
+    def test_a_migrated_graph_is_the_graph_a_fresh_build_writes_and_stays_put(self):
+        """Break caught: migration that is not a fixed point, or that leaves a trace
+        (a stale twin, an edge on the old id), so a migrated store differs from one
+        built fresh, or every run of it rewrites the graph."""
+        with tempfile.TemporaryDirectory() as raw:
+            _store(Path(raw))
+            for stage in (packages, deployments):
+                _run(stage)
+            fresh = config.GRAPH_PATH.read_bytes()
+            # The previous version's graph: this one with the repository id as it was.
+            old = fresh.replace(b"alpha::repository:self", OLD_ID.encode())
+            self.assertNotEqual(old, fresh, "the premise: the graph holds the new id")
+            config.GRAPH_PATH.write_bytes(old)
+            for stage in (packages, deployments):
+                _run(stage)
+            migrated = config.GRAPH_PATH.read_bytes()
+            for stage in (packages, deployments):
+                _run(stage)
+            self.assertEqual(migrated, fresh)
+            self.assertEqual(config.GRAPH_PATH.read_bytes(), fresh)
