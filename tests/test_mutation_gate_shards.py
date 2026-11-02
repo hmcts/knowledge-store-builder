@@ -422,7 +422,7 @@ class WorkflowShardsTest(unittest.TestCase):
         )
         self.assertIn("mutation_gate.py", str(shard[5]["run"]))
 
-    def test_the_mutation_gate_job_is_four_blocking_shards_on_pull_requests_and_pushes(self):
+    def test_the_mutation_gate_job_is_eight_blocking_shards_on_pull_requests_and_pushes(self):
         """Catches the gate losing its shards, or becoming something a failure can
         slip past: `fail-fast` left on cancels shards, which `tests` then reads as no
         verdict, and `continue-on-error` would make a surviving mutation green."""
@@ -430,7 +430,7 @@ class WorkflowShardsTest(unittest.TestCase):
         step = [s for s in job["steps"] if "mutation_gate.py" in str(s.get("run", ""))]
 
         self.assertEqual(len(step), 1)
-        self.assertEqual(job["strategy"]["matrix"]["shard"], [1, 2, 3, 4])
+        self.assertEqual(job["strategy"]["matrix"]["shard"], [1, 2, 3, 4, 5, 6, 7, 8])
         self.assertIs(job["strategy"]["fail-fast"], False)
         self.assertNotIn("continue-on-error", str(job))
         self.assertEqual(
