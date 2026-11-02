@@ -279,7 +279,9 @@ class ComposingABaseWithItsPatches(SettingsIsolated):
         repo = Path(self.tmp.name) / "repositories" / REPO
         # Without this the loop below passes over an empty set, which is exactly
         # what the stage did before it could read this layout.
-        self.assertEqual(sorted(self.facts), ["alpha (_base)", "alpha (prod)", "alpha (staging)"])
+        self.assertEqual(
+            sorted(self.facts), ["alpha (_base)", "alpha (prod, blue)", "alpha (staging)"]
+        )
         for label, node in sorted(self.facts.items()):
             with self.subTest(fact=label):
                 self.assertTrue((repo / node["source_file"]).is_file(), node["source_file"])
@@ -293,7 +295,7 @@ class ComposingABaseWithItsPatches(SettingsIsolated):
         overlay, so a reader that only follows environment directories loses a
         limit that is really set - and reports nothing missing."""
         self.assertEqual(
-            self.facts["alpha (prod)"]["metadata"]["config"]["resources.limits.memory"], "2Gi"
+            self.facts["alpha (prod, blue)"]["metadata"]["config"]["resources.limits.memory"], "2Gi"
         )
         self.assertNotIn(
             "resources.limits.memory", self.facts["alpha (staging)"]["metadata"]["config"]
@@ -304,7 +306,7 @@ class ComposingABaseWithItsPatches(SettingsIsolated):
         composed first. Overlaying onto the parsed base document rather than a copy
         gives `staging` prod's CPU limit, with both facts looking well-formed."""
         self.assertEqual(
-            self.facts["alpha (prod)"]["metadata"]["config"]["resources.limits.cpu"], "9"
+            self.facts["alpha (prod, blue)"]["metadata"]["config"]["resources.limits.cpu"], "9"
         )
         self.assertEqual(
             self.facts["alpha (staging)"]["metadata"]["config"]["resources.limits.cpu"], "1"
@@ -409,13 +411,13 @@ class BothRoutesReachOneEnvironment(SettingsIsolated):
         self.assertEqual(routes, {"kustomize", "values"})
 
     def test_both_routes_reached_prod(self):
-        self.assertIn("alpha (prod)", self.facts)
+        self.assertIn("alpha (prod, blue)", self.facts)
         self.assertIn("beta-service (prod)", self.facts)
 
     def test_each_fact_records_the_route_that_produced_it(self):
         """Without it, "which services reach this environment by which route" is
         answerable only by guessing from the file path a fact happens to cite."""
-        self.assertEqual(self.facts["alpha (prod)"]["metadata"]["route"], "kustomize")
+        self.assertEqual(self.facts["alpha (prod, blue)"]["metadata"]["route"], "kustomize")
         self.assertEqual(self.facts["beta-service (prod)"]["metadata"]["route"], "values")
 
     def test_both_facts_hang_off_the_one_environment_by_an_edge(self):
@@ -424,7 +426,7 @@ class BothRoutesReachOneEnvironment(SettingsIsolated):
             for edge in self.graph["links"]
             if edge["relation"] == "deployed_in"
         }
-        self.assertIn((f"{REPO}::deploy:prod:alpha", "deploy::env:prod"), edges)
+        self.assertIn((f"{REPO}::deploy:prod:alpha@blue", "deploy::env:prod"), edges)
         self.assertIn((f"{REPO}::deploy:prod:beta-service", "deploy::env:prod"), edges)
 
 

@@ -252,7 +252,7 @@ templated file per service and environment, which is what
 `KSB_DEPLOY_VALUES_GLOB` points at. The **kustomize** route reads a
 Kustomize/Flux tree: a base HelmRelease per service, patched by environment and
 stack overlays, with each cluster's Flux Kustomizations saying which of those
-directories are reconciled where.
+directories are reconciled where, one fact per reconciled path.
 
 Both emit onto the same `deploy::env:<environment>` nodes, and every fact records
 which route produced it in `metadata.route` — so "which services reach this
@@ -267,15 +267,28 @@ differently still reads:
 |---|---|
 | `HelmRelease` (`helm.toolkit.fluxcd.io`) with `spec.chart` | the service's base declaration, with its chart and pinned version |
 | `HelmRelease` with no `spec.chart` | a patch over that base |
-| `Kustomization` (`kustomize.toolkit.fluxcd.io`) | which directories a cluster reconciles, and so which patches compose that environment's fact |
+| `Kustomization` (`kustomize.toolkit.fluxcd.io`) | which directories a cluster reconciles, and so which patches compose that path's fact |
+| `kustomization.yaml` (`kustomize.config.k8s.io`) | read as an index: the files it lists are what its directory reaches |
 | `spec.chart.spec.sourceRef` naming a chart source | a dependency edge to the repository providing the chart, the shape `packages` gives a Terraform module |
 
-One path assumption is left, and it is where an environment gets its **name**:
-the segment below the root of the tree holding the cluster files, so
-`clusters/<env>/<cluster>/apps.yaml` names `<env>`. A cluster file with no such
-segment is reported rather than given an invented environment. A
-`kustomization.yaml` is deliberately not read — it indexes the patch files, and
-the patches themselves carry `kind: HelmRelease`.
+**One fact is one service in one reconciled overlay path.** An environment gets its
+**name** from `clusters/<env>/` - the directory a Flux Kustomization sits in, or the
+`clusters/<env>/...` its `spec.path` reconciles - or from an `environments/<env>`
+directory. It is never taken from an `apps/<name>` segment: those are teams and
+stacks. From each reconciled path the route follows the `kustomization.yaml`
+indexes and nested Flux Kustomizations (a templated `${ENV}` segment in a
+`spec.path` is read as the environment being walked, and only where that directory
+exists) and composes the base with the overlays that path reaches, and nothing
+else. A stack (`.../stacks/<id>`) or a cluster directory (`clusters/<env>/<id>`) is
+a fact of its own: the node id gains `@<stack>`, the label reads
+`service (env, stack)`, and `metadata.stack` carries the identifier while
+`metadata.environment` stays the real environment.
+
+Two guards stay on. A fact whose layers carry the overlays of more than one
+environment, or of more than one stack of one, is **refused** - skipped, counted
+and named in the run report with its reason - rather than emitted as a blend. And a
+Kustomization found under `apps/<team>/` that names no environment draws a
+**WARNING** instead of an environment.
 
 **Read this route's own report before trusting the layer.** The gap it closes was
 silent: the stage returned the same pair count with or without the repository. So

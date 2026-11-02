@@ -276,7 +276,7 @@ def _graph_holding(config_values: dict[str, str]) -> dict:
         "nodes": [
             {"id": "ignored::node", "metadata": {"kind": "feature", "config": {"p": PASSWORD}}},
             {
-                "id": f"{REPO}::deploy:prod:alpha",
+                "id": f"{REPO}::deploy:prod:alpha@blue",
                 "metadata": {"kind": "deployment", "config": config_values},
             },
         ],
@@ -301,7 +301,7 @@ class CheckEvidenceReadsDeploymentConfig(SettingsIsolated):
     def test_a_graph_still_holding_a_matching_value_fails_and_names_the_node(self):
         code, output = self._check(_graph_holding({"dbPassword": PASSWORD, "replicas": "2"}))
         self.assertEqual(code, 1)
-        self.assertIn(f"{REPO}::deploy:prod:alpha", output)
+        self.assertIn(f"{REPO}::deploy:prod:alpha@blue", output)
         self.assertIn("1 value(s)", output)
         self.assertIn("key-name", output)
 
@@ -312,7 +312,7 @@ class CheckEvidenceReadsDeploymentConfig(SettingsIsolated):
         )
         # Fails first if nothing was reported, or the loop below reads an empty page.
         self.assertEqual(code, 1)
-        self.assertIn(f"{REPO}::deploy:prod:alpha", output)
+        self.assertIn(f"{REPO}::deploy:prod:alpha@blue", output)
         for secret in (PASSWORD, VENDOR_KEY, STORE_VALUE):
             self.assertNotIn(secret, output)
         self.assertNotIn("dbPassword", output)
