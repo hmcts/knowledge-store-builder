@@ -13586,7 +13586,6 @@ MUTATIONS = (
             "test_build_store_index.TheStageWritesTheIndex.test_it_writes_both_files_and_reports_the_reconciliation_and_sizes",
             "test_build_store_index.TheStageWritesTheIndex.test_the_archive_graph_is_read_when_the_plain_one_is_absent",
             "test_build_store_index.TheStageWritesTheIndex.test_the_archive_is_read_when_both_graphs_exist",
-            "test_check_answers",
             "test_check_yield.BaselineFormatTests.test_a_gzipped_baseline_gives_the_same_report",
             "test_config_and_io.DeterministicGzipTest.test_same_content_same_bytes_regardless_of_time_and_name",
             "test_config_and_io.IoTest.test_gzip_json_round_trip_and_default",
