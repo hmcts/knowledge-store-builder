@@ -473,6 +473,9 @@ class TheCommittedGraphCanBeDescribed(SettingsIsolated):
             code = record_clustering.main([])
         self.assertEqual(code, 0)
         message = err.getvalue()
+        self.assertIn("MISMATCH", message)
+        self.assertIn("graph.json has 5 communities over 120", message)
+        self.assertIn("graph.json.gz has 7 over 140", message)
 
     def test_agreeing_graphs_say_nothing(self):
         """Otherwise the finding fires on every normal refresh and stops being read."""
