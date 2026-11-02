@@ -16,7 +16,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  tests:
+  # The unit tests and the JavaScript gates. Not the required `tests` context any
+  # more: that is the job at the end of this file, which reports one verdict over
+  # this job and `mutation-gate`, so the gate can run in parallel with these steps
+  # instead of after them.
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -69,7 +73,7 @@ jobs:
           # graphify too, and not only for the deployments stage. Without it 20
           # tests skip silently - every check that reads graphify's own dispatch
           # table or its ignore helpers - so "with extras" was green over a fifth
-          # of its own suite never running. Found by the mutation gate below,
+          # of its own suite never running. Found by the mutation gate,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
@@ -83,35 +87,6 @@ jobs:
       # green would mean nothing about it.
       - name: Unit tests, with extras
         run: python3 -m unittest discover -s tests -v
-
-      # A green suite reports two things with the same output: that the product
-      # works, and that nothing is checking it. This gate distinguishes them by
-      # breaking the product on purpose and requiring the suite to notice. Every
-      # mutation in it is a defect that was actually written, reviewed and caught
-      # late - one of them shipped in a release.
-      #
-      # Each entry names the test modules that observe it and only those are run,
-      # which took this step from about 26 minutes to 81 seconds measured locally
-      # over 183 entries. That makes each entry's mapping load-bearing and
-      # invisible from a passing run: a wrong name prints `caught` either way,
-      # once because the mutation was seen and once because a module that cannot
-      # see it failed for its own reasons. Do not add an entry without running
-      # `--derive-mapping` for it.
-      #
-      # `--verify-mapping` is the check for that. It applies every entry against
-      # the whole suite and refuses a set that names a test which did not fail,
-      # or that nothing observes; a test that fails and is not named is a warning,
-      # because the defect is observed all the same. That costs what this gate cost before the
-      # mapping existed - 1683 seconds measured here - so it runs on the schedule
-      # and on `workflow_dispatch`, in the `mapping` job below, over sixteen runners
-      # at a time (#285).
-      #
-      # A condition rather than a shell branch: interpolating an expression into
-      # a `run:` block is the script-injection shape the analysers read, and it
-      # is worth not writing even where the value is an enum the runner controls.
-      - name: Mutation gate
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        run: python3 tests/mutation_gate.py
 
       # One script, run here and by contributors, so the pinned versions and the
       # checked paths cannot differ between the two.
@@ -192,6 +167,145 @@ jobs:
             && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
             || { git status --porcelain=v1 --untracked-files=all; exit 1; }
 
+  # The mutation gate, in four slices, on the events the `tests` verdict wants it.
+  #
+  # It was a step of the one job that ran the unit tests, and took 1,947 of that
+  # job's 2,457 seconds, so a pull request waited on the two in series. The default
+  # mode accepts `--shard N/M` and holds that the shards are a partition of the table
+  # - each entry in exactly one - so four runners cost no coverage. One runner per
+  # shard, because the gate mutates a real file in the tree and two workers in one
+  # checkout corrupt each other's.
+  #
+  # Not the required context: a matrix leg cannot be one, and a skipped job reads as
+  # satisfied. `tests` below reports the verdict over this job.
+  #
+  # The environment is the `unit` job's up to the extras, minus the default-install
+  # unit run, which proves something about the core install and nothing about the
+  # gate. `test_mutation_gate_shards` holds the two to the same steps.
+  mutation-gate:
+    # A condition rather than a shell branch: interpolating an expression into
+    # a `run:` block is the script-injection shape the analysers read, and it
+    # is worth not writing even where the value is an enum the runner controls.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs, so two surviving mutations in different shards are two
+      # findings rather than one and a cancellation.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from tags at install
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # NOSONAR(S8541,S8544) - `-e .` installs this repository's own project, which
+      # has no version to lock and no sdist to build: both rules are asking for a pin
+      # that does not exist. The extras below carry real pins and real flags. Both jobs
+      # install identically on purpose - a mapping derived under one environment and
+      # verified under another reports the table as wrong when the environments differ.
+      - name: Install the package
+        run: pip install -e . # NOSONAR
+
+      - name: Install the optional extras
+        run: |
+          pip install --only-binary :all: 'PyYAML==6.0.3'
+          # graphify too, and not only for the deployments stage. Without it 20
+          # tests skip silently - every check that reads graphify's own dispatch
+          # table or its ignore helpers - so "with extras" was green over a fifth
+          # of its own suite never running. Found by the mutation gate,
+          # which reported a symlink-exclusion mutation as surviving in CI while
+          # the same mutation was caught locally.
+          pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
+          # The MCP SDK, pinned to what the `server` extra declares, so the server's
+          # tests under tests/server run instead of skipping. The default-install run
+          # above skips them with a reason that names the extra.
+          pip install --only-binary :all: 'mcp==2.3.0'
+
+      # A green suite reports two things with the same output: that the product
+      # works, and that nothing is checking it. This gate distinguishes them by
+      # breaking the product on purpose and requiring the suite to notice. Every
+      # mutation in it is a defect that was actually written, reviewed and caught
+      # late - one of them shipped in a release.
+      #
+      # Each entry names the test modules that observe it and only those are run,
+      # which took this step from about 26 minutes to 81 seconds measured locally
+      # over 183 entries. That makes each entry's mapping load-bearing and
+      # invisible from a passing run: a wrong name prints `caught` either way,
+      # once because the mutation was seen and once because a module that cannot
+      # see it failed for its own reasons. Do not add an entry without running
+      # `--derive-mapping` for it.
+      #
+      # `--verify-mapping` is the check for that. It applies every entry against
+      # the whole suite and refuses a set that names a test which did not fail,
+      # or that nothing observes; a test that fails and is not named is a warning,
+      # because the defect is observed all the same. That costs what this gate cost before the
+      # mapping existed - 1683 seconds measured here - so it runs on the schedule
+      # and on `workflow_dispatch`, in the `mapping` job below, over sixteen runners
+      # at a time (#285).
+      #
+      # The divisor is the number of shards rather than a literal four, so adding or
+      # removing one cannot leave a quarter of the table unchecked with every shard
+      # green. Through the environment rather than interpolated into the script,
+      # which is the script-injection shape the analysers read.
+      - name: Mutation gate, this shard's entries
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python3 tests/mutation_gate.py --shard "$SHARD/$SHARDS"
+
+      # The gate edits a real source file and puts it back; this is the evidence the
+      # restore was byte-exact, as in the `unit` job.
+      - name: The gate left the checkout as it found it
+        run: |
+          git diff --exit-code \
+            && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
+            || { git status --porcelain=v1 --untracked-files=all; exit 1; }
+
+  # The required context. `unit` and `mutation-gate` are separate jobs so the gate's
+  # shards run in parallel, and a matrix leg cannot be a required status check - so
+  # this job keeps the name `tests` the `main` ruleset requires and reports one
+  # verdict over both.
+  #
+  # `always()` because a job that `needs` a failed one is skipped, and a skipped
+  # check is not a failed one - a required context reads it as satisfied. Without it
+  # this job would report nothing in exactly the case it exists for. No event
+  # condition, for the opposite reason: a skipped `tests` is the deadlock
+  # `CLAUDE.md` 10 describes.
+  #
+  # The verdict is `tests/tests_verdict.py` and not shell, for the reason
+  # `mapping-summary` is a module: a shell verdict once reported success over legs
+  # that never ran (#331). A skipped `mutation-gate` passes only on the events where
+  # it is not wanted. Results reach it through the environment rather than being
+  # interpolated into the script.
+  tests:
+    needs: [unit, mutation-gate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # No `pip install`: the module imports the standard library only.
+      - name: One verdict over the unit tests and the mutation gate
+        env:
+          UNIT: ${{ needs.unit.result }}
+          GATE: ${{ needs.mutation-gate.result }}
+          EVENT: ${{ github.event_name }}
+        run: python3 tests/tests_verdict.py
+
+
   # The pull-request half of the same question, on the event that creates the
   # problem. `mapping-decision` below never runs on a pull request, and the two jobs
   # after it never do either - but a merge of `main` into a branch is *where* an
@@ -214,7 +328,7 @@ jobs:
   # a mutated line; the nightly legs own that half. Not a required check, so a red
   # here blocks nothing by itself - it is a verdict to act on.
   #
-  # The steps before the last are the `tests` job's, step for step, the discipline
+  # The steps before the last are the `unit` job's, step for step, the discipline
   # the `mapping` legs follow and `test_observer_staleness` holds this job to. The
   # mapping is derived with the package and the pinned extras installed; without
   # them a test that needs an extra skips, fails under no entry, and settles CLEAN
@@ -258,7 +372,7 @@ jobs:
           # graphify too, and not only for the deployments stage. Without it 20
           # tests skip silently - every check that reads graphify's own dispatch
           # table or its ignore helpers - so "with extras" was green over a fifth
-          # of its own suite never running. Found by the mutation gate below,
+          # of its own suite never running. Found by the mutation gate,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
@@ -285,7 +399,7 @@ jobs:
   # not parallelised - half its 90 seconds is process-and-import floor, and its
   # entries are concentrated on a few modules.
   #
-  # The steps up to the extras are the `tests` job's, step for step, and
+  # The steps up to the extras are the `unit` job's, step for step, and
   # `test_mutation_gate_shards` fails if they stop being: one runner per shard
   # costs a second job, and this is what keeps it from also costing a second
   # environment. A prefix rather than a hand-picked subset, because a prefix is
@@ -378,7 +492,7 @@ jobs:
           # graphify too, and not only for the deployments stage. Without it 20
           # tests skip silently - every check that reads graphify's own dispatch
           # table or its ignore helpers - so "with extras" was green over a fifth
-          # of its own suite never running. Found by the mutation gate below,
+          # of its own suite never running. Found by the mutation gate,
           # which reported a symlink-exclusion mutation as surviving in CI while
           # the same mutation was caught locally.
           pip install --only-binary :all: 'graphifyy[terraform,sql]==0.9.97'
@@ -481,7 +595,7 @@ jobs:
   # Schedule only: a pull request already reports to its author, and a push to
   # main is followed by the next scheduled run within a day.
   nightly-alarm:
-    needs: [tests, observer-staleness, mapping-decision, mapping, mapping-summary]
+    needs: [unit, mutation-gate, tests, observer-staleness, mapping-decision, mapping, mapping-summary]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:

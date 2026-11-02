@@ -583,6 +583,12 @@ and `lint.yml` may keep theirs because they are not required. If skipping a
 required check on prose ever becomes worth the effort, add a companion job that
 reports the same context for the ignored paths.
 
+The `tests` context is itself a verdict job, `tests/tests_verdict.py`, over the
+`unit` job and the four-shard `mutation-gate` job: a matrix leg cannot be a
+required context, and a skipped job reads as satisfied. It runs under `always()`
+and fails unless both succeeded, a skipped gate passing only on a schedule or a
+dispatch. Do not rename it, and do not put the gate back inside `unit`.
+
 ## 11. Releases
 
 **Cutting a release is the maintainer's call, not a contributor's.** Publishing

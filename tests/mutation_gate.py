@@ -38,7 +38,7 @@ only named module was the one holding them (#274). Those guards are named in
 `TABLE_GUARDS` and subtracted from every set this gate derives or verifies.
 
 The three slow modes are what keep the mapping honest, and none runs in the
-`tests` job: `--derive-mapping` fills in a new entry from a full suite run,
+pull-request jobs: `--derive-mapping` fills in a new entry from a full suite run,
 `--verify-mapping` applies every entry against the whole suite, refuses a named
 set that claims a test which did not fail (or that nothing observes) and only
 warns of one that omits a test which did - the defect is observed either way, so
@@ -77,7 +77,7 @@ itself. `--isolate` re-runs each named observer by itself under its entry's
 mutation and refuses one that passes, which is the only shape that separates an
 observation from a sibling's leftovers (#334). One test per subprocess against a
 suite per entry makes it the cheapest of the three by orders of magnitude, and it
-is still off the `tests` job's path, because what it can find is a claim the
+is still off the pull-request gate's path, because what it can find is a claim the
 table makes rather than a defect in the product.
 
 `--derive-mapping` is also the one mode that does not require a valid mapping. It

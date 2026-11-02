@@ -80,7 +80,7 @@ def runs(*described: tuple[int, str, str]) -> dict[str, object]:
 
 
 def legs(*conclusions: str) -> dict[str, object]:
-    """A run's jobs: the four matrix legs, plus the `tests` job every run has."""
+    """A run's jobs: the four matrix legs, plus the `unit` and `tests` jobs every run has."""
     return {
         "jobs": [
             {"name": f"mapping ({n})", "conclusion": conclusion}
