@@ -3213,10 +3213,23 @@ def verify(sample: int | None = None, strict: bool = False, estate: bool = False
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["extract"]:
+        # Parsed even with nothing to parse: `--help` must print and exit before
+        # a stage that writes files touches any of them.
+        argparse.ArgumentParser(
+            prog="knowledgestore summaries extract",
+            description="Write a digest per significant community for summaries to be written from.",
+        ).parse_args(arguments[1:])
         return extract()
     if arguments[:1] == ["merge"] and len(arguments) >= 2:
+        if arguments[1] in ("-h", "--help"):
+            print("usage: knowledgestore summaries merge RESULT.json [RESULT.json ...]")
+            return 0
         return merge(arguments[1:])
     if arguments[:1] == ["snapshot"]:
+        argparse.ArgumentParser(
+            prog="knowledgestore summaries snapshot",
+            description="Record the current community membership so a later remap can read it.",
+        ).parse_args(arguments[1:])
         return snapshot()
     if arguments[:1] == ["verify"]:
         parser = argparse.ArgumentParser(prog="knowledgestore summaries verify")

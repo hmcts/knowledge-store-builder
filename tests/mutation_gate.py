@@ -13766,6 +13766,17 @@ MUTATIONS = (
             "test_redact_cache.RedactCacheTest.test_a_change_names_the_stages_that_rebuild_the_copies",
         ),
     ),
+    Mutation(
+        "summaries snapshot runs when asked for --help",
+        "build_community_summaries.py",
+        "        ).parse_args(arguments[1:])\n        return snapshot()\n",
+        "        )\n        return snapshot()\n",
+        "a store asked `summaries snapshot --help` and its committed membership snapshot was "
+        "overwritten before a remap could read it",
+        (
+            "test_help_never_writes.HelpNeverWritesTest.test_help_on_every_stage_exits_zero_and_writes_nothing",
+        ),
+    ),
 )
 
 
