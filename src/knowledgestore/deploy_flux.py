@@ -610,7 +610,7 @@ def read(entries: Sequence[tuple[str, Sequence[object]]]) -> Reading:
     releases, reconciliations, counted = _classify(ordered_entries)
     tree = _Tree(ordered_entries)
     scopes = _scopes(reconciliations)
-    environments = {environment for environment, _ in scopes}
+    environments = {key[0] for key in scopes}
     bases = _bases(releases, environments)
     reached: set[str] = set()
     unresolved: list[str] = []
