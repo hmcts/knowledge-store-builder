@@ -419,7 +419,8 @@ class AGraphFromThePreviousVersionMigrates(SettingsIsolated, unittest.TestCase):
         )
         self.assertEqual({t for _, t in _edges(graph, "deploys")}, {"alpha::repository:self"})
         moved = next(n for n in graph["nodes"] if n["id"] == "alpha::repository:self")
-        self.assertEqual({**moved, "id": OLD_ID}, old)
+        restored = {**moved, "id": OLD_ID}
+        self.assertEqual(restored, old)
 
     def test_a_class_at_the_old_id_stays_when_the_old_node_is_gone(self):
         """Break caught: migration rewriting by id alone, so it takes the class that
