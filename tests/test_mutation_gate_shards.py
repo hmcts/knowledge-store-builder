@@ -386,7 +386,7 @@ class WorkflowShardsTest(unittest.TestCase):
         self.assertIn("matrix.shard", str(step["env"]))
         self.assertRegex(str(step["run"]), r"--shard\s+\"?\$\{?\w+\}?/\$\{?\w+\}?\"?")
 
-    def test_the_mapping_job_runs_the_environment_the_tests_job_runs(self):
+    def test_the_mapping_job_runs_the_environment_the_unit_job_runs(self):
         """Catches the two jobs' environments drifting. They install the same package,
         the same pinned extras and the same interpreter, and the mapping check
         concludes about the tests the suite runs - so a job that installs one fewer
@@ -397,7 +397,77 @@ class WorkflowShardsTest(unittest.TestCase):
         environment = mapping[: len(mapping) - 1]
 
         self.assertGreater(len(environment), 1, "the mapping job sets nothing up")
-        self.assertEqual(environment, self.jobs["tests"]["steps"][: len(environment)])
+        self.assertEqual(environment, self.jobs["unit"]["steps"][: len(environment)])
+
+    def test_the_mutation_gate_job_runs_the_environment_the_unit_job_runs(self):
+        """Catches the gate shards running in a different environment from the suite
+        they judge: one extra fewer installed and a test that needs it skips, so a
+        mutation it alone observes is reported `survived` here or, worse, `caught` by
+        a failure for another reason. The shards skip the default-install unit run -
+        it proves the core installs, not anything about the gate - so the unit job's
+        steps with that one removed must be the shards' setup step for step, up to the
+        extras, and the one step after is the gate."""
+        unit = [
+            step
+            for step in self.jobs["unit"]["steps"]
+            if step.get("name") != "Unit tests, default install"
+        ]
+        shard = self.jobs["mutation-gate"]["steps"]
+        setup = shard[:5]
+
+        self.assertEqual(setup, unit[:5])
+        self.assertTrue(
+            any("graphifyy" in str(step.get("run", "")) for step in setup),
+            "the shards run without the extras the suite is judged under",
+        )
+        self.assertIn("mutation_gate.py", str(shard[5]["run"]))
+
+    def test_the_mutation_gate_job_is_four_blocking_shards_on_pull_requests_and_pushes(self):
+        """Catches the gate losing its shards, or becoming something a failure can
+        slip past: `fail-fast` left on cancels shards, which `tests` then reads as no
+        verdict, and `continue-on-error` would make a surviving mutation green."""
+        job = self.jobs["mutation-gate"]
+        step = [s for s in job["steps"] if "mutation_gate.py" in str(s.get("run", ""))]
+
+        self.assertEqual(len(step), 1)
+        self.assertEqual(job["strategy"]["matrix"]["shard"], [1, 2, 3, 4])
+        self.assertIs(job["strategy"]["fail-fast"], False)
+        self.assertNotIn("continue-on-error", str(job))
+        self.assertEqual(
+            job["if"], "github.event_name == 'pull_request' || github.event_name == 'push'"
+        )
+        self.assertEqual(step[0]["env"]["SHARD"], "${{ matrix.shard }}")
+        self.assertEqual(step[0]["env"]["SHARDS"], "${{ strategy.job-total }}")
+        self.assertEqual(step[0]["run"], 'python3 tests/mutation_gate.py --shard "$SHARD/$SHARDS"')
+        self.assertEqual(job["steps"][-1]["name"], "The gate left the checkout as it found it")
+
+    def test_the_gate_is_not_a_step_of_the_unit_job(self):
+        """Catches the gate being run serially again, after a merge puts the step back."""
+        self.assertEqual(
+            [
+                step
+                for step in self.jobs["unit"]["steps"]
+                if "mutation_gate.py" in str(step.get("run", ""))
+            ],
+            [],
+            "the unit job runs the mutation gate in series with the suite",
+        )
+
+    def test_the_required_context_is_one_verdict_over_the_unit_job_and_the_gate(self):
+        """Catches the `tests` context reporting on less than both jobs, or being
+        skippable: `always()` is what keeps a skipped dependency from skipping it, and
+        a skipped required context reads as satisfied. Results go through the
+        environment, and the verdict is the module the suite drives."""
+        job = self.jobs["tests"]
+        [step] = [s for s in job["steps"] if "tests_verdict.py" in str(s.get("run", ""))]
+
+        self.assertEqual(sorted(job["needs"]), ["mutation-gate", "unit"])
+        self.assertEqual(job["if"], "always()")
+        self.assertNotIn("continue-on-error", str(job))
+        self.assertEqual(step["env"]["UNIT"], "${{ needs.unit.result }}")
+        self.assertEqual(step["env"]["GATE"], "${{ needs.mutation-gate.result }}")
+        self.assertEqual(step["env"]["EVENT"], "${{ github.event_name }}")
+        self.assertNotIn("${{", str(step["run"]))
 
     def _summarising_step(self) -> dict:
         steps = self.jobs["mapping-summary"]["steps"]
@@ -506,11 +576,12 @@ class WorkflowShardsTest(unittest.TestCase):
         self.assertEqual(
             [
                 step
-                for step in self.jobs["tests"]["steps"]
+                for job in ("unit", "mutation-gate", "tests")
+                for step in self.jobs[job]["steps"]
                 if "--verify-mapping" in str(step.get("run", ""))
             ],
             [],
-            "the tests job still runs the whole-suite mapping check",
+            "a job that runs on a pull request still runs the whole-suite mapping check",
         )
 
 

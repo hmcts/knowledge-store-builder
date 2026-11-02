@@ -902,17 +902,17 @@ class TheWorkflowSettlesOnAPullRequestTest(unittest.TestCase):
         self.workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         self.job = self.workflow["jobs"]["observer-staleness"]
 
-    def test_the_job_settles_in_the_environment_the_tests_job_builds(self):
+    def test_the_job_settles_in_the_environment_the_unit_job_builds(self):
         """Catches settling running where the arrived tests cannot observe anything.
         Without the package and the pinned extras installed, a test that needs one
         skips - and a skipped test fails under no mutation, so every entry it
-        observes comes back CLEAN. A prefix of the `tests` job's steps rather than a
+        observes comes back CLEAN. A prefix of the `unit` job's steps rather than a
         hand-picked subset, the discipline `test_mutation_gate_shards` holds the
         `mapping` job to, and it has to reach the extras or the equality is vacuous."""
         steps = self.job["steps"]
         environment = steps[: len(steps) - 1]
 
-        self.assertEqual(environment, self.workflow["jobs"]["tests"]["steps"][: len(environment)])
+        self.assertEqual(environment, self.workflow["jobs"]["unit"]["steps"][: len(environment)])
         self.assertTrue(
             any("graphifyy" in str(step.get("run", "")) for step in environment),
             "the job settles without the extras the mapping is derived with",
