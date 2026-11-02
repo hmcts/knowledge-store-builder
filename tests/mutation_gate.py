@@ -4687,8 +4687,8 @@ MUTATIONS = (
     Mutation(
         "only the first directory a cluster reconciles is read",
         "deploy_flux.py",
-        "                add(environment, stack, service, whole.get(service, []) + services[service])",
-        "                add(environment, stack, service, services[service])",
+        "                add(environment, stack, service, whole.get(service, []) + layers)",
+        "                add(environment, stack, service, layers)",
         "#88: a cluster reconciles an environment overlay and its stack overlays together, so "
         "reading one of them loses limits that are really set and reports nothing missing",
         (

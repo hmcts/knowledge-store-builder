@@ -320,7 +320,7 @@ def _join(directory: str, reference: str) -> str | None:
     joined = posixpath.normpath(posixpath.join(directory, reference))
     if joined == "." or joined == "":
         return ""
-    return None if joined.startswith("..") or joined.startswith("/") else joined
+    return None if joined.startswith(("..", "/")) else joined
 
 
 def _references(index: dict) -> list[str]:
@@ -584,16 +584,15 @@ def _compose(
         else:
             facts[(environment, service, stack)] = _fact(service, environment, ordered, stack)
 
-    for environment in sorted({env for env, _ in scopes}):
-        whole = scopes.get((environment, ""), {})
-        stacks = {
-            stack: scopes[(environment, stack)]
-            for env, stack in scopes
-            if env == environment and stack
-        }
+    by_environment: dict[str, dict[str, dict[str, list[tuple[str, dict]]]]] = {}
+    for (environment, stack), services in scopes.items():
+        by_environment.setdefault(environment, {})[stack] = services
+    for environment, grouped in sorted(by_environment.items()):
+        whole = grouped.get("", {})
+        stacks = {stack: services for stack, services in grouped.items() if stack}
         for stack, services in sorted(stacks.items()):
-            for service in sorted(services):
-                add(environment, stack, service, whole.get(service, []) + services[service])
+            for service, layers in sorted(services.items()):
+                add(environment, stack, service, whole.get(service, []) + layers)
         covered = {service for services in stacks.values() for service in services}
         for service in sorted(set(whole) - covered):
             add(environment, "", service, whole[service])
