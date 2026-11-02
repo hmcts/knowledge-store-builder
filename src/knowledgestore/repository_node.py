@@ -23,6 +23,10 @@ leave it behind at degree 0. Each stage therefore also ends with
 `prune_unlinked_repository_nodes`: what survives is what some stage's edges still
 use. A fresh merge rebuilds the graph without the node, and with it the edges that
 used it, so nothing outlives the repository it described.
+
+The id is one graphify cannot produce (`SUFFIX`), and a node at it that this module
+did not create is refused, never adopted (#549). A graph written under the old id is
+migrated by `migrate_repository_nodes` when either stage next runs.
 """
 
 from __future__ import annotations
@@ -31,9 +35,25 @@ from . import kinds
 
 ORIGIN = "repository"
 
+# What follows the `<repo>::` prefix. graphify builds node ids from word characters
+# and underscores only (`graphify.ids.normalize_id` replaces every run of
+# `[^\w]` with `_`), so a colon after the prefix is a shape its extraction cannot
+# emit. The id used to be `<repo>::repository`, which a class named `Repository`
+# produces exactly, and the stages then adopted that class as the repository (#549).
+SUFFIX = "repository:self"
+LEGACY_SUFFIX = "repository"
+
+
+class ForeignNodeError(ValueError):
+    """A node that is not a repository node holds a repository node's id."""
+
 
 def repository_id(repo: str) -> str:
-    return f"{repo}::repository"
+    return f"{repo}::{SUFFIX}"
+
+
+def _legacy_id(repo: str) -> str:
+    return f"{repo}::{LEGACY_SUFFIX}"
 
 
 def _node(repo: str) -> dict:
@@ -51,16 +71,69 @@ def _node(repo: str) -> dict:
     }
 
 
+def refuse_foreign_nodes(graph: dict) -> None:
+    """Raise `ForeignNodeError` if a node that is not ours holds a repository id.
+
+    The stages call this once, when they load the graph, because `ensure_repository_node`
+    is called in a loop with a `known` set and cannot afford a scan per call.
+    """
+    tail = f"::{SUFFIX}"
+    for node in graph["nodes"]:
+        if node["id"].endswith(tail) and node.get("_origin") != ORIGIN:
+            raise ForeignNodeError(
+                f"node {node['id']!r} (_origin {node.get('_origin')!r}) holds the id of a "
+                "repository node, which only this library creates; refusing to adopt it. "
+                "Rebuild the graph, and report this if it recurs."
+            )
+
+
+def migrate_repository_nodes(graph: dict) -> None:
+    """Rewrite repository nodes written under the old id to the current one.
+
+    Called by each stage on load, before it strips its own layer: the old node is
+    ours (`_origin` is `ORIGIN`), and every edge that ends on it is ours too, whichever
+    stage wrote it, so they are retargeted together. A node that merely shares the old
+    id - a class named `Repository` - has another `_origin`, is not touched, and its
+    edges stay where they are. A foreign node already at the current id is refused.
+    """
+    refuse_foreign_nodes(graph)
+    moved: dict[str, str] = {}
+    present = {n["id"] for n in graph["nodes"]}
+    keep = []
+    for node in graph["nodes"]:
+        repo = node.get("repo")
+        if (
+            node.get("_origin") == ORIGIN
+            and isinstance(repo, str)
+            and node["id"] == _legacy_id(repo)
+        ):
+            moved[node["id"]] = repository_id(repo)
+            if repository_id(repo) in present:
+                continue  # already migrated once; this is the stale twin
+            node["id"] = repository_id(repo)
+            present.add(node["id"])
+        keep.append(node)
+    if not moved:
+        return
+    graph["nodes"] = keep
+    for edge in graph["links"]:
+        edge["source"] = moved.get(edge["source"], edge["source"])
+        edge["target"] = moved.get(edge["target"], edge["target"])
+
+
 def ensure_repository_node(graph: dict, repo: str, known: set[str] | None = None) -> str:
     """Make sure `repo` has its repository node and return the node's id.
 
     `known` is the set of ids a caller that calls this in a loop already holds, so
     the graph is not rescanned per call; it is updated when a node is added. Left
-    out, the graph is scanned once for this call.
+    out, the graph is scanned once for this call, and a node at the id that is not
+    ours raises `ForeignNodeError`. A caller that passes `known` has called
+    `refuse_foreign_nodes` on load.
     """
     node_id = repository_id(repo)
     if known is None:
         known = {n["id"] for n in graph["nodes"]}
+        refuse_foreign_nodes(graph)
     if node_id not in known:
         graph["nodes"].append(_node(repo))
         known.add(node_id)

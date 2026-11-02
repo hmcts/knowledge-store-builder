@@ -330,6 +330,11 @@ def main() -> int:
     providers = _discover_providers(clones)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
+    try:
+        repository_node.migrate_repository_nodes(graph)
+    except repository_node.ForeignNodeError as error:
+        print(error, file=sys.stderr)
+        return 1
     _strip_layer(graph)
     package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
     module_count, module_pairs, module_edges, module_external = _add_module_layer(

@@ -828,7 +828,7 @@ knowledgestore manifest        # the relationships are a layer: re-run it
 (`metadata.config`), so it is read through `node` or `repo_answer`, never found
 by searching labels for a key name. A `config_truncated: <n>` beside it means
 `KSB_DEPLOY_MAX_KEYS` dropped `n` keys. Each deployment's `deploys` edge ends on
-the matched repository's `<repo>::repository` node, which `packages` shares for
+the matched repository's `<repo>::repository:self` node, which `packages` shares for
 its `USES_MODULE` anchor; a service no repository matched gets no edge.
 
 Config values are published with the node, so those matching the secret rules

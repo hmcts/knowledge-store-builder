@@ -814,6 +814,16 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "repository node: a foreign node at the repository id is adopted",
+        "repository_node.py",
+        '        if node["id"].endswith(tail) and node.get("_origin") != ORIGIN:\n',
+        "        if False:\n",
+        "#549: the guard that refuses a node that is not ours at a repository id; without it a graphify node (a class named Repository, under the old id) or a planted one is taken for the repository, and `deploys` and `USES_MODULE` land on code",
+        (
+            "test_repository_node.AGraphifyNodeCannotBecomeTheRepository.test_a_foreign_node_at_the_repository_id_is_refused_not_adopted",
+        ),
+    ),
+    Mutation(
         "repository node: its position depends on which run created it",
         "build_deployments.py",
         "    repository_node.settle_repository_nodes(graph)\n",

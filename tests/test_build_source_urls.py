@@ -262,7 +262,7 @@ class SourceUrlsStageTest(SettingsIsolated):
         graph = _graph()
         graph["nodes"] = [
             {
-                "id": "example-repo::repository",
+                "id": "example-repo::repository:self",
                 "label": "example-repo",
                 "source_file": None,
                 "repo": "example-repo",
@@ -271,7 +271,7 @@ class SourceUrlsStageTest(SettingsIsolated):
             },
             # No provenance sha is the same refusal a file gets: no link, not a guess.
             {
-                "id": "hosted-elsewhere::repository",
+                "id": "hosted-elsewhere::repository:self",
                 "repo": "hosted-elsewhere",
                 "metadata": {"kind": "repository"},
             },
@@ -281,10 +281,10 @@ class SourceUrlsStageTest(SettingsIsolated):
         nodes = self._nodes()
         self.assertEqual(code, 0)
         self.assertEqual(
-            nodes["example-repo::repository"]["url"],
+            nodes["example-repo::repository:self"]["url"],
             f"https://github.com/example-org/example-repo/tree/{SHA}",
         )
-        self.assertNotIn("url", nodes["hosted-elsewhere::repository"])
+        self.assertNotIn("url", nodes["hosted-elsewhere::repository:self"])
         self.assertIn("1 clone URL is not on github.com", report)
 
     def test_a_node_with_neither_repo_nor_file_gets_no_url_and_is_counted(self):
