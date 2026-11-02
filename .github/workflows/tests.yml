@@ -452,6 +452,17 @@ jobs:
     needs: mapping-decision
     if: needs.mapping-decision.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # One set of legs per branch at a time. Each leg runs for hours and checks the
+    # whole table at its commit, so three merges in two minutes started three full
+    # sets of sixteen, of which only the newest said anything the others did not.
+    # Queued rather than cancelled, so a busy day still finishes a verification: the
+    # running set completes and only the newest waiting set survives. A set replaced
+    # while waiting is not a verification, and `mapping_trigger.py` diffs from the
+    # last set that did pass, so nothing it covered goes unchecked. The shard is in
+    # the group because legs of one run sharing a group would queue behind each other.
+    concurrency:
+      group: mapping-${{ github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: false
     strategy:
       # Every leg runs, so two disagreeing entries in different shards are two
       # findings rather than one and a cancellation.

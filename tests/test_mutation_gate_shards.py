@@ -539,6 +539,18 @@ class WorkflowShardsTest(unittest.TestCase):
             self.jobs["mapping-decision"]["outputs"]["run"], "${{ steps.decide.outputs.run }}"
         )
 
+    def test_merges_in_quick_succession_do_not_each_start_a_set_of_legs(self):
+        """Catches every merge to main starting its own sixteen multi-hour legs - three
+        merges in two minutes once ran three full sets for six hours, only the newest
+        of which told anyone anything. Also catches the group losing the shard, which
+        would make the legs of one run queue behind each other, and cancel-in-progress,
+        which on a busy day would let no set ever finish."""
+        concurrency = self.jobs["mapping"].get("concurrency", {})
+
+        self.assertIn("${{ github.ref }}", str(concurrency.get("group")))
+        self.assertIn("${{ matrix.shard }}", str(concurrency.get("group")))
+        self.assertIs(concurrency.get("cancel-in-progress"), False)
+
     def test_the_decision_is_made_by_the_module_the_suite_tests(self):
         """Catches the reasoning migrating into the workflow. A decision written in
         shell here is a decision nothing in the suite can drive, and this one hides its
