@@ -167,12 +167,12 @@ jobs:
             && test -z "$(git status --porcelain=v1 --untracked-files=all)" \
             || { git status --porcelain=v1 --untracked-files=all; exit 1; }
 
-  # The mutation gate, in four slices, on the events the `tests` verdict wants it.
+  # The mutation gate, in eight slices, on the events the `tests` verdict wants it.
   #
   # It was a step of the one job that ran the unit tests, and took 1,947 of that
   # job's 2,457 seconds, so a pull request waited on the two in series. The default
   # mode accepts `--shard N/M` and holds that the shards are a partition of the table
-  # - each entry in exactly one - so four runners cost no coverage. One runner per
+  # - each entry in exactly one - so eight runners cost no coverage. One runner per
   # shard, because the gate mutates a real file in the tree and two workers in one
   # checkout corrupt each other's.
   #
@@ -193,7 +193,7 @@ jobs:
       # findings rather than one and a cancellation.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -452,6 +452,17 @@ jobs:
     needs: mapping-decision
     if: needs.mapping-decision.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # One set of legs per branch at a time. Each leg runs for hours and checks the
+    # whole table at its commit, so three merges in two minutes started three full
+    # sets of sixteen, of which only the newest said anything the others did not.
+    # Queued rather than cancelled, so a busy day still finishes a verification: the
+    # running set completes and only the newest waiting set survives. A set replaced
+    # while waiting is not a verification, and `mapping_trigger.py` diffs from the
+    # last set that did pass, so nothing it covered goes unchecked. The shard is in
+    # the group because legs of one run sharing a group would queue behind each other.
+    concurrency:
+      group: mapping-${{ github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: false
     strategy:
       # Every leg runs, so two disagreeing entries in different shards are two
       # findings rather than one and a cancellation.

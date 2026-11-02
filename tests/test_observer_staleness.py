@@ -578,9 +578,16 @@ class TheParseHasNoHiddenBlindSpotTest(unittest.TestCase):
         verdict over a real arrival, which is silent. If this fails, the parse needs
         to resolve bases across modules; it is not a licence to widen the base."""
         suite = Path(__file__).resolve().parent
+        # Parsed once. Asking each base afresh re-read the whole suite per base -
+        # mutation_gate.py alone is over 15,000 lines - which made this one test
+        # take over a minute and a half, paid again by every gate entry naming
+        # this module.
+        parsed = {
+            module: ast.parse(module.read_text(encoding="utf-8")) for module in suite.glob("*.py")
+        }
         borrowed: list[str] = []
-        for module in sorted(suite.glob("*.py")):
-            tree = ast.parse(module.read_text(encoding="utf-8"))
+        for module in sorted(parsed):
+            tree = parsed[module]
             defined = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
             for node in tree.body:
                 if not isinstance(node, ast.ClassDef):
@@ -589,16 +596,16 @@ class TheParseHasNoHiddenBlindSpotTest(unittest.TestCase):
                     name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
                     if name in defined or name == "TestCase":
                         continue
-                    if self._provides_a_test(suite, name):
+                    if self._provides_a_test(parsed, name):
                         borrowed.append(f"{module.stem}.{node.name} inherits tests from {name}")
 
         self.assertEqual(borrowed, [])
 
     @staticmethod
-    def _provides_a_test(suite: Path, name: str) -> bool:
+    def _provides_a_test(parsed: dict[Path, ast.Module], name: str) -> bool:
         """Whether a class defined anywhere in this suite carries a `test_*` method."""
-        for module in suite.glob("*.py"):
-            for node in ast.parse(module.read_text(encoding="utf-8")).body:
+        for module, tree in parsed.items():
+            for node in tree.body:
                 if isinstance(node, ast.ClassDef) and node.name == name:
                     if staleness.test_ids(module.read_text(encoding="utf-8")):
                         return any(
