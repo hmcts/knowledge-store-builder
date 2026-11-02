@@ -4677,7 +4677,7 @@ MUTATIONS = (
         "#88: a cluster reconciles an environment overlay and its stack overlays together, so "
         "reading one of them loses limits that are really set and reports nothing missing",
         (
-            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
         ),
     ),
     Mutation(
