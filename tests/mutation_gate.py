@@ -4541,6 +4541,9 @@ MUTATIONS = (
             "test_deploy_values.StripTemplateDollarDialect.test_an_interpolation_spanning_lines_is_stripped_whole",
             "test_deploy_values.StripTemplateDollarDialect.test_both_dialects_withhold_the_same_name_identically",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_templated_team_path_is_followed_only_where_that_directory_exists",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_the_only_environments_are_the_clusters_not_teams_or_the_flux_system",
             "test_secret_mask.InstrumentationKeys.test_an_account_key_placeholder_is_unchanged",
             "test_secret_mask.KubernetesEnvLists.test_an_item_named_for_no_secret_or_holding_a_reference_is_unchanged",
             "test_secret_mask.LineEndingsPreserved.test_a_crlf_file_holding_no_secret_is_unchanged",
@@ -4635,6 +4638,17 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_a_declared_environment_directory_is_an_environment",
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_it_warns_and_takes_no_environment_from_the_team_directory",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_templated_team_path_is_followed_only_where_that_directory_exists",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_an_overlay_that_declares_its_own_chart_is_not_taken_as_the_base",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_the_only_environments_are_the_clusters_not_teams_or_the_flux_system",
+            "test_flux_one_fact_per_overlay.RunningTwice.test_a_second_run_is_byte_identical",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_both_stacks_hang_off_the_one_environment",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_the_stack_is_part_of_the_node_id_so_two_stacks_are_two_nodes",
+            "test_flux_one_fact_per_overlay.TheBlendingGuard.test_the_stage_skips_and_counts_a_fact_whose_directory_holds_both_overlays",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
@@ -4680,6 +4694,7 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.ChartReferencesAreDependencies.test_the_chart_source_becomes_an_edge_citing_the_file_that_declares_it",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
@@ -4691,12 +4706,12 @@ MUTATIONS = (
     Mutation(
         "only the first directory a cluster reconciles is read",
         "deploy_flux.py",
-        "        if any(_under(rel, directory) for directory in directories):",
-        "        if any(_under(rel, directory) for directory in directories[:1]):",
+        "                add(environment, stack, service, whole.get(service, []) + layers)",
+        "                add(environment, stack, service, layers)",
         "#88: a cluster reconciles an environment overlay and its stack overlays together, so "
         "reading one of them loses limits that are really set and reports nothing missing",
         (
-            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
         ),
     ),
     Mutation(
@@ -4711,6 +4726,94 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+        ),
+    ),
+    Mutation(
+        "facts merge overlays across environments or stacks",
+        "deploy_flux.py",
+        "            scopes.setdefault((environment, stack_of(path)), set()).add(path)",
+        '            scopes.setdefault((environment, ""), set()).add(path)',
+        "#542: two stacks of one environment reconcile separate overlays, and composing them into "
+        "one fact quotes a configuration no stack runs - under an environment label that makes "
+        "the answer look authoritative",
+        (
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_facts_hang_off_the_one_environment_by_an_edge",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_both_routes_reached_prod",
+            "test_flux_kustomize_deployments.BothRoutesReachOneEnvironment.test_each_fact_records_the_route_that_produced_it",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_every_fact_cites_a_file_that_exists_and_names_the_layers_it_composed",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_one_environments_patch_does_not_bleed_into_another",
+            "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_templated_team_path_is_followed_only_where_that_directory_exists",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.RunningTwice.test_a_second_run_is_byte_identical",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_both_stacks_hang_off_the_one_environment",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_the_stack_is_part_of_the_node_id_so_two_stacks_are_two_nodes",
+        ),
+    ),
+    Mutation(
+        "environment taken from an apps/ segment",
+        "deploy_flux.py",
+        "        environment = environment_of(rel) or environment_of_path(raw)",
+        "        environment = (\n"
+        '            (rel.split("/")[1] if rel.startswith("apps/") else "")\n'
+        "            or environment_of(rel)\n"
+        "            or environment_of_path(raw)\n"
+        "        )",
+        "#542: an `apps/<name>` child is a team or a stack, so naming the environment after it "
+        "filed every fact under a team and left no real environment in the store",
+        (
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_a_declared_environment_directory_is_an_environment",
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_it_warns_and_takes_no_environment_from_the_team_directory",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_nested_kustomization_with_no_path_does_not_pull_in_every_environment",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_templated_team_path_is_followed_only_where_that_directory_exists",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_an_overlay_that_declares_its_own_chart_is_not_taken_as_the_base",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_the_only_environments_are_the_clusters_not_teams_or_the_flux_system",
+        ),
+    ),
+    Mutation(
+        "the blending guard never refuses",
+        "deploy_flux.py",
+        "        if reason:\n            refused.append(",
+        "        if False:\n            refused.append(",
+        "#542: the guard is what stays true when the walk changes. A fact whose layers carry two "
+        "environments' or two stacks' overlays must be skipped and counted, not emitted",
+        (
+            "test_flux_one_fact_per_overlay.TheBlendingGuard.test_the_stage_skips_and_counts_a_fact_whose_directory_holds_both_overlays",
+        ),
+    ),
+    Mutation(
+        "a nested Kustomization with no path followed to the source root",
+        "deploy_flux.py",
+        "                if path and self.tree.holds(path):",
+        "                if self.tree.holds(path):",
+        "#542: Flux reads an absent `spec.path` as the repository root; followed from inside a "
+        "walk it reaches every environment's overlays at once",
+        (
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_nested_kustomization_with_no_path_does_not_pull_in_every_environment",
+        ),
+    ),
+    Mutation(
+        "an overlay that declares a chart chosen as the base",
+        "deploy_flux.py",
+        "        carries = bool(overlay_markers(rel, environments))",
+        "        carries = False",
+        "#542: one environment's full release became every environment's base, so its "
+        "configuration sat under facts of environments it was never deployed in",
+        (
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_an_overlay_that_declares_its_own_chart_is_not_taken_as_the_base",
+        ),
+    ),
+    Mutation(
+        "a team directory beside the apps tree reported as nothing",
+        "build_deployments.py",
+        "    if flux.siblings:",
+        "    if False:",
+        "#542: the old reading took `apps/<team>` for an environment without saying so; the "
+        "warning is the only sign a Kustomization there was passed over",
+        (
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_it_warns_and_takes_no_environment_from_the_team_directory",
         ),
     ),
     Mutation(
@@ -4778,8 +4881,8 @@ MUTATIONS = (
     Mutation(
         "every environment named after the root of the cluster tree",
         "deploy_flux.py",
-        '    return parts[_ENVIRONMENT_SEGMENT] if len(parts) > _ENVIRONMENT_SEGMENT + 1 else ""',
-        '    return parts[0] if len(parts) > 1 else ""',
+        "    if len(parts) > 2 and parts[0] == CLUSTERS_DIR:\n        return parts[1]",
+        "    if len(parts) > 2 and parts[0] == CLUSTERS_DIR:\n        return parts[0]",
         "#88: the environment name is the one thing these trees state by path, so taking the "
         "wrong segment collapses every environment into one - and a single environment holding "
         "every service is a plausible-looking answer, which is the failure this stage was "
@@ -4814,6 +4917,10 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_named_rather_than_resolved_quietly",
             "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
             "test_flux_kustomize_deployments.SayingWhatItCouldNotRead.test_a_malformed_document_is_counted_and_named_and_the_run_continues",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_both_stacks_hang_off_the_one_environment",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_the_stack_is_part_of_the_node_id_so_two_stacks_are_two_nodes",
+            "test_flux_one_fact_per_overlay.TheBlendingGuard.test_the_stage_skips_and_counts_a_fact_whose_directory_holds_both_overlays",
             "test_package_edges.BareEqualsReleaseTest.test_a_release_with_a_bare_equals_in_its_values_gives_the_same_edge_in_both",
             "test_package_edges.ChartDefinedTwiceTest.test_a_chart_two_clones_define_falls_back_to_its_source_ref",
             "test_package_edges.ChartDefinedTwiceTest.test_a_declared_umbrella_leaves_the_chart_to_the_other_definer",
@@ -13230,6 +13337,8 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_environment_patch_wins_and_the_base_still_supplies_the_rest",
             "test_flux_kustomize_deployments.ComposingABaseWithItsPatches.test_the_stack_overlay_the_cluster_reconciles_is_applied",
             "test_flux_kustomize_deployments.OneCloneDeclaringAServiceTwice.test_the_clash_is_one_node_and_the_existing_route_keeps_it",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
             "test_repository_node.ConfigTruncation.test_a_capped_config_says_how_many_keys_were_dropped",
         ),
     ),
@@ -13639,6 +13748,19 @@ MUTATIONS = (
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_dollar_brace_reference_loses_the_variable_name",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_a_secret_reference_keeps_the_variable_and_loses_the_store_and_the_path",
             "test_flux_kustomize_deployments.WithholdingWhatTheseFilesCarry.test_neither_the_vault_nor_the_entry_reaches_the_written_graph",
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_a_declared_environment_directory_is_an_environment",
+            "test_flux_one_fact_per_overlay.AnEnvironmentNameBesideTeamDirectories.test_it_warns_and_takes_no_environment_from_the_team_directory",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_nested_kustomization_with_no_path_does_not_pull_in_every_environment",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_a_templated_team_path_is_followed_only_where_that_directory_exists",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_an_overlay_that_declares_its_own_chart_is_not_taken_as_the_base",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_each_fact_names_its_environment_its_layers_and_its_own_overlays_value",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_the_only_environments_are_the_clusters_not_teams_or_the_flux_system",
+            "test_flux_one_fact_per_overlay.EnvironmentsComeFromTheReconcilingCluster.test_the_run_reports_no_warning_when_every_environment_has_a_cluster",
+            "test_flux_one_fact_per_overlay.RunningTwice.test_a_second_run_is_byte_identical",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_both_stacks_hang_off_the_one_environment",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_each_stack_is_a_fact_with_its_own_value_and_the_environment_kept",
+            "test_flux_one_fact_per_overlay.StacksOfOneEnvironmentAreFactsOfTheirOwn.test_the_stack_is_part_of_the_node_id_so_two_stacks_are_two_nodes",
+            "test_flux_one_fact_per_overlay.TheBlendingGuard.test_the_stage_skips_and_counts_a_fact_whose_directory_holds_both_overlays",
             "test_gzip_writes_stay_deterministic.TheBytesDoNotChangeBetweenRuns.test_the_helper_writes_the_same_bytes_a_second_apart",
             "test_io_write_targets.WriteTargetTest.test_ordinary_paths_still_write_both_formats",
             "test_json_schema_end_to_end.JsonSchemaLayerEndToEndTest.test_the_layer_replaces_keyword_nodes_and_links_across_repositories",

@@ -429,6 +429,7 @@ class _Fact:
     extra: dict[str, object] = field(default_factory=dict)
     chart_source: str = ""
     chart: str = ""
+    stack: str = ""
 
 
 def _deployment_node(
@@ -438,22 +439,27 @@ def _deployment_node(
     name: str,
     withheld: list[tuple[str, str]] | None = None,
 ) -> dict:
+    # A stack is part of the identity: two stacks of one environment are two
+    # deployments, so their ids differ. Absent, the id is the one it always was.
+    local = f"deploy:{fact.environment}:{fact.service}" + (f"@{fact.stack}" if fact.stack else "")
+    label = deploy_flux.label(fact.service, fact.environment, fact.stack)
     return {
-        "id": f"{deploy_repo}::deploy:{fact.environment}:{fact.service}",
-        "label": f"{fact.service} ({fact.environment})",
-        "norm_label": f"{fact.service} ({fact.environment})".lower(),
+        "id": f"{deploy_repo}::{local}",
+        "label": label,
+        "norm_label": label.lower(),
         "file_type": "concept",
         "source_file": fact.rel,
         "source_location": None,
         "repo": deploy_repo,
         "_origin": FORMAT,
-        "local_id": f"deploy:{fact.environment}:{fact.service}",
+        "local_id": local,
         "community": community,
         "community_name": name,
         "metadata": {
             "kind": "deployment",
             "service": fact.service,
             "environment": fact.environment,
+            **({"stack": fact.stack} if fact.stack else {}),
             "route": fact.route,
             "config": fact.config,
             **_truncation(fact.config),
@@ -579,6 +585,9 @@ class _FluxTally:
         self.unattached: list[str] = []
         self.unnamed_environments: list[str] = []
         self.unnamed_services: list[str] = []
+        self.refused: list[tuple[str, str]] = []
+        self.siblings: list[str] = []
+        self.unresolved: list[str] = []
         # providing repository -> whether the estate holds it. Named for the
         # `chart_source` node kind; a key is the resolved provider, which is the
         # `sourceRef` only for a chart nothing in the estate provides.
@@ -606,11 +615,13 @@ class _Tally:
         self.flux = _FluxTally()
 
 
-def _values_facts(found: dict[tuple[str, str], dict[str, str]]) -> dict[tuple[str, str], _Fact]:
+def _values_facts(
+    found: dict[tuple[str, str], dict[str, str]],
+) -> dict[tuple[str, str, str], _Fact]:
     """The layout this stage already read, as facts."""
     root = _glob_root(config.DEPLOY_VALUES_GLOB)
     return {
-        (environment, service): _Fact(
+        (environment, service, ""): _Fact(
             environment,
             service,
             _source_file(root, environment, service),
@@ -621,14 +632,14 @@ def _values_facts(found: dict[tuple[str, str], dict[str, str]]) -> dict[tuple[st
     }
 
 
-def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
+def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str, str], _Fact]:
     """A Kustomize/Flux reading as facts, its values flattened by the same rules.
 
     `deploy_values.flatten` is what applies the secret-location policy, so the
     second layout inherits it rather than restating it - the whole point of
     settling that policy in the library (#88).
     """
-    facts: dict[tuple[str, str], _Fact] = {}
+    facts: dict[tuple[str, str, str], _Fact] = {}
     for key, fact in sorted(reading.facts.items()):
         extra: dict[str, object] = {"layers": list(fact.layers)}
         if fact.chart.name or fact.chart.version or fact.chart.source:
@@ -650,6 +661,7 @@ def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str], _Fact]:
             extra,
             fact.chart.source,
             fact.chart.name,
+            fact.stack,
         )
     return facts
 
@@ -658,7 +670,7 @@ def _merged_facts(
     found: dict[tuple[str, str], dict[str, str]],
     reading: deploy_flux.Reading,
     tally: _FluxTally,
-) -> dict[tuple[str, str], _Fact]:
+) -> dict[tuple[str, str, str], _Fact]:
     """Both routes' facts, keyed as before, with a clash resolved to the values route.
 
     One clone holding both layouts would otherwise produce two nodes with one id.
@@ -669,7 +681,7 @@ def _merged_facts(
     facts = _values_facts(found)
     for key, fact in _flux_facts(reading).items():
         if key in facts:
-            tally.both_routes.append(f"{fact.service} ({fact.environment})")
+            tally.both_routes.append(deploy_flux.label(fact.service, fact.environment, fact.stack))
             continue
         facts[key] = fact
     return facts
@@ -741,6 +753,9 @@ def _record_flux(
     tally.unattached.extend(reading.unattached)
     tally.unnamed_environments.extend(reading.unnamed_environments)
     tally.unnamed_services.extend(reading.unnamed_services)
+    tally.refused.extend(reading.refused)
+    tally.siblings.extend(reading.sibling_environments)
+    tally.unresolved.extend(reading.unresolved_paths)
 
 
 def _add_repo_layer(
@@ -847,6 +862,24 @@ def _flux_report(flux: _FluxTally) -> None:
             f"    {len(set(flux.unnamed_environments))} Kustomization file(s) name no "
             f"environment segment, so what they reconcile is unattributed: "
             f"{_named(flux.unnamed_environments)}"
+        )
+    if flux.refused:
+        reasons = sorted({reason for _, reason in flux.refused})
+        print(
+            f"    {len(flux.refused)} fact(s) REFUSED, not emitted, because their layers "
+            f"blend overlays: {_named([name for name, _ in flux.refused])}. "
+            f"Reason(s): {'; '.join(reasons[:3])}"
+        )
+    if flux.siblings:
+        print(
+            f"    WARNING: {len(set(flux.siblings))} Kustomization location(s) sit beside "
+            f"apps/<team> directories and name no environment, so none was taken from "
+            f"them (a team or stack is not an environment): {_named(flux.siblings)}"
+        )
+    if flux.unresolved:
+        print(
+            f"    {len(set(flux.unresolved))} reconciled path(s) name no directory in this "
+            f"clone and reached nothing: {_named(flux.unresolved)}"
         )
     if flux.unnamed_services:
         print(
