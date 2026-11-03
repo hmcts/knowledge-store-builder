@@ -370,8 +370,31 @@ class _Carried:
     """What other stages hung on this stage's nodes, held across the rebuild."""
 
     edges: list[dict]
-    # id -> (the source_file the url was derived from, the url)
-    urls: dict[str, tuple[object, str]]
+    # id -> (the source_file the node cited, the attributes other stages gave it)
+    attributes: dict[str, tuple[object, dict]]
+
+
+# Every top-level attribute this stage writes on a node of its own. Anything else
+# on one of its nodes - the `url` `source-urls` gives it, a field a store's own
+# step copies onto it - is another stage's, and is carried across a re-run. A key
+# added to the node builders below belongs here too, or a node built without it
+# would get back the previous run's copy.
+OWN_NODE_KEYS = frozenset(
+    {
+        "id",
+        "label",
+        "norm_label",
+        "file_type",
+        "source_file",
+        "source_location",
+        "repo",
+        "_origin",
+        "local_id",
+        "community",
+        "community_name",
+        "metadata",
+    }
+)
 
 
 def _strip_layer(graph: dict) -> _Carried:
@@ -379,14 +402,15 @@ def _strip_layer(graph: dict) -> _Carried:
 
     What other stages added to those nodes is held rather than dropped (#548): an
     edge another stage or a store's own extractor drew onto a deployment node, and
-    the `url` `source-urls` gave it. `_restore` puts back whatever still has a node
-    to sit on.
+    any attribute outside `OWN_NODE_KEYS`, such as the `url` `source-urls` gave it.
+    `_restore` puts back whatever still has a node to sit on.
     """
     ours = {n["id"] for n in graph["nodes"] if n.get("_origin") == FORMAT}
-    urls = {
-        n["id"]: (n.get("source_file"), n["url"])
+    attributes = {
+        n["id"]: (n.get("source_file"), foreign)
         for n in graph["nodes"]
-        if n.get("_origin") == FORMAT and n.get("url")
+        if n.get("_origin") == FORMAT
+        and (foreign := {k: v for k, v in n.items() if k not in OWN_NODE_KEYS})
     }
     graph["nodes"] = [n for n in graph["nodes"] if n.get("_origin") != FORMAT]
     kept: list[dict] = []
@@ -397,23 +421,25 @@ def _strip_layer(graph: dict) -> _Carried:
         elif not (edge["source"] in ours and edge.get("relation") in OWN_RELATIONS):
             carried.append(edge)
     graph["links"] = kept
-    return _Carried(carried, urls)
+    return _Carried(carried, attributes)
 
 
 def _restore(graph: dict, carried: _Carried) -> int:
     """Put back what `_strip_layer` held; return how many edges had nowhere to go.
 
     An edge comes back only when both its ends exist after the rebuild, so nothing
-    dangles. A `url` comes back only to a node still citing the file it was derived
-    from: a node whose file moved would otherwise link to the wrong one.
+    dangles. Attributes come back only to a node still citing the same file, since
+    what another stage derived from it - a `url` above all - would otherwise describe
+    the wrong one; and never over a value the rebuild wrote.
     """
     ids = {n["id"] for n in graph["nodes"]}
     back = [e for e in carried.edges if e["source"] in ids and e["target"] in ids]
     graph["links"].extend(back)
     for node in graph["nodes"]:
-        held = carried.urls.get(node["id"])
+        held = carried.attributes.get(node["id"])
         if node.get("_origin") == FORMAT and held and held[0] == node.get("source_file"):
-            node.setdefault("url", held[1])
+            for key, value in held[1].items():
+                node.setdefault(key, value)
     return len(carried.edges) - len(back)
 
 

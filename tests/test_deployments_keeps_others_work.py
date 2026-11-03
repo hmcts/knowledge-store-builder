@@ -148,6 +148,33 @@ class AReRunKeepsOtherStagesWork(SettingsIsolated, unittest.TestCase):
         node = next(n for n in _read(self.tmp)["nodes"] if n.get("label") == PRD)
         self.assertNotIn("url", node)
 
+    def test_a_field_another_step_copied_onto_a_node_survives(self):
+        """Catches the carry keeping only `url`: one store's own step copies `repo`
+        into `repository` on every deployment node, and a re-run emptied it on all
+        of them while their links survived."""
+        graph = _read(self.tmp)
+        node = next(n for n in graph["nodes"] if n.get("label") == PRD)
+        node["repository"] = "estate-deploy"
+        _write(self.tmp, graph)
+
+        _run()
+
+        node = next(n for n in _read(self.tmp)["nodes"] if n.get("label") == PRD)
+        self.assertEqual(node.get("repository"), "estate-deploy")
+
+    def test_every_attribute_the_stage_writes_is_declared_its_own(self):
+        """Catches a key added to a node builder but not to `OWN_NODE_KEYS`: the
+        carry would treat it as another stage's, so a node rebuilt without it
+        would get back the previous run's stale copy."""
+        written = {
+            key
+            for node in _read(self.tmp)["nodes"]
+            if node.get("_origin") == deployments.FORMAT
+            for key in node
+        }
+        self.assertTrue(written)
+        self.assertLessEqual(written, deployments.OWN_NODE_KEYS)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -617,11 +617,34 @@ MUTATIONS = (
     Mutation(
         "a deployments re-run drops the url source-urls gave its nodes",
         "build_deployments.py",
-        '            node.setdefault("url", held[1])',
-        "            pass",
+        "                node.setdefault(key, value)",
+        "                pass",
         "#548: every deployment node lost its link until source-urls ran again",
         (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_field_another_step_copied_onto_a_node_survives",
             "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_rebuilt_node_keeps_the_url_source_urls_gave_it",
+        ),
+    ),
+    Mutation(
+        "a deployments re-run carries only the url other stages gave its nodes",
+        "build_deployments.py",
+        "        and (foreign := {k: v for k, v in n.items() if k not in OWN_NODE_KEYS})",
+        '        and (foreign := {k: v for k, v in n.items() if k == "url"})',
+        "#548: a field a store's own step copied onto every deployment node was "
+        "emptied by each re-run while the links survived",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_field_another_step_copied_onto_a_node_survives",
+        ),
+    ),
+    Mutation(
+        "a deployments node attribute is missing from the stage's own keys",
+        "build_deployments.py",
+        '        "community_name",\n        "metadata",\n    }',
+        '        "metadata",\n    }',
+        "#548: an undeclared own key reads as another stage's, so a node rebuilt "
+        "without it gets back the previous run's stale copy",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_every_attribute_the_stage_writes_is_declared_its_own",
         ),
     ),
     Mutation(
