@@ -25,6 +25,7 @@ import io as stdio
 import contextlib
 import gzip
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -694,7 +695,14 @@ class TheStageAsRun(SettingsIsolated):
         `io.checked_write_target` makes for the write side.
         """
         self._repo_graph("orchard-api", [_node("a", "main.tf")], [])
-        elsewhere = Path(self._tmp.name).parent / "outside-the-store.txt"
+        # A name of its own beside the store, not a fixed one: the mutation gate runs
+        # several whole suites at once, all sharing this directory, and a fixed name
+        # let one run's cleanup delete the file another run was reading.
+        handle, raw = tempfile.mkstemp(
+            prefix="outside-the-store-", suffix=".txt", dir=Path(self._tmp.name).parent
+        )
+        os.close(handle)
+        elsewhere = Path(raw)
         elsewhere.write_text("cut iac\nfile *.tf\n", encoding="utf-8")
         self.addCleanup(elsewhere.unlink)
         inside = self.root / "config" / "alternative-cuts.txt"
