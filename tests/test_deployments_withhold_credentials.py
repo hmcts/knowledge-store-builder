@@ -214,10 +214,90 @@ class ReportingIsCappedAndNeverQuotes(SettingsIsolated):
             _deploy_repo(root, {**LAYOUT, "apps/base/services/alpha/helmrelease.yaml": base})
             config.configure(root=root, DEPLOY_REPOS={REPO})
             _, stdout, stderr = _run(root)
-        # 13 keys, in each of the two facts (the base and staging) that carry them.
-        self.assertIn("26 config value(s) withheld", stdout)
-        self.assertIn("... and 16 more", stdout)
+        # 13 keys in the base, which both facts (the base and staging) compose: 13
+        # places to rotate, not 26.
+        self.assertIn("13 config value(s) withheld", stdout)
+        self.assertIn("... and 3 more", stdout)
         self.assertNotIn(PASSWORD, stdout + stderr)
+
+
+OVERLAY_PASSWORD = "fake-staging-only-pw-4567"
+
+PATCH_WITH_A_PASSWORD = (
+    PATCH
+    + f"""    database:
+      dbPassword: {OVERLAY_PASSWORD}
+"""
+)
+
+
+@needs_yaml
+class TheReportNamesTheFileHoldingTheValue(SettingsIsolated):
+    """The report exists so a store can rotate a credential at source, so the file
+    it names has to be the one holding the value, and each place is one line."""
+
+    def setUp(self) -> None:
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        root = Path(raw.name)
+        _graph(root)
+        _deploy_repo(
+            root,
+            {**LAYOUT, "apps/environments/staging/services/alpha.yaml": PATCH_WITH_A_PASSWORD},
+        )
+        config.configure(root=root, DEPLOY_REPOS={REPO})
+        self.graph, self.stdout, self.stderr = _run(root)
+
+    def test_a_value_an_overlay_sets_is_reported_against_the_overlay(self):
+        """Catches the report citing the fact's first layer: a password only the
+        staging overlay sets was reported against the base file, which does not
+        hold it, so the pointer to rotate it led to the wrong place."""
+        self.assertIn(
+            f"{REPO}: apps/environments/staging/services/alpha.yaml  "
+            "key database.dbPassword  rule key-name",
+            self.stdout,
+        )
+
+    def test_a_value_the_base_sets_is_still_reported_against_the_base(self):
+        """Catches the lookup citing the last layer for every key: the base fact's
+        password is in the base file, and so is the staging fact's instrumentation key."""
+        self.assertIn(
+            f"{REPO}: apps/base/services/alpha/helmrelease.yaml  "
+            "key database.dbPassword  rule key-name",
+            self.stdout,
+        )
+        self.assertIn(
+            f"{REPO}: apps/base/services/alpha/helmrelease.yaml  "
+            "key appInsights.instrumentationKey",
+            self.stdout,
+        )
+        self.assertNotIn(
+            "apps/environments/staging/services/alpha.yaml  key appInsights", self.stdout
+        )
+
+    def test_a_base_value_both_facts_compose_is_one_line(self):
+        """Catches one line per fact: a base value composed into every environment
+        printed once per environment, which reads as several credentials."""
+        line = (
+            f"{REPO}: apps/base/services/alpha/helmrelease.yaml  key appInsights.instrumentationKey"
+        )
+        self.assertEqual(self.stdout.count(line), 1)
+        self.assertNotIn(OVERLAY_PASSWORD, self.stdout + self.stderr)
+
+    def test_a_reshaped_key_takes_the_last_layer_setting_anything_beneath_it(self):
+        """Catches a key the layers do not name as written falling back to the
+        cited file when a later layer set what it was made from."""
+        fact = deployments._Fact(
+            "staging",
+            "alpha",
+            "base.yaml",
+            "kustomize",
+            {},
+            origins={"vault.ref.store": "base.yaml", "vault.ref.entry": "staging.yaml"},
+        )
+        self.assertEqual(fact.file_of("vault.ref"), "staging.yaml")
+        self.assertEqual(fact.file_of("vault.ref.store"), "base.yaml")
+        self.assertEqual(fact.file_of("absent"), "base.yaml")
 
 
 @needs_yaml

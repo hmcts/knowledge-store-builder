@@ -60,11 +60,12 @@ import copy
 import functools
 import posixpath
 import re
+import sys
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from . import config
-from .deploy_values import PLACEHOLDER
+from .deploy_values import PLACEHOLDER, flatten
 
 HELM_RELEASE_KIND = "HelmRelease"
 HELM_RELEASE_GROUP = "helm.toolkit.fluxcd.io"
@@ -133,6 +134,10 @@ class Fact:
     values: dict
     chart: Chart
     stack: str = ""
+    # Flattened key -> the layer that last set it, which is the file holding the
+    # value. A composed fact cites its first layer, and a value an overlay sets is
+    # not in that file, so anything reporting where a value sits reads this.
+    origins: dict[str, str] = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -408,7 +413,21 @@ def _fact(
     service: str, environment: str, layers: Sequence[tuple[str, dict]], stack: str = ""
 ) -> Fact:
     values, chart = _composed(layers)
-    return Fact(service, environment, tuple(rel for rel, _ in layers), values, chart, stack)
+    rels = tuple(rel for rel, _ in layers)
+    return Fact(service, environment, rels, values, chart, stack, _origins(layers))
+
+
+def _origins(layers: Sequence[tuple[str, dict]]) -> dict[str, str]:
+    """Each flattened key of the layers, mapped to the last layer that sets it.
+
+    Uncapped, so a key the composed fact keeps is never missing here for having
+    fallen past a cap in one layer. Later layers win, as they do in `_composed`.
+    """
+    origins: dict[str, str] = {}
+    for rel, document in layers:
+        for key in flatten(values_of(document), sys.maxsize, sys.maxsize):
+            origins[key] = rel
+    return origins
 
 
 def label(service: str, environment: str, stack: str) -> str:

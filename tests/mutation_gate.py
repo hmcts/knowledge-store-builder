@@ -636,6 +636,51 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the withheld report cites a fact's first layer for every value",
+        "build_deployments.py",
+        "        tally.withheld.extend((deploy_repo, fact.file_of(key), key, rule) for key, rule in found)",
+        "        tally.withheld.extend((deploy_repo, fact.rel, key, rule) for key, rule in found)",
+        "a value an overlay sets was reported against the base file, so the "
+        "pointer to rotate it led to a file that does not hold it",
+        (
+            "test_deployments_withhold_credentials.TheReportNamesTheFileHoldingTheValue.test_a_value_an_overlay_sets_is_reported_against_the_overlay",
+        ),
+    ),
+    Mutation(
+        "a layer's origin is the first layer to set a key, not the last",
+        "deploy_flux.py",
+        "            origins[key] = rel",
+        "            origins.setdefault(key, rel)",
+        "later layers win in composition, so the first setter is not the file "
+        "holding the value an overlay replaced",
+        (
+            "test_deployments_withhold_credentials.TheReportNamesTheFileHoldingTheValue.test_a_value_an_overlay_sets_is_reported_against_the_overlay",
+        ),
+    ),
+    Mutation(
+        "a reshaped key falls back to the cited file",
+        "build_deployments.py",
+        "        return below[-1] if below else self.rel",
+        "        return self.rel",
+        "a key flatten reshaped from several layers would cite the base whatever "
+        "layer set what it was made from",
+        (
+            "test_deployments_withhold_credentials.TheReportNamesTheFileHoldingTheValue.test_a_reshaped_key_takes_the_last_layer_setting_anything_beneath_it",
+        ),
+    ),
+    Mutation(
+        "the withheld report prints a place once per fact",
+        "build_deployments.py",
+        "    places = sorted(set(withheld))",
+        "    places = sorted(withheld)",
+        "a base value every environment composes printed once per environment, "
+        "which reads as several credentials",
+        (
+            "test_deployments_withhold_credentials.TheReportNamesTheFileHoldingTheValue.test_a_base_value_both_facts_compose_is_one_line",
+            "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
+        ),
+    ),
+    Mutation(
         "the key-name rule reads only a generic last segment",
         "deploy_secrets.py",
         "    leaf = _named_segment(key)",
