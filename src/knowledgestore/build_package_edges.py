@@ -252,14 +252,29 @@ def _edge(source: str, target: str, relation: str, rel: str) -> dict:
     }
 
 
-def _discover_providers(clones: list) -> dict[str, tuple[str, str]]:
-    """package name -> (provider repo, manifest path); first repo wins a conflict."""
-    providers: dict[str, tuple[str, str]] = {}
+def _discover_providers(
+    clones: list,
+) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]]]:
+    """package name -> (provider repo, manifest path), and the packages several
+    repositories publish with none chosen, each with its publishers (#500).
+
+    The provider is chosen by the relationships layer's rule, not by name order: a
+    package two repositories publish goes to the one that is not a declared fork,
+    and otherwise to nobody. First by name let a fork whose name sorts first take
+    its original's package, and a rename move the edge.
+    """
+    clones = sorted(clones, key=lambda clone: clone.name)
+    manifests: dict[tuple[str, str], str] = {}
+    published: dict[str, list[str]] = {}
     for repo_dir in clones:
         for name, manifest_rel in relationships.npm_publishes(repo_dir):
-            if name not in providers or repo_dir.name < providers[name][0]:
-                providers[name] = (repo_dir.name, manifest_rel)
-    return providers
+            manifests.setdefault((name, repo_dir.name), manifest_rel)
+            publishers = published.setdefault(name, [])
+            if repo_dir.name not in publishers:
+                publishers.append(repo_dir.name)
+    chosen, unchosen = relationships.npm_providers(published, config.FORK_REPOS)
+    providers = {name: (repo, manifests[(name, repo)]) for name, repo in chosen.items()}
+    return providers, unchosen
 
 
 def _ensure_package_node(
@@ -327,7 +342,7 @@ def main() -> int:
     except ValueError as error:
         print(f"Cannot read the store's repository list: {error}", file=sys.stderr)
         return 1
-    providers = _discover_providers(clones)
+    providers, unchosen = _discover_providers(clones)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     try:
@@ -350,9 +365,18 @@ def main() -> int:
 
     print(
         f"Packages: {package_count} shared across repositories "
-        f"({len(providers)} named in total), {consumer_pairs} consumer relationships, "
-        f"{edges} edges added"
+        f"({len(providers) + len(unchosen)} named in total), {consumer_pairs} consumer "
+        f"relationships, {edges} edges added"
     )
+    if unchosen:
+        print(
+            f"  {len(unchosen)} package(s) published by several repositories, none of "
+            "them a declared fork (KSB_FORK_REPOS), so no provider was chosen: "
+            + "; ".join(
+                f"{name} ({', '.join(repos)})" for name, repos in sorted(unchosen.items())[:10]
+            )
+            + (f"; and {len(unchosen) - 10} more" if len(unchosen) > 10 else "")
+        )
     print(
         f"Terraform modules: {module_count} referenced across repositories, "
         f"{module_pairs} consumer relationships, {module_edges} edges added"

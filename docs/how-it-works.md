@@ -310,7 +310,9 @@ Like a chart, a coordinate is never resolved by name order: when several clones
 that are not forks publish it, or several forks and nothing else, it is listed
 under `unresolved_conflicts` with every candidate, and each reference to it is
 counted under `skipped` as `ambiguous`. Declare the copies in `KSB_FORK_REPOS`
-and the conflict resolves. `KSB_CHART_REPO_PATTERN` names chart repositories
+and the conflict resolves. The `packages` stage chooses an npm package's provider
+the same way, so the graph's `provided_by` edge names the same repository; a package
+left unresolved gets no node, and the run names it with its publishers. `KSB_CHART_REPO_PATTERN` names chart repositories
 only, and settles no coordinate. `conflicts` lists only a store's own kinds,
 which take the first by name.
 
