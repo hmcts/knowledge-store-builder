@@ -385,6 +385,31 @@ class ThePlaceholderPatternsAreNamedAndTested(SettingsIsolated):
         self.assertEqual(deploy_secrets.rule_for("header", "{{ " + VENDOR_KEY + " }}"), "sk-key")
 
 
+class TheNameAboveAGenericLeafIsRead(SettingsIsolated):
+    """Break it catches: the key-name rule reading only a generic last segment, so
+    `db.password.value` was judged on `value` and a literal credential under it was
+    published (#548). And the converse - a fix that withholds every `.value` - which
+    would blank ordinary configuration."""
+
+    def test_a_literal_under_a_secret_named_parent_is_withheld(self):
+        for key in ("db.password.value", "api.token.data", "auth.clientSecret.content"):
+            with self.subTest(key=key):
+                self.assertEqual(deploy_secrets.rule_for(key, PASSWORD), secret_mask.KEY_NAME_RULE)
+
+    def test_an_ordinary_parent_leaves_the_value_alone(self):
+        for key, value in (
+            ("theme.colour.value", "blue"),
+            ("db.secretName.value", "app-db-credentials"),
+            ("auth.passwordPolicy.data", "strict"),
+            ("env.3.value", "8080"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(deploy_secrets.rule_for(key, value), "")
+
+    def test_a_placeholder_under_a_secret_named_parent_is_still_kept(self):
+        self.assertEqual(deploy_secrets.rule_for("db.password.value", "${DB_PASSWORD}"), "")
+
+
 class MaskLeavesNoZeroEntries(SettingsIsolated):
     """Break it catches: `secret_mask.mask` inserting a zero for every rule it tried,
     so `if counts:` over text it never changed is true. One store reported 13,029

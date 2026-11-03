@@ -573,6 +573,80 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "a deployments re-run drops other stages' edges on its nodes",
+        "build_deployments.py",
+        '        elif not (edge["source"] in ours and edge.get("relation") in OWN_RELATIONS):\n            carried.append(edge)',
+        "        elif False:\n            carried.append(edge)",
+        "#548: the strip took every edge touching a deployment node, so one store lost "
+        "53 environment edges its own extractor drew and had to re-run it after every "
+        "deployments run",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_an_edge_another_stage_added_onto_a_deployment_node_survives",
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_an_edge_whose_deployment_node_is_gone_goes_with_it_and_is_counted",
+        ),
+    ),
+    Mutation(
+        "a deployments re-run carries its own edges as another stage's",
+        "build_deployments.py",
+        'OWN_RELATIONS = frozenset({"deploys", "deployed_in", "uses_chart"})',
+        "OWN_RELATIONS: frozenset[str] = frozenset()",
+        "#548: edges carry no origin, so the stage tells its own by relation; if it "
+        "cannot, every re-run adds its edges again and the graph grows without bound",
+        (
+            "test_build_deployments.Layer.test_running_twice_leaves_the_graph_the_same_size",
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_an_edge_whose_deployment_node_is_gone_goes_with_it_and_is_counted",
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_the_stages_own_edges_are_rebuilt_not_carried_twice",
+            "test_deployments_withhold_credentials.ASecondRunIsByteIdentical.test_two_runs_write_the_same_bytes",
+            "test_flux_kustomize_deployments.RunningTwice.test_the_graph_is_the_same_size_after_a_second_run",
+            "test_repository_node.AGraphFromThePreviousVersionMigrates.test_a_migrated_graph_is_the_graph_a_fresh_build_writes_and_stays_put",
+            "test_repository_node.AGraphifyNodeCannotBecomeTheRepository.test_a_second_run_over_the_collision_writes_the_same_bytes",
+            "test_repository_node.OneRepositoryNode.test_a_second_run_writes_the_same_graph_byte_for_byte",
+        ),
+    ),
+    Mutation(
+        "a carried edge is put back onto a deployment node that was not rebuilt",
+        "build_deployments.py",
+        '    back = [e for e in carried.edges if e["source"] in ids and e["target"] in ids]',
+        "    back = list(carried.edges)",
+        "#548: a deployment that went leaves another stage's edge pointing at nothing, "
+        "and the run reports no loss",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_an_edge_whose_deployment_node_is_gone_goes_with_it_and_is_counted",
+        ),
+    ),
+    Mutation(
+        "a deployments re-run drops the url source-urls gave its nodes",
+        "build_deployments.py",
+        '            node.setdefault("url", held[1])',
+        "            pass",
+        "#548: every deployment node lost its link until source-urls ran again",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_rebuilt_node_keeps_the_url_source_urls_gave_it",
+        ),
+    ),
+    Mutation(
+        "a deployments re-run restores a url for a file the node no longer cites",
+        "build_deployments.py",
+        '        if node.get("_origin") == FORMAT and held and held[0] == node.get("source_file"):',
+        '        if node.get("_origin") == FORMAT and held:',
+        "#548: a url is derived from source_file, so carrying it across a moved file "
+        "makes a wrong citation rather than a missing one",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_url_for_a_file_the_node_no_longer_cites_is_not_carried",
+        ),
+    ),
+    Mutation(
+        "the key-name rule reads only a generic last segment",
+        "deploy_secrets.py",
+        "    leaf = _named_segment(key)",
+        '    leaf = key.rsplit(".", 1)[-1]',
+        "#548: `db.password.value` was judged on `value`, so a literal credential in "
+        "that position was published",
+        (
+            "test_deployments_withhold_credentials.TheNameAboveAGenericLeafIsRead.test_a_literal_under_a_secret_named_parent_is_withheld",
+        ),
+    ),
+    Mutation(
         "deployments overwrites the committed graph from a stale one",
         "build_deployments.py",
         "    refusal = graph_files.stale_refusal(config.GRAPH_PATH)",
