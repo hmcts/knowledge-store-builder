@@ -56,16 +56,30 @@ def is_placeholder(value: str) -> bool:
     return any(pattern.fullmatch(stripped) for pattern in PLACEHOLDER_VALUES)
 
 
+# Last segments that say a value is held, not what it is: `db.password.value`
+# holds a password, and read on `value` alone the key-name rule never fired (#548).
+_CONTAINER_LEAVES = frozenset({"value", "data", "content"})
+
+
+def _named_segment(key: str) -> str:
+    """The segment that names what `key` holds: its last one that is not a container."""
+    segments = key.split(".")
+    named = [segment for segment in segments if segment.lower() not in _CONTAINER_LEAVES]
+    return named[-1] if named else segments[-1]
+
+
 def rule_for(key: str, value: str) -> str:
     """The rule a config value falls foul of, or "" when it falls foul of none.
 
     The value is read as the line `<key>: <value>`, so the key-name rule fires for
-    a literal under `...password`. Secret rules first, in rule-name order so two
-    runs agree when a value trips several; the store's sensitive-data rules after.
+    a literal under `...password`, and under `...password.value`: a generic last
+    segment is passed over for the nearest one that names something. Secret rules
+    first, in rule-name order so two runs agree when a value trips several; the
+    store's sensitive-data rules after.
     """
     if _WITHHELD.fullmatch(value):
         return ""
-    leaf = key.rsplit(".", 1)[-1]
+    leaf = _named_segment(key)
     tally: Counter[str] = Counter()
     secret_mask.mask(f"{leaf}: {value}", tally)
     if is_placeholder(value):

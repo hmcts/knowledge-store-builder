@@ -830,6 +830,10 @@ by searching labels for a key name. A `config_truncated: <n>` beside it means
 `KSB_DEPLOY_MAX_KEYS` dropped `n` keys. Each deployment's `deploys` edge ends on
 the matched repository's `<repo>::repository:self` node, which `packages` shares for
 its `USES_MODULE` anchor; a service no repository matched gets no edge.
+Re-running it rebuilds its own nodes and edges and keeps what other stages added
+to them: their edges, and the `url` while the node cites the same file. An edge
+whose deployment node is gone is dropped, and the run says how many with
+`lost their deployment node`.
 
 Config values are published with the node, so those matching the secret rules
 (built-in plus `KSB_SENSITIVE_PATTERNS`) are withheld as `[<rule> withheld]` and

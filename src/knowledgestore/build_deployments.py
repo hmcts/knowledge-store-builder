@@ -357,13 +357,64 @@ def unreachable_services(services: set[str], repos: set[str]) -> set[str]:
     return {service for service in services if not _words(_bare(service)) & known}
 
 
-def _strip_layer(graph: dict) -> None:
-    """Idempotence by reconstruction: drop everything this stage added before."""
+# Every edge this stage writes leaves one of its own nodes under one of these
+# relations, which is what tells its edges from another stage's on the same node.
+# Edges carry no `_origin`, so this is the only mark there is; a relation added to
+# `_edge` calls below belongs here too, or a re-run would carry the old copy of it
+# alongside the new one.
+OWN_RELATIONS = frozenset({"deploys", "deployed_in", "uses_chart"})
+
+
+@dataclass
+class _Carried:
+    """What other stages hung on this stage's nodes, held across the rebuild."""
+
+    edges: list[dict]
+    # id -> (the source_file the url was derived from, the url)
+    urls: dict[str, tuple[object, str]]
+
+
+def _strip_layer(graph: dict) -> _Carried:
+    """Idempotence by reconstruction: drop everything this stage added before.
+
+    What other stages added to those nodes is held rather than dropped (#548): an
+    edge another stage or a store's own extractor drew onto a deployment node, and
+    the `url` `source-urls` gave it. `_restore` puts back whatever still has a node
+    to sit on.
+    """
     ours = {n["id"] for n in graph["nodes"] if n.get("_origin") == FORMAT}
+    urls = {
+        n["id"]: (n.get("source_file"), n["url"])
+        for n in graph["nodes"]
+        if n.get("_origin") == FORMAT and n.get("url")
+    }
     graph["nodes"] = [n for n in graph["nodes"] if n.get("_origin") != FORMAT]
-    graph["links"] = [
-        e for e in graph["links"] if e["source"] not in ours and e["target"] not in ours
-    ]
+    kept: list[dict] = []
+    carried: list[dict] = []
+    for edge in graph["links"]:
+        if edge["source"] not in ours and edge["target"] not in ours:
+            kept.append(edge)
+        elif not (edge["source"] in ours and edge.get("relation") in OWN_RELATIONS):
+            carried.append(edge)
+    graph["links"] = kept
+    return _Carried(carried, urls)
+
+
+def _restore(graph: dict, carried: _Carried) -> int:
+    """Put back what `_strip_layer` held; return how many edges had nowhere to go.
+
+    An edge comes back only when both its ends exist after the rebuild, so nothing
+    dangles. A `url` comes back only to a node still citing the file it was derived
+    from: a node whose file moved would otherwise link to the wrong one.
+    """
+    ids = {n["id"] for n in graph["nodes"]}
+    back = [e for e in carried.edges if e["source"] in ids and e["target"] in ids]
+    graph["links"].extend(back)
+    for node in graph["nodes"]:
+        held = carried.urls.get(node["id"])
+        if node.get("_origin") == FORMAT and held and held[0] == node.get("source_file"):
+            node.setdefault("url", held[1])
+    return len(carried.edges) - len(back)
 
 
 class Communities:
@@ -612,6 +663,8 @@ class _Tally:
         self.unreadable: list[str] = []
         # (repository, file, key, rule) of each value withheld. Never the value.
         self.withheld: list[tuple[str, str, str, str]] = []
+        # Edges other stages drew onto a deployment node this run did not rebuild.
+        self.lost = 0
         self.flux = _FluxTally()
 
 
@@ -954,6 +1007,13 @@ def _report(tally: _Tally, graph: dict) -> None:
         print(
             f"  {len(tally.unreadable)} values file(s) did not parse and carry no evidence: {shown}"
         )
+    if tally.lost:
+        # Another stage's work, so said out loud: the node it pointed at was not
+        # rebuilt, which is right when the configuration went, and worth a look
+        # when it did not.
+        print(
+            f"  {tally.lost} edge(s) other stages added lost their deployment node and were dropped"
+        )
     _withheld_report(tally.withheld)
     _flux_report(tally.flux)
     print(f"Graph now: {len(graph['nodes'])} nodes, {len(graph['links'])} edges")
@@ -988,7 +1048,7 @@ def main() -> int:
     except repository_node.ForeignNodeError as error:
         print(error, file=sys.stderr)
         return 1
-    _strip_layer(graph)
+    carried = _strip_layer(graph)
     repos = _repositories(graph)
 
     # Community labels live beside the graph, so the page can name an area. Read
@@ -1008,6 +1068,8 @@ def main() -> int:
             continue
         _add_repo_layer(graph, deploy_repo, repos, tally, communities)
 
+    # Before the prune, so a repository node another stage's edge still holds is kept.
+    tally.lost = _restore(graph, carried)
     repository_node.settle_repository_nodes(graph)
     repository_node.prune_unlinked_repository_nodes(graph)
     serialised = json.dumps(graph, ensure_ascii=False)
