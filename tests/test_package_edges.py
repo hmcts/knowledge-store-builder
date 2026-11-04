@@ -156,6 +156,80 @@ RELATIONS = ("USES_MODULE", "uses_chart", "imports_package", "provided_by")
 LAYER_KINDS = ("terraform_module", "chart_source", "package")
 
 
+def _fork(tmp: Path, name: str) -> None:
+    """A fork of corelib, republishing @acme/core from the same manifest path."""
+    fork = tmp / "repositories" / name
+    (fork / ".git").mkdir(parents=True)
+    (fork / "projects" / "core").mkdir(parents=True)
+    (fork / "projects" / "core" / "package.json").write_text(
+        json.dumps({"name": "@acme/core", "version": "0.0.0-PLACEHOLDER"}), encoding="utf-8"
+    )
+
+
+def _run_with_fork(name: str, declared: bool) -> tuple[bytes, str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _store(root)
+        _fork(root, name)
+        config.configure(root=str(root), FORK_REPOS={name} if declared else set())
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            code = packages.main()
+        if code != 0:
+            raise AssertionError(printed.getvalue())
+        return config.GRAPH_PATH.read_bytes(), printed.getvalue()
+
+
+def _provided_by(graph_bytes: bytes) -> list[str]:
+    graph = json.loads(graph_bytes)
+    return [e["target"] for e in graph["links"] if e.get("relation") == "provided_by"]
+
+
+class AForkDoesNotProvideByNameOrderTest(SettingsIsolated):
+    """#500: the graph's npm provider is chosen as the relationships layer chooses."""
+
+    def test_a_declared_fork_that_sorts_first_does_not_take_the_package(self):
+        """Catches first-by-name: `a-corelib-fork` sorts before `corelib`, and the
+        graph said the fork provides the package its original publishes."""
+        graph, _ = _run_with_fork("a-corelib-fork", declared=True)
+        self.assertEqual(_provided_by(graph), ["corelib::4"])
+        package = next(
+            n for n in json.loads(graph)["nodes"] if n.get("metadata", {}).get("kind") == "package"
+        )
+        self.assertEqual(package["repo"], "corelib")
+
+    def test_renaming_the_fork_past_its_original_changes_nothing(self):
+        """Catches a provider that moves when a repository is renamed: the graph is
+        byte-identical whichever side of its original the fork's name sorts."""
+        before, _ = _run_with_fork("a-corelib-fork", declared=True)
+        after, _ = _run_with_fork("z-corelib-fork", declared=True)
+        self.assertEqual(before, after)
+
+    def test_an_undeclared_second_publisher_chooses_nobody_and_says_so(self):
+        """Catches a guess: with no fork declared, two publishers of one package
+        are a conflict the store has to settle, so no provider is written and the
+        run names the package and both publishers."""
+        graph, printed = _run_with_fork("a-corelib-fork", declared=False)
+        self.assertEqual(_provided_by(graph), [])
+        self.assertIn("@acme/core (a-corelib-fork, corelib)", printed)
+        self.assertIn("1 package(s) published by several repositories", printed)
+
+    def test_an_unresolved_package_keeps_the_repositories_that_import_it(self):
+        """Catches the provider's absence taking the importers with it: that `app`
+        imports @acme/core is read from app's own files whoever publishes it, and
+        the graph held that edge before the provider rule changed."""
+        graph_bytes, _ = _run_with_fork("a-corelib-fork", declared=False)
+        graph = json.loads(graph_bytes)
+        package = next(n for n in graph["nodes"] if n.get("metadata", {}).get("kind") == "package")
+        self.assertEqual(package["repo"], "")
+        self.assertEqual(
+            package["metadata"]["publishers_unresolved"], ["a-corelib-fork", "corelib"]
+        )
+        self.assertEqual(package["metadata"]["consumers"], [{"repo": "app", "import_sites": 1}])
+        imports = [e for e in graph["links"] if e.get("relation") == "imports_package"]
+        self.assertEqual([(e["source"], e["target"]) for e in imports], [("app::0", package["id"])])
+
+
 def _module(name: str, source: str) -> str:
     return f'module "{name}" {{\n  source = "{source}"\n}}\n'
 

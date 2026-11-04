@@ -1465,6 +1465,16 @@ def _points_inside_clone(ref: Reference) -> bool:
     return resolved != ".." and not resolved.startswith("../")
 
 
+def npm_providers(
+    published: dict[str, list[str]], forks: Set[str]
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """npm package -> the clone providing it, chosen as the layer chooses (`_choose`),
+    and the packages left unchosen with every clone that publishes them. What the
+    graph's `provided_by` edges take, so the two layers name the same provider."""
+    chosen, _, unchosen = _choose("npm_package", published, frozenset(), forks)
+    return chosen, unchosen
+
+
 def chart_definitions(clones: list[Path], umbrellas: Set[str]) -> dict[str, str]:
     """chart name -> the clone defining it, chosen as the layer chooses
     (`_choose`). What `resolve_chart` takes as `defined`, for a caller resolving

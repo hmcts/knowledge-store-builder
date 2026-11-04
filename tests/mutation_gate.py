@@ -659,6 +659,53 @@ MUTATIONS = (
         ),
     ),
     Mutation(
+        "the packages stage ignores declared forks",
+        "build_package_edges.py",
+        "    chosen, unchosen = relationships.npm_providers(published, config.FORK_REPOS)",
+        "    chosen, unchosen = relationships.npm_providers(published, frozenset())",
+        "#500: a package its original and a declared fork both publish got no "
+        "provider, though the store had said which one is the fork",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
+        ),
+    ),
+    Mutation(
+        "the graph's npm provider is the first publisher by name",
+        "relationships.py",
+        '    chosen, _, unchosen = _choose("npm_package", published, frozenset(), forks)',
+        '    chosen, _, unchosen = _choose("npm", published, frozenset(), forks)',
+        "#500: a second publisher whose name sorts first took the package, and a "
+        "rename moved the edge",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
+        ),
+    ),
+    Mutation(
+        "the packages stage drops an unchosen package silently",
+        "build_package_edges.py",
+        "    if unchosen:",
+        "    if False:",
+        "#500: a package with no provider vanished from the graph and nothing said why",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
+        ),
+    ),
+    Mutation(
+        "an npm package with no chosen provider loses its importers",
+        "build_package_edges.py",
+        "            or (name in unchosen and consumer not in unchosen[name])\n",
+        "",
+        "#500: what imports a package is read from the consumer's own files, so an "
+        "unknown provider must not drop the imports_package edges the graph held",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
+        ),
+    ),
+    Mutation(
         "the key-name rule reads only a generic last segment",
         "deploy_secrets.py",
         "    leaf = _named_segment(key)",
