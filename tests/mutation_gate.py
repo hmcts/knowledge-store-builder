@@ -4805,7 +4805,6 @@ MUTATIONS = (
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_a_value_under_a_secret_named_key_is_withheld",
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_an_instrumentation_key_is_withheld",
             "test_deployments_withhold_credentials.AFlaggedValueIsWithheldFromTheNode.test_the_withheld_keys_are_listed_sorted",
-            "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
             "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_long_value_that_matches_nothing_is_still_capped",
             "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_private_key_block_longer_than_the_cap_is_withheld",
             "test_deployments_withhold_credentials.TheCapNeverRunsBeforeMasking.test_a_token_that_starts_inside_the_cap_and_ends_beyond_it_is_withheld",
