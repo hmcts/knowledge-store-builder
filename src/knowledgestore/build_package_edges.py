@@ -239,6 +239,28 @@ def _package_node(name: str, provider_repo: str, manifest_rel: str) -> dict:
     }
 
 
+def _unresolved_package_node(name: str, publishers: list[str]) -> dict:
+    """A package several repositories publish with no provider chosen (#500).
+
+    What imports it is still read from each consumer's own files, so the node and
+    its `imports_package` edges stay; only the provider is unknown. It belongs to
+    no repository and cites no manifest, and names every publisher instead, as a
+    chart source outside the estate does.
+    """
+    return {
+        "id": f"npm::pkg:{name}",
+        "label": name,
+        "norm_label": name.lower(),
+        "file_type": "concept",
+        "source_file": None,
+        "source_location": None,
+        "repo": "",
+        "_origin": FORMAT,
+        "local_id": f"pkg:{name}",
+        "metadata": {"kind": "package", "publishers_unresolved": list(publishers)},
+    }
+
+
 def _edge(source: str, target: str, relation: str, rel: str) -> dict:
     return {
         "source": source,
@@ -252,22 +274,48 @@ def _edge(source: str, target: str, relation: str, rel: str) -> dict:
     }
 
 
-def _discover_providers(clones: list) -> dict[str, tuple[str, str]]:
-    """package name -> (provider repo, manifest path); first repo wins a conflict."""
-    providers: dict[str, tuple[str, str]] = {}
+def _discover_providers(
+    clones: list,
+) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]]]:
+    """package name -> (provider repo, manifest path), and the packages several
+    repositories publish with none chosen, each with its publishers (#500).
+
+    The provider is chosen by the relationships layer's rule, not by name order: a
+    package two repositories publish goes to the one that is not a declared fork,
+    and otherwise to nobody. First by name let a fork whose name sorts first take
+    its original's package, and a rename move the edge.
+    """
+    clones = sorted(clones, key=lambda clone: clone.name)
+    manifests: dict[tuple[str, str], str] = {}
+    published: dict[str, list[str]] = {}
     for repo_dir in clones:
         for name, manifest_rel in relationships.npm_publishes(repo_dir):
-            if name not in providers or repo_dir.name < providers[name][0]:
-                providers[name] = (repo_dir.name, manifest_rel)
-    return providers
+            manifests.setdefault((name, repo_dir.name), manifest_rel)
+            publishers = published.setdefault(name, [])
+            if repo_dir.name not in publishers:
+                publishers.append(repo_dir.name)
+    chosen, unchosen = relationships.npm_providers(published, config.FORK_REPOS)
+    providers = {name: (repo, manifests[(name, repo)]) for name, repo in chosen.items()}
+    return providers, unchosen
 
 
 def _ensure_package_node(
-    graph: dict, reps: dict, providers: dict, name: str, package_nodes: dict
+    graph: dict,
+    reps: dict,
+    providers: dict,
+    unchosen: dict[str, list[str]],
+    name: str,
+    package_nodes: dict,
 ) -> tuple[dict, int]:
-    """The package's node, creating it with its provided_by edge on first sight."""
+    """The package's node, creating it on first sight with its provided_by edge
+    when a provider was chosen, and without one when none was."""
     node = package_nodes.get(name)
     if node is not None:
+        return node, 0
+    if name not in providers:
+        node = _unresolved_package_node(name, unchosen[name])
+        package_nodes[name] = node
+        graph["nodes"].append(node)
         return node, 0
     provider_repo, manifest_rel = providers[name]
     node = _package_node(name, provider_repo, manifest_rel)
@@ -280,7 +328,9 @@ def _ensure_package_node(
     return node, 0
 
 
-def _add_package_layer(graph: dict, clones: list, providers: dict) -> tuple[int, int, int]:
+def _add_package_layer(
+    graph: dict, clones: list, providers: dict, unchosen: dict[str, list[str]]
+) -> tuple[int, int, int]:
     """Mutate the graph in place; return (packages, consumer pairs, edges added)."""
     reps = _representatives(graph)
     package_nodes: dict[str, dict] = {}
@@ -291,10 +341,13 @@ def _add_package_layer(graph: dict, clones: list, providers: dict) -> tuple[int,
         shared = {
             name
             for name in _declared_dependencies(repo_dir)
-            if name in providers and providers[name][0] != consumer
+            if (name in providers and providers[name][0] != consumer)
+            or (name in unchosen and consumer not in unchosen[name])
         }
         for name in sorted(shared):
-            node, added = _ensure_package_node(graph, reps, providers, name, package_nodes)
+            node, added = _ensure_package_node(
+                graph, reps, providers, unchosen, name, package_nodes
+            )
             edges += added
             importing = _importing_files(repo_dir, name)
             node["metadata"].setdefault("consumers", []).append(
@@ -327,7 +380,7 @@ def main() -> int:
     except ValueError as error:
         print(f"Cannot read the store's repository list: {error}", file=sys.stderr)
         return 1
-    providers = _discover_providers(clones)
+    providers, unchosen = _discover_providers(clones)
 
     graph = json.loads(config.GRAPH_PATH.read_text(encoding="utf-8"))
     try:
@@ -336,7 +389,7 @@ def main() -> int:
         print(error, file=sys.stderr)
         return 1
     _strip_layer(graph)
-    package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers)
+    package_count, consumer_pairs, edges = _add_package_layer(graph, clones, providers, unchosen)
     module_count, module_pairs, module_edges, module_external = _add_module_layer(
         graph, clones, orgs
     )
@@ -350,9 +403,19 @@ def main() -> int:
 
     print(
         f"Packages: {package_count} shared across repositories "
-        f"({len(providers)} named in total), {consumer_pairs} consumer relationships, "
-        f"{edges} edges added"
+        f"({len(providers) + len(unchosen)} named in total), {consumer_pairs} consumer "
+        f"relationships, {edges} edges added"
     )
+    if unchosen:
+        print(
+            f"  {len(unchosen)} package(s) published by several repositories, none of "
+            "them a declared fork (KSB_FORK_REPOS), so no provided_by edge was written "
+            "(their importers are kept): "
+            + "; ".join(
+                f"{name} ({', '.join(repos)})" for name, repos in sorted(unchosen.items())[:10]
+            )
+            + (f"; and {len(unchosen) - 10} more" if len(unchosen) > 10 else "")
+        )
     print(
         f"Terraform modules: {module_count} referenced across repositories, "
         f"{module_pairs} consumer relationships, {module_edges} edges added"

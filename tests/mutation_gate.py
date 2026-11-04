@@ -617,11 +617,34 @@ MUTATIONS = (
     Mutation(
         "a deployments re-run drops the url source-urls gave its nodes",
         "build_deployments.py",
-        '            node.setdefault("url", held[1])',
-        "            pass",
+        "                node.setdefault(key, value)",
+        "                pass",
         "#548: every deployment node lost its link until source-urls ran again",
         (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_field_another_step_copied_onto_a_node_survives",
             "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_rebuilt_node_keeps_the_url_source_urls_gave_it",
+        ),
+    ),
+    Mutation(
+        "a deployments re-run carries only the url other stages gave its nodes",
+        "build_deployments.py",
+        "        and (foreign := {k: v for k, v in n.items() if k not in OWN_NODE_KEYS})",
+        '        and (foreign := {k: v for k, v in n.items() if k == "url"})',
+        "#548: a field a store's own step copied onto every deployment node was "
+        "emptied by each re-run while the links survived",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_a_field_another_step_copied_onto_a_node_survives",
+        ),
+    ),
+    Mutation(
+        "a deployments node attribute is missing from the stage's own keys",
+        "build_deployments.py",
+        '        "community_name",\n        "metadata",\n    }',
+        '        "metadata",\n    }',
+        "#548: an undeclared own key reads as another stage's, so a node rebuilt "
+        "without it gets back the previous run's stale copy",
+        (
+            "test_deployments_keeps_others_work.AReRunKeepsOtherStagesWork.test_every_attribute_the_stage_writes_is_declared_its_own",
         ),
     ),
     Mutation(
@@ -678,6 +701,53 @@ MUTATIONS = (
         (
             "test_deployments_withhold_credentials.TheReportNamesTheFileHoldingTheValue.test_a_base_value_both_facts_compose_is_one_line",
             "test_deployments_withhold_credentials.ReportingIsCappedAndNeverQuotes.test_a_long_list_is_capped_and_the_total_stays_whole",
+        ),
+    ),
+    Mutation(
+        "the packages stage ignores declared forks",
+        "build_package_edges.py",
+        "    chosen, unchosen = relationships.npm_providers(published, config.FORK_REPOS)",
+        "    chosen, unchosen = relationships.npm_providers(published, frozenset())",
+        "#500: a package its original and a declared fork both publish got no "
+        "provider, though the store had said which one is the fork",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
+        ),
+    ),
+    Mutation(
+        "the graph's npm provider is the first publisher by name",
+        "relationships.py",
+        '    chosen, _, unchosen = _choose("npm_package", published, frozenset(), forks)',
+        '    chosen, _, unchosen = _choose("npm", published, frozenset(), forks)',
+        "#500: a second publisher whose name sorts first took the package, and a "
+        "rename moved the edge",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
+        ),
+    ),
+    Mutation(
+        "the packages stage drops an unchosen package silently",
+        "build_package_edges.py",
+        "    if unchosen:",
+        "    if False:",
+        "#500: a package with no provider vanished from the graph and nothing said why",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
+        ),
+    ),
+    Mutation(
+        "an npm package with no chosen provider loses its importers",
+        "build_package_edges.py",
+        "            or (name in unchosen and consumer not in unchosen[name])\n",
+        "",
+        "#500: what imports a package is read from the consumer's own files, so an "
+        "unknown provider must not drop the imports_package edges the graph held",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
         ),
     ),
     Mutation(
