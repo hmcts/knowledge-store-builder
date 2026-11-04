@@ -507,6 +507,20 @@ class _Fact:
     chart_source: str = ""
     chart: str = ""
     stack: str = ""
+    # Flattened key -> the file that sets it, where that is not `rel`.
+    origins: dict[str, str] = field(default_factory=dict)
+
+    def file_of(self, key: str) -> str:
+        """The file holding `key`'s value: the layer that set it, else the cited file.
+
+        A key the layers do not name as written - one `flatten` reshaped while
+        composing, such as a secret reference whose store and entry came from two
+        layers - takes the last layer setting anything beneath it.
+        """
+        if key in self.origins:
+            return self.origins[key]
+        below = [rel for name, rel in self.origins.items() if name.startswith(key + ".")]
+        return below[-1] if below else self.rel
 
 
 def _deployment_node(
@@ -741,6 +755,7 @@ def _flux_facts(reading: deploy_flux.Reading) -> dict[tuple[str, str, str], _Fac
             fact.chart.source,
             fact.chart.name,
             fact.stack,
+            fact.origins,
         )
     return facts
 
@@ -871,7 +886,7 @@ def _add_repo_layer(
         # and the report read what that already replaced.
         recorded: tuple[tuple[str, str], ...] = getattr(fact.config, "withheld", ())
         found = list(recorded)
-        tally.withheld.extend((deploy_repo, fact.rel, key, rule) for key, rule in found)
+        tally.withheld.extend((deploy_repo, fact.file_of(key), key, rule) for key, rule in found)
         node = _deployment_node(fact, deploy_repo, cid, name, found)
         graph["nodes"].append(node)
         tally.pairs += 1
@@ -981,18 +996,20 @@ def _withheld_report(withheld: list[tuple[str, str, str, str]]) -> None:
 
     Printed so a store learns that a literal credential sat in its configuration:
     withholding it from the graph does not take it out of the repository, and it
-    should still be rotated at source.
+    should still be rotated at source. So it lists places, each once: a base value
+    every environment's fact composes is one value to rotate, not one per fact.
     """
-    if not withheld:
+    places = sorted(set(withheld))
+    if not places:
         return
     print(
-        f"  {len(withheld)} config value(s) withheld as secret-shaped "
+        f"  {len(places)} config value(s) withheld as secret-shaped "
         "(listed under config_withheld on the node); rotate any real credential at source:"
     )
-    for repo, rel, key, rule in sorted(withheld)[:WITHHELD_SHOWN]:
+    for repo, rel, key, rule in places[:WITHHELD_SHOWN]:
         print(f"    {repo}: {rel}  key {key}  rule {rule}")
-    if len(withheld) > WITHHELD_SHOWN:
-        print(f"    ... and {len(withheld) - WITHHELD_SHOWN} more")
+    if len(places) > WITHHELD_SHOWN:
+        print(f"    ... and {len(places) - WITHHELD_SHOWN} more")
 
 
 def _report(tally: _Tally, graph: dict) -> None:
