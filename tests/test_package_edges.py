@@ -214,6 +214,21 @@ class AForkDoesNotProvideByNameOrderTest(SettingsIsolated):
         self.assertIn("@acme/core (a-corelib-fork, corelib)", printed)
         self.assertIn("1 package(s) published by several repositories", printed)
 
+    def test_an_unresolved_package_keeps_the_repositories_that_import_it(self):
+        """Catches the provider's absence taking the importers with it: that `app`
+        imports @acme/core is read from app's own files whoever publishes it, and
+        the graph held that edge before the provider rule changed."""
+        graph_bytes, _ = _run_with_fork("a-corelib-fork", declared=False)
+        graph = json.loads(graph_bytes)
+        package = next(n for n in graph["nodes"] if n.get("metadata", {}).get("kind") == "package")
+        self.assertEqual(package["repo"], "")
+        self.assertEqual(
+            package["metadata"]["publishers_unresolved"], ["a-corelib-fork", "corelib"]
+        )
+        self.assertEqual(package["metadata"]["consumers"], [{"repo": "app", "import_sites": 1}])
+        imports = [e for e in graph["links"] if e.get("relation") == "imports_package"]
+        self.assertEqual([(e["source"], e["target"]) for e in imports], [("app::0", package["id"])])
+
 
 def _module(name: str, source: str) -> str:
     return f'module "{name}" {{\n  source = "{source}"\n}}\n'

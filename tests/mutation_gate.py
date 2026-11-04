@@ -644,6 +644,7 @@ MUTATIONS = (
         "provider, though the store had said which one is the fork",
         (
             "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
         ),
     ),
     Mutation(
@@ -655,6 +656,7 @@ MUTATIONS = (
         "rename moved the edge",
         (
             "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_a_declared_fork_that_sorts_first_does_not_take_the_package",
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
             "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
             "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_renaming_the_fork_past_its_original_changes_nothing",
         ),
@@ -667,6 +669,17 @@ MUTATIONS = (
         "#500: a package with no provider vanished from the graph and nothing said why",
         (
             "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_undeclared_second_publisher_chooses_nobody_and_says_so",
+        ),
+    ),
+    Mutation(
+        "an npm package with no chosen provider loses its importers",
+        "build_package_edges.py",
+        "            or (name in unchosen and consumer not in unchosen[name])\n",
+        "",
+        "#500: what imports a package is read from the consumer's own files, so an "
+        "unknown provider must not drop the imports_package edges the graph held",
+        (
+            "test_package_edges.AForkDoesNotProvideByNameOrderTest.test_an_unresolved_package_keeps_the_repositories_that_import_it",
         ),
     ),
     Mutation(
